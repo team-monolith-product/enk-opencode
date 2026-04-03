@@ -92,19 +92,11 @@ export function SessionSidePanel(props: {
 
   onCleanup(revokePreview)
 
-  createEffect(() => {
-    const target = previewTarget()
-    revokePreview()
-    if (!target) {
-      setPreviewSrc(undefined)
-      return
-    }
-    if (target.type === "devserver") {
-      setPreviewSrc(sdk.url.replace(/\/user\//, "/serve/"))
-      return
-    }
+  const previewPattern = /\.(html|htm|pdf|png|jpg|jpeg|gif|svg|webp)$/i
+
+  const loadPreviewBlob = (filePath: string) =>
     sdk.client.file
-      .read({ path: target.path })
+      .read({ path: filePath })
       .then((res) => {
         const data = res.data
         if (!data?.content) {
@@ -120,6 +112,32 @@ export function SessionSidePanel(props: {
         setPreviewSrc(URL.createObjectURL(blob))
       })
       .catch(() => setPreviewSrc(undefined))
+
+  createEffect(() => {
+    const target = previewTarget()
+    revokePreview()
+    if (!target) {
+      // fallback: file.status API에서 프리뷰 가능한 untracked 파일 탐색
+      sdk.client.file
+        .status()
+        .then((res) => {
+          const found = (res.data ?? []).find(
+            (f) => f.status !== "deleted" && previewPattern.test(f.path),
+          )
+          if (!found) {
+            setPreviewSrc(undefined)
+            return
+          }
+          loadPreviewBlob(found.path)
+        })
+        .catch(() => setPreviewSrc(undefined))
+      return
+    }
+    if (target.type === "devserver") {
+      setPreviewSrc(sdk.url.replace(/\/user\//, "/serve/"))
+      return
+    }
+    loadPreviewBlob(target.path)
   })
   const kinds = createMemo(() => {
     const merge = (a: "add" | "del" | "mix" | undefined, b: "add" | "del" | "mix") => {

@@ -470,7 +470,7 @@ export namespace File {
                   status: "added",
                 })
               } catch {
-                continue
+                changed.push({ path: file, added: 0, removed: 0, status: "added" })
               }
             }
           }
