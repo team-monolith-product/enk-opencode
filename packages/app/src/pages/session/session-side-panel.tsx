@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createEffect, createMemo, onCleanup, type JSX } from "solid-js"
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
 import { Tabs } from "@opencode-ai/ui/tabs"
@@ -18,6 +18,7 @@ import { useCommand } from "@/context/command"
 import { useFile, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
+import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { createFileTabListSync } from "@/pages/session/file-tab-scroll"
 import { FileTabContent } from "@/pages/session/file-tabs"
@@ -33,6 +34,7 @@ export function SessionSidePanel(props: {
   size: Sizing
 }) {
   const layout = useLayout()
+  const sdk = useSDK()
   const sync = useSync()
   const file = useFile()
   const language = useLanguage()
@@ -71,6 +73,54 @@ export function SessionSidePanel(props: {
   })
 
   const diffFiles = createMemo(() => diffs().map((d) => d.file))
+  const previewTarget = createMemo(() => {
+    const d = diffs().filter((x) => x.status !== "deleted")
+    if (!d.length) return undefined
+    const paths = d.map((f) => f.file)
+    if (paths.some((p) => /vite\.config|next\.config/.test(p))) return { type: "devserver" as const }
+    const previewable = paths.find((p) => /\.(html|htm|pdf|png|jpg|jpeg|gif|svg|webp)$/i.test(p))
+    if (previewable) return { type: "file" as const, path: previewable }
+    return undefined
+  })
+
+  const [previewSrc, setPreviewSrc] = createSignal<string | undefined>()
+
+  const revokePreview = () => {
+    const prev = previewSrc()
+    if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev)
+  }
+
+  onCleanup(revokePreview)
+
+  createEffect(() => {
+    const target = previewTarget()
+    revokePreview()
+    if (!target) {
+      setPreviewSrc(undefined)
+      return
+    }
+    if (target.type === "devserver") {
+      setPreviewSrc(sdk.url.replace(/\/user\//, "/serve/"))
+      return
+    }
+    sdk.client.file
+      .read({ path: target.path })
+      .then((res) => {
+        const data = res.data
+        if (!data?.content) {
+          setPreviewSrc(undefined)
+          return
+        }
+        const blob =
+          data.encoding === "base64"
+            ? new Blob([Uint8Array.from(atob(data.content), (c) => c.charCodeAt(0))], {
+                type: data.mimeType || "application/octet-stream",
+              })
+            : new Blob([data.content], { type: data.mimeType || "text/html" })
+        setPreviewSrc(URL.createObjectURL(blob))
+      })
+      .catch(() => setPreviewSrc(undefined))
+  })
   const kinds = createMemo(() => {
     const merge = (a: "add" | "del" | "mix" | undefined, b: "add" | "del" | "mix") => {
       if (!a) return b
@@ -250,6 +300,13 @@ export function SessionSidePanel(props: {
                           </div>
                         </Tabs.Trigger>
                       </Show>
+                      <Show when={previewSrc()}>
+                        <Tabs.Trigger value="preview">
+                          <div class="flex items-center gap-1.5">
+                            <div>결과 화면</div>
+                          </div>
+                        </Tabs.Trigger>
+                      </Show>
                       <Show when={contextOpen()}>
                         <Tabs.Trigger
                           value="context"
@@ -320,6 +377,18 @@ export function SessionSidePanel(props: {
                           </div>
                         </div>
                       </div>
+                    </Show>
+                  </Tabs.Content>
+
+                  <Tabs.Content value="preview" class="flex flex-col h-full overflow-hidden contain-strict">
+                    <Show when={activeTab() === "preview" && previewSrc()}>
+                      {(src) => (
+                        <iframe
+                          src={src()}
+                          class="w-full h-full border-0"
+                          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                        />
+                      )}
                     </Show>
                   </Tabs.Content>
 
