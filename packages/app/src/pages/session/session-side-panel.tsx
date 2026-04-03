@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js"
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
 import { Tabs } from "@opencode-ai/ui/tabs"
@@ -115,7 +115,7 @@ export function SessionSidePanel(props: {
 
   createEffect(() => {
     const target = previewTarget()
-    revokePreview()
+    untrack(revokePreview)
     if (!target) {
       // fallback: file.status API에서 프리뷰 가능한 untracked 파일 탐색
       sdk.client.file
