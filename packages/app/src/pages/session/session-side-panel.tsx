@@ -74,18 +74,50 @@ export function SessionSidePanel(props: {
 
   const diffFiles = createMemo(() => diffs().map((d) => d.file))
   // The enk-opencode-hub CHP proxy is configured with
-  //   --serve-path=/serve --serve-port=3000
-  // so anything under /serve/... is forwarded to port 3000 inside the
-  // singleuser pod. Dev servers MUST bind to 0.0.0.0:3000 to be reachable.
+  //   --serve-path=/serve --serve-port=<PREVIEW_DEV_PORT>
+  // so anything under /serve/... is forwarded to that port inside the
+  // singleuser pod. Dev servers MUST bind to 0.0.0.0:<PREVIEW_DEV_PORT>
+  // to be reachable. Keep PREVIEW_DEV_PORT in sync with the CHP config
+  // in enk-opencode-hub-helm/aws-apne2-dev-hackathon.yaml.
+  const PREVIEW_DEV_PORT = 3000
   const VITE_CONFIG_PATTERN = /(^|\/)vite\.config\.(ts|tsx|js|cjs|mjs|jsx)$/i
   const NEXT_CONFIG_PATTERN = /(^|\/)next\.config\.(ts|tsx|js|cjs|mjs|jsx)$/i
   const PREVIEW_FILE_PATTERN = /\.(html|htm|pdf|png|jpg|jpeg|gif|svg|webp)$/i
   const PREVIEW_PTY_TITLE = "__opencode_preview_dev_server__"
   const PREVIEW_INSTALL_LOG = "/tmp/opencode-preview-install.log"
+  // How long to wait for the dev server to become reachable after spawn.
+  const PREVIEW_READY_TIMEOUT_MS = 60_000
+  const PREVIEW_READY_INTERVAL_MS = 500
 
   type Framework = "vite" | "next"
 
-  const devServerUrl = () => sdk.url.replace(/\/user\//, "/serve/")
+  // Returns undefined when the SDK base URL does not follow the
+  // enk-opencode-hub `/user/<name>/` shape (e.g. local dev against a
+  // bare opencode server). In that case the /serve/ proxy does not
+  // exist and the preview tab cannot work.
+  const devServerUrl = () => {
+    if (!sdk.url.includes("/user/")) return undefined
+    return sdk.url.replace(/\/user\//, "/serve/")
+  }
+
+  // Poll until the dev server answers with a non-5xx response, or the
+  // timeout elapses. Same-origin GET — no CORS needed because /serve/
+  // lives on the same host as the opencode SPA. Returns true on ready,
+  // false on timeout / stale / network persistently failing.
+  const waitForDevServer = async (url: string, isStale: () => boolean) => {
+    const deadline = Date.now() + PREVIEW_READY_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      if (isStale()) return false
+      try {
+        const res = await fetch(url, { cache: "no-store" })
+        if (res.status < 500) return true
+      } catch {
+        // Connection refused or network error — dev server not listening yet.
+      }
+      await new Promise((resolve) => setTimeout(resolve, PREVIEW_READY_INTERVAL_MS))
+    }
+    return false
+  }
 
   const detectFramework = (paths: string[]): Framework | undefined => {
     if (paths.some((p) => VITE_CONFIG_PATTERN.test(p))) return "vite"
@@ -116,15 +148,18 @@ export function SessionSidePanel(props: {
     // spawn would be both slow and a vector for lockfile drift.
     const maybeInstall = `[ -d node_modules ] || "$PM" install >${PREVIEW_INSTALL_LOG} 2>&1`
     // `<pm> run dev --` forwards extra flags to the underlying dev script.
-    // Flags must make the server bind to 0.0.0.0:3000 (CHP is configured
-    // with --serve-path=/serve --serve-port=3000 — see enk-opencode-hub-helm).
+    // Flags must make the server bind to 0.0.0.0:<PREVIEW_DEV_PORT> to
+    // match the CHP proxy configuration in enk-opencode-hub-helm.
     const hostFlag = framework === "vite" ? "--host" : "--hostname"
-    const run = `"$PM" run dev -- ${hostFlag} 0.0.0.0 --port 3000`
+    const run = `"$PM" run dev -- ${hostFlag} 0.0.0.0 --port ${PREVIEW_DEV_PORT}`
     return `${detectPm}; ${maybeInstall}; ${run}`
   }
 
   const ensureDevServerPty = async (framework: Framework) => {
-    const list = await sdk.client.pty.list({}).catch(() => undefined)
+    const list = await sdk.client.pty.list({}).catch((error: unknown) => {
+      console.error("[preview] failed to list PTYs", error)
+      return undefined
+    })
     const running = list?.data?.find((p) => p.title === PREVIEW_PTY_TITLE && p.status === "running")
     if (running) return running
     return sdk.client.pty
@@ -134,7 +169,10 @@ export function SessionSidePanel(props: {
         args: ["-c", devServerShellScript(framework)],
       })
       .then((r) => r.data)
-      .catch(() => undefined)
+      .catch((error: unknown) => {
+        console.error("[preview] failed to spawn dev server PTY", error)
+        return undefined
+      })
   }
 
   const [previewSrc, setPreviewSrc] = createSignal<string | undefined>()
@@ -187,36 +225,60 @@ export function SessionSidePanel(props: {
     setPreviewLoading(true)
 
     void (async () => {
-      // Prefer diff list; fall back to file.status() when diffs haven't loaded yet
-      // or the relevant files are untracked.
-      let paths = diffList.filter((x) => x.status !== "deleted").map((x) => x.file)
-      if (paths.length === 0) {
-        paths = await sdk.client.file
-          .status()
-          .then((res) => (res.data ?? []).filter((f) => f.status !== "deleted").map((f) => f.path))
-          .catch(() => [])
-        if (isStale()) return
-      }
+      try {
+        // Prefer diff list; fall back to file.status() when diffs haven't loaded yet
+        // or the relevant files are untracked.
+        let paths = diffList.filter((x) => x.status !== "deleted").map((x) => x.file)
+        if (paths.length === 0) {
+          paths = await sdk.client.file
+            .status()
+            .then((res) => (res.data ?? []).filter((f) => f.status !== "deleted").map((f) => f.path))
+            .catch(() => [])
+          if (isStale()) return
+        }
 
-      const target = findPreviewable(paths)
-      if (!target) {
-        apply(undefined)
-        return
-      }
+        const target = findPreviewable(paths)
+        if (!target) {
+          apply(undefined)
+          return
+        }
 
-      if (target.type === "devserver") {
-        await ensureDevServerPty(target.framework)
-        if (isStale()) return
-        apply(devServerUrl())
-        return
-      }
+        if (target.type === "devserver") {
+          const url = devServerUrl()
+          if (!url) {
+            // Environment does not expose a /serve/ proxy (e.g. local dev
+            // against a bare opencode server). Nothing we can do.
+            apply(undefined)
+            return
+          }
+          const pty = await ensureDevServerPty(target.framework)
+          if (isStale()) return
+          if (!pty) {
+            apply(undefined)
+            return
+          }
+          // Wait until the dev server is actually reachable via /serve/
+          // before showing the iframe; otherwise users would see a broken
+          // page while bun install / bundler startup is still in progress.
+          const ready = await waitForDevServer(url, isStale)
+          if (isStale()) return
+          apply(ready ? url : undefined)
+          return
+        }
 
-      const blobUrl = await loadPreviewBlob(target.path)
-      if (isStale()) {
-        if (blobUrl) URL.revokeObjectURL(blobUrl)
-        return
+        const blobUrl = await loadPreviewBlob(target.path)
+        if (isStale()) {
+          if (blobUrl) URL.revokeObjectURL(blobUrl)
+          return
+        }
+        apply(blobUrl)
+      } catch (error) {
+        console.error("[preview] effect failed", error)
+        if (!isStale()) {
+          setPreviewLoading(false)
+          setPreviewSrc(undefined)
+        }
       }
-      apply(blobUrl)
     })()
   })
   const kinds = createMemo(() => {
