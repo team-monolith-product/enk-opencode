@@ -151,7 +151,14 @@ export function SessionSidePanel(props: {
     // Flags must make the server bind to 0.0.0.0:<PREVIEW_DEV_PORT> to
     // match the CHP proxy configuration in enk-opencode-hub-helm.
     const hostFlag = framework === "vite" ? "--host" : "--hostname"
-    const run = `"$PM" run dev -- ${hostFlag} 0.0.0.0 --port ${PREVIEW_DEV_PORT}`
+    // Vite 5.4.12+ (CVE-2025-24010) rejects requests whose Host header
+    // isn't in server.allowedHosts. Passing the flag with no value sets
+    // it to `true` (allow all); safe here because the CHP proxy and
+    // JupyterHub auth already isolate the dev server per user.
+    // Next.js: no CLI equivalent; needs allowedDevOrigins in next.config
+    // (follow-up).
+    const extraFlags = framework === "vite" ? " --allowedHosts" : ""
+    const run = `"$PM" run dev -- ${hostFlag} 0.0.0.0 --port ${PREVIEW_DEV_PORT}${extraFlags}`
     return `${detectPm}; ${maybeInstall}; ${run}`
   }
 
@@ -161,7 +168,17 @@ export function SessionSidePanel(props: {
       return undefined
     })
     const running = list?.data?.find((p) => p.title === PREVIEW_PTY_TITLE && p.status === "running")
-    if (running) return running
+    if (running) {
+      // If the existing PTY was spawned before the `--allowedHosts` fix,
+      // Vite will still reject proxied requests. Detect that by looking
+      // at the shell script embedded in args[1] and respawn if stale.
+      const shellScript = running.args[1] ?? ""
+      const hasAllowedHosts = shellScript.includes("--allowedHosts")
+      if (framework !== "vite" || hasAllowedHosts) return running
+      await sdk.client.pty.remove({ ptyID: running.id }).catch((error: unknown) => {
+        console.error("[preview] failed to remove stale PTY", error)
+      })
+    }
     return sdk.client.pty
       .create({
         title: PREVIEW_PTY_TITLE,
