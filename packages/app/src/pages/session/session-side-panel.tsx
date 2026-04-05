@@ -73,17 +73,72 @@ export function SessionSidePanel(props: {
   })
 
   const diffFiles = createMemo(() => diffs().map((d) => d.file))
-  const previewTarget = createMemo(() => {
-    const d = diffs().filter((x) => x.status !== "deleted")
-    if (!d.length) return undefined
-    const paths = d.map((f) => f.file)
-    if (paths.some((p) => /vite\.config|next\.config/.test(p))) return { type: "devserver" as const }
-    const previewable = paths.find((p) => /\.(html|htm|pdf|png|jpg|jpeg|gif|svg|webp)$/i.test(p))
-    if (previewable) return { type: "file" as const, path: previewable }
+  // The enk-opencode-hub CHP proxy is configured with
+  //   --serve-path=/serve --serve-port=3000
+  // so anything under /serve/... is forwarded to port 3000 inside the
+  // singleuser pod. Dev servers MUST bind to 0.0.0.0:3000 to be reachable.
+  const VITE_CONFIG_PATTERN = /(^|\/)vite\.config\.(ts|tsx|js|cjs|mjs|jsx)$/i
+  const NEXT_CONFIG_PATTERN = /(^|\/)next\.config\.(ts|tsx|js|cjs|mjs|jsx)$/i
+  const PREVIEW_FILE_PATTERN = /\.(html|htm|pdf|png|jpg|jpeg|gif|svg|webp)$/i
+  const PREVIEW_PTY_TITLE = "__opencode_preview_dev_server__"
+  const PREVIEW_INSTALL_LOG = "/tmp/opencode-preview-install.log"
+
+  type Framework = "vite" | "next"
+
+  const devServerUrl = () => sdk.url.replace(/\/user\//, "/serve/")
+
+  const detectFramework = (paths: string[]): Framework | undefined => {
+    if (paths.some((p) => VITE_CONFIG_PATTERN.test(p))) return "vite"
+    if (paths.some((p) => NEXT_CONFIG_PATTERN.test(p))) return "next"
     return undefined
-  })
+  }
+
+  const findPreviewable = (paths: string[]) => {
+    const framework = detectFramework(paths)
+    if (framework) return { type: "devserver" as const, framework }
+    const file = paths.find((p) => PREVIEW_FILE_PATTERN.test(p))
+    if (file) return { type: "file" as const, path: file }
+    return undefined
+  }
+
+  const devServerShellScript = (framework: Framework) => {
+    // Detect package manager from lock file so we don't clobber an
+    // existing lockfile with a mismatched installer (e.g. `bun install`
+    // in an npm-managed project creates bun.lock and may resolve
+    // different versions). Falls back to bun when no lock file is found.
+    const detectPm =
+      "if [ -f bun.lock ] || [ -f bun.lockb ]; then PM=bun; " +
+      "elif [ -f pnpm-lock.yaml ]; then PM=pnpm; " +
+      "elif [ -f yarn.lock ]; then PM=yarn; " +
+      "elif [ -f package-lock.json ]; then PM=npm; " +
+      "else PM=bun; fi"
+    // Only install when node_modules is missing — re-installing on every
+    // spawn would be both slow and a vector for lockfile drift.
+    const maybeInstall = `[ -d node_modules ] || "$PM" install >${PREVIEW_INSTALL_LOG} 2>&1`
+    // `<pm> run dev --` forwards extra flags to the underlying dev script.
+    // Flags must make the server bind to 0.0.0.0:3000 (CHP is configured
+    // with --serve-path=/serve --serve-port=3000 — see enk-opencode-hub-helm).
+    const hostFlag = framework === "vite" ? "--host" : "--hostname"
+    const run = `"$PM" run dev -- ${hostFlag} 0.0.0.0 --port 3000`
+    return `${detectPm}; ${maybeInstall}; ${run}`
+  }
+
+  const ensureDevServerPty = async (framework: Framework) => {
+    const list = await sdk.client.pty.list({}).catch(() => undefined)
+    const running = list?.data?.find((p) => p.title === PREVIEW_PTY_TITLE && p.status === "running")
+    if (running) return running
+    return sdk.client.pty
+      .create({
+        title: PREVIEW_PTY_TITLE,
+        command: "sh",
+        args: ["-c", devServerShellScript(framework)],
+      })
+      .then((r) => r.data)
+      .catch(() => undefined)
+  }
 
   const [previewSrc, setPreviewSrc] = createSignal<string | undefined>()
+  const [previewLoading, setPreviewLoading] = createSignal(false)
 
   const revokePreview = () => {
     const prev = previewSrc()
@@ -92,52 +147,77 @@ export function SessionSidePanel(props: {
 
   onCleanup(revokePreview)
 
-  const previewPattern = /\.(html|htm|pdf|png|jpg|jpeg|gif|svg|webp)$/i
-
-  const loadPreviewBlob = (filePath: string) =>
+  const loadPreviewBlob = async (filePath: string): Promise<string | undefined> =>
     sdk.client.file
       .read({ path: filePath })
       .then((res) => {
         const data = res.data
-        if (!data?.content) {
-          setPreviewSrc(undefined)
-          return
-        }
+        if (!data?.content) return undefined
         const blob =
           data.encoding === "base64"
             ? new Blob([Uint8Array.from(atob(data.content), (c) => c.charCodeAt(0))], {
                 type: data.mimeType || "application/octet-stream",
               })
             : new Blob([data.content], { type: data.mimeType || "text/html" })
-        setPreviewSrc(URL.createObjectURL(blob))
+        return URL.createObjectURL(blob)
       })
-      .catch(() => setPreviewSrc(undefined))
+      .catch(() => undefined)
 
+  let previewReqId = 0
   createEffect(() => {
-    const target = previewTarget()
+    // Track reactive inputs
+    const diffList = diffs()
+    const reviewable = hasReview()
+    const myReq = ++previewReqId
     untrack(revokePreview)
-    if (!target) {
-      // fallback: file.status API에서 프리뷰 가능한 untracked 파일 탐색
-      sdk.client.file
-        .status()
-        .then((res) => {
-          const found = (res.data ?? []).find(
-            (f) => f.status !== "deleted" && previewPattern.test(f.path),
-          )
-          if (!found) {
-            setPreviewSrc(undefined)
-            return
-          }
-          loadPreviewBlob(found.path)
-        })
-        .catch(() => setPreviewSrc(undefined))
+
+    const isStale = () => myReq !== previewReqId
+    const apply = (src: string | undefined) => {
+      if (isStale()) return
+      setPreviewLoading(false)
+      setPreviewSrc(src)
+    }
+
+    if (!reviewable) {
+      setPreviewLoading(false)
+      setPreviewSrc(undefined)
       return
     }
-    if (target.type === "devserver") {
-      setPreviewSrc(sdk.url.replace(/\/user\//, "/serve/"))
-      return
-    }
-    loadPreviewBlob(target.path)
+
+    setPreviewLoading(true)
+
+    void (async () => {
+      // Prefer diff list; fall back to file.status() when diffs haven't loaded yet
+      // or the relevant files are untracked.
+      let paths = diffList.filter((x) => x.status !== "deleted").map((x) => x.file)
+      if (paths.length === 0) {
+        paths = await sdk.client.file
+          .status()
+          .then((res) => (res.data ?? []).filter((f) => f.status !== "deleted").map((f) => f.path))
+          .catch(() => [])
+        if (isStale()) return
+      }
+
+      const target = findPreviewable(paths)
+      if (!target) {
+        apply(undefined)
+        return
+      }
+
+      if (target.type === "devserver") {
+        await ensureDevServerPty(target.framework)
+        if (isStale()) return
+        apply(devServerUrl())
+        return
+      }
+
+      const blobUrl = await loadPreviewBlob(target.path)
+      if (isStale()) {
+        if (blobUrl) URL.revokeObjectURL(blobUrl)
+        return
+      }
+      apply(blobUrl)
+    })()
   })
   const kinds = createMemo(() => {
     const merge = (a: "add" | "del" | "mix" | undefined, b: "add" | "del" | "mix") => {
@@ -318,7 +398,7 @@ export function SessionSidePanel(props: {
                           </div>
                         </Tabs.Trigger>
                       </Show>
-                      <Show when={previewSrc()}>
+                      <Show when={hasReview()}>
                         <Tabs.Trigger value="preview">
                           <div class="flex items-center gap-1.5">
                             <div>결과 화면</div>
@@ -399,14 +479,29 @@ export function SessionSidePanel(props: {
                   </Tabs.Content>
 
                   <Tabs.Content value="preview" class="flex flex-col h-full overflow-hidden contain-strict">
-                    <Show when={activeTab() === "preview" && previewSrc()}>
-                      {(src) => (
-                        <iframe
-                          src={src()}
-                          class="w-full h-full border-0"
-                          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                        />
-                      )}
+                    <Show when={activeTab() === "preview"}>
+                      <Switch
+                        fallback={
+                          <div class="flex-1 flex items-center justify-center text-center">
+                            <div class="text-12-regular text-text-weak">미리볼 수 있는 결과가 없습니다</div>
+                          </div>
+                        }
+                      >
+                        <Match when={previewSrc()}>
+                          {(src) => (
+                            <iframe
+                              src={src()}
+                              class="w-full h-full border-0"
+                              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                            />
+                          )}
+                        </Match>
+                        <Match when={previewLoading()}>
+                          <div class="flex-1 flex items-center justify-center text-center">
+                            <div class="text-12-regular text-text-weak">결과 화면을 준비하는 중입니다…</div>
+                          </div>
+                        </Match>
+                      </Switch>
                     </Show>
                   </Tabs.Content>
 
