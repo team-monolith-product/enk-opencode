@@ -239,6 +239,7 @@ export function SessionSidePanel(props: {
     }
 
     setPreviewLoading(true)
+    setPreviewSrc(undefined)
 
     void (async () => {
       try {
