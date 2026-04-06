@@ -329,7 +329,7 @@ export namespace File {
   export interface Interface {
     readonly init: () => Effect.Effect<void>
     readonly status: () => Effect.Effect<File.Info[]>
-    readonly read: (file: string) => Effect.Effect<File.Content>
+    readonly read: (file: string, options?: { preview?: boolean }) => Effect.Effect<File.Content>
     readonly list: (dir?: string) => Effect.Effect<File.Node[]>
     readonly search: (input: {
       query: string
@@ -514,7 +514,7 @@ export namespace File {
         })
       })
 
-      const read = Effect.fn("File.read")(function* (file: string) {
+      const read = Effect.fn("File.read")(function* (file: string, options?: { preview?: boolean }) {
         using _ = log.time("read", { file })
         const full = path.join(Instance.directory, file)
 
@@ -536,7 +536,22 @@ export namespace File {
 
         const knownText = isTextByExtension(file) || isTextByName(file)
 
-        if (isBinaryByExtension(file) && !knownText) return { type: "binary" as const, content: "" }
+        if (isBinaryByExtension(file) && !knownText) {
+          if (options?.preview && ext(file) === "pdf") {
+            const exists = yield* appFs.existsSafe(full)
+            if (exists) {
+              const bytes = yield* appFs.readFile(full).pipe(Effect.catch(() => Effect.succeed(new Uint8Array())))
+              return {
+                type: "text" as const,
+                content: Buffer.from(bytes).toString("base64"),
+                mimeType: "application/pdf",
+                encoding: "base64" as const,
+              }
+            }
+            return { type: "text" as const, content: "" }
+          }
+          return { type: "binary" as const, content: "" }
+        }
 
         const exists = yield* appFs.existsSafe(full)
         if (!exists) return { type: "text" as const, content: "" }
@@ -679,8 +694,8 @@ export namespace File {
     return runPromise((svc) => svc.status())
   }
 
-  export async function read(file: string): Promise<Content> {
-    return runPromise((svc) => svc.read(file))
+  export async function read(file: string, options?: { preview?: boolean }): Promise<Content> {
+    return runPromise((svc) => svc.read(file, options))
   }
 
   export async function list(dir?: string) {

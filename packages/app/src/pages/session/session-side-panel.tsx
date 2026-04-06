@@ -202,21 +202,20 @@ export function SessionSidePanel(props: {
 
   onCleanup(revokePreview)
 
-  const loadPreviewBlob = async (filePath: string): Promise<string | undefined> =>
-    sdk.client.file
-      .read({ path: filePath })
-      .then((res) => {
-        const data = res.data
-        if (!data?.content) return undefined
-        const blob =
-          data.encoding === "base64"
-            ? new Blob([Uint8Array.from(atob(data.content), (c) => c.charCodeAt(0))], {
-                type: data.mimeType || "application/octet-stream",
-              })
-            : new Blob([data.content], { type: data.mimeType || "text/html" })
-        return URL.createObjectURL(blob)
-      })
+  const loadPreviewBlob = async (filePath: string): Promise<string | undefined> => {
+    const data = await sdk.client.file
+      .read({ path: filePath, preview: "true" })
+      .then((res) => res.data)
       .catch(() => undefined)
+    if (!data?.content) return undefined
+    const blob =
+      data.encoding === "base64"
+        ? new Blob([Uint8Array.from(atob(data.content), (c) => c.charCodeAt(0))], {
+            type: data.mimeType || "application/octet-stream",
+          })
+        : new Blob([data.content], { type: data.mimeType || "text/html" })
+    return URL.createObjectURL(blob)
+  }
 
   let previewReqId = 0
   createEffect(() => {
