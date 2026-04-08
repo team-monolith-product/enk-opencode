@@ -74,11 +74,10 @@ export function SessionSidePanel(props: {
 
   const diffFiles = createMemo(() => diffs().map((d) => d.file))
   // The enk-opencode-hub CHP proxy is configured with
-  //   --serve-path=/serve --serve-port=<PREVIEW_DEV_PORT>
-  // so anything under /serve/... is forwarded to that port inside the
-  // singleuser pod. Dev servers MUST bind to 0.0.0.0:<PREVIEW_DEV_PORT>
-  // to be reachable. Keep PREVIEW_DEV_PORT in sync with the CHP config
-  // in enk-opencode-hub-helm/aws-apne2-dev-hackathon.yaml.
+  //   --serve-domain=<domain> --serve-port=<PREVIEW_DEV_PORT>
+  // Requests to {username}.{serveDomain} are forwarded to port
+  // PREVIEW_DEV_PORT inside the singleuser pod. Dev servers MUST bind
+  // to 0.0.0.0:<PREVIEW_DEV_PORT> to be reachable.
   const PREVIEW_DEV_PORT = 3000
   const VITE_CONFIG_PATTERN = /(^|\/)vite\.config\.(ts|tsx|js|cjs|mjs|jsx)$/i
   const NEXT_CONFIG_PATTERN = /(^|\/)next\.config\.(ts|tsx|js|cjs|mjs|jsx)$/i
@@ -91,28 +90,29 @@ export function SessionSidePanel(props: {
 
   type Framework = "vite" | "next"
 
-  // Returns undefined when the SDK base URL does not follow the
-  // enk-opencode-hub `/user/<name>/` shape (e.g. local dev against a
-  // bare opencode server). In that case the /serve/ proxy does not
-  // exist and the preview tab cannot work.
+  // Returns undefined when the server does not expose serveDomain and
+  // jupyterhubUser (e.g. local dev against a bare opencode server).
   const devServerUrl = () => {
-    if (!sdk.url.includes("/user/")) return undefined
-    return sdk.url.replace(/\/user\//, "/serve/")
+    const path = sync.data.path
+    const domain = path?.serveDomain
+    const user = path?.jupyterhubUser
+    if (!domain || !user) return undefined
+    return `https://${user}.${domain}`
   }
 
   // Poll until the dev server answers with a non-5xx response, or the
-  // timeout elapses. Same-origin GET — no CORS needed because /serve/
-  // lives on the same host as the opencode SPA. Returns true on ready,
-  // false on timeout / stale / network persistently failing.
+  // timeout elapses. Cross-origin GET — the CHP proxy adds
+  // Access-Control-Allow-Origin: * for serve domain responses.
+  // Returns true on ready, false on timeout / stale / network failing.
   const waitForDevServer = async (url: string, isStale: () => boolean) => {
     const deadline = Date.now() + PREVIEW_READY_TIMEOUT_MS
     while (Date.now() < deadline) {
       if (isStale()) return false
       try {
-        const res = await fetch(url, { cache: "no-store" })
+        const res = await fetch(url, { cache: "no-store", mode: "cors" })
         if (res.status < 500) return true
       } catch {
-        // Connection refused or network error — dev server not listening yet.
+        // Connection refused, network error, or CORS error — dev server not listening yet.
       }
       await new Promise((resolve) => setTimeout(resolve, PREVIEW_READY_INTERVAL_MS))
     }
@@ -149,7 +149,7 @@ export function SessionSidePanel(props: {
     const maybeInstall = `[ -d node_modules ] || "$PM" install >${PREVIEW_INSTALL_LOG} 2>&1`
     // `<pm> run dev --` forwards extra flags to the underlying dev script.
     // Flags must make the server bind to 0.0.0.0:<PREVIEW_DEV_PORT> to
-    // match the CHP proxy configuration in enk-opencode-hub-helm.
+    // be reachable by the CHP proxy.
     const hostFlag = framework === "vite" ? "--host" : "--hostname"
     // Vite 5.4.12+ (CVE-2025-24010) rejects requests whose Host header
     // isn't in server.allowedHosts. Passing the flag with no value sets
@@ -263,7 +263,7 @@ export function SessionSidePanel(props: {
         if (target.type === "devserver") {
           const url = devServerUrl()
           if (!url) {
-            // Environment does not expose a /serve/ proxy (e.g. local dev
+            // Environment does not expose a serve domain (e.g. local dev
             // against a bare opencode server). Nothing we can do.
             apply(undefined)
             return
@@ -274,9 +274,9 @@ export function SessionSidePanel(props: {
             apply(undefined)
             return
           }
-          // Wait until the dev server is actually reachable via /serve/
-          // before showing the iframe; otherwise users would see a broken
-          // page while bun install / bundler startup is still in progress.
+          // Wait until the dev server is actually reachable via the serve
+          // subdomain before showing the iframe; otherwise users would see
+          // a broken page while bun install / bundler startup is in progress.
           const ready = await waitForDevServer(url, isStale)
           if (isStale()) return
           apply(ready ? url : undefined)

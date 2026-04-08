@@ -34,11 +34,13 @@ const embeddedUIPromise = Flag.OPENCODE_DISABLE_EMBEDDED_WEB_UI
   : // @ts-expect-error - generated file at build time
     import("opencode-web-ui.gen.ts").then((module) => module.default as Record<string, string>).catch(() => null)
 
+const serveWildcard = Flag.OPENCODE_SERVE_DOMAIN ? ` https://*.${Flag.OPENCODE_SERVE_DOMAIN}` : ""
+
 const DEFAULT_CSP =
-  "frame-ancestors 'self' https://enki.dev.team-mono.com; default-src 'self'; frame-src 'self' blob:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:"
+  `frame-ancestors 'self' https://enki.dev.team-mono.com; default-src 'self'; frame-src 'self' blob:${serveWildcard}; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:${serveWildcard}`
 
 const csp = (hash = "") =>
-  `frame-ancestors 'self' https://enki.dev.team-mono.com; default-src 'self'; frame-src 'self' blob:; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
+  `frame-ancestors 'self' https://enki.dev.team-mono.com; default-src 'self'; frame-src 'self' blob:${serveWildcard}; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:${serveWildcard}`
 
 export const InstanceRoutes = (app?: Hono) =>
   (app ?? new Hono())
@@ -96,6 +98,8 @@ export const InstanceRoutes = (app?: Hono) =>
                       config: z.string(),
                       worktree: z.string(),
                       directory: z.string(),
+                      serveDomain: z.string().optional(),
+                      jupyterhubUser: z.string().optional(),
                     })
                     .meta({
                       ref: "Path",
@@ -113,6 +117,8 @@ export const InstanceRoutes = (app?: Hono) =>
           config: Global.Path.config,
           worktree: Instance.worktree,
           directory: Instance.directory,
+          ...(Flag.OPENCODE_SERVE_DOMAIN ? { serveDomain: Flag.OPENCODE_SERVE_DOMAIN } : {}),
+          ...(Flag.JUPYTERHUB_USER ? { jupyterhubUser: Flag.JUPYTERHUB_USER } : {}),
         })
       },
     )
