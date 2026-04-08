@@ -3,10 +3,10 @@ import { describeRoute, generateSpecs, validator, resolver, openAPIRouteHandler 
 import { Hono } from "hono"
 import { compress } from "hono/compress"
 import { cors } from "hono/cors"
-import { basicAuth } from "hono/basic-auth"
 import z from "zod"
 import { Auth } from "../auth"
 import { Flag } from "../flag/flag"
+import { HubAuth } from "./hub-auth"
 import { ProviderID } from "../provider/schema"
 import { WorkspaceRouterMiddleware } from "./router"
 import { websocket } from "hono/bun"
@@ -42,15 +42,8 @@ export namespace Server {
     const app = new Hono()
     return app
       .onError(errorHandler(log))
-      .use((c, next) => {
-        // Allow CORS preflight requests to succeed without auth.
-        // Browser clients sending Authorization headers will preflight with OPTIONS.
-        if (c.req.method === "OPTIONS") return next()
-        const password = Flag.OPENCODE_SERVER_PASSWORD
-        if (!password) return next()
-        const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
-        return basicAuth({ username, password })(c, next)
-      })
+      .use(HubAuth.auth())
+      .get("/oauth_callback", (c) => HubAuth.callback(c))
       .use(async (c, next) => {
         const skip = c.req.path === "/log"
         if (!skip) {
@@ -286,8 +279,17 @@ export namespace Server {
         if (basePath !== "/") {
           const url = new URL(req.url)
           if (url.pathname.startsWith(basePath)) {
+            const original = req
             url.pathname = url.pathname.slice(basePath.length) || "/"
             req = new Request(url.toString(), req)
+            if (original.headers.get("upgrade")) {
+              // Bun's server.upgrade() requires the original Request to access
+              // the internal request_context for the underlying TCP socket.
+              // new Request() does not copy this field (oven-sh/bun#11382).
+              const upgrade = server.upgrade.bind(server)
+              server = Object.create(server)
+              server.upgrade = (_: Request, opts?: any) => upgrade(original, opts)
+            }
           }
         }
         return controlPlane.fetch(req, server)
