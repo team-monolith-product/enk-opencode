@@ -81,7 +81,7 @@ export function SessionSidePanel(props: {
   const PREVIEW_DEV_PORT = 3000
   const VITE_CONFIG_PATTERN = /(^|\/)vite\.config\.(ts|tsx|js|cjs|mjs|jsx)$/i
   const NEXT_CONFIG_PATTERN = /(^|\/)next\.config\.(ts|tsx|js|cjs|mjs|jsx)$/i
-  const PREVIEW_FILE_PATTERN = /\.(html|htm|pdf|png|jpg|jpeg|gif|svg|webp)$/i
+  const PREVIEW_FILE_PATTERN = /\.(html|htm|pdf|svg)$/i
   const PREVIEW_PTY_TITLE = "__opencode_preview_dev_server__"
   const PREVIEW_INSTALL_LOG = "/tmp/opencode-preview-install.log"
   // How long to wait for the dev server to become reachable after spawn.
