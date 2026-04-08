@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, untrack, type Accessor } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js"
 import type { FileDiff } from "@opencode-ai/sdk/v2"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
@@ -137,7 +137,11 @@ export function createPreview(input: {
     if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev)
   }
 
-  onCleanup(revoke)
+  let disposed = false
+  onCleanup(() => {
+    disposed = true
+    revoke()
+  })
 
   const loadBlob = async (filePath: string): Promise<string | undefined> => {
     const data = await sdk.client.file
@@ -161,7 +165,7 @@ export function createPreview(input: {
     const myReq = ++reqId
     untrack(revoke)
 
-    const isStale = () => myReq !== reqId
+    const isStale = () => disposed || myReq !== reqId
     const apply = (value: string | undefined) => {
       if (isStale()) return
       setLoading(false)
@@ -230,5 +234,7 @@ export function createPreview(input: {
     })()
   })
 
-  return { src, loading }
+  const available = createMemo(() => !!src() || loading())
+
+  return { src, loading, available }
 }

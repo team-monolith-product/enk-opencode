@@ -252,7 +252,7 @@ export function SessionSidePanel(props: {
                           </div>
                         </Tabs.Trigger>
                       </Show>
-                      <Show when={hasReview()}>
+                      <Show when={preview.available()}>
                         <Tabs.Trigger value="preview">
                           <div class="flex items-center gap-1.5">
                             <div>결과 화면</div>
