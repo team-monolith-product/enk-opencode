@@ -346,7 +346,11 @@ export function SessionSidePanel(props: {
                             <iframe
                               src={src()}
                               class="w-full h-full border-0"
-                              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                              sandbox={
+                                src().startsWith("blob:")
+                                  ? "allow-scripts allow-forms allow-popups"
+                                  : "allow-scripts allow-same-origin allow-forms allow-popups"
+                              }
                             />
                           )}
                         </Match>
