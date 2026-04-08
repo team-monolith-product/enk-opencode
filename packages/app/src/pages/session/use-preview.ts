@@ -137,6 +137,13 @@ export function createPreview(input: {
       })
   }
 
+  // session.diff events may update deep properties (additions/deletions)
+  // without changing the array reference, so the effect won't re-trigger.
+  // Bump a counter on every event to force a re-run.
+  const [diffVersion, setDiffVersion] = createSignal(0)
+  const unsubDiff = sdk.event.on("session.diff", () => setDiffVersion((v) => v + 1))
+  onCleanup(unsubDiff)
+
   const [src, setSrc] = createSignal<string | undefined>()
   const [loading, setLoading] = createSignal(false)
 
@@ -170,6 +177,7 @@ export function createPreview(input: {
   createEffect(() => {
     const diffList = input.diffs()
     const reviewable = input.hasReview()
+    diffVersion()
     const myReq = ++reqId
     untrack(revoke)
 
