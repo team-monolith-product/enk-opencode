@@ -4411,7 +4411,6 @@ export type FileReadData = {
     directory?: string
     workspace?: string
     path: string
-    preview?: "true" | "false"
   }
   url: "/file/content"
 }
