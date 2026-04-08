@@ -20,20 +20,6 @@ const PREVIEW_READY_INTERVAL_MS = 500
 
 type Framework = "vite" | "next"
 
-const detectFramework = (paths: string[]): Framework | undefined => {
-  if (paths.some((p) => VITE_CONFIG_PATTERN.test(p))) return "vite"
-  if (paths.some((p) => NEXT_CONFIG_PATTERN.test(p))) return "next"
-  return undefined
-}
-
-const findPreviewable = (paths: string[]) => {
-  const framework = detectFramework(paths)
-  if (framework) return { type: "devserver" as const, framework }
-  const file = paths.find((p) => PREVIEW_FILE_PATTERN.test(p))
-  if (file) return { type: "file" as const, path: file }
-  return undefined
-}
-
 const devServerShellScript = (framework: Framework) => {
   // Detect package manager from lock file so we don't clobber an
   // existing lockfile with a mismatched installer (e.g. `bun install`
@@ -88,6 +74,28 @@ export function createPreview(input: {
 }) {
   const sdk = useSDK()
   const sync = useSync()
+
+  const detectFramework = async (): Promise<Framework | undefined> => {
+    const viteFiles = await sdk.client.find
+      .files({ query: "vite.config" })
+      .then((x) => x.data ?? [])
+      .catch(() => [] as string[])
+    if (viteFiles.some((p) => VITE_CONFIG_PATTERN.test(p))) return "vite"
+    const nextFiles = await sdk.client.find
+      .files({ query: "next.config" })
+      .then((x) => x.data ?? [])
+      .catch(() => [] as string[])
+    if (nextFiles.some((p) => NEXT_CONFIG_PATTERN.test(p))) return "next"
+    return undefined
+  }
+
+  const findPreviewable = async (paths: string[]) => {
+    const framework = await detectFramework()
+    if (framework) return { type: "devserver" as const, framework }
+    const file = paths.find((p) => PREVIEW_FILE_PATTERN.test(p))
+    if (file) return { type: "file" as const, path: file }
+    return undefined
+  }
 
   // Returns undefined when the server does not expose serveDomain and
   // jupyterhubUser (e.g. local dev against a bare opencode server).
@@ -194,7 +202,7 @@ export function createPreview(input: {
           if (isStale()) return
         }
 
-        const target = findPreviewable(paths)
+        const target = await findPreviewable(paths)
         if (!target) {
           apply(undefined)
           return
