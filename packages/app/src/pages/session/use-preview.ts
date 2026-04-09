@@ -49,6 +49,20 @@ const devServerShellScript = (framework: Framework) => {
   return `${detectPm}; ${maybeInstall}; ${run}`
 }
 
+const detectFramework = (paths: string[]): Framework | undefined => {
+  if (paths.some((p) => VITE_CONFIG_PATTERN.test(p))) return "vite"
+  if (paths.some((p) => NEXT_CONFIG_PATTERN.test(p))) return "next"
+  return undefined
+}
+
+const findPreviewable = (paths: string[]) => {
+  const framework = detectFramework(paths)
+  if (framework) return { type: "devserver" as const, framework }
+  const file = paths.find((p) => PREVIEW_FILE_PATTERN.test(p))
+  if (file) return { type: "file" as const, path: file }
+  return undefined
+}
+
 // Poll until the dev server answers with a non-5xx response, or the
 // timeout elapses. Cross-origin GET — the CHP proxy adds
 // Access-Control-Allow-Origin: * for serve domain responses.
@@ -74,28 +88,6 @@ export function createPreview(input: {
 }) {
   const sdk = useSDK()
   const sync = useSync()
-
-  const detectFramework = async (): Promise<Framework | undefined> => {
-    const viteFiles = await sdk.client.find
-      .files({ query: "vite.config" })
-      .then((x) => x.data ?? [])
-      .catch(() => [] as string[])
-    if (viteFiles.some((p) => VITE_CONFIG_PATTERN.test(p))) return "vite"
-    const nextFiles = await sdk.client.find
-      .files({ query: "next.config" })
-      .then((x) => x.data ?? [])
-      .catch(() => [] as string[])
-    if (nextFiles.some((p) => NEXT_CONFIG_PATTERN.test(p))) return "next"
-    return undefined
-  }
-
-  const findPreviewable = async (paths: string[]) => {
-    const framework = await detectFramework()
-    if (framework) return { type: "devserver" as const, framework }
-    const file = paths.find((p) => PREVIEW_FILE_PATTERN.test(p))
-    if (file) return { type: "file" as const, path: file }
-    return undefined
-  }
 
   // Returns undefined when the server does not expose serveDomain and
   // jupyterhubUser (e.g. local dev against a bare opencode server).
@@ -210,7 +202,7 @@ export function createPreview(input: {
           if (isStale()) return
         }
 
-        const target = await findPreviewable(paths)
+        const target = findPreviewable(paths)
         if (!target) {
           apply(undefined)
           return
