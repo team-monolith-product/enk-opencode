@@ -37,10 +37,10 @@ const embeddedUIPromise = Flag.OPENCODE_DISABLE_EMBEDDED_WEB_UI
 const SERVE_URL = process.env["OPENCODE_SERVE_URL"] ?? ""
 
 const DEFAULT_CSP =
-  `frame-ancestors 'self' ${SERVE_URL}; default-src 'self'; frame-src 'self' https:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
+  `frame-ancestors 'self' ${SERVE_URL}; default-src 'self'; frame-src 'self' script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
 
 const csp = (hash = "") =>
-  `frame-ancestors 'self' ${SERVE_URL}; default-src 'self'; frame-src 'self' https:; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
+  `frame-ancestors 'self' ${SERVE_URL}; default-src 'self'; frame-src 'self' script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:`
 
 export const InstanceRoutes = (app?: Hono) =>
   (app ?? new Hono())
