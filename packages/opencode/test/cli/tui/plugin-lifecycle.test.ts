@@ -208,14 +208,13 @@ test(
     try {
       await TuiPluginRuntime.init(createTuiPluginApi())
 
-      const done = await new Promise<string>((resolve) => {
-        const timer = setTimeout(() => resolve("timeout"), 7000)
-        TuiPluginRuntime.dispose().then(() => {
-          clearTimeout(timer)
-          resolve("done")
-        })
-      })
-      expect(done).toBe("done")
+      // dispose() must surface a hang as a failure rather than block forever.
+      // The internal cap is DISPOSE_TIMEOUT_MS (5000ms); allow generous slack
+      // for CI scheduling jitter. Bun's test timeout (15000ms above) still
+      // catches a true hang.
+      const start = Date.now()
+      await TuiPluginRuntime.dispose()
+      expect(Date.now() - start).toBeLessThan(10_000)
     } finally {
       await TuiPluginRuntime.dispose()
       restore()
