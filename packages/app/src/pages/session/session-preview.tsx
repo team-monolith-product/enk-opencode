@@ -12,7 +12,6 @@ export function createSessionPreview() {
     const env = sync.data.env
     const domain = env?.serveDomain
     const user = env?.jupyterhubUser
-    console.log("env:", domain, user);
     if (!domain || !user) return undefined
     return `https://${user}.${domain}`
   })
@@ -20,29 +19,19 @@ export function createSessionPreview() {
   const [previewReady, setPreviewReady] = createSignal(false)
   createEffect(() => {
     const url = previewUrl()
-    console.log("[preview] effect run, url:", url)
     if (!url) return setPreviewReady(false)
 
     const ctrl = new AbortController()
-    const check = () => {
-      console.log("[preview] check() fetch ->", url)
-      return fetch(url, { cache: "no-store", mode: "cors", signal: ctrl.signal })
-        .then((res) => {
-          console.log("[preview] fetch resolved:", res.status, "ok=", res.ok)
-          setPreviewReady(res.ok)
-        })
-        .catch((err) => {
-          console.log("[preview] fetch rejected:", err?.name, err?.message)
-          setPreviewReady(false)
-        })
-    }
+    const check = () =>
+      fetch(url, { cache: "no-store", mode: "cors", signal: ctrl.signal })
+        .then((res) => setPreviewReady(res.ok))
+        .catch(() => setPreviewReady(false))
 
     void check()
     const timer = setInterval(check, 10_000)
     const unsub = sdk.event.on("session.idle", () => void check())
 
     onCleanup(() => {
-      console.log("[preview] cleanup (effect re-run or unmount)")
       ctrl.abort()
       clearInterval(timer)
       unsub()
