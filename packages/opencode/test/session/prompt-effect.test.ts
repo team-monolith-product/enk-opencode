@@ -561,6 +561,41 @@ it.effect("loop sets status to busy then idle", () =>
   ),
 )
 
+it.effect("watchdog idle status is emitted after runner is no longer busy", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const test = yield* TestLLM
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const bus = yield* Bus.Service
+
+        yield* test.push((input) => hang(input, start()))
+
+        const chat = yield* sessions.create({})
+        yield* user(chat.id, "stall")
+
+        const idle = defer<Exit.Exit<void, Session.BusyError>>()
+        const off = yield* bus.subscribeCallback(SessionStatus.Event.Status, (evt) => {
+          if (evt.properties.sessionID !== chat.id) return
+          if (evt.properties.status.type !== "idle") return
+          Effect.runPromise(prompt.assertNotBusy(chat.id).pipe(Effect.exit)).then(idle.resolve)
+        })
+
+        const result = yield* prompt.loop({ sessionID: chat.id })
+        const exit = yield* Effect.promise(() => idle.promise)
+        off()
+
+        expect(result.info.role).toBe("assistant")
+        if (result.info.role === "assistant") {
+          expect(result.info.error?.name).toBe("APIError")
+        }
+        expect(Exit.isSuccess(exit)).toBe(true)
+      }),
+    { git: true, config: { ...cfg, experimental: { session_watchdog: { inactivity: 20, reasoning: 0 } } } },
+  ),
+)
+
 // Cancel semantics
 
 it.effect(

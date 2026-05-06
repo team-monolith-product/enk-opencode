@@ -742,7 +742,6 @@ it.effect("session.processor effect tests recover inactive model streams with wa
         const test = yield* TestLLM
         const processors = yield* SessionProcessor.Service
         const session = yield* Session.Service
-        const status = yield* SessionStatus.Service
 
         yield* test.push((input) => hang(input, start()))
 
@@ -772,14 +771,12 @@ it.effect("session.processor effect tests recover inactive model streams with wa
           messages: [{ role: "user", content: "stall" }],
           tools: {},
         })
-        const state = yield* status.get(chat.id)
 
         expect(value).toBe("stop")
         expect(handle.message.error?.name).toBe("APIError")
         if (MessageV2.APIError.isInstance(handle.message.error)) {
           expect(handle.message.error.data.metadata?.reason).toBe("inactivity")
         }
-        expect(state).toMatchObject({ type: "idle" })
       }),
     { git: true, config: { experimental: { session_watchdog: { inactivity: 20, reasoning: 0 } } } },
   )

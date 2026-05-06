@@ -616,7 +616,6 @@ export namespace SessionProcessor {
             if (aborted && !ctx.assistantMessage.error) {
               yield* abort()
             }
-            if (stalled) yield* status.set(ctx.sessionID, { type: "idle" })
             if (ctx.needsCompaction) return "compact"
             if (ctx.blocked || ctx.assistantMessage.error || aborted) return "stop"
             return "continue"
