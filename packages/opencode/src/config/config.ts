@@ -1066,6 +1066,25 @@ export namespace Config {
             .optional()
             .describe("Tools that should only be available to primary agents."),
           continue_loop_on_deny: z.boolean().optional().describe("Continue the agent loop when a tool call is denied"),
+          session_watchdog: z
+            .object({
+              enabled: z.boolean().optional().describe("Enable session stream watchdog recovery"),
+              inactivity: z
+                .number()
+                .int()
+                .min(0)
+                .optional()
+                .describe("Milliseconds without model stream events before recovering the session. Set 0 to disable."),
+              reasoning: z
+                .number()
+                .int()
+                .min(0)
+                .optional()
+                .describe("Milliseconds of reasoning-only output before recovering the session. Set 0 to disable."),
+            })
+            .strict()
+            .optional()
+            .describe("Recover sessions that remain busy while the model stream is stalled."),
           mcp_timeout: z
             .number()
             .int()

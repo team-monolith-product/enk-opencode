@@ -1,4 +1,4 @@
-import { Cause, Effect, Layer, ServiceMap } from "effect"
+import { Cause, Duration, Effect, Exit, Fiber, Layer, ServiceMap } from "effect"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
 import { Bus } from "@/bus"
@@ -21,6 +21,8 @@ import { Question } from "@/question"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
+  const WATCHDOG_INACTIVITY = 30_000
+  const WATCHDOG_REASONING = 120_000
   const log = Log.create({ service: "session.processor" })
 
   export type Result = "compact" | "stop" | "continue"
@@ -55,6 +57,7 @@ export namespace SessionProcessor {
   }
 
   type StreamEvent = Event
+  type Stall = "inactivity" | "reasoning"
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionProcessor") {}
 
@@ -103,6 +106,29 @@ export namespace SessionProcessor {
             providerID: input.model.providerID,
             aborted,
           })
+
+        const running = () => Object.values(ctx.toolcalls).some((part) => part.state.status === "running")
+
+        const recover = Effect.fn("SessionProcessor.recover")(function* (type: Stall) {
+          const error = new MessageV2.APIError({
+            message:
+              type === "reasoning"
+                ? "Session recovered after model reasoning stalled"
+                : "Session recovered after model stream stalled",
+            isRetryable: false,
+            metadata: {
+              reason: type,
+              providerID: ctx.model.providerID,
+              modelID: ctx.model.id,
+            },
+          }).toObject()
+          ctx.assistantMessage.error = error
+          ctx.assistantMessage.finish = ctx.assistantMessage.finish ?? "watchdog"
+          yield* bus.publish(Session.Event.Error, {
+            sessionID: ctx.assistantMessage.sessionID,
+            error,
+          })
+        })
 
         const handleEvent = Effect.fn("SessionProcessor.handleEvent")(function* (value: StreamEvent) {
           switch (value.type) {
@@ -443,19 +469,119 @@ export namespace SessionProcessor {
         const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
           log.info("process")
           ctx.needsCompaction = false
-          ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+          const cfg = yield* config.get()
+          ctx.shouldBreak = cfg.experimental?.continue_loop_on_deny !== true
+          const opts = cfg.experimental?.session_watchdog
+          const watchdog = {
+            enabled: opts?.enabled !== false,
+            inactivity: opts?.inactivity ?? WATCHDOG_INACTIVITY,
+            reasoning: opts?.reasoning ?? WATCHDOG_REASONING,
+          }
+          let stalled: Stall | undefined
 
           return yield* Effect.gen(function* () {
             yield* Effect.gen(function* () {
               ctx.currentText = undefined
               ctx.reasoningMap = {}
               const stream = llm.stream(streamInput)
-
-              yield* stream.pipe(
-                Stream.tap((event) => handleEvent(event)),
+              const watch = {
+                event: Date.now(),
+                progress: Date.now(),
+                reasoning: false,
+                paused: false,
+              }
+              const tick = (event: StreamEvent) => {
+                const now = Date.now()
+                watch.event = now
+                switch (event.type) {
+                  case "reasoning-start":
+                  case "reasoning-delta":
+                    watch.reasoning = true
+                    return
+                  case "reasoning-end":
+                    watch.reasoning = false
+                    watch.progress = now
+                    return
+                  case "start":
+                  case "start-step":
+                  case "tool-input-start":
+                  case "tool-input-delta":
+                  case "tool-input-end":
+                  case "tool-call":
+                  case "tool-result":
+                  case "tool-error":
+                  case "text-start":
+                  case "text-delta":
+                  case "text-end":
+                  case "finish-step":
+                  case "finish":
+                    watch.progress = now
+                    return
+                  default:
+                    return
+                }
+              }
+              const drain = stream.pipe(
+                Stream.tap((event) =>
+                  Effect.gen(function* () {
+                    tick(event)
+                    yield* handleEvent(event)
+                  }),
+                ),
                 Stream.takeUntil(() => ctx.needsCompaction),
                 Stream.runDrain,
               )
+              if (!watchdog.enabled || (watchdog.inactivity <= 0 && watchdog.reasoning <= 0)) {
+                yield* drain
+                return
+              }
+
+              log.info("watchdog start", {
+                sessionID: ctx.sessionID,
+                inactivity: watchdog.inactivity,
+                reasoning: watchdog.reasoning,
+              })
+              const fiber = yield* drain.pipe(Effect.forkChild)
+              const guard = yield* Effect.gen(function* () {
+                while (!ctx.needsCompaction) {
+                  const waits = [watchdog.inactivity, watchdog.reasoning].filter((n) => n > 0)
+                  const wait = Math.max(10, Math.min(1000, Math.min(...waits) / 4))
+                  yield* Effect.sleep(Duration.millis(wait))
+                  const tool = running()
+                  if (tool !== watch.paused) {
+                    watch.paused = tool
+                    log.info(tool ? "watchdog pause" : "watchdog resume", { sessionID: ctx.sessionID })
+                  }
+                  if (tool) continue
+                  const now = Date.now()
+                  const reason =
+                    watchdog.inactivity > 0 && now - watch.event >= watchdog.inactivity
+                      ? "inactivity"
+                      : watchdog.reasoning > 0 && watch.reasoning && now - watch.progress >= watchdog.reasoning
+                        ? "reasoning"
+                        : undefined
+                  if (!reason) continue
+                  stalled = reason
+                  log.warn("watchdog stalled", {
+                    sessionID: ctx.sessionID,
+                    reason,
+                    event: now - watch.event,
+                    progress: now - watch.progress,
+                  })
+                  yield* Fiber.interrupt(fiber)
+                  return
+                }
+              }).pipe(Effect.forkChild)
+              const exit = yield* Fiber.await(fiber).pipe(
+                Effect.ensuring(Fiber.interrupt(guard)),
+                Effect.onInterrupt(() => Fiber.interrupt(fiber).pipe(Effect.asVoid)),
+              )
+              if (Exit.isSuccess(exit)) return
+              if (stalled) {
+                yield* recover(stalled)
+                return
+              }
+              return yield* Effect.failCause(exit.cause)
             }).pipe(
               Effect.onInterrupt(() => Effect.sync(() => void (aborted = true))),
               Effect.catchCauseIf(
@@ -481,6 +607,7 @@ export namespace SessionProcessor {
             if (aborted && !ctx.assistantMessage.error) {
               yield* abort()
             }
+            if (stalled) yield* status.set(ctx.sessionID, { type: "idle" })
             if (ctx.needsCompaction) return "compact"
             if (ctx.blocked || ctx.assistantMessage.error || aborted) return "stop"
             return "continue"

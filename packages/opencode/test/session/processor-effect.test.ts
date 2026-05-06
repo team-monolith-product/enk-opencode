@@ -115,6 +115,16 @@ function toolCall(toolCallId: string, toolName: string, input: unknown): LLM.Eve
   return { type: "tool-call", toolCallId, toolName, input }
 }
 
+function toolResult(toolCallId: string, input: unknown, output: string): LLM.Event {
+  return {
+    type: "tool-result",
+    toolCallId,
+    toolName: "bash",
+    input,
+    output: { output },
+  } as LLM.Event
+}
+
 function fail<E>(err: E, ...items: LLM.Event[]) {
   return stream(...items).pipe(Stream.concat(Stream.fail(err)))
 }
@@ -722,6 +732,159 @@ it.effect("session.processor effect tests mark pending tools as aborted on clean
         }
       }),
     { git: true },
+  )
+})
+
+it.effect("session.processor effect tests recover inactive model streams with watchdog", () => {
+  return provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const test = yield* TestLLM
+        const processors = yield* SessionProcessor.Service
+        const session = yield* Session.Service
+        const status = yield* SessionStatus.Service
+
+        yield* test.push((input) => hang(input, start()))
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "stall")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = model(100)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "stall" }],
+          tools: {},
+        })
+        const state = yield* status.get(chat.id)
+
+        expect(value).toBe("stop")
+        expect(handle.message.error?.name).toBe("APIError")
+        if (MessageV2.APIError.isInstance(handle.message.error)) {
+          expect(handle.message.error.data.metadata?.reason).toBe("inactivity")
+        }
+        expect(state).toMatchObject({ type: "idle" })
+      }),
+    { git: true, config: { experimental: { session_watchdog: { inactivity: 20, reasoning: 0 } } } },
+  )
+})
+
+it.effect("session.processor effect tests recover reasoning-only streams with watchdog", () => {
+  return provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const test = yield* TestLLM
+        const processors = yield* SessionProcessor.Service
+        const session = yield* Session.Service
+
+        yield* test.push((input) => hang(input, start(), reasoningStart("r"), reasoningDelta("r", "loop")))
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "reason stall")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = model(100)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "reason stall" }],
+          tools: {},
+        })
+        const parts = yield* Effect.promise(() => MessageV2.parts(msg.id))
+        const part = parts.find((item): item is MessageV2.ReasoningPart => item.type === "reasoning")
+
+        expect(value).toBe("stop")
+        expect(handle.message.error?.name).toBe("APIError")
+        if (MessageV2.APIError.isInstance(handle.message.error)) {
+          expect(handle.message.error.data.metadata?.reason).toBe("reasoning")
+        }
+        expect(part?.time?.end).toBeDefined()
+      }),
+    { git: true, config: { experimental: { session_watchdog: { inactivity: 0, reasoning: 20 } } } },
+  )
+})
+
+it.effect("session.processor effect tests pause inactivity watchdog while tools run", () => {
+  return provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const input = { cmd: "pwd" }
+        const test = yield* TestLLM
+        const processors = yield* SessionProcessor.Service
+        const session = yield* Session.Service
+
+        yield* test.push(
+          stream(start(), toolInputStart("tool-1", "bash"), toolCall("tool-1", "bash", input)).pipe(
+            Stream.concat(Stream.fromEffect(Effect.sleep("80 millis").pipe(Effect.as(toolResult("tool-1", input, "ok"))))),
+            Stream.concat(stream(finishStep(), finish())),
+          ),
+        )
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "long tool")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = model(100)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies MessageV2.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "long tool" }],
+          tools: {},
+        })
+        const parts = yield* Effect.promise(() => MessageV2.parts(msg.id))
+        const part = parts.find((item): item is MessageV2.ToolPart => item.type === "tool")
+
+        expect(value).toBe("continue")
+        expect(handle.message.error).toBeUndefined()
+        expect(part?.state.status).toBe("completed")
+      }),
+    { git: true, config: { experimental: { session_watchdog: { inactivity: 20, reasoning: 0 } } } },
   )
 })
 
