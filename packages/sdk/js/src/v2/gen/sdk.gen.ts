@@ -83,6 +83,8 @@ import type {
   ProjectCurrentResponses,
   ProjectInitGitResponses,
   ProjectListResponses,
+  ProjectSummaryGenerateErrors,
+  ProjectSummaryGenerateResponses,
   ProjectUpdateErrors,
   ProjectUpdateResponses,
   ProviderAuthResponses,
@@ -1419,6 +1421,53 @@ export class Worktree extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<WorktreeResetResponses, WorktreeResetErrors, ThrowOnError>({
       url: "/experimental/worktree/reset",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class ProjectSummary extends HeyApiClient {
+  /**
+   * Generate project summary
+   *
+   * Summarize the given session into a public-gallery project summary (title, description, usage). Runs in the background and is not appended to the session message stream.
+   */
+  public generate<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      sessionID?: string
+      providerID?: string
+      modelID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "sessionID" },
+            { in: "body", key: "providerID" },
+            { in: "body", key: "modelID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      ProjectSummaryGenerateResponses,
+      ProjectSummaryGenerateErrors,
+      ThrowOnError
+    >({
+      url: "/project-summary/generate",
       ...options,
       ...params,
       headers: {
@@ -4033,6 +4082,11 @@ export class OpencodeClient extends HeyApiClient {
   private _worktree?: Worktree
   get worktree(): Worktree {
     return (this._worktree ??= new Worktree({ client: this.client }))
+  }
+
+  private _projectSummary?: ProjectSummary
+  get projectSummary(): ProjectSummary {
+    return (this._projectSummary ??= new ProjectSummary({ client: this.client }))
   }
 
   private _session?: Session2

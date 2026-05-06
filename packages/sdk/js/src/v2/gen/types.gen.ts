@@ -1617,6 +1617,23 @@ export type Config = {
      */
     continue_loop_on_deny?: boolean
     /**
+     * Recover sessions that remain busy while the model stream is stalled.
+     */
+    session_watchdog?: {
+      /**
+       * Enable session stream watchdog recovery
+       */
+      enabled?: boolean
+      /**
+       * Milliseconds without model stream events before recovering the session. Set 0 to disable.
+       */
+      inactivity?: number
+      /**
+       * Milliseconds of reasoning-only output before recovering the session. Set 0 to disable.
+       */
+      reasoning?: number
+    }
+    /**
      * Timeout in milliseconds for model context protocol (MCP) requests
      */
     mcp_timeout?: number
@@ -1793,9 +1810,9 @@ export type WorktreeResetInput = {
 }
 
 export type ProjectSummary = {
-  id: string
-  name?: string
-  worktree: string
+  title: string
+  description: string
+  usage: string
 }
 
 export type GlobalSession = {
@@ -2995,6 +3012,42 @@ export type ExperimentalResourceListResponses = {
 
 export type ExperimentalResourceListResponse =
   ExperimentalResourceListResponses[keyof ExperimentalResourceListResponses]
+
+export type ProjectSummaryGenerateData = {
+  body?: {
+    sessionID: string
+    providerID?: string
+    modelID?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project-summary/generate"
+}
+
+export type ProjectSummaryGenerateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ProjectSummaryGenerateError = ProjectSummaryGenerateErrors[keyof ProjectSummaryGenerateErrors]
+
+export type ProjectSummaryGenerateResponses = {
+  /**
+   * Generated summary
+   */
+  200: ProjectSummary
+}
+
+export type ProjectSummaryGenerateResponse = ProjectSummaryGenerateResponses[keyof ProjectSummaryGenerateResponses]
 
 export type SessionListData = {
   body?: never
