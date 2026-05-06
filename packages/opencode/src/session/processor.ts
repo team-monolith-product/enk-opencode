@@ -489,6 +489,7 @@ export namespace SessionProcessor {
                 progress: Date.now(),
                 reasoning: false,
                 paused: false,
+                tools: new Set<string>(),
               }
               const tick = (event: StreamEvent) => {
                 const now = Date.now()
@@ -507,9 +508,17 @@ export namespace SessionProcessor {
                   case "tool-input-start":
                   case "tool-input-delta":
                   case "tool-input-end":
+                    watch.progress = now
+                    return
                   case "tool-call":
+                    watch.tools.add(event.toolCallId)
+                    watch.progress = now
+                    return
                   case "tool-result":
                   case "tool-error":
+                    watch.tools.delete(event.toolCallId)
+                    watch.progress = now
+                    return
                   case "text-start":
                   case "text-delta":
                   case "text-end":
@@ -547,7 +556,7 @@ export namespace SessionProcessor {
                   const waits = [watchdog.inactivity, watchdog.reasoning].filter((n) => n > 0)
                   const wait = Math.max(10, Math.min(1000, Math.min(...waits) / 4))
                   yield* Effect.sleep(Duration.millis(wait))
-                  const tool = running()
+                  const tool = watch.tools.size > 0 || running()
                   if (tool !== watch.paused) {
                     watch.paused = tool
                     log.info(tool ? "watchdog pause" : "watchdog resume", { sessionID: ctx.sessionID })
