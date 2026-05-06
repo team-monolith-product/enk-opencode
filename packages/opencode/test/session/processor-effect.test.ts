@@ -843,7 +843,7 @@ it.effect("session.processor effect tests pause inactivity watchdog while tools 
 
         yield* test.push(
           stream(start(), toolInputStart("tool-1", "bash"), toolCall("tool-1", "bash", input)).pipe(
-            Stream.concat(Stream.fromEffect(Effect.sleep("80 millis").pipe(Effect.as(toolResult("tool-1", input, "ok"))))),
+            Stream.concat(Stream.fromEffect(Effect.sleep("700 millis").pipe(Effect.as(toolResult("tool-1", input, "ok"))))),
             Stream.concat(stream(finishStep(), finish())),
           ),
         )
@@ -881,7 +881,7 @@ it.effect("session.processor effect tests pause inactivity watchdog while tools 
         expect(handle.message.error).toBeUndefined()
         expect(part?.state.status).toBe("completed")
       }),
-    { git: true, config: { experimental: { session_watchdog: { inactivity: 20, reasoning: 0 } } } },
+    { git: true, config: { experimental: { session_watchdog: { inactivity: 500, reasoning: 0 } } } },
   )
 })
 

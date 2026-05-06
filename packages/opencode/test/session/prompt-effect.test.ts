@@ -1182,7 +1182,9 @@ unix(
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const { prompt, chat } = yield* boot()
+          const { test, prompt, chat } = yield* boot()
+          yield* test.reply(...replyStop("queued"))
+          yield* user(chat.id, "queued")
 
           const sh = yield* prompt
             .shell({ sessionID: chat.id, agent: "build", command: "sleep 30" })
