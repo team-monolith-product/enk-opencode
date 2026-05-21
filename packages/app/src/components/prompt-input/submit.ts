@@ -170,14 +170,14 @@ type PromptSubmitInput = {
   imageAttachments: Accessor<ImageAttachmentPart[]>
   commentCount: Accessor<number>
   autoAccept: Accessor<boolean>
-  mode: Accessor<"normal" | "shell">
+  mode: Accessor<"normal" | "shell" | "draw" | "doc">
   working: Accessor<boolean>
   editor: () => HTMLDivElement | undefined
   queueScroll: () => void
   promptLength: (prompt: Prompt) => number
-  addToHistory: (prompt: Prompt, mode: "normal" | "shell") => void
+  addToHistory: (prompt: Prompt, mode: "normal" | "shell" | "draw" | "doc") => void
   resetHistoryNavigation: () => void
-  setMode: (mode: "normal" | "shell") => void
+  setMode: (mode: "normal" | "shell" | "draw" | "doc") => void
   setPopover: (popover: "at" | "slash" | null) => void
   newSessionWorktree?: Accessor<string | undefined>
   onNewSessionWorktreeReset?: () => void
@@ -281,12 +281,15 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     })
   }
 
-  const handleSubmit = async (event: Event) => {
+  const handleSubmit = async (event: Event, override?: Prompt) => {
     event.preventDefault()
 
-    const currentPrompt = prompt.current()
+    const saved = prompt.current()
+    const currentPrompt = override ?? saved
     const text = currentPrompt.map((part) => ("content" in part ? part.content : "")).join("")
-    const images = input.imageAttachments().slice()
+    const images = override
+      ? currentPrompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+      : input.imageAttachments().slice()
     const mode = input.mode()
 
     if (text.trim().length === 0 && images.length === 0 && input.commentCount() === 0) {
@@ -305,7 +308,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    input.addToHistory(currentPrompt, mode)
+    input.addToHistory(currentPrompt, mode === "draw" || mode === "doc" ? "normal" : mode)
     input.resetHistoryNavigation()
 
     const projectDirectory = sdk.directory
@@ -402,12 +405,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     const clearInput = () => {
       prompt.reset()
-      input.setMode("normal")
+      input.setMode(mode === "doc" ? "doc" : "normal")
       input.setPopover(null)
     }
 
     const restoreInput = () => {
-      prompt.set(currentPrompt, input.promptLength(currentPrompt))
+      prompt.set(saved, input.promptLength(saved))
       input.setMode(mode)
       input.setPopover(null)
       requestAnimationFrame(() => {
