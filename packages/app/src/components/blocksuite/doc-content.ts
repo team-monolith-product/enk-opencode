@@ -120,13 +120,6 @@ function title(model: BlockModel, name: string) {
   return str(model, "title") ?? (caption(model) || undefined) ?? str(model, "name") ?? name
 }
 
-function link(model: BlockModel, name: string) {
-  const url = str(model, "url")
-  const text = title(model, name)
-  if (!url) return `**${name}: ${text}**`
-  return `[${label(text)}](${url})`
-}
-
 function detail(name: string, value?: string | number | null) {
   if (value === undefined || value === null || value === "") return
   return `- ${name}: ${value}`
@@ -175,28 +168,31 @@ async function dataUrl(opts: ExportOpts, id: string) {
   if (res.error || !res.data) return
   const blob = res.data as Blob
   const buf = await blob.arrayBuffer()
-  const bin = Array.from(new Uint8Array(buf), (byte) => String.fromCharCode(byte)).join("")
-  const mime = blob.type || res.response.headers.get("content-type") || "application/octet-stream"
+  const bytes = new Uint8Array(buf)
+  const bin = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("")
+  const mime = media(bytes, blob.type || res.response.headers.get("content-type") || "application/octet-stream")
   return {
     mime,
     dataUrl: `data:${mime};base64,${btoa(bin)}`,
   }
 }
 
+function media(bytes: Uint8Array, mime: string) {
+  const text = String.fromCharCode(...bytes.subarray(0, 16))
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg"
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png"
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return "image/gif"
+  if (text.startsWith("RIFF") && text.slice(8, 12) === "WEBP") return "image/webp"
+  if (text.startsWith("%PDF")) return "application/pdf"
+  return mime.startsWith("image/") || mime === "application/pdf" ? "application/octet-stream" : mime
+}
+
+function exportable(mime: string) {
+  return mime.startsWith("image/") || mime === "application/pdf"
+}
+
 function embed(model: BlockModel, name: string) {
-  return [
-    link(model, name),
-    detail("Caption", caption(model)),
-    detail("Description", str(model, "description")),
-    detail("Creator", str(model, "creator")),
-    detail("Creator URL", str(model, "creatorUrl")),
-    detail("Video ID", str(model, "videoId")),
-    detail("Owner", str(model, "owner")),
-    detail("Repository", str(model, "repo")),
-    detail("GitHub Type", str(model, "githubType")),
-    detail("GitHub ID", str(model, "githubId")),
-    detail("Status", str(model, "status")),
-  ].filter((line): line is string => !!line)
+  return [fence("json", JSON.stringify({ type: name, ...props(model) }, null, 2))]
 }
 
 function unknown(model: BlockModel) {
@@ -286,7 +282,7 @@ async function block(model: BlockModel, opts: ExportOpts, assets: DocExportAsset
     const asset = await dataUrl(opts, id)
     if (!asset) return [`![${caption(model) || id}](attachment://${encodeURIComponent(id)})`, ...nested]
     const name = caption(model) || id
-    assets.push({ id, mime: asset.mime, filename: id, dataUrl: asset.dataUrl })
+    if (exportable(asset.mime)) assets.push({ id, mime: asset.mime, filename: id, dataUrl: asset.dataUrl })
     return [`![${name}](attachment://${encodeURIComponent(id)})`, ...nested]
   }
 
@@ -299,18 +295,8 @@ async function block(model: BlockModel, opts: ExportOpts, assets: DocExportAsset
     const nested = await children()
     if (!id) return [`[${label(name)}]`, ...meta, ...nested]
     const asset = await dataUrl(opts, id)
-    if (asset) assets.push({ id, mime: asset.mime, filename: name, dataUrl: asset.dataUrl })
+    if (asset && exportable(asset.mime)) assets.push({ id, mime: asset.mime, filename: name, dataUrl: asset.dataUrl })
     return [`[${label(name)}](attachment://${encodeURIComponent(id)})`, ...meta, ...nested]
-  }
-
-  if (model.flavour === "affine:embed-html") {
-    const text = str(model, "html") ?? str(model, "design")
-    const nested = await children()
-    return [
-      caption(model) ? `HTML Embed: ${caption(model)}` : "HTML Embed",
-      text ? fence("html", text) : "",
-      ...nested,
-    ].filter((line): line is string => !!line)
   }
 
   if (model.flavour.startsWith("affine:embed-") || model.flavour === "affine:bookmark") {

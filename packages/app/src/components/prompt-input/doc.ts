@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { OpencodeClient, SessionActor } from "@opencode-ai/sdk/v2/client"
-import { createPage, type DocMountInput } from "@/components/blocksuite/blocksuite-doc"
+import { createPage, type DocActor, type DocMountInput } from "@/components/blocksuite/blocksuite-doc"
 import type { DocSyncOpts } from "@/components/blocksuite/opencode-doc-source"
 import { clearActor, loadActor, saveActor } from "./doc-actor"
 
@@ -12,6 +12,7 @@ type PromptDocInput = {
   url: () => string
   directory: () => string
   client: OpencodeClient
+  submit: () => void
 }
 
 async function register(input: PromptDocInput, sessionID: string) {
@@ -37,6 +38,7 @@ export function createPromptDoc(input: PromptDocInput) {
   const clientID = crypto.randomUUID()
   let handle: DocHandle | undefined
   let theme: DocMountInput["theme"] | undefined
+  let locale: DocMountInput["locale"] | undefined
   let sync: DocSyncOpts | undefined
   let init = true
   let historySub: { dispose: () => void } | undefined
@@ -48,6 +50,8 @@ export function createPromptDoc(input: PromptDocInput) {
 
   const [ready, setReady] = createSignal(false)
   const [docID, setDocID] = createSignal<string | undefined>()
+  const [actor, setActor] = createSignal<SessionActor | undefined>()
+  const [activeSync, setActiveSync] = createSignal<DocSyncOpts | undefined>()
   const [history, setHistory] = createStore({ undo: false, redo: false })
 
   const syncHistory = () => {
@@ -78,7 +82,9 @@ export function createPromptDoc(input: PromptDocInput) {
 
   const ensure = async (sessionID: string) => {
     const actor = await register(input, sessionID)
+    setActor(actor)
     const doc = await promptDoc(input, sessionID)
+    setDocID(doc.docID)
     sync = {
       docID: doc.docID,
       baseUrl: input.url(),
@@ -88,6 +94,7 @@ export function createPromptDoc(input: PromptDocInput) {
       name: actor.name,
       color: actor.color,
     }
+    setActiveSync(sync)
     init = true
     session = sessionID
   }
@@ -106,7 +113,13 @@ export function createPromptDoc(input: PromptDocInput) {
     if (!el || !themeFn || !next) return
     if (!opts?.keep) await drop()
     const current = handle
-    const fresh = await createPage({ theme: themeFn, sync: next, init: opts?.init ?? init })
+    const fresh = await createPage({
+      theme: themeFn,
+      locale,
+      sync: next,
+      init: opts?.init ?? init,
+      submit: input.submit,
+    })
     if (opts?.seq && opts.seq !== seq) {
       await fresh.dispose()
       return
@@ -120,6 +133,7 @@ export function createPromptDoc(input: PromptDocInput) {
     historySub = undefined
     handle = fresh
     sync = next
+    setActiveSync(next)
     init = opts?.init ?? init
     if (opts?.sessionID) session = opts.sessionID
     await fresh.attach(el)
@@ -134,6 +148,7 @@ export function createPromptDoc(input: PromptDocInput) {
   const pivot = (sessionID: string, next: string, opts?: { init?: boolean; force?: boolean }) => {
     if (!opts?.force && live === next && handle?.collection.id === next && sync?.docID === next)
       return Promise.resolve()
+    setDocID(next)
     const should = opts?.init ?? true
     if (!opts?.force && pending?.id === next && (pending.init || !should)) return pending.task
     const mark = ++seq
@@ -163,6 +178,7 @@ export function createPromptDoc(input: PromptDocInput) {
 
   const refresh = async (sessionID: string, opts?: { init?: boolean }) => {
     const doc = await promptDoc(input, sessionID)
+    setDocID(doc.docID)
     if (live !== doc.docID || handle?.collection.id !== doc.docID || sync?.docID !== doc.docID) {
       await pivot(sessionID, doc.docID, opts)
       return doc.docID
@@ -171,14 +187,16 @@ export function createPromptDoc(input: PromptDocInput) {
     return doc.docID
   }
 
-  const mount = async (opts: { el: HTMLElement; theme: () => "light" | "dark" }) => {
+  const mount = async (opts: { el: HTMLElement; theme: () => "light" | "dark"; locale?: () => string }) => {
     mounted = opts.el
     theme = opts.theme
+    locale = opts.locale
 
     const sessionID = input.sessionID()
     if (!sessionID) return
 
     const remote = await promptDoc(input, sessionID)
+    setDocID(remote.docID)
     if (session !== sessionID || !sync || sync.docID !== remote.docID) {
       await drop()
       await ensure(sessionID)
@@ -197,21 +215,31 @@ export function createPromptDoc(input: PromptDocInput) {
     void drop()
     mounted = undefined
     theme = undefined
+    locale = undefined
   }
 
   const reset = () => {
     const sessionID = session
     detach()
     sync = undefined
+    setActiveSync(undefined)
     init = true
     session = undefined
     live = undefined
+    setActor(undefined)
     setDocID(undefined)
     if (sessionID) clearActor(sessionID)
     setHistory({ undo: false, redo: false })
   }
 
   const guard = () => handle?.guard()
+  const refocus = (target?: Element) => {
+    if (handle) {
+      handle.refocus(target)
+      return
+    }
+    requestAnimationFrame(() => handle?.refocus(target))
+  }
 
   const undo = () => {
     handle?.undo()
@@ -227,8 +255,16 @@ export function createPromptDoc(input: PromptDocInput) {
 
   const empty = () => (handle ? handle.empty() : true)
 
-  const advance = async () => {
-    const sessionID = input.sessionID()
+  const actors = () => {
+    const list: DocActor[] = handle?.actors() ?? []
+    const own = actor()
+    if (!own) return list
+    if (list.some((item) => item.actorID === own.actorID)) return list
+    return [...list, { actorID: own.actorID, name: own.name }]
+  }
+
+  const advance = async (id?: string) => {
+    const sessionID = id ?? input.sessionID()
     if (!sessionID) return
     const res = await input.client.session.promptDoc2.advance({
       sessionID,
@@ -251,6 +287,10 @@ export function createPromptDoc(input: PromptDocInput) {
   return {
     ready,
     docID,
+    sync: activeSync,
+    actorID: () => actor()?.actorID,
+    actorName: () => actor()?.name,
+    actors,
     history,
     mount,
     detach,
@@ -259,6 +299,7 @@ export function createPromptDoc(input: PromptDocInput) {
     pivot,
     clientID,
     guard,
+    refocus,
     commitMarkdown,
     empty,
     advance,

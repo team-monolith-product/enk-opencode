@@ -1,12 +1,17 @@
 import { useFilteredList } from "@opencode-ai/ui/hooks"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
 import { createEffect, on, Component, Show, onCleanup, createMemo, createSignal } from "solid-js"
+import { useNavigate } from "@solidjs/router"
+import { base64Encode } from "@opencode-ai/util/encode"
+import { Binary } from "@opencode-ai/util/binary"
+import type { Session } from "@opencode-ai/sdk/v2/client"
 import { createStore } from "solid-js/store"
 import { useLocal } from "@/context/local"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/context/file"
 import {
   ContentPart,
   DEFAULT_PROMPT,
+  isLineContextItem,
   isPromptEqual,
   Prompt,
   usePrompt,
@@ -17,6 +22,7 @@ import {
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
 import { useGlobalSDK } from "@/context/global-sdk"
+import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
 import { Button } from "@opencode-ai/ui/button"
@@ -60,6 +66,9 @@ import { promptFromDocMarkdown } from "@/components/prompt-input/prompt-plain"
 import { PromptDrawingShell } from "./prompt-input/drawing-shell"
 import { createPromptDrawing } from "./prompt-input/drawing"
 import { createPromptDoc } from "./prompt-input/doc"
+import { createPromptContextSync } from "./prompt-input/context-sync"
+import { connectSubmit, respondSubmit, startSubmit, type DocSubmitState } from "./prompt-input/doc-submit"
+import { DialogDocSubmit } from "./dialog-doc-submit"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 
 interface PromptInputProps {
@@ -105,6 +114,7 @@ const EXAMPLES = [
 
 const promptTriggersOff = import.meta.env.VITE_DISABLE_PROMPT_TRIGGERS === "true"
 const permissionsOff = import.meta.env.VITE_DISABLE_PROMPT_PERMISSIONS === "true"
+const footerOff = import.meta.env.VITE_DISABLE_PROMPT_FOOTER === "true"
 const wysiwygOnly = import.meta.env.VITE_DISABLE_WYSIWYG_ONLY === "true"
 
 const NON_EMPTY_TEXT = /[^\s\u200B]/
@@ -118,7 +128,9 @@ const DOC_RATIO = 0.8
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
+  const navigate = useNavigate()
   const globalSDK = useGlobalSDK()
+  const globalSync = useGlobalSync()
   const sync = useSync()
   const local = useLocal()
   const files = useFile()
@@ -136,6 +148,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   let fileInputRef: HTMLInputElement | undefined
   let scrollRef!: HTMLDivElement
   let slashPopoverRef!: HTMLDivElement
+  let pending: Promise<string | undefined> | undefined
 
   const mirror = { input: false }
   const inset = 56
@@ -301,6 +314,48 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
   const [height, setHeight] = createSignal(DOC_HEIGHT)
 
+  const seed = (info: Session) => {
+    const [, setStore] = globalSync.child(sdk.directory)
+    setStore("session", (list: Session[]) => {
+      const result = Binary.search(list, info.id, (item) => item.id)
+      const next = [...list]
+      if (result.found) {
+        next[result.index] = info
+        return next
+      }
+      next.splice(result.index, 0, info)
+      return next
+    })
+  }
+
+  const ensure = async () => {
+    if (params.id) return params.id
+    if (pending) return pending
+    pending = sdk.client.session
+      .create()
+      .then((res) => {
+        const info = res.data
+        if (!info) return undefined
+        seed(info)
+        if (accepting()) permission.enableAutoAccept(info.id, sdk.directory)
+        local.session.promote(sdk.directory, info.id)
+        layout.handoff.setTabs(base64Encode(sdk.directory), info.id)
+        navigate(`/${base64Encode(sdk.directory)}/session/${info.id}`)
+        return info.id
+      })
+      .catch(() => {
+        showToast({
+          title: language.t("prompt.toast.sessionCreateFailed.title"),
+          description: language.t("common.requestFailed"),
+        })
+        return undefined
+      })
+      .finally(() => {
+        pending = undefined
+      })
+    return pending
+  }
+
   const max = () => Math.max(DOC_MIN, Math.floor(window.innerHeight * DOC_RATIO))
   const clamp = (value: number) => Math.min(max(), Math.max(DOC_MIN, value))
   const fit = () => {
@@ -366,7 +421,102 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     url: () => sdk.url,
     directory: () => sdk.directory,
     client: sdk.client,
+    submit: () => void submit(false),
   })
+  createPromptContextSync({
+    sync: doc.sync,
+    comments: comments.all,
+    context: prompt.context,
+    replace: comments.replace,
+  })
+  const [approval, setApproval] = createSignal<DocSubmitState | undefined>()
+  let approvalID: string | undefined
+  let approvalSession: string | undefined
+
+  const approvalActor = () => doc.actorID()
+  const clearContext = () => {
+    for (const item of prompt.context.items()) {
+      prompt.context.remove(item.key)
+    }
+  }
+  const closeApproval = () => {
+    dialog.close()
+    approvalID = undefined
+    setApproval(undefined)
+  }
+  const showApproval = (state: DocSubmitState) => {
+    const actorID = approvalActor()
+    if (!actorID) return
+    if (!state.actors.some((item) => item.actorID === actorID)) return
+    if (state.status === "sent") {
+      clearContext()
+      if (approvalID === state.submitID) closeApproval()
+      return
+    }
+    setApproval(state)
+    if (approvalID === state.submitID) return
+    approvalID = state.submitID
+    dialog.show(
+      () => (
+        <DialogDocSubmit
+          state={approval}
+          actorID={actorID}
+          approve={() => {
+            const current = approval()
+            if (!current) return
+            void respondSubmit({
+              baseUrl: sdk.url,
+              directory: sdk.directory,
+              sessionID: current.sessionID,
+              submitID: current.submitID,
+              actorID,
+              action: "approve",
+            })
+              .then(setApproval)
+              .catch(() =>
+                showToast({
+                  title: "전송 동의 실패",
+                  description: language.t("common.requestFailed"),
+                }),
+              )
+          }}
+          cancel={() => {
+            const current = approval()
+            if (!current) return
+            void respondSubmit({
+              baseUrl: sdk.url,
+              directory: sdk.directory,
+              sessionID: current.sessionID,
+              submitID: current.submitID,
+              actorID,
+              action: "cancel",
+            })
+              .then(setApproval)
+              .catch(() =>
+                showToast({
+                  title: "전송 동의 취소 실패",
+                  description: language.t("common.requestFailed"),
+                }),
+              )
+          }}
+          close={closeApproval}
+        />
+      ),
+      () => {
+        const current = approval()
+        if (current?.status === "pending") {
+          approvalID = undefined
+          window.setTimeout(() => {
+            const next = approval()
+            if (next?.status === "pending") showApproval(next)
+          }, 120)
+          return
+        }
+        approvalID = undefined
+        setApproval(undefined)
+      },
+    )
+  }
 
   createEffect((prev) => {
     const id = params.id
@@ -382,16 +532,35 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
 
   createEffect(() => {
+    const sessionID = params.id
+    const docID = doc.docID()
+    const actorID = doc.actorID()
+    if (store.mode !== "doc" || !sessionID || !docID || !actorID) return
+    const stop = connectSubmit({
+      baseUrl: sdk.url,
+      directory: sdk.directory,
+      sessionID,
+      docID,
+      actorID,
+      event: (event) => showApproval(event.state),
+    })
+    onCleanup(stop)
+  })
+
+  createEffect(() => {
     const id = params.id
     if (!id) return
     void globalSDK.event.start()
     const unsub = globalSDK.event.on(sdk.directory, (event) => {
-      const item = event as { type: string; properties: { sessionID: string; docID: string; clientID?: string } }
+      const item = event as {
+        type: string
+        properties: { sessionID: string; docID: string; clientID?: string; init?: boolean }
+      }
       if (item.type !== "doc.prompt.rotated") return
       const props = item.properties
       if (props.sessionID !== id) return
       if (props.clientID === doc.clientID) return
-      void doc.pivot(props.sessionID, props.docID, { init: false }).then(() => {
+      void doc.pivot(props.sessionID, props.docID, { init: props.init ?? false }).then(() => {
         if (store.mode === "doc") return
         setStore("mode", "doc")
       })
@@ -402,7 +571,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const contextItems = createMemo(() => {
     const items = prompt.context.items()
     if (store.mode !== "shell") return items
-    return items.filter((item) => !item.comment?.trim())
+    return items.filter((item) => !isLineContextItem(item) && !item.comment?.trim())
   })
 
   const hasUserPrompt = createMemo(() => {
@@ -1243,6 +1412,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     permission.toggleAutoAccept(params.id, sdk.directory)
   }
 
+  createEffect(() => {
+    if (store.mode !== "doc") return
+    if (params.id) return
+    void ensure().then((id) => {
+      if (!id) return
+      void doc.refresh(id)
+    })
+  })
+
   const { abort, handleSubmit } = createPromptSubmit({
     info,
     imageAttachments,
@@ -1259,12 +1437,47 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     },
     setMode: (mode) => setStore("mode", mode),
     setPopover: (popover) => setStore("popover", popover),
-    newSessionWorktree: () => props.newSessionWorktree,
+    newSessionWorktree: () => (store.mode === "doc" ? "main" : props.newSessionWorktree),
     onNewSessionWorktreeReset: props.onNewSessionWorktreeReset,
     shouldQueue: props.shouldQueue,
     onQueue: props.onQueue,
     onAbort: props.onAbort,
     onSubmit: props.onSubmit,
+    approve: async (input) => {
+      if (store.mode !== "doc") return false
+      const docID = doc.docID()
+      const actorID = doc.actorID()
+      if (!docID || !actorID) return false
+      const ids = Array.from(new Set([actorID, ...doc.actors().map((item) => item.actorID)]))
+      if (ids.length <= 1) return false
+      try {
+        const state = await startSubmit({
+          baseUrl: sdk.url,
+          directory: input.sessionDirectory,
+          sessionID: input.sessionID,
+          docID,
+          actorID,
+          actorIDs: ids,
+          prompt: {
+            messageID: input.messageID,
+            agent: input.agent,
+            model: input.model,
+            variant: input.variant,
+            parts: input.parts,
+          },
+        })
+        approvalSession = input.sessionID
+        showApproval(state)
+        return true
+      } catch {
+        approvalSession = input.sessionID
+        showToast({
+          title: "전송 동의 요청 실패",
+          description: language.t("common.requestFailed"),
+        })
+        return true
+      }
+    },
   })
 
   const exitDoc = () => {
@@ -1274,11 +1487,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     requestAnimationFrame(() => editorRef?.focus())
   }
 
-  const handleFormSubmit = async (event: Event) => {
+  async function submit(stop: boolean) {
     if (store.mode === "draw") {
-      event.preventDefault()
       const part = await drawing.commit()
       if (!part) {
+        if (working() && stop) {
+          await abort()
+          return
+        }
+        if (working()) return
         showToast({
           title: language.t("prompt.toast.drawEmpty.title"),
           description: language.t("prompt.toast.drawEmpty.description"),
@@ -1286,23 +1503,27 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         return
       }
       drawing.dispose()
-      await handleSubmit(event, [part])
+      await handleSubmit(undefined, [part])
       return
     }
 
     if (store.mode === "doc") {
-      event.preventDefault()
+      if (working() && !stop) return
       const next = await doc.commitMarkdown()
       const text = next?.text
       if (!text) {
+        if (working() && stop) {
+          await abort()
+          return
+        }
+        if (working()) return
         showToast({
           title: language.t("prompt.toast.docEmpty.title"),
           description: language.t("prompt.toast.docEmpty.description"),
         })
         return
       }
-      const sessionID = params.id
-      await handleSubmit(event, [
+      const base = [
         ...promptFromDocMarkdown(text, prompt.current(), doc.docID()),
         ...(next?.assets.map((asset) => ({
           type: "image" as const,
@@ -1311,10 +1532,19 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           mime: asset.mime,
           dataUrl: asset.dataUrl,
         })) ?? []),
-      ])
+      ]
+      approvalSession = undefined
+      const sessionID = await handleSubmit(undefined, {
+        prompt: base,
+        prepare: async (id) => [
+          ...promptFromDocMarkdown(text, prompt.current(), await doc.refresh(id)),
+          ...base.filter((part) => part.type === "image"),
+        ],
+      })
       if (!sessionID) return
+      if (approvalSession === sessionID) return
       try {
-        await doc.advance()
+        await doc.advance(sessionID)
       } catch {
         showToast({
           title: language.t("prompt.toast.docAdvanceFailed.title"),
@@ -1324,7 +1554,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return
     }
 
-    handleSubmit(event)
+    await handleSubmit()
+  }
+
+  const handleFormSubmit = (event: Event) => {
+    event.preventDefault()
+    void submit(true)
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -1499,7 +1734,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       ) {
         return
       }
-      handleSubmit(event)
+      void handleSubmit(event)
     }
   }
 
@@ -1758,7 +1993,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           </Show>
         </div>
       </DockShellForm>
-      <Show when={store.mode === "normal" || store.mode === "shell" || canvasMode(store.mode)}>
+      <Show when={!footerOff && (store.mode === "normal" || store.mode === "shell" || canvasMode(store.mode))}>
         <DockTray attach="top">
           <div class="px-1.75 pt-5.5 pb-2 flex items-center gap-2 min-w-0">
             <div class="flex items-center gap-1.5 min-w-0 flex-1 relative">

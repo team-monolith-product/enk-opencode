@@ -10,6 +10,16 @@ import { lazy } from "../util/lazy"
 import * as Room from "./room"
 
 const MAX = 10 * 1024 * 1024
+const inline = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"])
+
+function mime(input: string) {
+  const type = input.split(";")[0]?.trim().toLowerCase()
+  return type && inline.has(type) ? type : "application/octet-stream"
+}
+
+function file(name: string) {
+  return `attachment; filename="${name.replace(/["\\\r\n]/g, "_")}"`
+}
 
 function b64(input: Uint8Array) {
   return Buffer.from(input).toString("base64")
@@ -112,7 +122,7 @@ export const DocRoutes = lazy(() =>
       "/:docID/asset",
       describeRoute({
         summary: "Upload doc asset",
-        description: "Store an image asset for a collaborative doc.",
+        description: "Store an asset for a collaborative doc.",
         operationId: "doc.asset.create",
         responses: {
           200: {
@@ -131,7 +141,7 @@ export const DocRoutes = lazy(() =>
         "json",
         z.object({
           id: AssetID.zod.optional(),
-          mime: z.string().startsWith("image/"),
+          mime: z.string().min(1),
           data: z.string().min(1),
         }),
       ),
@@ -140,7 +150,7 @@ export const DocRoutes = lazy(() =>
         const body = c.req.valid("json")
         const data = new Uint8Array(Buffer.from(body.data, "base64"))
         if (data.byteLength > MAX) throw new HTTPException(400, { message: "Doc asset is too large" })
-        const asset = Doc.assetCreate({ docID, assetID: body.id, mime: body.mime, data })
+        const asset = Doc.assetCreate({ docID, assetID: body.id, mime: mime(body.mime), data })
         const next = new URL(await href(asset.url), "http://opencode.internal")
         const query = ["directory", "workspace"] as const
         query.forEach((key) => {
@@ -154,7 +164,7 @@ export const DocRoutes = lazy(() =>
       "/:docID/asset/:assetID",
       describeRoute({
         summary: "Get doc asset",
-        description: "Return a stored image asset for a collaborative doc.",
+        description: "Return a stored asset for a collaborative doc.",
         operationId: "doc.asset.get",
         responses: {
           200: {
@@ -172,9 +182,12 @@ export const DocRoutes = lazy(() =>
       async (c) => {
         const param = c.req.valid("param")
         const asset = Doc.assetGet({ docID: param.docID, assetID: param.assetID })
-        c.header("Content-Type", asset.mime)
+        const type = mime(asset.mime)
+        c.header("Content-Type", type)
         c.header("Content-Length", asset.size.toString())
         c.header("Cache-Control", "public, max-age=31536000, immutable")
+        c.header("X-Content-Type-Options", "nosniff")
+        if (type === "application/octet-stream") c.header("Content-Disposition", file(asset.assetID))
         return c.body(asset.data)
       },
     )

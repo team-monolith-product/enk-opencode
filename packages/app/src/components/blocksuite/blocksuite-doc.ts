@@ -1,5 +1,5 @@
 import { AffineSchemas } from "@blocksuite/blocks/schemas"
-import type { Doc } from "@blocksuite/store"
+import type { BlockModel, Doc, Query } from "@blocksuite/store"
 import { DocCollection, Schema } from "@blocksuite/store"
 import "@/components/blocksuite/blocksuite-doc.css"
 import { watchCursorLabels } from "./cursor-labels"
@@ -14,9 +14,60 @@ import { scheme } from "./theme"
 
 export type DocMountInput = {
   theme: () => "light" | "dark"
+  locale?: () => string
   sync?: DocSyncOpts
   init?: boolean
   readonly?: boolean
+  submit?: () => void
+}
+
+export type DocActor = {
+  actorID: string
+  name: string
+}
+
+type TextProp = {
+  toString?: () => string
+}
+type YBlock = {
+  get?: (key: string) => unknown
+}
+type TextModel = {
+  id?: string
+  text?: TextProp
+  yBlock?: YBlock
+}
+
+const text = (value: unknown): value is TextProp => {
+  if (!value || typeof value !== "object") return false
+  return typeof (value as TextProp).toString === "function"
+}
+
+const yblock = (doc: Doc, block: TextModel) => {
+  if (!block.id) return
+  return (doc.blockCollection.yBlocks as { get?: (id: string) => unknown }).get?.(block.id) as YBlock | undefined
+}
+
+const models = (doc: Doc) => doc.getBlocks().map((model) => model as BlockModel & TextModel)
+
+// Concurrent empty-doc initialization can leave a view Doc bound to a superseded Y.Map.
+const desynced = (doc: Doc) =>
+  models(doc).some((block) => {
+    const live = yblock(doc, block)
+    if (live && block.yBlock && live !== block.yBlock) return true
+    const next = live?.get?.("prop:text") ?? block.yBlock?.get?.("prop:text")
+    if (!text(block.text) || !text(next)) return false
+    return block.text.toString?.() !== next.toString?.()
+  })
+
+const actor = (value: unknown): DocActor | undefined => {
+  if (!value || typeof value !== "object") return
+  const user = (value as { user?: unknown }).user
+  if (!user || typeof user !== "object") return
+  const actorID = (user as { actorID?: unknown }).actorID
+  const name = (user as { name?: unknown }).name
+  if (typeof actorID !== "string" || typeof name !== "string") return
+  return { actorID, name }
 }
 
 export async function createPage(input: DocMountInput) {
@@ -28,7 +79,8 @@ export async function createPage(input: DocMountInput) {
 
   const schema = new Schema().register(AffineSchemas)
   const page = "page"
-  let doc: Doc | undefined
+  const query = { match: [], mode: "loose" } satisfies Query
+  let draft: Doc | undefined
   let collection: DocCollection
   let direct: OpencodeDocSource | undefined
   let unlink: (() => void) | undefined
@@ -46,25 +98,29 @@ export async function createPage(input: DocMountInput) {
     })
     collection.meta.initialize()
     if (awareness) {
-      collection.awarenessStore.awareness.setLocalStateField("user", { name: input.sync.name })
+      collection.awarenessStore.awareness.setLocalStateField("user", {
+        actorID: input.sync.actorID,
+        name: input.sync.name,
+      })
       collection.awarenessStore.awareness.setLocalStateField("color", input.sync.color)
     }
     if (input.init !== false) {
-      doc = await remote(direct, collection, input.sync.docID, page, input.readonly)
-      doc = doc ?? collection.getDoc(page, { readonly: input.readonly }) ?? collection.createDoc({ id: page })
-      if (!doc.loaded) doc.load()
-      await load(direct, page, doc.spaceDoc)
-      if (!doc.root && !input.readonly) initDoc(doc)
-      if (!input.readonly) baseline(doc)
+      draft = await remote(direct, collection, input.sync.docID, page, input.readonly, query)
+      draft =
+        draft ?? collection.getDoc(page, { readonly: input.readonly, query }) ?? collection.createDoc({ id: page, query })
+      if (!draft.loaded) draft.load()
+      await load(direct, page, draft.spaceDoc)
+      if (!draft.root && !input.readonly) initDoc(draft)
+      if (!input.readonly) baseline(draft)
     }
     if (input.init === false) {
       if (input.readonly) {
-        doc = await remote(direct, collection, input.sync.docID, page, input.readonly)
-        if (!doc?.root) throw new Error("doc viewer load failed")
+        draft = await remote(direct, collection, input.sync.docID, page, input.readonly, query)
+        if (!draft?.root) throw new Error("doc viewer load failed")
       } else {
-        while (!doc) {
-          doc = await remote(direct, collection, input.sync.docID, page, input.readonly)
-          if (doc) break
+        while (!draft) {
+          draft = await remote(direct, collection, input.sync.docID, page, input.readonly, query)
+          if (draft) break
           await frame()
         }
       }
@@ -74,7 +130,7 @@ export async function createPage(input: DocMountInput) {
     collection.meta.initialize()
   }
 
-  doc = doc ?? collection.getDoc(page, { readonly: input.readonly }) ?? collection.createDoc({ id: page })
+  let doc = draft ?? collection.getDoc(page, { readonly: input.readonly, query }) ?? collection.createDoc({ id: page, query })
   if (!doc.loaded) doc.load()
   if (!doc.root && input.init !== false && !input.readonly) initDoc(doc)
   if (!input.readonly) baseline(doc)
@@ -87,12 +143,18 @@ export async function createPage(input: DocMountInput) {
   if (input.readonly) editor.specs = PreviewEditorBlockSpecs
   editor.hasViewport = true
 
+  let reload: (() => void) | undefined
+  let tick = 0
+  let checks = 0
+
   const applyTheme = () => {
     editor.std.get(ThemeProvider).app$.value = scheme(input.theme())
   }
 
   const focus = async (ready?: Awaited<ReturnType<typeof inlineReady>>) => {
     ensureEditable(doc)
+    const root = editor.querySelector("affine-page-root")
+    if (root instanceof HTMLElement) root.focus()
     const next = ready ?? (await inlineReady(editor))
     next.focusEnd()
     await next.waitForUpdate()
@@ -102,8 +164,59 @@ export async function createPage(input: DocMountInput) {
   let mutate: MutationObserver | undefined
   let unload: (() => void) | undefined
   let cursors: (() => void) | undefined
+  let unkeys: (() => void) | undefined
 
-  const clamp = (height: number) => Math.min(650, Math.max(50, Math.ceil(height)))
+  const rebind = () => {
+    const current = editor.std?.doc ?? doc
+    if (!desynced(current)) return
+    const active = document.activeElement
+    const restore = active instanceof Element && editor.contains(active)
+    current.blockCollection.clearQuery(query, input.readonly)
+    const fresh = collection.getDoc(page, { readonly: input.readonly, query })
+    if (!fresh) return
+    if (!fresh.loaded) fresh.load()
+    doc = fresh
+    editor.doc = fresh
+    if (fresh !== current) current.dispose()
+    editor.requestUpdate()
+    const el = editor.parentElement
+    if (!(el instanceof HTMLElement)) return
+    requestAnimationFrame(() => {
+      cursors?.()
+      cursors = input.readonly ? undefined : watchCursorLabels(editor, el)
+      fit(el)
+      if (restore) void focus()
+    })
+  }
+
+  const probe = (count = 8) => {
+    checks = Math.max(checks, count)
+    if (tick) return
+    const run = () => {
+      tick = 0
+      if (checks <= 0) return
+      checks--
+      rebind()
+      if (checks > 0) tick = requestAnimationFrame(run)
+    }
+    tick = requestAnimationFrame(run)
+  }
+
+  if (input.sync) {
+    const space = doc.spaceDoc
+    const update = () => probe()
+    space.on("update", update)
+    probe(2)
+    reload = () => {
+      space.off("update", update)
+      checks = 0
+      if (!tick) return
+      cancelAnimationFrame(tick)
+      tick = 0
+    }
+  }
+
+  const clamp = (height: number) => Math.min(650, Math.max(40, Math.ceil(height)))
 
   const content = (host: HTMLElement, root?: HTMLElement, preview?: HTMLElement) => {
     const base = host.getBoundingClientRect().top
@@ -131,10 +244,13 @@ export async function createPage(input: DocMountInput) {
     const width = host.clientWidth
     const root = editor.querySelector(".affine-page-root-block-container")
     const preview = editor.querySelector("affine-preview-root")
-    const height =
-      input.readonly && root instanceof HTMLElement
-        ? content(host, root, preview instanceof HTMLElement ? preview : undefined)
-        : host.clientHeight
+    const height = input.readonly
+      ? content(
+          host,
+          root instanceof HTMLElement ? root : undefined,
+          preview instanceof HTMLElement ? preview : undefined,
+        )
+      : host.clientHeight
     const tall = input.readonly ? clamp(height) : height
     if (tall <= 0) return
     if (input.readonly) host.style.height = `${tall}px`
@@ -164,8 +280,6 @@ export async function createPage(input: DocMountInput) {
 
   const attach = async (el: HTMLElement) => {
     const attached = editor.parentElement === el
-    const events = el.style.pointerEvents
-    el.style.pointerEvents = "none"
     el.setAttribute("aria-busy", "true")
     if (!attached) el.replaceChildren(editor)
     try {
@@ -191,6 +305,22 @@ export async function createPage(input: DocMountInput) {
       unload = () => editor.removeEventListener("load", loaded, true)
       cursors?.()
       cursors = input.readonly ? undefined : watchCursorLabels(editor, el)
+      unkeys?.()
+      unkeys = undefined
+      const send = input.submit
+      if (!input.readonly && send) {
+        const onKey = (event: KeyboardEvent) => {
+          if (event.key !== "Enter" || event.isComposing) return
+          if (event.altKey || event.metaKey || event.ctrlKey) return
+          if (!event.shiftKey) return
+          event.preventDefault()
+          event.stopPropagation()
+          if (event.repeat) return
+          send()
+        }
+        editor.addEventListener("keydown", onKey, true)
+        unkeys = () => editor.removeEventListener("keydown", onKey, true)
+      }
       if (!attached && ready) await focus(ready)
       if (input.sync && awareness && !aware) {
         collection.awarenessSync.connect()
@@ -198,13 +328,15 @@ export async function createPage(input: DocMountInput) {
       }
       await frame()
       fit(el)
+      if (!input.readonly && document.activeElement === editor.querySelector("affine-page-root")) await focus(ready)
     } finally {
-      el.style.pointerEvents = events
       el.removeAttribute("aria-busy")
     }
   }
 
   const detach = () => {
+    unkeys?.()
+    unkeys = undefined
     cursors?.()
     cursors = undefined
     resize?.disconnect()
@@ -240,6 +372,12 @@ export async function createPage(input: DocMountInput) {
     ensureEditable(doc)
   }
 
+  const refocus = (target?: Element) => {
+    const active = document.activeElement
+    if (target?.closest(".inline-editor") && active instanceof Element && editor.contains(active)) return
+    void focus()
+  }
+
   const undo = () => {
     if (!doc.canUndo) return
     doc.undo()
@@ -254,13 +392,26 @@ export async function createPage(input: DocMountInput) {
     requestAnimationFrame(() => void focus())
   }
 
+  const actors = () => {
+    const own = input.sync ? [{ actorID: input.sync.actorID, name: input.sync.name }] : []
+    const states = Array.from(collection.awarenessStore.awareness.getStates().values())
+    return Array.from(
+      [...own, ...states.map(actor).filter((item): item is DocActor => !!item)]
+        .reduce((map, item) => map.set(item.actorID, item), new Map<string, DocActor>())
+        .values(),
+    )
+  }
+
   return {
-    doc,
+    get doc() {
+      return doc
+    },
     editor,
     collection,
     attach,
     detach,
     guard,
+    refocus,
     onHistory,
     markdown: () =>
       input.sync
@@ -276,10 +427,15 @@ export async function createPage(input: DocMountInput) {
     redo,
     canUndo: () => doc.canUndo,
     canRedo: () => doc.canRedo,
+    actors,
     setTheme: (theme: "light" | "dark") => {
       editor.std.get(ThemeProvider).app$.value = scheme(theme)
     },
     dispose: async () => {
+      reload?.()
+      reload = undefined
+      unkeys?.()
+      unkeys = undefined
       cursors?.()
       cursors = undefined
       resize?.disconnect()
