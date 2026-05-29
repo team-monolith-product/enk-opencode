@@ -1239,6 +1239,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const addPart = (part: ContentPart) => {
     if (part.type === "image") return false
+    if (store.mode === "doc") {
+      const cursor = prompt.cursor() ?? promptLength(prompt.current())
+      prompt.set([...prompt.current(), part], cursor)
+      return true
+    }
 
     const selection = window.getSelection()
     if (!selection) return false
@@ -1382,15 +1387,40 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
 
   const { addAttachments, removeAttachment, handlePaste } = createPromptAttachments({
-    enabled: () => !canvasMode(store.mode),
+    enabled: () => store.mode !== "draw",
     editor: () => editorRef,
     isDialogActive: () => !!dialog.active,
     setDraggingType: (type) => setStore("draggingType", type),
     focusEditor: () => {
+      if (store.mode === "doc") {
+        doc.refocus()
+        return
+      }
       editorRef.focus()
       setCursorPosition(editorRef, promptLength(prompt.current()))
     },
     addPart,
+    dropPath: async (path) => {
+      if (store.mode !== "doc") return false
+      const dir = sdk.directory.replace(/\/+$/, "")
+      const rel =
+        path.startsWith(dir) && (path === dir || path[dir.length] === "/")
+          ? path.slice(dir.length).replace(/^\/+/, "")
+          : path
+      const ok = doc.addReference(rel)
+      if (ok) addPart({ type: "file", path, content: "@" + path, start: 0, end: 0 })
+      return ok
+    },
+    dropFiles: async (list) => {
+      if (store.mode !== "doc") return false
+      const ok = await doc.addFiles(list)
+      if (!ok && list.length > 0) {
+        showToast({
+          title: language.t("common.requestFailed"),
+        })
+      }
+      return true
+    },
     readClipboardImage: platform.readClipboardImage,
   })
 
@@ -1761,7 +1791,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           class="group absolute -top-2.5 left-8 right-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
           onPointerDown={resize}
         >
-          <div class="h-0.5 w-18 rounded-full bg-border-base transition-colors group-hover:bg-border-strong-base" />
+          <div class="h-0.5 w-18 rounded-none bg-border-weaker-base transition-colors group-hover:bg-border-strong-base" />
         </div>
       </Show>
       <PromptPopover
@@ -1783,13 +1813,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         onSubmit={handleFormSubmit}
         classList={{
           "group/prompt-input": true,
-          "focus-within:shadow-xs-border": true,
           "border-icon-info-active border-dashed": store.draggingType !== null,
           "flex min-h-0 flex-1 flex-col": canvasMode(store.mode),
           [props.class ?? ""]: !!props.class,
         }}
       >
-        <Show when={!canvasMode(store.mode)}>
+        <Show when={store.mode !== "draw"}>
           <PromptDragOverlay
             type={store.draggingType}
             label={language.t(
@@ -1870,7 +1899,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       onKeyDown={handleKeyDown}
                       classList={{
                         "select-text": true,
-                        "w-full pl-3 pr-2 pt-2 text-14-regular text-text-strong focus:outline-none whitespace-pre-wrap": true,
+                        "w-full text-14-regular text-text-strong focus:outline-none whitespace-pre-wrap": true,
                         "[&_[data-type=file]]:text-syntax-property": true,
                         "[&_[data-type=agent]]:text-syntax-type": true,
                         "font-mono!": store.mode === "shell",
@@ -1879,7 +1908,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     />
                     <Show when={!prompt.dirty()}>
                       <div
-                        class="absolute top-0 inset-x-0 pl-3 pr-2 pt-2 text-14-regular text-text-weak pointer-events-none whitespace-nowrap truncate"
+                        data-component="prompt-input-placeholder"
+                        class="absolute top-0 inset-x-0 text-14-regular text-text-weak pointer-events-none whitespace-nowrap truncate"
                         classList={{ "font-mono!": store.mode === "shell" }}
                         style={{ "padding-bottom": space }}
                       >
@@ -1951,7 +1981,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       (store.mode === "normal" && !prompt.dirty() && !working() && commentCount() === 0)
                     }
                     tabIndex={store.mode === "shell" ? -1 : undefined}
-                    icon={working() ? "stop" : "arrow-up"}
+                    icon={working() ? "stop" : "arrow-up-bold"}
                     variant="primary"
                     class="size-7.5"
                     style={submitStyle()}
