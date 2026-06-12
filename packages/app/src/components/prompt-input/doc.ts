@@ -2,7 +2,10 @@ import { createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { OpencodeClient, SessionActor } from "@opencode-ai/sdk/v2/client"
 import { createPage, type DocActor, type DocMountInput } from "@/components/blocksuite/blocksuite-doc"
+import type { FileNodeType } from "@/components/blocksuite/file-reference-block"
+import type { LineRefInput } from "@/components/blocksuite/line-reference-url"
 import type { DocSyncOpts } from "@/components/blocksuite/opencode-doc-source"
+import { label } from "@/components/blocksuite/actor"
 import { clearActor, loadActor, saveActor } from "./doc-actor"
 
 type DocHandle = Awaited<ReturnType<typeof createPage>>
@@ -13,18 +16,24 @@ type PromptDocInput = {
   directory: () => string
   client: OpencodeClient
   submit: () => void
+  user?: () => { id: string; name: string } | undefined
 }
 
 async function register(input: PromptDocInput, sessionID: string) {
-  const stored = loadActor(sessionID)
+  const user = input.user?.()
+  // With a ?user= param the identity is keyed by that user id (stable per user, distinct across
+  // users); without it, per tab. We never force a tab/browser-stored actorID onto a user-scoped
+  // identity — that would merge two different users into one. The server also de-dupes by user id.
+  const stored = loadActor(sessionID, user?.id)
   const res = await input.client.session.actor.upsert({
     sessionID,
     directory: input.directory(),
     ...(stored ? { actorID: stored } : {}),
+    ...(user ? { userID: user.id, name: user.name } : {}),
   })
   const actor = res.data as SessionActor | undefined
   if (!actor) throw new Error("actor registration failed")
-  saveActor(sessionID, actor.actorID)
+  saveActor(sessionID, actor.actorID, user?.id)
   return actor
 }
 
@@ -45,8 +54,20 @@ export function createPromptDoc(input: PromptDocInput) {
   let mounted: HTMLElement | undefined
   let session: string | undefined
   let live: string | undefined
-  let seq = 0
-  let pending: { id: string; init: boolean; task: Promise<void> } | undefined
+
+  // Every operation that builds or replaces the editor handle runs through one serialized lane, so
+  // they never interleave. Each call gets a generation token; after each await it checks `alive()`
+  // and bails if a newer intent has superseded it. This single mechanism replaces the scattered
+  // seq/mark/pending and `mounted !== el` race guards.
+  let lane: Promise<unknown> = Promise.resolve()
+  let generation = 0
+
+  const serialize = <T>(task: (alive: () => boolean) => Promise<T>): Promise<T> => {
+    const token = ++generation
+    const run = lane.then(() => task(() => token === generation))
+    lane = run.catch(() => {})
+    return run
+  }
 
   const [ready, setReady] = createSignal(false)
   const [filled, setFilled] = createSignal(false)
@@ -98,7 +119,7 @@ export function createPromptDoc(input: PromptDocInput) {
       directory: input.directory(),
       client: input.client,
       actorID: actor.actorID,
-      name: actor.name,
+      name: label(actor.actorID, actor.name),
       color: actor.color,
     }
     setActiveSync(sync)
@@ -106,14 +127,16 @@ export function createPromptDoc(input: PromptDocInput) {
     session = sessionID
   }
 
-  const remount = async (opts?: {
-    sync?: DocSyncOpts
-    init?: boolean
-    sessionID?: string
-    docID?: string
-    keep?: boolean
-    seq?: number
-  }) => {
+  const remount = async (
+    alive: () => boolean,
+    opts?: {
+      sync?: DocSyncOpts
+      init?: boolean
+      sessionID?: string
+      docID?: string
+      keep?: boolean
+    },
+  ) => {
     const el = mounted
     const themeFn = theme
     const next = opts?.sync ?? sync
@@ -126,20 +149,19 @@ export function createPromptDoc(input: PromptDocInput) {
       sync: next,
       init: opts?.init ?? init,
       submit: input.submit,
-      onDraftChange: syncFilled,
+      onDraftChange: () => {
+        syncFilled()
+        syncHistory()
+      },
     })
-    if (opts?.seq && opts.seq !== seq) {
-      await fresh.dispose()
-      return
-    }
-    if (mounted !== el || theme !== themeFn) {
+    if (!alive()) {
       await fresh.dispose()
       return
     }
     const id = opts?.docID ?? next.docID
-    historySub?.dispose()
-    historySub = undefined
     handle = fresh
+    // Subscribe before attach so history events fired while attaching are not missed.
+    bindHistory()
     sync = next
     setActiveSync(next)
     init = opts?.init ?? init
@@ -151,7 +173,6 @@ export function createPromptDoc(input: PromptDocInput) {
     setReady(true)
     syncHistory()
     syncFilled()
-    bindHistory()
   }
 
   const pivot = (sessionID: string, next: string, opts?: { init?: boolean; force?: boolean }) => {
@@ -159,30 +180,20 @@ export function createPromptDoc(input: PromptDocInput) {
       return Promise.resolve()
     setDocID(next)
     const should = opts?.init ?? true
-    if (!opts?.force && pending?.id === next && (pending.init || !should)) return pending.task
-    const mark = ++seq
 
-    const run = async () => {
+    return serialize(async (alive) => {
+      // Already on the target doc (a duplicate pivot that queued behind the real one) — no-op.
       if (!opts?.force && handle?.collection.id === next && session === sessionID && sync?.docID === next) return
 
       if (session !== sessionID || !sync) await ensure(sessionID)
-      if (!sync) return
-      if (mark !== seq) return
-      await remount({
+      if (!alive() || !sync) return
+      await remount(alive, {
         sync: { ...sync, docID: next },
         init: should,
         sessionID,
         docID: next,
-        seq: mark,
       })
-    }
-    const task = run()
-    const done = task.finally(() => {
-      if (pending?.task !== done) return
-      pending = undefined
     })
-    pending = { id: next, init: should, task: done }
-    return done
   }
 
   const refresh = async (sessionID: string, opts?: { init?: boolean }) => {
@@ -196,45 +207,64 @@ export function createPromptDoc(input: PromptDocInput) {
     return doc.docID
   }
 
-  const mount = async (opts: { el: HTMLElement; theme: () => "light" | "dark"; locale?: () => string }) => {
+  const mount = (opts: { el: HTMLElement; theme: () => "light" | "dark"; locale?: () => string }) => {
     mounted = opts.el
     theme = opts.theme
     locale = opts.locale
 
     const sessionID = input.sessionID()
-    if (!sessionID) return
+    if (!sessionID) return Promise.resolve()
 
-    const remote = await promptDoc(input, sessionID)
-    setDocID(remote.docID)
-    if (session !== sessionID || !sync || sync.docID !== remote.docID) {
-      await drop()
-      await ensure(sessionID)
-    }
+    return serialize(async (alive) => {
+      const remote = await promptDoc(input, sessionID)
+      if (!alive()) return
+      setDocID(remote.docID)
+      if (session !== sessionID || !sync || sync.docID !== remote.docID) {
+        await drop()
+        if (!alive()) return
+        await ensure(sessionID)
+        if (!alive()) return
+      }
 
-    if (handle?.collection.id === remote.docID) {
-      await handle.attach(opts.el)
-      setReady(true)
-      syncFilled()
-      return
-    }
+      if (handle?.collection.id === remote.docID) {
+        await handle.attach(opts.el)
+        setReady(true)
+        syncHistory()
+        syncFilled()
+        return
+      }
 
-    await remount()
+      await remount(alive)
+    })
   }
 
   const detach = () => {
-    seq++
-    pending = undefined
-    void drop()
     mounted = undefined
     theme = undefined
     locale = undefined
+    // Keep the handle (sync connection + own-edit undo history) alive across panel unmounts, so
+    // leaving and re-entering doc mode does not rebuild the editor and wipe undo history. The DOM
+    // is detached only; mount() reuses the handle for the same doc. serialize() bumps the
+    // generation (cancelling any in-flight build) so this can never race a concurrent mount/pivot.
+    void serialize(async () => {
+      handle?.detach()
+      setReady(false)
+    })
+  }
+
+  const dispose = () => {
+    mounted = undefined
+    theme = undefined
+    locale = undefined
+    // Full teardown (unlike detach): releases the editor and sync connection without clearing the
+    // stored actor identity the way reset() does.
+    void serialize(async () => {
+      await drop()
+    })
   }
 
   const reset = () => {
     const sessionID = session
-    seq++
-    pending = undefined
-    void drop()
     sync = undefined
     setActiveSync(undefined)
     init = true
@@ -245,6 +275,9 @@ export function createPromptDoc(input: PromptDocInput) {
     if (sessionID) clearActor(sessionID)
     setHistory({ undo: false, redo: false })
     setFilled(false)
+    void serialize(async () => {
+      await drop()
+    })
   }
 
   const guard = () => handle?.guard()
@@ -275,14 +308,16 @@ export function createPromptDoc(input: PromptDocInput) {
     return result.some(Boolean)
   }
 
-  const addReference = (path: string) => handle?.addReference(path) ?? false
+  const addReference = (path: string, nodeType?: FileNodeType) => handle?.addReference(path, nodeType) ?? false
+
+  const addLineReference = (input: LineRefInput) => handle?.addLineReference(input) ?? false
 
   const actors = () => {
     const list: DocActor[] = handle?.actors() ?? []
     const own = actor()
     if (!own) return list
     if (list.some((item) => item.actorID === own.actorID)) return list
-    return [...list, { actorID: own.actorID, name: own.name }]
+    return [...list, { actorID: own.actorID, name: label(own.actorID, own.name) }]
   }
 
   const advance = async (id?: string) => {
@@ -318,6 +353,7 @@ export function createPromptDoc(input: PromptDocInput) {
     history,
     mount,
     detach,
+    dispose,
     reset,
     refresh,
     pivot,
@@ -327,6 +363,7 @@ export function createPromptDoc(input: PromptDocInput) {
     commitMarkdown,
     addFiles,
     addReference,
+    addLineReference,
     empty,
     advance,
     undo,

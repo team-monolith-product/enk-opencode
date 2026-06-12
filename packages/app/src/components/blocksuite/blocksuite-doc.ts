@@ -1,7 +1,6 @@
 import { AffineSchemas } from "@blocksuite/blocks/schemas"
-import type { BlockModel, Doc, Query } from "@blocksuite/store"
+import { DocCollection, Schema, type BlockModel, type Doc, type Query } from "@blocksuite/store"
 import { getFilename } from "@opencode-ai/util/path"
-import { DocCollection, Schema } from "@blocksuite/store"
 import "@/components/blocksuite/blocksuite-doc.css"
 import { watchCursorLabels } from "./cursor-labels"
 import { baseline, docMarkdown, docPlain, ensureEditable } from "./doc-content"
@@ -12,7 +11,13 @@ import { frame, settled } from "./frame"
 import { inlineReady } from "./inline-editor"
 import { OpencodeAwarenessSource, OpencodeBlobSource, OpencodeDocSource, type DocSyncOpts } from "./opencode-doc-source"
 import { scheme } from "./theme"
-import { FileReferenceBlockSpec, withFileReferenceSchema } from "./file-reference-block"
+import { FileReferenceBlockSpec, withFileReferenceSchema, type FileNodeType } from "./file-reference-block"
+import { LineReferenceBlockSpec, withLineReferenceSchema } from "./line-reference-block"
+import { lineReferenceUrl, normLineRef, type LineRefInput } from "./line-reference-url"
+import { actor, label, type DocActor } from "./actor"
+import { patchSlashMenu } from "./slash-menu-patch"
+
+export type { DocActor } from "./actor"
 
 export type DocMountInput = {
   theme: () => "light" | "dark"
@@ -22,11 +27,6 @@ export type DocMountInput = {
   readonly?: boolean
   submit?: () => void
   onDraftChange?: () => void
-}
-
-export type DocActor = {
-  actorID: string
-  name: string
 }
 
 type TextProp = {
@@ -65,16 +65,6 @@ const desynced = (doc: Doc) =>
     return block.text.toString?.() !== next.toString?.()
   })
 
-const actor = (value: unknown): DocActor | undefined => {
-  if (!value || typeof value !== "object") return
-  const user = (value as { user?: unknown }).user
-  if (!user || typeof user !== "object") return
-  const actorID = (user as { actorID?: unknown }).actorID
-  const name = (user as { name?: unknown }).name
-  if (typeof actorID !== "string" || typeof name !== "string") return
-  return { actorID, name }
-}
-
 const kind = (file: File) => {
   const type = file.type.split(";", 1)[0]?.trim().toLowerCase()
   if (type) return type
@@ -88,10 +78,14 @@ const image = (file: File) => kind(file).startsWith("image/")
 
 export async function createPage(input: DocMountInput) {
   await ensureEffects()
-  const [{ PageEditor }, { DocModeExtension, PageEditorBlockSpecs, PreviewEditorBlockSpecs, ThemeProvider }] =
-    await Promise.all([import("@blocksuite/presets"), import("@blocksuite/blocks")])
+  const [
+    { PageEditor },
+    { AffineSlashMenuWidget, DocModeExtension, PageEditorBlockSpecs, PreviewEditorBlockSpecs, ThemeProvider },
+  ] = await Promise.all([import("@blocksuite/presets"), import("@blocksuite/blocks")])
 
-  const schema = new Schema().register(withFileReferenceSchema(AffineSchemas))
+  patchSlashMenu(AffineSlashMenuWidget)
+
+  const schema = new Schema().register(withLineReferenceSchema(withFileReferenceSchema(AffineSchemas)))
   const page = "page"
   const query = { match: [], mode: "loose" } satisfies Query
   let draft: Doc | undefined
@@ -114,7 +108,7 @@ export async function createPage(input: DocMountInput) {
     if (awareness) {
       collection.awarenessStore.awareness.setLocalStateField("user", {
         actorID: input.sync.actorID,
-        name: input.sync.name,
+        name: label(input.sync.actorID, input.sync.name),
       })
       collection.awarenessStore.awareness.setLocalStateField("color", input.sync.color)
     }
@@ -166,6 +160,7 @@ export async function createPage(input: DocMountInput) {
       togglePrimaryMode: () => "page",
     }),
     ...FileReferenceBlockSpec,
+    ...LineReferenceBlockSpec,
   ]
   editor.hasViewport = true
 
@@ -261,7 +256,8 @@ export async function createPage(input: DocMountInput) {
     }
   }
 
-  const clamp = (height: number) => Math.min(650, Math.max(40, Math.ceil(height)))
+  // A sent doc message grows to its full content height (no max cap, no inner scroll).
+  const clamp = (height: number) => Math.max(40, Math.ceil(height))
 
   const content = (host: HTMLElement, root?: HTMLElement, preview?: HTMLElement) => {
     const base = host.getBoundingClientRect().top
@@ -307,7 +303,8 @@ export async function createPage(input: DocMountInput) {
       viewport.style.width = width > 0 ? `${width}px` : "100%"
       viewport.style.height = `${tall}px`
       viewport.style.minHeight = input.readonly ? "0" : `${tall}px`
-      viewport.style.overflowY = input.readonly ? "auto" : ""
+      // Readonly (a sent message): never scroll — grow to full content. Editing keeps default.
+      viewport.style.overflowY = input.readonly ? "visible" : ""
     }
     if (root instanceof HTMLElement) {
       root.style.maxWidth = "none"
@@ -333,6 +330,9 @@ export async function createPage(input: DocMountInput) {
       const ready = input.readonly ? undefined : await inlineReady(editor)
       applyTheme()
       fit(el)
+      // A sent message can finish laying out a frame after the first measure; re-fit once so its
+      // full height is captured (no clipping). Guarded so a detached node never collapses to min.
+      if (input.readonly) requestAnimationFrame(() => el.isConnected && fit(el))
       resize?.disconnect()
       resize = new ResizeObserver(() => fit(el))
       resize.observe(el)
@@ -427,8 +427,7 @@ export async function createPage(input: DocMountInput) {
   }
 
   const refocus = (target?: Element) => {
-    const active = document.activeElement
-    if (target?.closest(".inline-editor") && active instanceof Element && editor.contains(active)) return
+    if (target && editor.contains(target)) return
     void focus()
   }
 
@@ -452,14 +451,49 @@ export async function createPage(input: DocMountInput) {
     return true
   }
 
-  const addReference = (path: string) => {
+  const addReference = (path: string, nodeType: FileNodeType = "file") => {
     if (input.readonly) return false
     ensureEditable(doc)
     const parent = doc.getBlockByFlavour("affine:note")[0]
     if (!parent) return false
+    const name = nodeType === "directory" ? path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path : getFilename(path)
     doc.addBlock(
       "opencode:file-reference",
-      { name: getFilename(path), path, url: path },
+      { name, path, url: path, nodeType },
+      parent.id,
+    )
+    onHistory()
+    requestAnimationFrame(() => void focus())
+    return true
+  }
+
+  const addLineReference = (ref: LineRefInput) => {
+    if (input.readonly) return false
+    ensureEditable(doc)
+    const parent = doc.getBlockByFlavour("affine:note")[0]
+    if (!parent) return false
+    const norm = normLineRef(ref)
+    const path = ref.path
+    const comment = ref.comment?.trim() ?? ""
+    const preview = ref.preview?.trim() ?? ""
+    doc.addBlock(
+      "opencode:line-reference",
+      {
+        name: getFilename(path),
+        path,
+        url: lineReferenceUrl({ ...ref, ...norm }),
+        start: norm.start,
+        end: norm.end,
+        side: norm.side ?? "",
+        endSide: norm.endSide ?? "",
+        additionStart: ref.additionStart ?? 0,
+        additionEnd: ref.additionEnd ?? 0,
+        deletionStart: ref.deletionStart ?? 0,
+        deletionEnd: ref.deletionEnd ?? 0,
+        label: ref.label?.trim() ?? "",
+        preview,
+        comment,
+      },
       parent.id,
     )
     onHistory()
@@ -482,7 +516,7 @@ export async function createPage(input: DocMountInput) {
   }
 
   const actors = () => {
-    const own = input.sync ? [{ actorID: input.sync.actorID, name: input.sync.name }] : []
+    const own = input.sync ? [{ actorID: input.sync.actorID, name: label(input.sync.actorID, input.sync.name) }] : []
     const states = Array.from(collection.awarenessStore.awareness.getStates().values())
     return Array.from(
       [...own, ...states.map(actor).filter((item): item is DocActor => !!item)]
@@ -503,6 +537,7 @@ export async function createPage(input: DocMountInput) {
     refocus,
     addFile,
     addReference,
+    addLineReference,
     onHistory,
     markdown: () =>
       input.sync
