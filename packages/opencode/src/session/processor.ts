@@ -8,6 +8,7 @@ import { Plugin } from "@/plugin"
 import { Snapshot } from "@/snapshot"
 import { Log } from "@/util/log"
 import { Session } from "."
+import { AiUsageReporter } from "./ai-usage-reporter"
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
 import { isOverflow } from "./overflow"
@@ -294,6 +295,13 @@ export namespace SessionProcessor {
                 cost: usage.cost,
               })
               yield* session.updateMessage(ctx.assistantMessage)
+              yield* Effect.promise(() =>
+                AiUsageReporter.report({
+                  model: ctx.model,
+                  tokens: usage.tokens,
+                  cost: usage.cost,
+                }),
+              ).pipe(Effect.ignoreCause({ log: true, message: "ai usage reporting failed" }), Effect.forkDetach)
               if (ctx.snapshot) {
                 const patch = yield* snapshot.patch(ctx.snapshot)
                 if (patch.files.length) {
