@@ -39,6 +39,7 @@ import { JsonMigration } from "./storage/json-migration"
 import { Database } from "./storage/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
+import { Flag } from "./flag/flag"
 
 // Note: Sentry 의 onUncaughtExceptionIntegration/onUnhandledRejectionIntegration 가
 // 기본 활성화되어 있어 process-level 예외는 자동 보고된다. 여기서는 로그만 남긴다.
@@ -81,10 +82,12 @@ const cli = yargs(hideBin(process.argv))
     }
 
     await Log.init({
-      print: process.argv.includes("--print-logs"),
+      print: process.argv.includes("--print-logs") || Boolean(Flag.ENVIRONMENT),
       dev: Installation.isLocal(),
       level: (() => {
         if (opts.logLevel) return opts.logLevel as Log.Level
+        if (Flag.ENVIRONMENT === "development") return "DEBUG"
+        if (Flag.ENVIRONMENT === "production") return "INFO"
         if (Installation.isLocal()) return "DEBUG"
         return "INFO"
       })(),
