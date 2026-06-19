@@ -17,6 +17,7 @@ import {
   type DomQuery,
   type DomSnapshot,
   type ErrorEntry,
+  type LocationInfo,
   type ParentMethods,
   type PickedElement,
   type ScrollTarget,
@@ -38,6 +39,9 @@ let remoteParent: ParentMethods | undefined
 let connection: { destroy: () => void } | undefined
 let connected = false
 let connecting = false
+// routeTo 가 라우터를 깨우려고 직접 쏘는 popstate 1회는 위치 보고에서 제외한다(이미 pushState 가 "push" 로
+// 보고했고, 합성 popstate 까지 "pop" 으로 보고하면 동일 href 가 스택에 중복돼 부모 커서가 어긋난다).
+let suppressPopReport = false
 
 const childMethods: ChildMethods = {
   ping: () => "pong",
@@ -46,6 +50,20 @@ const childMethods: ChildMethods = {
   },
   reload: () => {
     window.location.reload()
+  },
+  routeTo: (path: string) => {
+    // 소프트 라우팅 — 리로드 없이 history 만 바꾸고 popstate 를 쏴 SPA 라우터가 path 로 전환하게 한다.
+    // pushState 래퍼가 onLocationChange("push") 로 부모 미러를 갱신하고, 라우터를 깨우는 합성 popstate 의
+    // 중복 "pop" 보고는 suppressPopReport 로 1회 건너뛴다.
+    window.history.pushState(null, "", path)
+    suppressPopReport = true
+    window.dispatchEvent(new PopStateEvent("popstate"))
+  },
+  back: () => {
+    window.history.back()
+  },
+  forward: () => {
+    window.history.forward()
   },
   scrollTo: (target: ScrollTarget) => {
     const behavior = target.behavior ?? "auto"
@@ -78,6 +96,10 @@ function setupConnection() {
       remoteParent = parent
       connected = true
       connecting = false
+      // 연결 직후 현재 위치 1회 보고. 전체 페이지 이동(MPA·location.assign·뒤로/앞으로)은 문서가 새로 로드돼
+      // popstate 가 아닌 재연결로만 감지되므로, 이 로드가 어떤 종류였는지 Navigation Timing 으로 판별해
+      // 부모 미러가 push/replace/pop 을 구분하게 한다(재연결마다 와도 부모가 href 로 멱등 처리).
+      emit(() => remoteParent?.onLocationChange(readLocation(navigationType())))
     })
     .catch(() => {
       // 핸드셰이크 실패/타임아웃 — 재연결 타이머가 다시 시도한다.
@@ -88,9 +110,10 @@ function setupConnection() {
 }
 
 function boot() {
-  // console/error 후킹은 1회만 설치하고, 내부에서 항상 최신 remoteParent 를 참조한다.
+  // console/error/location 후킹은 1회만 설치하고, 내부에서 항상 최신 remoteParent 를 참조한다.
   installConsoleForwarding()
   installErrorForwarding()
+  installLocationForwarding()
   setupConnection()
   // 끊긴 동안 주기적으로 재연결 시도(부모도 재시도하므로 결국 다시 핸드셰이크된다).
   setInterval(() => {
@@ -168,6 +191,73 @@ function installErrorForwarding() {
   })
 }
 
+// ── 라우팅(위치) 변화 중계 ──────────────────────────────────────────────────
+//
+// 자식의 URL 변화를 부모로 보고해 주소창·뒤로/앞으로를 동기화한다. SPA 는 보통 history.pushState/
+// replaceState 로 이동하므로 두 메서드를 래핑하고, 사용자 뒤로/앞으로는 popstate, 해시 이동은
+// hashchange 로 잡는다. 단 해시 뒤로/앞으로는 popstate + hashchange 가 함께 발생하므로(중복),
+// popstate 직후의 hashchange 1회는 억제한다.
+
+// 직전 문서 로드의 성격을 history 미러 타입으로 매핑.
+//  - back_forward(뒤로/앞으로) → pop : 부모가 스택에서 href 를 찾아 커서 이동
+//  - reload(새로고침)         → replace : 현재 항목 유지
+//  - navigate/그 외           → push : 새 항목
+function navigationType(): LocationInfo["type"] {
+  try {
+    const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined
+    if (nav?.type === "back_forward") return "pop"
+    if (nav?.type === "reload") return "replace"
+  } catch {
+    /* Navigation Timing 미지원 — push 로 폴백 */
+  }
+  return "push"
+}
+
+function readLocation(type: LocationInfo["type"]): LocationInfo {
+  return {
+    href: location.href,
+    origin: location.origin,
+    pathname: location.pathname,
+    search: location.search,
+    hash: location.hash,
+    title: document.title,
+    type,
+  }
+}
+
+function installLocationForwarding() {
+  let justPopped = false
+  const report = (type: LocationInfo["type"]) => emit(() => remoteParent?.onLocationChange(readLocation(type)))
+
+  const wrap = (key: "pushState" | "replaceState", type: "push" | "replace") => {
+    const original = history[key].bind(history)
+    history[key] = (...args: Parameters<History["pushState"]>) => {
+      original(...args)
+      report(type)
+    }
+  }
+  wrap("pushState", "push")
+  wrap("replaceState", "replace")
+
+  window.addEventListener("popstate", () => {
+    // routeTo 가 라우터를 깨우려 쏜 합성 popstate 는 보고 생략(pushState 가 이미 보고함).
+    if (suppressPopReport) {
+      suppressPopReport = false
+      return
+    }
+    justPopped = true
+    report("pop")
+  })
+  window.addEventListener("hashchange", () => {
+    // popstate 와 함께 온 hashchange 는 같은 이동의 중복 — 1회 억제.
+    if (justPopped) {
+      justPopped = false
+      return
+    }
+    report("push")
+  })
+}
+
 function safeStringify(value: unknown): string {
   if (typeof value === "string") return value
   try {
@@ -214,10 +304,39 @@ function snapshotDom(query?: DomQuery): DomSnapshot {
 async function capture(options?: CaptureOptions): Promise<string> {
   const type = options?.type ?? "image/png"
   const node = document.documentElement
-  if (type === "image/jpeg") {
-    return htmlToImage.toJpeg(node, { quality: options?.quality ?? 0.92 })
+
+  // html-to-image 는 노드를 클론해 항상 스크롤 최상단부터 렌더한다. 그래서 전체 페이지를 한 번 그린 뒤
+  // 현재 스크롤 위치(window.scrollX/Y)의 뷰포트 영역만 잘라내야 "지금 보이는 화면"이 캡처된다.
+  // 크롭하지 않으면 어디로 스크롤했든 무조건 맨 위가 찍힌다.
+  const fullW = node.scrollWidth
+  const fullH = node.scrollHeight
+  try {
+    // 명시적 전체 스크롤 크기 지정 → 캔버스 배율이 결정적(canvas.width / fullW = pixelRatio).
+    const canvas = await htmlToImage.toCanvas(node, { width: fullW, height: fullH, cacheBust: true })
+    const rx = canvas.width / fullW
+    const ry = canvas.height / fullH
+    const out = document.createElement("canvas")
+    out.width = Math.max(1, Math.round(window.innerWidth * rx))
+    out.height = Math.max(1, Math.round(window.innerHeight * ry))
+    const ctx = out.getContext("2d")
+    if (!ctx) throw new Error("no 2d context")
+    ctx.drawImage(
+      canvas,
+      window.scrollX * rx,
+      window.scrollY * ry,
+      window.innerWidth * rx,
+      window.innerHeight * ry,
+      0,
+      0,
+      out.width,
+      out.height,
+    )
+    return type === "image/jpeg" ? out.toDataURL("image/jpeg", options?.quality ?? 0.92) : out.toDataURL("image/png")
+  } catch {
+    // 크롭 경로 실패 시 전체 페이지라도 반환(기존 동작 폴백).
+    if (type === "image/jpeg") return htmlToImage.toJpeg(node, { quality: options?.quality ?? 0.92 })
+    return htmlToImage.toPng(node)
   }
-  return htmlToImage.toPng(node)
 }
 
 // ── 요소 선택(인스펙트) 모드 ────────────────────────────────────────────────

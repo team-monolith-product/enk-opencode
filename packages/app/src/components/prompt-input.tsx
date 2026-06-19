@@ -36,7 +36,7 @@ import { Select } from "@opencode-ai/ui/select"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ModelSelectorPopover } from "@/components/dialog-select-model"
 import { useProviders } from "@/hooks/use-providers"
-import { useCommand } from "@/context/command"
+import { matchKeybind, parseKeybind, useCommand } from "@/context/command"
 import { Persist, persisted } from "@/utils/persist"
 import { usePermission } from "@/context/permission"
 import { usePromptDocBridge } from "@/context/prompt-doc-bridge"
@@ -79,7 +79,7 @@ import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { promptFromDocMarkdown } from "@/components/prompt-input/prompt-plain"
 import { PromptDocShell } from "./prompt-input/doc-shell"
-import { createPromptDoc } from "./prompt-input/doc"
+import { createPromptDoc, type PromptDocConfig } from "./prompt-input/doc"
 import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
@@ -162,6 +162,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const prompt = usePrompt()
   const layout = useLayout()
   const env = useClientEnv()
+  const submitKeys = createMemo(() => parseKeybind(env.promptSubmitKey()))
+  const newlineKeys = createMemo(() => parseKeybind(env.promptNewlineKey()))
   const comments = useComments()
   const dialog = useDialog()
   const providers = useProviders()
@@ -337,13 +339,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     applyingHistory: false,
   })
   const [height, setHeight] = createSignal(DOC_HEIGHT)
-  // 자동 확대: 입력창 포커스 시 전체 너비 expanded 로 자동 진입(기본 ON, localStorage 영속).
+  // 자동 확대: 입력창 포커스 시 전체 너비 expanded 로 자동 진입(기본 OFF, localStorage 영속).
   const [autoExpand, setAutoExpand] = createSignal(
     (() => {
       try {
-        return localStorage.getItem(AUTO_EXPAND_KEY) !== "0"
+        return localStorage.getItem(AUTO_EXPAND_KEY) === "1"
       } catch {
-        return true
+        return false
       }
     })(),
   )
@@ -549,13 +551,26 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
 
   const parentParams = useParentParams()
+  const [docConfig, setDocConfig] = createStore<PromptDocConfig>({
+    sessionID: params.id,
+    url: sdk.url,
+    directory: sdk.directory,
+    submitKey: env.promptSubmitKey(),
+    user: parentParams.user[0],
+  })
+  createEffect(() => {
+    setDocConfig({
+      sessionID: params.id,
+      url: sdk.url,
+      directory: sdk.directory,
+      submitKey: env.promptSubmitKey(),
+      user: parentParams.user[0],
+    })
+  })
   const doc = createPromptDoc({
-    sessionID: () => params.id,
-    url: () => sdk.url,
-    directory: () => sdk.directory,
+    config: docConfig,
     client: sdk.client,
-    submit: () => void submit(),
-    user: () => parentParams.user[0],
+    onSubmit: () => void submit(),
   })
   // detach() keeps the doc handle (sync + undo history) alive across panel unmounts, so the
   // component itself owns the final teardown.
@@ -597,12 +612,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       })
     })
     bridge.setOpenLineReference((input) => {
-      if (store.mode !== "doc") return false
       openSessionFile({ path: input.path, selection: lineRefToSelection(input) })
       return true
     })
     bridge.setOpenFileReference((path, nodeType) => {
-      if (store.mode !== "doc") return false
       openSessionFile({ path: relPath(path), nodeType: nodeType === "directory" ? "directory" : "file" })
       return true
     })
@@ -2012,9 +2025,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
     }
 
-    // Handle Shift+Enter BEFORE IME check - Shift+Enter is never used for IME input
-    // and should always insert a newline regardless of composition state
-    if (event.key === "Enter" && event.shiftKey) {
+    // Newline shortcuts that carry a modifier (e.g. the default Shift+Enter) are never used for
+    // IME input, so handle them BEFORE the IME guard. Modifier-less newline keys (e.g. a plain
+    // Enter binding) are handled after the IME check below so they don't fire mid-composition.
+    const hasModifier = event.shiftKey || event.ctrlKey || event.metaKey || event.altKey
+    if (hasModifier && matchKeybind(newlineKeys(), event)) {
       addPart({ type: "text", content: "\n", start: 0, end: 0 })
       event.preventDefault()
       return
@@ -2079,8 +2094,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return
     }
 
-    // Note: Shift+Enter is handled earlier, before IME check
-    if (event.key === "Enter" && !event.shiftKey) {
+    // Modifier-less newline keys land here (after the IME guard). Modifier-bearing newline
+    // shortcuts were already handled before the IME check above.
+    if (matchKeybind(newlineKeys(), event)) {
+      addPart({ type: "text", content: "\n", start: 0, end: 0 })
+      event.preventDefault()
+      return
+    }
+
+    if (matchKeybind(submitKeys(), event)) {
       event.preventDefault()
       if (event.repeat) return
       const action = submitAction()
@@ -2120,8 +2142,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         setTimeout(() => {
           if (!rootRef) return
           if (rootRef.contains(document.activeElement)) return
+          // iframe(미리보기 등)로 포커스가 넘어간 경우는 명백한 이탈 — pointerDownInside 는 부모 window 로
+          // pointerdown 이 안 와 stale 일 수 있으니 무시하고 축소한다.
+          const toIframe = document.activeElement instanceof HTMLIFrameElement
           // 컴포저 안의 포커스 못 받는 버튼/컨트롤을 눌러 포커스가 body 로 빠진 경우는 이탈이 아니다.
-          if (pointerDownInside) return
+          if (pointerDownInside && !toIframe) return
           setFocusWithin(false)
         }, 0)
       }}

@@ -14,6 +14,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import FileTree from "@/components/file-tree"
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { SessionContextTab, SortableTab, FileVisual } from "@/components/session"
+import { FileSearchButton } from "@/components/session/file-search-button"
 import { useClientEnv } from "@/context/client-env"
 import { useCommand } from "@/context/command"
 import { useFile, type SelectedLineRange } from "@/context/file"
@@ -173,19 +174,14 @@ export function SessionSidePanel(props: {
   // 미리보기 헤더의 스크린샷 버튼 ↔ 컴포저(PromptInput)의 캡처 플로우를 공유.
   const previewBridge = useSessionPreviewBridge()
   previewBridge.setBridge(preview.bridge)
+  // 주소창 입력: 파일 탭이 활성이면 파일 경로를 읽기 전용 표시, 아니면(미리보기) host 고정 + 경로 편집 가능.
   const browserAddress = createMemo(() => {
     const active = activeFileTab()
     if (active) {
       const path = pathFromContentTab(active)
-      if (path) return path
+      if (path) return { host: undefined as string | undefined, path, editablePath: false }
     }
-    const url = preview.previewUrl()
-    if (!url) return undefined
-    try {
-      return new URL(url).host
-    } catch {
-      return url
-    }
+    return { host: preview.host(), path: preview.path(), editablePath: true }
   })
 
   const fileTreeTab = () => (env.disableChangeFiles() ? "all" : layout.fileTree.tab())
@@ -203,6 +199,12 @@ export function SessionSidePanel(props: {
   const showAllFiles = () => {
     if (fileTreeTab() !== "changes") return
     layout.fileTree.setTab("all")
+  }
+
+  const openFileSearch = () => {
+    void import("@/components/dialog-select-file").then((x) => {
+      dialog.show(() => <x.DialogSelectFile mode="files" onOpenFile={showAllFiles} />)
+    })
   }
 
   const [store, setStore] = createStore({
@@ -269,12 +271,19 @@ export function SessionSidePanel(props: {
         <div class="size-full flex flex-col border-l border-border-weaker-base">
           {/* 브라우저 chrome 바 — 시안처럼 상단 전체 폭을 차지(탐색기·미리보기 위). */}
           <SessionBrowserChrome
-            address={browserAddress()}
+            host={browserAddress().host}
+            path={browserAddress().path}
+            editablePath={browserAddress().editablePath}
+            onNavigatePath={preview.navigatePath}
+            canGoBack={preview.canGoBack()}
+            canGoForward={preview.canGoForward()}
+            onBack={preview.goBack}
+            onForward={preview.goForward}
             url={preview.previewUrl()}
-            onReload={preview.reload}
+            onReload={preview.hardReload}
             onHome={() => {
               tabs().setActive("preview")
-              preview.reload()
+              preview.goHome()
             }}
             onCapture={previewBridge.requestCapture}
             capturing={previewBridge.capturing()}
@@ -365,11 +374,7 @@ export function SessionSidePanel(props: {
                             variant="ghost"
                             iconSize="large"
                             class="!rounded-md"
-                            onClick={() => {
-                              void import("@/components/dialog-select-file").then((x) => {
-                                dialog.show(() => <x.DialogSelectFile mode="files" onOpenFile={showAllFiles} />)
-                              })
-                            }}
+                            onClick={openFileSearch}
                             aria-label={language.t("command.file.open")}
                           />
                         </TooltipKeybind>
@@ -460,6 +465,13 @@ export function SessionSidePanel(props: {
               class="h-full flex flex-col overflow-hidden group/filetree"
               classList={{ "border-r border-border-weaker-base": reviewOpen() }}
             >
+              {/* 운영 레이아웃은 타이틀바/헤더가 없어 "파일 검색" 버튼이 사라진다.
+                  탐색기 상단에 직접 노출해 동일한 DialogSelectFile 모달을 연다. */}
+              <Show when={env.productionLayout()}>
+                <div class="shrink-0 px-3 pt-3">
+                  <FileSearchButton onClick={openFileSearch} />
+                </div>
+              </Show>
               <Tabs
                 variant="pill"
                 value={fileTreeTab()}
