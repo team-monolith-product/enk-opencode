@@ -6,6 +6,7 @@ import { SessionTable, MessageTable, PartTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
 import { Log } from "../util/log"
 import * as CycleRecorder from "../doc/cycle-recorder"
+import { AiUsage } from "../enk/ai-usage"
 
 const log = Log.create({ service: "session.projector" })
 
@@ -106,6 +107,14 @@ export default [
       CycleRecorder.record(db, data.info)
     } catch (err) {
       log.warn("cycle record failed", { messageID: id, sessionID, err: String(err) })
+    }
+
+    // Report token usage to enk-hackathon-rails (no-op unless ENK_* env is set). Enqueue only;
+    // the actual POST runs in a background queue so it never blocks this projector.
+    try {
+      AiUsage.report(data.info)
+    } catch (err) {
+      log.warn("ai usage report failed", { messageID: id, sessionID, err: String(err) })
     }
   }),
 
