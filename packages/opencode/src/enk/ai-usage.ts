@@ -37,6 +37,7 @@ export namespace AiUsage {
   const sent = new Set<string>() // messageIDs already enqueued — dedupes repeated updates
   let draining = false // serial-drain guard: at most one request in flight
   let dropped = 0 // records discarded due to MAX_PENDING overflow
+  let warnedDisabled = false // suppress repeated "not configured" warnings
 
   function enabled() {
     return Boolean(Flag.ENK_HACKATHON_RAILS_URL && Flag.ENK_AI_USAGE_TOKEN)
@@ -56,7 +57,13 @@ export namespace AiUsage {
 
   /** Enqueue one completed assistant turn's usage. Non-blocking; never throws into the caller. */
   export function report(info: MessageV2.Info) {
-    if (!enabled()) return
+    if (!enabled()) {
+      if (!warnedDisabled) {
+        warnedDisabled = true
+        log.warn("ai usage reporting disabled: ENK_HACKATHON_RAILS_URL or ENK_AI_USAGE_TOKEN not set")
+      }
+      return
+    }
     if (info.role !== "assistant") return
     if (!info.time.completed) return // only finished turns
     if (sent.has(info.id)) return // already enqueued
@@ -93,6 +100,8 @@ export namespace AiUsage {
     })
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
+        // Transmission log: address + method + time (no payload).
+        log.info("sending", { method: "POST", url, at: new Date().toISOString(), attempt })
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `token ${token}` },
