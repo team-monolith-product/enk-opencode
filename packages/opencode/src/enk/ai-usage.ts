@@ -93,6 +93,8 @@ export namespace AiUsage {
     })
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
+        // Transmission log: address + method + time (no payload).
+        log.info("sending", { method: "POST", url, at: new Date().toISOString(), attempt })
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `token ${token}` },
