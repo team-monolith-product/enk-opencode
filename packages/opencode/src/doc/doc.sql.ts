@@ -140,6 +140,10 @@ export const PromptCycleTable = sqliteTable(
     // (multi-step agent loop); they are all aggregated into this single cycle.
     user_message_id: text().notNull(),
 
+    // Session working directory the cycle ran in (= assistant message info.path.cwd).
+    // Doubles as the ai_usages `mount_path` reported to enk-hackathon-rails.
+    path: text(),
+
     time_created: integer().notNull(), // cycle/run started (prompt authored)
 
     // ── 출력 (output) ──
