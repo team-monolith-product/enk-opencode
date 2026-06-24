@@ -19,6 +19,18 @@ export default createHandler(
               <meta name="viewport" content="width=device-width, initial-scale=1" />
               <meta property="og:image" content="/social-share.png" />
               <meta property="twitter:image" content="/social-share.png" />
+              <script>{`
+                (function() {
+                  try {
+                    var t = localStorage.getItem('theme');
+                    if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                      document.documentElement.setAttribute('data-theme', 'dark');
+                    } else {
+                      document.documentElement.setAttribute('data-theme', 'light');
+                    }
+                  } catch (e) {}
+                })();
+              `}</script>
               <style>{criticalCSS}</style>
               {assets}
             </head>

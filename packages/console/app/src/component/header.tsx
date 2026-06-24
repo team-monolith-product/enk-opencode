@@ -21,6 +21,7 @@ import { createEffect, onCleanup } from "solid-js"
 import { config } from "~/config"
 import { useI18n } from "~/context/i18n"
 import { useLanguage } from "~/context/language"
+import { useTheme } from "~/context/theme"
 import "./header-context-menu.css"
 
 const isDarkMode = () => window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -40,6 +41,7 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
   const navigate = useNavigate()
   const i18n = useI18n()
   const language = useLanguage()
+  const theme = useTheme()
   const githubData = createAsync(() => github())
   const starCount = createMemo(() =>
     githubData()?.stars
@@ -100,7 +102,7 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
 
   const copyWordmarkToClipboard = async () => {
     try {
-      const isDark = isDarkMode()
+      const isDark = theme.isDark()
       const wordmarkSvgPath = isDark ? copyWordmarkSvgDark : copyWordmarkSvgLight
       const wordmarkSvg = await fetchSvgContent(wordmarkSvgPath)
       await navigator.clipboard.writeText(wordmarkSvg)
@@ -111,7 +113,7 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
 
   const copyLogoToClipboard = async () => {
     try {
-      const isDark = isDarkMode()
+      const isDark = theme.isDark()
       const logoSvgPath = isDark ? copyLogoSvgDark : copyLogoSvgLight
       const logoSvg = await fetchSvgContent(logoSvgPath)
       await navigator.clipboard.writeText(logoSvg)
@@ -175,6 +177,45 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
               <a href="/auth">{i18n.t("nav.login")}</a>
             </li>
           </Show>
+          <li>
+            <button
+              onClick={() => theme.toggle()}
+              style="background: none; border: none; cursor: pointer; color: var(--color-text); padding: 4px; display: flex; align-items: center;"
+              aria-label="Toggle theme"
+            >
+              <Show
+                when={theme.isDark()}
+                fallback={
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+                  </svg>
+                }
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+                </svg>
+              </Show>
+            </button>
+          </li>
           <Show when={!props.hideGetStarted}>
             <li>
               <A href={language.route("/download")} data-slot="cta-button">
@@ -270,6 +311,51 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
                 </Show>
                 <li>
                   <A href={language.route("/enterprise")}>{i18n.t("nav.enterprise")}</A>
+                </li>
+                <li>
+                  <button
+                    onClick={() => theme.toggle()}
+                    style="background: none; border: none; cursor: pointer; color: var(--color-text); padding: 8px 16px; display: flex; align-items: center; gap: 8px; font-size: inherit; font-family: inherit; font-weight: inherit; width: 100%; text-align: left;"
+                    aria-label="Toggle theme"
+                  >
+                    <Show
+                      when={theme.isDark()}
+                      fallback={
+                        <>
+                          <svg
+                            width="18"
+                            height="18"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          >
+                            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+                          </svg>
+                          <span>Dark Mode</span>
+                        </>
+                      }
+                    >
+                      <>
+                        <svg
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <circle cx="12" cy="12" r="4" />
+                          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+                        </svg>
+                        <span>Light Mode</span>
+                      </>
+                    </Show>
+                  </button>
                 </li>
                 <Show when={props.zen || props.go}>
                   <li>

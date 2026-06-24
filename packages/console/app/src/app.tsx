@@ -8,6 +8,7 @@ import "@ibm/plex/css/ibm-plex.css"
 import "./app.css"
 import { LanguageProvider } from "~/context/language"
 import { I18nProvider, useI18n } from "~/context/i18n"
+import { ThemeProvider } from "~/context/theme"
 import { strip } from "~/lib/language"
 
 function AppMeta() {
@@ -30,10 +31,12 @@ export default function App() {
       root={(props) => (
         <LanguageProvider>
           <I18nProvider>
-            <MetaProvider>
-              <AppMeta />
-              <Suspense>{props.children}</Suspense>
-            </MetaProvider>
+            <ThemeProvider>
+              <MetaProvider>
+                <AppMeta />
+                <Suspense>{props.children}</Suspense>
+              </MetaProvider>
+            </ThemeProvider>
           </I18nProvider>
         </LanguageProvider>
       )}
