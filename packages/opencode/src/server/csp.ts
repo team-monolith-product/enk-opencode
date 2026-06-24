@@ -1,7 +1,5 @@
 import { Flag } from "../flag/flag"
 
-// 빌드 시 OPENCODE_ASSET_BASE 에서 주입되는 에셋 CDN 오리진. 임베드된 index.html 이
-// 참조하는 S3/CloudFront 도메인이며, 미설정 빌드(로컬·테스트)에선 빈 문자열이라 CSP 가 그대로 유지된다.
 declare const OPENCODE_ASSET_ORIGIN: string
 const ASSET_ORIGIN = typeof OPENCODE_ASSET_ORIGIN === "string" ? OPENCODE_ASSET_ORIGIN : ""
 
@@ -24,7 +22,6 @@ const FRAME_ANCESTORS = origins("'self'", SERVE_URL)
 const SCRIPT_SRC = origins("'self'", "'wasm-unsafe-eval'", ASSET_ORIGIN)
 const STYLE_SRC = origins("'self'", "'unsafe-inline'", ASSET_ORIGIN)
 const FONT_SRC = origins("'self'", "data:", ASSET_ORIGIN)
-// 알림음(sound.ts 의 `new Audio(src)`)이 CDN 에셋 URL 을 재생하므로 media-src 도 허용한다.
 const MEDIA_SRC = origins("'self'", "data:", ASSET_ORIGIN)
 
 const buildCsp = (hash = "") =>
