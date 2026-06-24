@@ -51,6 +51,10 @@ export namespace Flag {
   export const JUPYTERHUB_OAUTH_CALLBACK_URL = process.env["JUPYTERHUB_OAUTH_CALLBACK_URL"]
   export const JUPYTERHUB_BASE_URL = process.env["JUPYTERHUB_BASE_URL"]
   export const JUPYTERHUB_SERVICE_PREFIX = process.env["JUPYTERHUB_SERVICE_PREFIX"]
+  // enk-hackathon-rails AI usage reporting (ai_usages API)
+  export const ENK_HACKATHON_RAILS_URL = process.env["ENK_HACKATHON_RAILS_URL"]
+  export const ENK_AI_USAGE_TOKEN = process.env["ENK_AI_USAGE_TOKEN"]
+
   // Serve proxy (subdomain routing)
   export const OPENCODE_SERVE_DOMAIN = process.env["OPENCODE_SERVE_DOMAIN"]
 
@@ -90,6 +94,9 @@ export namespace Flag {
   export const OPENCODE_MODELS_PATH = process.env["OPENCODE_MODELS_PATH"]
   export const OPENCODE_DISABLE_EMBEDDED_WEB_UI = truthy("OPENCODE_DISABLE_EMBEDDED_WEB_UI")
   export const OPENCODE_DB = process.env["OPENCODE_DB"]
+  // DB 를 네트워크 FS(EFS 등)에 둘 때 사용. locking_mode=EXCLUSIVE 로 WAL 의 -shm
+  // 공유메모리 의존을 없애 단일 프로세스가 네트워크 FS 위에서 WAL 을 쓸 수 있게 한다.
+  export const OPENCODE_DB_EXCLUSIVE_LOCK = truthy("OPENCODE_DB_EXCLUSIVE_LOCK")
   export const OPENCODE_DISABLE_CHANNEL_DB = truthy("OPENCODE_DISABLE_CHANNEL_DB")
   export const OPENCODE_SKIP_MIGRATIONS = truthy("OPENCODE_SKIP_MIGRATIONS")
   export const OPENCODE_STRICT_CONFIG_DEPS = truthy("OPENCODE_STRICT_CONFIG_DEPS")
