@@ -66,6 +66,10 @@ const skipInstall = process.argv.includes("--skip-install")
 const plugin = createSolidTransformPlugin()
 const skipEmbedWebUi = process.argv.includes("--skip-embed-web-ui")
 
+// vite base(OPENCODE_ASSET_BASE)와 같은 출처를 CSP 에 baked-in 한다. 둘이 갈라지면
+// 임베드 index.html 이 참조하는 에셋 도메인을 CSP 가 막는다.
+const assetOrigin = process.env.OPENCODE_ASSET_BASE ? new URL(process.env.OPENCODE_ASSET_BASE).origin : ""
+
 const createEmbeddedWebUIBundle = async () => {
   console.log(`Building Web UI to embed in the binary`)
   const appDir = path.join(import.meta.dirname, "../../app")
@@ -230,6 +234,7 @@ for (const item of targets) {
       OPENCODE_WORKER_PATH: workerPath,
       OPENCODE_CHANNEL: `'${Script.channel}'`,
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
+      OPENCODE_ASSET_ORIGIN: JSON.stringify(assetOrigin),
     },
   })
 
