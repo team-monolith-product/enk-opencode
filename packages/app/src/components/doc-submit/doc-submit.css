@@ -1,11 +1,43 @@
+/* ============================================================
+   전송 동의 v3 — E-4 카드형 리디자인 (포팅: dialogs.jsx E4ConsensusVoteV3)
+   ------------------------------------------------------------
+   주인공 = "전송될 내용 스냅샷"(read-only 프롬프트 doc). soft scrim(캔버스 비침) +
+   상단 caution-strip 타이머 바 + 비대칭 액션(Enter 수락 / Esc 거절).
+   토큰은 디자인 시스템 값을 overlay 스코프에 그대로 정의 — 이 다이얼로그는
+   테마와 무관하게 라이트 paper 카드로 렌더된다.
+   ============================================================ */
+
 [data-component="doc-submit-overlay"] {
-  --ds-helmet: #ffce2b;
-  --ds-backdrop: rgba(13, 13, 17, 0.64);
-  --ds-disc: rgba(13, 13, 17, 0.94);
-  --ds-mint: #22b487;
-  --ds-safety: #ff6b1f;
-  --ds-safety-soft: #ffe0cf;
-  --ds-ring-size: min(480px, calc(100vw - 48px));
+  --c-paper: #faf9f6;
+  --c-canvas: #ffffff;
+  --c-ink: #17171c;
+  --c-ink-2: #2a2a32;
+  --c-ink-3: #4a4a55;
+  --c-slate: #6f6f7c;
+  --c-muted: #8c8c97;
+  --c-stone: #eeece7;
+  --c-stone-2: #e6e3dd;
+  --c-hairline: #e3e1da;
+  --c-hairline-strong: #cdc9c0;
+  --c-helmet: #ffce2b;
+  --c-helmet-soft: #fff4c2;
+  --c-stache: #14130f;
+  --c-mint: #096c4d;
+  --c-mint-soft: #d6f1de;
+  --c-mint-wash: #eaf3ec;
+  --c-safety: #ff6b1f;
+  --c-safety-soft: #ffe0cf;
+  --c-safety-deep: #cc4a0a;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-pill: 999px;
+  --shadow-modal: 0 30px 80px rgba(0, 0, 0, 0.3), 0 12px 24px rgba(0, 0, 0, 0.16);
+  --dur-slow: 360ms;
+  --dur-base: 240ms;
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --font-mono: "D2Coding", "IBM Plex Mono", ui-monospace, monospace;
 
   position: fixed;
   inset: 0;
@@ -13,162 +45,315 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
   pointer-events: auto;
-  animation: ds-fade-in 200ms ease-out;
 }
 
+/* ④ soft scrim — 완전 암전 대신 0.58 + blur, 뒤 캔버스가 비쳐 보인다. */
 [data-component="doc-submit-overlay"] [data-slot="doc-submit-backdrop"] {
   position: absolute;
   inset: 0;
-  background: var(--ds-backdrop);
-  backdrop-filter: blur(6px);
+  background: rgba(20, 19, 15, 0.58);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 
-[data-component="doc-submit-overlay"] [data-slot="doc-submit-body"] {
+/* ── card ── */
+[data-component="doc-submit-overlay"] .jt-consent-card {
   position: relative;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32px 24px;
-  width: 100%;
-  max-height: 100%;
-  overflow: auto;
+  background: var(--c-paper);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  transform-origin: 50% 100%;
+  animation: jt-consent-rise var(--dur-slow) var(--ease-spring) both;
 }
 
-.ds-ring-stage {
-  position: relative;
-  width: var(--ds-ring-size);
-  height: var(--ds-ring-size);
+[data-component="doc-submit-overlay"] .ds-card {
+  width: min(620px, 94vw);
+  max-height: 92vh;
 }
 
-.ds-match-ring {
+@keyframes jt-consent-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.965);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 5초 이내 긴급 — 카드 전체 두근두근 + 안쪽 빨간 sheen */
+[data-component="doc-submit-overlay"] .jt-consent-card.is-urgent {
+  animation: jt-consent-rise var(--dur-slow) var(--ease-spring) both, jt-heartbeat 0.92s ease-in-out infinite;
+}
+
+[data-component="doc-submit-overlay"] .jt-consent-card.is-urgent::after {
+  content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  overflow: visible;
+  z-index: 4;
+  border-radius: inherit;
+  box-shadow: inset 0 0 64px 2px rgba(255, 60, 30, 0.2), inset 0 0 16px 0 rgba(255, 107, 31, 0.22);
+  animation: jt-urgent-sheen 0.92s ease-in-out infinite;
 }
 
-.ds-gauge-flash-in {
-  animation: ds-gauge-flash-in 0.75s ease-out forwards;
-  pointer-events: none;
-}
-
-@keyframes ds-gauge-flash-in {
+@keyframes jt-heartbeat {
   0% {
-    opacity: 1;
+    box-shadow: var(--shadow-modal), 0 0 0 0 rgba(255, 107, 31, 0);
   }
-  18% {
-    opacity: 0.95;
+  12% {
+    box-shadow: var(--shadow-modal), 0 0 0 4px rgba(255, 107, 31, 0.4), 0 0 46px 10px rgba(255, 60, 30, 0.34);
+  }
+  26% {
+    box-shadow: var(--shadow-modal), 0 0 0 2px rgba(255, 107, 31, 0.16), 0 0 24px 5px rgba(255, 60, 30, 0.14);
+  }
+  40% {
+    box-shadow: var(--shadow-modal), 0 0 0 5px rgba(255, 107, 31, 0.46), 0 0 56px 12px rgba(255, 60, 30, 0.4);
   }
   100% {
-    opacity: 0;
+    box-shadow: var(--shadow-modal), 0 0 0 0 rgba(255, 107, 31, 0);
   }
 }
 
-.ds-ring-inner {
+@keyframes jt-urgent-sheen {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  12% {
+    opacity: 0.9;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+/* ── caution-strip timer ── */
+[data-component="doc-submit-overlay"] .jt-consent-strip {
+  position: relative;
+  height: 12px;
+  width: 100%;
+  flex-shrink: 0;
+  background: var(--c-stone);
+  overflow: hidden;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+
+[data-component="doc-submit-overlay"] .jt-consent-strip-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  transition: width 1s linear;
+  /* 트레일링 경계를 줄무늬와 평행한 -45° 사선으로 컷 */
+  clip-path: polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+}
+
+[data-component="doc-submit-overlay"] .jt-consent-strip-layer {
   position: absolute;
   inset: 0;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--c-helmet) 0 14.1421356px,
+    var(--c-ink) 14.1421356px 28.2842712px
+  );
+  background-size: 40px 100%;
+  animation: jt-caution-scroll 1.6s linear infinite;
+  will-change: background-position;
+}
+
+[data-component="doc-submit-overlay"] .jt-consent-strip-layer.is-red {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--c-safety) 0 14.1421356px,
+    var(--c-ink) 14.1421356px 28.2842712px
+  );
+  opacity: 0;
+  transition: opacity 600ms ease;
+}
+
+[data-component="doc-submit-overlay"] .jt-consent-strip-layer.is-red.on {
+  opacity: 1;
+}
+
+@keyframes jt-caution-scroll {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 40px 0;
+  }
+}
+
+/* 본문 — 카드 내부 스크롤 */
+[data-component="doc-submit-overlay"] .jt-consent-body-in {
+  animation: jt-consent-body-in 340ms var(--ease-decelerate) both;
+}
+
+[data-component="doc-submit-overlay"] .ds-body-scroll {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+@keyframes jt-consent-body-in {
+  from {
+    transform: translateY(8px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* ── body layout ── */
+[data-component="doc-submit-overlay"] .ds-body {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(48px, 16vw, 80px);
-  text-align: center;
+}
+
+[data-component="doc-submit-overlay"] .ds-body--voting {
+  padding: 20px 24px 22px;
   gap: 14px;
 }
 
-.ds-ring-inner--failure {
-  padding: clamp(56px, 14vw, 70px);
+[data-component="doc-submit-overlay"] .ds-body--waiting {
+  padding: 24px 24px 20px;
+  gap: 16px;
+  align-items: center;
+  text-align: center;
+}
+
+/* ── voting header ── */
+[data-component="doc-submit-overlay"] .ds-vote-header {
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
-.ds-eyebrow {
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
+[data-component="doc-submit-overlay"] .ds-vote-header__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14.5px;
+  color: var(--c-ink-2);
 }
 
-.ds-eyebrow--helmet {
-  font-size: 11px;
-  color: var(--ds-helmet);
-  letter-spacing: 0.24em;
-  opacity: 0.85;
-}
-
-.ds-headline {
-  font-family: var(--font-family-sans);
-  font-size: clamp(22px, 5vw, 30px);
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: -0.022em;
-  margin: 0;
-  line-height: 1.2;
-}
-
-.ds-headline--waiting {
-  font-size: clamp(22px, 5vw, 28px);
-  line-height: 1.25;
-}
-
-.ds-headline--failure {
-  font-size: clamp(22px, 5vw, 28px);
-  line-height: 1.25;
-}
-
-.ds-sub {
-  font-size: 13.5px;
-  color: rgba(255, 255, 255, 0.72);
-  line-height: 1.55;
-}
-
-.ds-sub strong {
-  color: var(--ds-helmet);
+[data-component="doc-submit-overlay"] .ds-vote-header__text strong {
+  color: var(--c-ink);
   font-weight: 700;
 }
 
-/* Question + agreed answer preview, shown above the ring so everyone sees what is being sent. */
-.ds-preview {
-  width: 100%;
-  max-width: var(--ds-ring-size);
-  max-height: 30vh;
+[data-component="doc-submit-overlay"] .ds-headline {
+  font-size: 23px;
+  line-height: 1.25;
+  margin: 2px 0 0;
+  letter-spacing: -0.022em;
+  color: var(--c-ink);
+  font-weight: 700;
+}
+
+[data-component="doc-submit-overlay"] .ds-headline--center {
+  text-align: center;
+  font-size: 21px;
+  margin: 0;
+}
+
+/* ── countdown chip ── */
+[data-component="doc-submit-overlay"] .ds-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 5px 11px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  background: var(--c-helmet-soft);
+  color: #b97e1a;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+[data-component="doc-submit-overlay"] .ds-chip--danger {
+  background: var(--c-safety-soft);
+  color: var(--c-safety-deep);
+}
+
+/* ── snapshot (read-only doc / question preview) ── */
+[data-component="doc-submit-overlay"] .ds-snap {
+  background: var(--c-canvas);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  max-height: 300px;
   overflow-y: auto;
+  box-shadow: inset 0 1px 2px rgba(15, 15, 20, 0.03);
+}
+
+[data-component="doc-submit-overlay"] .ds-snap [data-component="prompt-doc-viewer"] {
+  width: 100%;
+}
+
+[data-component="doc-submit-overlay"] .ds-snap-fallback {
+  font-size: 13px;
+  color: var(--c-slate);
+  padding: 8px 4px;
+}
+
+/* thin scrollbar */
+[data-component="doc-submit-overlay"] .jt-snap-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-hairline-strong) transparent;
+}
+
+[data-component="doc-submit-overlay"] .jt-snap-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+[data-component="doc-submit-overlay"] .jt-snap-scroll::-webkit-scrollbar-thumb {
+  background: var(--c-hairline-strong);
+  border-radius: var(--r-pill);
+}
+
+/* ── question preview cards ── */
+[data-component="doc-submit-overlay"] .ds-preview {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 20px;
-  padding: 2px;
 }
 
-.ds-preview-item {
+[data-component="doc-submit-overlay"] .ds-preview-item {
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--c-stone);
+  border-radius: var(--r-sm);
   text-align: left;
 }
 
-.ds-preview-idx {
+[data-component="doc-submit-overlay"] .ds-preview-idx {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  font-family: var(--font-family-mono, ui-monospace, monospace);
+  border-radius: var(--r-pill);
+  background: var(--c-stone-2);
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--c-ink-3);
 }
 
-.ds-preview-body {
+[data-component="doc-submit-overlay"] .ds-preview-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -176,322 +361,454 @@
   flex: 1;
 }
 
-.ds-preview-q {
-  font-family: var(--font-family-sans);
-  font-size: 13px;
+[data-component="doc-submit-overlay"] .ds-preview-q {
+  font-size: 13.5px;
   font-weight: 500;
   line-height: 1.45;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--c-ink);
 }
 
-.ds-preview-answers {
+[data-component="doc-submit-overlay"] .ds-preview-answers {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-.ds-preview-a {
+[data-component="doc-submit-overlay"] .ds-preview-a {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: var(--radius-sm, 4px);
-  background: var(--ds-mint);
-  color: #0d0d11;
-  font-family: var(--font-family-sans);
+  border-radius: var(--r-sm);
+  background: var(--c-mint-soft);
+  color: var(--c-mint);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.5;
   word-break: break-word;
 }
 
-.ds-preview-a--empty {
+[data-component="doc-submit-overlay"] .ds-preview-a--empty {
   background: transparent;
-  border: 1px dashed rgba(255, 255, 255, 0.25);
-  color: rgba(255, 255, 255, 0.5);
+  border: 1px dashed var(--c-hairline-strong);
+  color: var(--c-muted);
   font-weight: 500;
 }
 
-.ds-pending-list {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.ds-pending-label {
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.ds-pending-row {
-  display: flex;
-  justify-content: center;
-  gap: 14px;
-  white-space: nowrap;
-}
-
-.ds-pending-row--large {
-  gap: 10px;
-}
-
-.ds-pending-row--outcome {
-  flex-wrap: nowrap;
-}
-
-.ds-pending-avatar {
+/* ── avatar ── */
+[data-component="doc-submit-overlay"] .ds-avatar {
+  position: relative;
   display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.ds-pending-avatar__circle {
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-family-sans);
-  font-weight: 700;
-  letter-spacing: -0.04em;
-  border: 2px dashed rgba(255, 255, 255, 0.5);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.ds-pending-avatar__name {
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.ds-more {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-}
-
-.ds-more__circle {
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.65);
-  border: 2px dashed rgba(255, 255, 255, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  line-height: 1;
-}
-
-.ds-more__circle--solid {
-  border-style: solid;
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.ds-outcome {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-}
-
-.ds-outcome--muted {
-  opacity: 0.7;
-}
-
-.ds-outcome__circle {
-  border-radius: 50%;
-  border: 2px solid;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  font-weight: 700;
-}
-
-.ds-outcome__circle--glow {
-  box-shadow: 0 0 0 3px rgba(255, 107, 31, 0.25);
-}
-
-.ds-outcome__name {
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  font-size: 9.5px;
-  color: rgba(255, 255, 255, 0.65);
-}
-
-.ds-outcome__chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 9.5px;
-  font-weight: 700;
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  letter-spacing: 0.02em;
-}
-
-.ds-failure__icon {
-  width: 84px;
-  height: 84px;
-  border-radius: 50%;
-  background: var(--ds-safety);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 10px 28px rgba(255, 107, 31, 0.45), 0 0 0 6px rgba(255, 107, 31, 0.18);
-  margin-bottom: 4px;
-}
-
-.ds-ring-action {
-  position: absolute;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-}
-
-.ds-ring-action--critical {
-  filter: drop-shadow(0 0 24px rgba(255, 206, 43, 0.45)) drop-shadow(0 14px 24px rgba(0, 0, 0, 0.55));
-}
-
-.ds-ring-action--success {
-  filter: drop-shadow(0 0 20px rgba(34, 180, 135, 0.4)) drop-shadow(0 14px 24px rgba(0, 0, 0, 0.55));
-}
-
-.ds-ring-footer {
-  margin-top: 16px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.ds-ring-footer--spacer {
-  pointer-events: none;
-}
-
-.ds-ring-caption {
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.ds-btn-critical,
-.ds-btn-reject,
-.ds-btn-success-static {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  border-radius: 10px;
-  font-weight: 700;
-  font-family: var(--font-family-sans);
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, border-color 120ms ease;
-}
-
-.ds-btn-critical {
-  width: min(190px, 78vw);
-  height: 62px;
-  padding: 0;
-  font-size: 20px;
-  background: #0d0d11;
-  color: var(--ds-helmet);
-  border: 2px solid var(--ds-helmet);
-}
-
-.ds-btn-critical:hover:not(:disabled) {
-  box-shadow: 0 0 32px rgba(255, 206, 43, 0.45), 0 0 64px rgba(255, 206, 43, 0.2);
-}
-
-.ds-btn-critical:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
-.ds-btn-critical__timer {
-  font-family: var(--font-family-mono, ui-monospace, monospace);
-  font-size: 14px;
-  font-weight: 700;
-  opacity: 0.7;
-  letter-spacing: 0.02em;
-}
-
-.ds-btn-reject {
-  height: 36px;
-  padding: 0 20px;
-  font-size: 14px;
-  gap: 8px;
-  background: transparent;
-  color: var(--ds-safety-soft);
-  border: 1px solid var(--ds-safety);
-}
-
-.ds-btn-reject:hover:not(:disabled) {
-  background: rgba(255, 107, 31, 0.18);
-  border-color: var(--ds-safety-soft);
-  color: #fff;
-}
-
-.ds-btn-reject:active:not(:disabled) {
-  background: var(--ds-safety);
-  color: #fff;
-  border-color: var(--ds-safety);
-}
-
-/* Icon 컴포넌트 래퍼는 [data-component="icon"]에서 color: var(--icon-base)(중립 회색)로
-   상속 color를 덮어쓴다. 이 버튼/원형 아이콘들은 자기 color(거절=safety-soft, 수락=mint,
-   무산 X=흰색)를 그대로 써야 하므로 inherit로 되돌린다. */
-.ds-btn-reject [data-component="icon"],
-.ds-btn-success-static [data-component="icon"],
-.ds-failure__icon [data-component="icon"] {
-  color: inherit;
-}
-
-.ds-btn-success-static {
-  width: min(190px, 78vw);
-  height: 62px;
-  padding: 0;
-  font-size: 20px;
-  background: #0d0d11;
-  color: var(--ds-mint);
-  border: 2px solid var(--ds-mint);
-  cursor: default;
-  opacity: 1;
-}
-
-.ds-btn-success-static:disabled {
-  opacity: 1;
-}
-
-.ds-bolt {
-  width: 18px;
-  height: 18px;
   flex-shrink: 0;
 }
 
-@keyframes ds-fade-in {
-  from {
-    opacity: 0;
+[data-component="doc-submit-overlay"] .ds-avatar__circle {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  color: #fff;
+  border: 1.5px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  transition: background-color var(--dur-base), color var(--dur-base), border-color var(--dur-base), opacity var(--dur-base);
+}
+
+[data-component="doc-submit-overlay"] .ds-avatar__circle--dashed {
+  color: var(--c-slate);
+  border: 1.5px dashed var(--c-hairline-strong);
+}
+
+[data-component="doc-submit-overlay"] .ds-avatar__check {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--c-mint);
+  color: #fff;
+  border: 2px solid var(--c-canvas);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@keyframes jt-check-pop {
+  0% {
+    transform: scale(0);
   }
+  65% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+[data-component="doc-submit-overlay"] .jt-check-pop {
+  animation: jt-check-pop 320ms var(--ease-spring) both;
+}
+
+/* ── live agreement stack (voting) ── */
+[data-component="doc-submit-overlay"] .ds-agree {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+[data-component="doc-submit-overlay"] .ds-agree__stack {
+  display: flex;
+}
+
+[data-component="doc-submit-overlay"] .ds-agree__slot {
+  border: 2px solid var(--c-paper);
+  border-radius: 50%;
+}
+
+[data-component="doc-submit-overlay"] .ds-agree__text {
+  font-size: 12.5px;
+  color: var(--c-slate);
+}
+
+[data-component="doc-submit-overlay"] .ds-agree__text strong {
+  color: var(--c-ink);
+  font-weight: 700;
+}
+
+[data-component="doc-submit-overlay"] .ds-agree__text .ds-ok {
+  color: var(--c-mint);
+}
+
+/* ── actions ── */
+[data-component="doc-submit-overlay"] .ds-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+[data-component="doc-submit-overlay"] .ds-actions__spacer {
+  flex: 1;
+}
+
+[data-component="doc-submit-overlay"] .ds-btn-approve {
+  padding-inline: 22px;
+  gap: 9px;
+}
+
+[data-component="doc-submit-overlay"] .ds-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--c-muted);
+}
+
+[data-component="doc-submit-overlay"] .ds-warn svg {
+  flex-shrink: 0;
+}
+
+/* ── waiting ── */
+[data-component="doc-submit-overlay"] .ds-waiting-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+[data-component="doc-submit-overlay"] .ds-waiting-sub {
+  font-size: 13px;
+  color: var(--c-slate);
+  margin: 0;
+}
+
+[data-component="doc-submit-overlay"] .ds-nowrap {
+  white-space: nowrap;
+}
+
+[data-component="doc-submit-overlay"] .ds-status-list {
+  width: 100%;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--c-canvas);
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-md);
+}
+
+[data-component="doc-submit-overlay"] .ds-status-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+[data-component="doc-submit-overlay"] .ds-status-row + .ds-status-row {
+  border-top: 1px solid var(--c-hairline);
+}
+
+[data-component="doc-submit-overlay"] .ds-status-row__name {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--c-slate);
+  transition: color var(--dur-base);
+}
+
+[data-component="doc-submit-overlay"] .ds-status-row__name--ok {
+  color: var(--c-ink);
+}
+
+[data-component="doc-submit-overlay"] .ds-status-row__wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--c-muted);
+  font-family: var(--font-mono);
+}
+
+[data-component="doc-submit-overlay"] .ds-status-row__pill {
+  font-size: 11px;
+}
+
+[data-component="doc-submit-overlay"] .ds-spin {
+  display: inline-flex;
+}
+
+@keyframes jt-spin {
   to {
-    opacity: 1;
+    transform: rotate(360deg);
+  }
+}
+
+[data-component="doc-submit-overlay"] .jt-spin {
+  animation: jt-spin 1.2s linear infinite;
+}
+
+@keyframes jt-consent-row-flash {
+  0% {
+    background: var(--c-mint-wash);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+[data-component="doc-submit-overlay"] .jt-consent-row-flash {
+  animation: jt-consent-row-flash 760ms ease-out both;
+}
+
+/* ── failure card ── */
+[data-component="doc-submit-overlay"] .ds-fail-card {
+  width: min(420px, 92vw);
+  align-items: center;
+  text-align: center;
+  padding: 30px 28px 22px;
+}
+
+[data-component="doc-submit-overlay"] .ds-fail__icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--c-stone);
+  color: var(--c-ink-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+[data-component="doc-submit-overlay"] .ds-fail__title {
+  font-size: 20px;
+  margin: 0 0 6px;
+}
+
+[data-component="doc-submit-overlay"] .ds-fail__sub {
+  font-size: 13.5px;
+  color: var(--c-slate);
+  line-height: 1.55;
+  margin: 0 0 18px;
+  max-width: 320px;
+}
+
+[data-component="doc-submit-overlay"] .ds-fail__bar {
+  width: 100%;
+  max-width: 240px;
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: var(--c-stone);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+[data-component="doc-submit-overlay"] .ds-fail__bar-fill {
+  height: 100%;
+  background: var(--c-ink-3);
+  transition: width 1s linear;
+}
+
+[data-component="doc-submit-overlay"] .ds-fail__count {
+  font-size: 11.5px;
+  color: var(--c-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+[data-component="doc-submit-overlay"] .ds-fail__btn {
+  margin-top: 16px;
+  gap: 8px;
+}
+
+/* ── buttons (design-system jt-btn ports, scoped) ── */
+[data-component="doc-submit-overlay"] .jt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  font-weight: 600;
+  border-width: 1px;
+  border-style: solid;
+  border-color: transparent;
+  box-sizing: border-box;
+  font-family: inherit;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-base), color var(--dur-base), border-color var(--dur-base), box-shadow var(--dur-base);
+}
+
+[data-component="doc-submit-overlay"] .jt-btn-lg {
+  height: 44px;
+  padding: 0 20px;
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+[data-component="doc-submit-overlay"] .jt-btn-secondary {
+  background: var(--c-canvas);
+  color: var(--c-ink);
+  border-color: var(--c-hairline-strong);
+}
+
+[data-component="doc-submit-overlay"] .jt-btn-secondary:hover {
+  background: var(--c-stone);
+  border-color: var(--c-ink-3);
+}
+
+[data-component="doc-submit-overlay"] .jt-btn-critical {
+  position: relative;
+  overflow: hidden;
+  background: var(--c-stache);
+  color: var(--c-helmet);
+  border: 1px solid var(--c-stache);
+  box-shadow: 0 0 0 2px var(--c-helmet);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+[data-component="doc-submit-overlay"] .jt-btn-critical:hover {
+  background: #000;
+  box-shadow: 0 0 0 2px var(--c-helmet), 0 6px 20px rgba(20, 19, 15, 0.35);
+}
+
+[data-component="doc-submit-overlay"] .jt-btn-critical::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 35%, rgba(255, 206, 43, 0.55) 50%, transparent 65%);
+  background-size: 220% 100%;
+  background-repeat: no-repeat;
+  background-position: 130% 0;
+  animation: jt-btn-shine 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes jt-btn-shine {
+  0% {
+    background-position: 130% 0;
+  }
+  55% {
+    background-position: -30% 0;
+  }
+  100% {
+    background-position: -30% 0;
+  }
+}
+
+/* ── pill (동의함) ── */
+[data-component="doc-submit-overlay"] .jt-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+[data-component="doc-submit-overlay"] .jt-pill-started {
+  background: var(--c-mint-soft);
+  color: var(--c-mint);
+}
+
+/* ── keyboard hint ── */
+[data-component="doc-submit-overlay"] .ds-kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--c-ink-2);
+  background: var(--c-stone);
+  border: 1px solid var(--c-hairline-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 4px 6px;
+}
+
+[data-component="doc-submit-overlay"] .ds-kbd--on-dark {
+  color: var(--c-helmet);
+  background: rgba(255, 206, 43, 0.18);
+  border-color: rgba(255, 206, 43, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-component="doc-submit-overlay"] .jt-consent-card,
+  [data-component="doc-submit-overlay"] .jt-consent-card.is-urgent,
+  [data-component="doc-submit-overlay"] .jt-consent-card.is-urgent::after,
+  [data-component="doc-submit-overlay"] .jt-consent-strip-layer,
+  [data-component="doc-submit-overlay"] .jt-consent-body-in,
+  [data-component="doc-submit-overlay"] .jt-consent-row-flash,
+  [data-component="doc-submit-overlay"] .jt-check-pop,
+  [data-component="doc-submit-overlay"] .jt-btn-critical::after {
+    animation: none !important;
+  }
+
+  [data-component="doc-submit-overlay"] .jt-consent-card.is-urgent {
+    box-shadow: var(--shadow-modal), 0 0 0 3px rgba(255, 107, 31, 0.4), 0 0 40px 8px rgba(255, 60, 30, 0.3);
   }
 }
 
 @media (max-width: 480px) {
-  [data-component="doc-submit-overlay"] [data-slot="doc-submit-body"] {
-    padding: 24px 16px;
+  [data-component="doc-submit-overlay"] {
+    padding: 16px;
   }
 
-  .ds-ring-inner {
-    gap: 10px;
-    padding: 56px 32px;
+  [data-component="doc-submit-overlay"] .ds-card {
+    width: 100%;
+  }
+
+  [data-component="doc-submit-overlay"] .ds-body--voting {
+    padding: 18px 18px 20px;
   }
 }

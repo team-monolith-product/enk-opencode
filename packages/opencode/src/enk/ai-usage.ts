@@ -1,5 +1,6 @@
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
+import { SentryReporter } from "@/util/sentry"
 import type { MessageV2 } from "@/session/message-v2"
 
 /**
@@ -72,7 +73,10 @@ export namespace AiUsage {
     sent.add(info.id)
     if (pending.length >= MAX_PENDING) {
       dropped++
-      if (dropped % 100 === 1) log.warn("ai usage queue full, dropping", { dropped, max: MAX_PENDING })
+      if (dropped % 100 === 1) {
+        log.warn("ai usage queue full, dropping", { dropped, max: MAX_PENDING })
+        SentryReporter.captureException(new Error("ai usage queue full"), { dropped, max: MAX_PENDING })
+      }
       return
     }
     pending.push(buildAttributes(info))
@@ -112,15 +116,18 @@ export namespace AiUsage {
         // mismatch, 422 validation, 401 bad token). Drop with a log.
         if (res.status >= 400 && res.status < 500 && res.status !== 429) {
           log.warn("ai usage rejected", { status: res.status, count: records.length })
+          SentryReporter.captureException(new Error("ai usage rejected"), { status: res.status, count: records.length })
           return
         }
         log.warn("ai usage post failed", { status: res.status, attempt, count: records.length })
       } catch (err) {
         log.warn("ai usage post error", { err: String(err), attempt, count: records.length })
+        SentryReporter.captureException(err, { attempt, count: records.length })
       }
       if (attempt < MAX_ATTEMPTS) await delay(1000 * 2 ** (attempt - 1))
     }
     log.warn("ai usage dropped after retries", { count: records.length })
+    SentryReporter.captureException(new Error("ai usage dropped after retries"), { count: records.length })
   }
 
   function delay(ms: number) {

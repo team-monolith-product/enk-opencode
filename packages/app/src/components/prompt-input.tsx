@@ -737,6 +737,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           state={approval}
           actorID={actorID}
           kind={approval()?.targetKind === "stop" ? "stop" : "doc"}
+          sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
           approve={() => {
             const current = approval()
             if (!current) return
