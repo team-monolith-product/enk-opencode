@@ -24,9 +24,11 @@ const FRAME_ANCESTORS = origins("'self'", SERVE_URL)
 const SCRIPT_SRC = origins("'self'", "'wasm-unsafe-eval'", ASSET_ORIGIN)
 const STYLE_SRC = origins("'self'", "'unsafe-inline'", ASSET_ORIGIN)
 const FONT_SRC = origins("'self'", "data:", ASSET_ORIGIN)
+// 알림음(sound.ts 의 `new Audio(src)`)이 CDN 에셋 URL 을 재생하므로 media-src 도 허용한다.
+const MEDIA_SRC = origins("'self'", "data:", ASSET_ORIGIN)
 
 const buildCsp = (hash = "") =>
-  `frame-ancestors ${FRAME_ANCESTORS}; default-src 'self'; frame-src ${FRAME_SRC}; script-src ${SCRIPT_SRC}${hash ? ` 'sha256-${hash}'` : ""}; style-src ${STYLE_SRC}; img-src 'self' data: blob: https:; font-src ${FONT_SRC}; media-src 'self' data:; connect-src ${CONNECT_SRC}`
+  `frame-ancestors ${FRAME_ANCESTORS}; default-src 'self'; frame-src ${FRAME_SRC}; script-src ${SCRIPT_SRC}${hash ? ` 'sha256-${hash}'` : ""}; style-src ${STYLE_SRC}; img-src 'self' data: blob: https:; font-src ${FONT_SRC}; media-src ${MEDIA_SRC}; connect-src ${CONNECT_SRC}`
 
 export const DEFAULT_CSP = buildCsp()
 export const csp = (hash = "") => buildCsp(hash)
