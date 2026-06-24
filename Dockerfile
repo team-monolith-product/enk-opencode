@@ -8,8 +8,13 @@ WORKDIR /app
 COPY . .
 RUN bun install --frozen-lockfile --ignore-scripts
 
-ENV OPENCODE_CHANNEL=latest OPENCODE_VERSION=0.0.0-enk
+ARG OPENCODE_ASSET_BASE
+ENV OPENCODE_CHANNEL=latest OPENCODE_VERSION=0.0.0-enk OPENCODE_ASSET_BASE=${OPENCODE_ASSET_BASE}
 RUN cd packages/opencode && bun run build --single
+
+# CI 가 임베드된 것과 동일한 vite dist 를 추출해 S3 로 업로드한다.
+FROM scratch AS asset-export
+COPY --from=build /app/packages/app/dist /
 
 FROM node:22-slim AS dev
 
