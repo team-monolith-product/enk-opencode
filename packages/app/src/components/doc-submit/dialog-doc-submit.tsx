@@ -1,11 +1,10 @@
-import { Icon } from "@opencode-ai/ui/icon"
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor } from "solid-js"
+import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { createEffect, createMemo, createSignal, For, type JSX, onCleanup, onMount, Show, type Accessor } from "solid-js"
 import { useClientEnv } from "@/context/client-env"
+import { createPage } from "@/components/blocksuite/blocksuite-doc"
+import { SessionPreviewMascot } from "@/pages/session/session-preview-mascot"
 import type { DocSubmitActor, DocSubmitState } from "../prompt-input/doc-submit"
-import { MatchAcceptRing } from "./match-accept-ring"
-import { MoreIndicator } from "./more-indicator"
-import { OutcomeAvatar } from "./outcome-avatar"
-import { PendingRow } from "./pending-row"
+import { avatarLabel } from "./avatar-label"
 import { useCountdown } from "./use-countdown"
 import "./doc-submit.css"
 
@@ -16,47 +15,24 @@ export type DocSubmitKind = "doc" | "question-send" | "question-dismiss" | "ques
 // exactly what is about to be sent (or which question is being dismissed).
 export type DocSubmitPreviewItem = { question: string; answers: string[] }
 
+// Enough of the session SDK to mount the prompt doc read-only inside the dialog. Passed explicitly
+// because the dialog renders in a Portal whose owner sits ABOVE the per-directory SDKProvider, so
+// `useSDK()` inside the dialog would not resolve the session client.
+export type DocSubmitSdk = { url: string; directory: string; client: OpencodeClient }
+
 type Props = {
   state: Accessor<DocSubmitState | undefined>
   actorID: string
   kind?: DocSubmitKind
   preview?: () => DocSubmitPreviewItem[]
+  // Required for kind === "doc": lets the snapshot mount the prompt doc read-only.
+  sdk?: DocSubmitSdk
   approve: () => void
   cancel: () => void
   close: () => void
 }
 
-function Preview(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boolean }) {
-  return (
-    <Show when={props.items().length > 0}>
-      <div class="ds-preview" data-multi={props.items().length > 1}>
-        <For each={props.items()}>
-          {(item, i) => (
-            <div class="ds-preview-item">
-              <Show when={props.items().length > 1}>
-                <span class="ds-preview-idx">{i() + 1}</span>
-              </Show>
-              <div class="ds-preview-body">
-                <div class="ds-preview-q">{item.question}</div>
-                <Show when={!props.dismiss}>
-                  <Show
-                    when={item.answers.length > 0}
-                    fallback={<div class="ds-preview-a ds-preview-a--empty">미선택</div>}
-                  >
-                    <div class="ds-preview-answers">
-                      <For each={item.answers}>{(answer) => <span class="ds-preview-a">{answer}</span>}</For>
-                    </div>
-                  </Show>
-                </Show>
-              </div>
-            </div>
-          )}
-        </For>
-      </div>
-    </Show>
-  )
-}
-
+// ── copy helpers (kind-aware) ──────────────────────────────────────────────
 function headline(kind: DocSubmitKind | undefined) {
   if (kind === "question-send") return "이 답변, 보낼까요?"
   if (kind === "question-dismiss") return "이 질문, 닫을까요?"
@@ -72,156 +48,411 @@ function requestVerb(kind: DocSubmitKind | undefined) {
   return "전송을"
 }
 
+function approveLabel(kind: DocSubmitKind | undefined) {
+  if (kind === "question-dismiss") return "수락하고 닫기"
+  if (kind === "question-back") return "수락하고 돌아가기"
+  if (kind === "stop") return "수락하고 멈추기"
+  return "수락하고 보내기"
+}
+
+// Verb used in the live "동의 현황" status line ("…전송돼요" / "…진행돼요").
+function proceedVerb(kind: DocSubmitKind | undefined) {
+  if (kind === "question-dismiss") return "닫혀요"
+  if (kind === "question-back") return "되돌아가요"
+  if (kind === "stop") return "멈춰요"
+  return "전송돼요"
+}
+
+function warnText(kind: DocSubmitKind | undefined) {
+  if (kind === "question-dismiss") return "닫으면 이 질문은 사라져요. 거절하면 그대로 둘 수 있어요."
+  if (kind === "question-back") return "되돌리면 이 질문의 답변이 초기화돼요. 거절하면 그대로 둘 수 있어요."
+  if (kind === "stop") return "멈추면 진행 중인 AI 응답이 중단돼요. 거절하면 계속 진행돼요."
+  return "전송 후에는 AI 응답을 취소할 수 없어요. 거절하면 다시 편집할 수 있어요."
+}
+
 // Votes that show only the question text (no answers) in the preview.
 function hideAnswers(kind: DocSubmitKind | undefined) {
   return kind === "question-dismiss" || kind === "question-back"
 }
 
-function role(
-  actor: DocSubmitActor,
-  state: DocSubmitState,
-): "requester" | "agreed" | "rejected" | "timeout" | "pending" | "left" {
-  if (state.status === "cancelled" && actor.actorID === state.cancelledBy?.actorID) return "rejected"
-  if (state.status === "left" && actor.actorID === state.cancelledBy?.actorID) return "left"
-  if (actor.actorID === state.actorID) return "requester"
-  if (actor.status === "approved") return "agreed"
-  if (state.status === "expired") return "timeout"
-  return "pending"
+// ── inline glyphs (design-system Icon ports — app icon set lacks send/clock/user/warn/refresh) ──
+const ICON = {
+  send: (s = 14) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+  ),
+  clock: (s = 14) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  ),
+  user: (s = 14) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  ),
+  check: (s = 14) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  ),
+  x: (s = 14) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  ),
+  warn: (s = 14) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  ),
+  refresh: (s = 14) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <polyline points="23 4 23 10 17 10" />
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
+  ),
+  arrowRight: (s = 14) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
+    </svg>
+  ),
 }
 
-function IconBolt() {
+// ── avatar (initials circle + agree check pop) ─────────────────────────────
+function ConsentAvatar(props: { name: string; color: string; size?: number; dashed?: boolean; check?: boolean; on?: boolean }) {
+  const size = () => props.size ?? 30
   return (
-    <svg class="ds-bolt" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M9.5 1.5 3.5 9h4l-1 5.5 6-7.5h-4z" />
-    </svg>
+    <span class="ds-avatar" style={{ width: `${size()}px`, height: `${size()}px` }}>
+      <span
+        class="ds-avatar__circle"
+        classList={{ "ds-avatar__circle--dashed": props.dashed }}
+        style={{
+          "background-color": props.dashed ? "transparent" : props.color,
+          "font-size": `${size() * 0.36}px`,
+          opacity: props.on === false ? 0.5 : 1,
+        }}
+      >
+        {avatarLabel(props.name)}
+      </span>
+      <Show when={props.check}>
+        <span class="ds-avatar__check jt-check-pop">{ICON.check(8)}</span>
+      </Show>
+    </span>
   )
 }
 
+function ConsentCountdownChip(props: { sec: number; danger: boolean }) {
+  return (
+    <span class="ds-chip" classList={{ "ds-chip--danger": props.danger }}>
+      {ICON.clock(13)}
+      자동 거절까지 {props.sec}초
+    </span>
+  )
+}
+
+// ── prompt doc snapshot — read-only mount of the doc being sent ────────────
+function snapshotTheme(): "light" | "dark" {
+  const scheme = document.documentElement.getAttribute("data-color-scheme")
+  if (scheme === "dark" || scheme === "light") return scheme
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+}
+
+function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
+  const [fail, setFail] = createSignal(false)
+  let el: HTMLDivElement | undefined
+  let page: Awaited<ReturnType<typeof createPage>> | undefined
+  let stop = false
+
+  onMount(() => {
+    const host = el
+    if (!host) {
+      setFail(true)
+      return
+    }
+    void createPage({
+      theme: snapshotTheme(),
+      init: false,
+      readonly: true,
+      sync: {
+        docID: props.docID,
+        baseUrl: props.sdk.url,
+        directory: props.sdk.directory,
+        client: props.sdk.client,
+        actorID: "viewer",
+        name: "Viewer",
+        color: "#3574D9",
+      },
+    })
+      .then(async (next) => {
+        if (stop) {
+          await next.dispose()
+          return
+        }
+        page = next
+        await next.attach(host)
+      })
+      .catch(() => {
+        void page?.dispose()
+        page = undefined
+        setFail(true)
+      })
+  })
+
+  onCleanup(() => {
+    stop = true
+    void page?.dispose()
+  })
+
+  return (
+    <Show when={!fail()} fallback={<div class="ds-snap-fallback">문서를 불러올 수 없습니다.</div>}>
+      <div ref={el} data-component="prompt-doc-viewer" />
+    </Show>
+  )
+}
+
+// ── question preview (rendered inside the snapshot card for question votes) ─
+function PreviewCard(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boolean }) {
+  return (
+    <div class="ds-preview" data-multi={props.items().length > 1}>
+      <For each={props.items()}>
+        {(item, i) => (
+          <div class="ds-preview-item">
+            <Show when={props.items().length > 1}>
+              <span class="ds-preview-idx">{i() + 1}</span>
+            </Show>
+            <div class="ds-preview-body">
+              <div class="ds-preview-q">{item.question}</div>
+              <Show when={!props.dismiss}>
+                <Show
+                  when={item.answers.length > 0}
+                  fallback={<div class="ds-preview-a ds-preview-a--empty">미선택</div>}
+                >
+                  <div class="ds-preview-answers">
+                    <For each={item.answers}>{(answer) => <span class="ds-preview-a">{answer}</span>}</For>
+                  </div>
+                </Show>
+              </Show>
+            </div>
+          </div>
+        )}
+      </For>
+    </div>
+  )
+}
+
+// The snapshot region: doc viewer for prompt sends, question preview for question votes, nothing
+// for a bare "stop" vote.
+function SnapshotArea(props: { kind?: DocSubmitKind; state: DocSubmitState; preview?: () => DocSubmitPreviewItem[]; sdk?: DocSubmitSdk }) {
+  return (
+    <Show when={props.kind !== "stop"}>
+      <div class="jt-snap-scroll ds-snap">
+        <Show
+          when={props.kind === "doc" && props.sdk}
+          fallback={
+            <Show when={props.preview}>
+              {(items) => <PreviewCard items={items()} dismiss={hideAnswers(props.kind)} />}
+            </Show>
+          }
+        >
+          <ConsentDocSnapshot docID={props.state.targetID} sdk={props.sdk!} />
+        </Show>
+      </div>
+    </Show>
+  )
+}
+
+// ── voting body — content snapshot + live agreement + asymmetric actions ───
 function VotingBody(props: {
   state: DocSubmitState
   kind?: DocSubmitKind
   preview?: () => DocSubmitPreviewItem[]
+  sdk?: DocSubmitSdk
+  actorID: string
+  sec: number
   approve: () => void
   cancel: () => void
 }) {
-  const remaining = useCountdown(() => props.state.expiresAt)
-  const total = () => props.state.timeoutMs / 1000
   const requester = () => props.state.actors.find((item) => item.actorID === props.state.actorID)
-  const pending = createMemo(() => props.state.actors.filter((item) => item.status === "pending"))
-  const display = createMemo(() => {
+  const nonReq = createMemo(() => props.state.actors.filter((item) => item.actorID !== props.state.actorID))
+  const remaining = createMemo(() => nonReq().filter((item) => item.status !== "approved"))
+  const onlyMe = () => {
     const left = remaining()
-    return left <= 0 ? 0 : Math.ceil(left)
-  })
+    return left.length === 1 && left[0]?.actorID === props.actorID
+  }
+  const danger = () => props.sec <= 5
 
   return (
-    <>
-      <Show when={props.preview}>{(items) => <Preview items={items()} dismiss={hideAnswers(props.kind)} />}</Show>
-      <div class="ds-ring-stage">
-        <MatchAcceptRing remaining={remaining()} total={total()} />
-        <div class="ds-ring-inner">
-          <div class="ds-eyebrow">자동 거절까지 · {String(display()).padStart(2, "0")}s</div>
-          <h2 class="ds-headline">{headline(props.kind)}</h2>
-          <div class="ds-sub">
-            <strong>{requester()?.name ?? "참여자"}</strong>님이 {requestVerb(props.kind)} 요청했어요
-          </div>
-          <Show when={pending().length > 0}>
-            <div class="ds-pending-list">
-              <div class="ds-pending-label">응답 대기 · {pending().length}명</div>
-              <PendingRow items={pending()} />
-            </div>
-          </Show>
+    <div class="ds-body ds-body--voting">
+      <div class="ds-vote-header">
+        <ConsentAvatar name={requester()?.name ?? "참여자"} color={requester()?.color ?? "#888"} size={34} />
+        <div class="ds-vote-header__text">
+          <strong>{requester()?.name ?? "참여자"}</strong>님이 {requestVerb(props.kind)} 요청했어요
         </div>
-        <div class="ds-ring-action ds-ring-action--critical">
-          <button
-            type="button"
-            class="ds-btn-critical"
-            data-action="doc-submit-approve"
-            onClick={props.approve}
-          >
-            <IconBolt />
-            수락
-          </button>
-        </div>
+        <ConsentCountdownChip sec={props.sec} danger={danger()} />
       </div>
-      <div class="ds-ring-footer">
-        <button type="button" class="ds-btn-reject" data-action="doc-submit-reject" onClick={props.cancel}>
-          <Icon name="close" size="small" />
-          거절
+
+      <h2 class="ds-headline">{headline(props.kind)}</h2>
+
+      <SnapshotArea kind={props.kind} state={props.state} preview={props.preview} sdk={props.sdk} />
+
+      <div class="ds-agree">
+        <span class="ds-agree__stack">
+          <For each={nonReq()}>
+            {(item, i) => {
+              const ok = () => item.status === "approved"
+              return (
+                <span class="ds-agree__slot" style={{ "margin-left": i() ? "-7px" : "0" }}>
+                  <ConsentAvatar name={item.name} color={item.color} size={26} dashed={!ok()} check={ok()} on={ok()} />
+                </span>
+              )
+            }}
+          </For>
+        </span>
+        <span class="ds-agree__text">
+          <Show
+            when={remaining().length > 0}
+            fallback={
+              <span>
+                <strong class="ds-ok">모두 동의했어요</strong> · 곧 {proceedVerb(props.kind)}
+              </span>
+            }
+          >
+            <Show
+              when={onlyMe()}
+              fallback={
+                <span>
+                  <strong>{remaining().length}명</strong>이 더 동의하면 {proceedVerb(props.kind)}
+                </span>
+              }
+            >
+              <span>
+                이제 <strong>나만</strong> 동의하면 {proceedVerb(props.kind)}
+              </span>
+            </Show>
+          </Show>
+        </span>
+      </div>
+
+      <div class="ds-actions">
+        <button type="button" class="jt-btn jt-btn-secondary jt-btn-lg" onClick={props.cancel}>
+          거절 <span class="ds-kbd">Esc</span>
+        </button>
+        <span class="ds-actions__spacer" />
+        <button type="button" class="jt-btn jt-btn-critical jt-btn-lg ds-btn-approve" onClick={props.approve}>
+          {ICON.send(15)}
+          {approveLabel(props.kind)}
+          <span class="ds-kbd ds-kbd--on-dark">Enter</span>
         </button>
       </div>
-    </>
+
+      <div class="ds-warn">
+        {ICON.warn(12)}
+        {warnText(props.kind)}
+      </div>
+    </div>
   )
 }
 
-function WaitingBody(props: {
-  state: DocSubmitState
-  kind?: DocSubmitKind
-  preview?: () => DocSubmitPreviewItem[]
-}) {
-  const pending = createMemo(() => props.state.actors.filter((item) => item.status === "pending"))
-
+// ── waiting body — I agreed, waiting on the rest ───────────────────────────
+function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: string }) {
+  const ok = () => props.actor.status === "approved"
+  const [flash, setFlash] = createSignal(false)
+  let prev = ok()
+  createEffect(() => {
+    const now = ok()
+    if (now && !prev) {
+      setFlash(true)
+      const t = setTimeout(() => setFlash(false), 800)
+      onCleanup(() => clearTimeout(t))
+    }
+    prev = now
+  })
+  const suffix = () => {
+    let out = ""
+    if (props.actor.actorID === props.me) out += " (나)"
+    if (props.actor.actorID === props.requesterID) out += " · 요청자"
+    return out
+  }
   return (
-    <>
-      <Show when={props.preview}>{(items) => <Preview items={items()} dismiss={hideAnswers(props.kind)} />}</Show>
-      <div class="ds-ring-stage">
-        <MatchAcceptRing full total={props.state.timeoutMs / 1000} />
-        <div class="ds-ring-inner">
-          <div class="ds-eyebrow ds-eyebrow--helmet">응답 전송됨</div>
-          <h2 class="ds-headline ds-headline--waiting">팀원 응답을 기다리고 있어요</h2>
-          <div class="ds-sub">
-            {props.kind === "stop"
-              ? "모두 동의하면 AI 응답을 멈춥니다"
-              : props.kind === "question-dismiss"
-                ? "모두 동의하면 질문을 닫습니다"
-                : props.kind === "question-back"
-                  ? "모두 동의하면 이전 질문으로 돌아갑니다"
-                  : "모두 동의하면 AI에 자동으로 전송됩니다"}
-          </div>
-          <Show when={pending().length > 0}>
-            <div class="ds-pending-list">
-              <div class="ds-pending-label">응답 대기 · {pending().length}명</div>
-              <PendingRow items={pending()} />
-            </div>
-          </Show>
-        </div>
-        <div class="ds-ring-action ds-ring-action--success">
-          <button type="button" class="ds-btn-success-static" disabled>
-            <Icon name="check" size="small" />
-            수락했어요
-          </button>
-        </div>
-      </div>
-      <div class="ds-ring-footer">
-        <div class="ds-ring-caption">응답 취소 불가 · 타이머 종료 대기</div>
-      </div>
-    </>
+    <div class="ds-status-row" classList={{ "jt-consent-row-flash": flash() }}>
+      <ConsentAvatar name={props.actor.name} color={props.actor.color} size={28} on={ok()} check={ok()} />
+      <span class="ds-status-row__name" classList={{ "ds-status-row__name--ok": ok() }}>
+        {props.actor.name}
+        {suffix()}
+      </span>
+      <Show
+        when={ok()}
+        fallback={
+          <span class="ds-status-row__wait">
+            대기 중 <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
+          </span>
+        }
+      >
+        <span class="jt-pill jt-pill-started ds-status-row__pill">동의함</span>
+      </Show>
+    </div>
   )
 }
 
-function loserRole(actor: DocSubmitActor, state: DocSubmitState): "rejected" | "timeout" | "left" {
-  if (state.status === "left" && actor.actorID === state.cancelledBy?.actorID) return "left"
-  if (state.status === "cancelled" && actor.actorID === state.cancelledBy?.actorID) return "rejected"
-  return "timeout"
+function WaitingBody(props: { state: DocSubmitState; kind?: DocSubmitKind; actorID: string; sec: number; cancel: () => void }) {
+  const allOk = createMemo(() => props.state.actors.every((item) => item.status === "approved"))
+  const sub = () => {
+    if (props.kind === "stop") return "모두 동의하면 AI 응답을 멈춰요"
+    if (props.kind === "question-dismiss") return "모두 동의하면 질문을 닫아요"
+    if (props.kind === "question-back") return "모두 동의하면 이전 질문으로 돌아가요"
+    return "모두 동의하면 바로 AI에게 전송돼요"
+  }
+  return (
+    <div class="ds-body ds-body--waiting">
+      <SessionPreviewMascot size={52} />
+      <div class="ds-waiting-head">
+        <h2 class="ds-headline ds-headline--center">{allOk() ? "모두 동의했어요. 진행할게요" : "동의했어요. 팀원을 기다려요"}</h2>
+        <p class="ds-waiting-sub">
+          {sub()} · <span class="ds-nowrap">자동 거절까지 {props.sec}초</span>
+        </p>
+      </div>
+      <div class="jt-snap-scroll ds-status-list">
+        <For each={props.state.actors}>
+          {(item) => <StatusRow actor={item} me={props.actorID} requesterID={props.state.actorID} />}
+        </For>
+      </div>
+      <button type="button" class="jt-btn jt-btn-secondary" onClick={props.cancel}>
+        동의 취소 <span class="ds-kbd">Esc</span>
+      </button>
+    </div>
+  )
 }
 
-function FailureBody(props: { state: DocSubmitState; close: () => void }) {
+// ── failure card — three outcomes, auto-returns to canvas ──────────────────
+function failInfo(state: DocSubmitState): { title: string; sub: string; icon: JSX.Element } {
+  const timeoutSec = Math.round(state.timeoutMs / 1000)
+  if (state.status === "left") {
+    return { title: "전송이 무산됐어요", sub: "팀원이 캔버스를 나가 합의가 깨졌어요. 다시 모이면 보낼 수 있어요.", icon: ICON.user(22) }
+  }
+  if (state.status === "expired") {
+    return {
+      title: "시간이 초과되었어요",
+      sub: `${timeoutSec}초 안에 모두 동의하지 않아 전송되지 않았어요. 다시 시도해 주세요.`,
+      icon: ICON.clock(22),
+    }
+  }
+  return { title: "전송이 취소되었어요", sub: "캔버스로 돌아가 내용을 다시 다듬은 뒤 보낼 수 있어요.", icon: ICON.x(22) }
+}
+
+function FailureCard(props: { state: DocSubmitState; close: () => void }) {
   const env = useClientEnv()
-  const leaver = createMemo(() => (props.state.status === "left" ? props.state.cancelledBy : undefined))
-  const losers = createMemo(() =>
-    props.state.actors
-      .filter((item) => {
-        const r = role(item, props.state)
-        return r === "rejected" || r === "timeout" || r === "left"
-      })
-      .map((item) => ({ item, role: loserRole(item, props.state) })),
-  )
-  const large = createMemo(() => losers().length > 4)
-  const more = createMemo(() => losers().length > 5)
-  const slots = createMemo(() => (more() ? losers().slice(0, 4) : losers()))
-  const hidden = createMemo(() => losers().length - slots().length)
-  const size = createMemo(() => (large() ? 32 : 40))
-
-  const [auto, setAuto] = createSignal(env.submitFailureCloseSec())
+  const info = createMemo(() => failInfo(props.state))
+  const total = env.submitFailureCloseSec()
+  const [auto, setAuto] = createSignal(total)
   createEffect(() => {
     if (auto() <= 0) {
       props.close()
@@ -230,108 +461,135 @@ function FailureBody(props: { state: DocSubmitState; close: () => void }) {
     const timer = setTimeout(() => setAuto((value) => value - 1), 1000)
     onCleanup(() => clearTimeout(timer))
   })
+  return (
+    <div class="jt-consent-card ds-fail-card">
+      <div class="ds-fail__icon">{info().icon}</div>
+      <h2 class="ds-headline ds-headline--center ds-fail__title">{info().title}</h2>
+      <p class="ds-fail__sub">{info().sub}</p>
+      <div class="ds-fail__bar">
+        <div class="ds-fail__bar-fill" style={{ width: `${total > 0 ? (Math.max(0, auto()) / total) * 100 : 0}%` }} />
+      </div>
+      <span class="ds-fail__count">{Math.max(0, auto())}초 후 캔버스로 돌아가요</span>
+      <button type="button" class="jt-btn jt-btn-secondary ds-fail__btn" onClick={props.close}>
+        지금 돌아가기 {ICON.arrowRight(14)}
+      </button>
+    </div>
+  )
+}
+
+// ── consent frame — top caution-strip timer + body (voting | waiting) ──────
+function ConsentFrame(props: {
+  view: "voting" | "waiting"
+  state: DocSubmitState
+  kind?: DocSubmitKind
+  preview?: () => DocSubmitPreviewItem[]
+  sdk?: DocSubmitSdk
+  actorID: string
+  approve: () => void
+  cancel: () => void
+}) {
+  const remaining = useCountdown(() => props.state.expiresAt)
+  const total = () => props.state.timeoutMs / 1000
+  // ceil → 1s steps; the strip's CSS `transition: width 1s linear` smooths between them.
+  const sec = () => Math.max(0, Math.ceil(remaining()))
+  const pct = () => {
+    const t = total()
+    return t > 0 ? Math.max(0, Math.min(100, (sec() / t) * 100)) : 0
+  }
+  // Urgency (red strip + heartbeat) only nudges an undecided voter — never the already-agreed waiter.
+  const urgent = () => sec() <= 5 && props.view === "voting"
 
   return (
-    <>
-      <div class="ds-ring-stage">
-        <MatchAcceptRing full palette="safety" animate={false} />
-        <div class="ds-ring-inner ds-ring-inner--failure">
-          <div class="ds-failure__icon">
-            <Icon name="close" size="large" />
-          </div>
-          <h2 class="ds-headline ds-headline--failure">{leaver() ? "전송에 실패했어요" : "합의가 무산됐어요"}</h2>
-          <div class="ds-sub">
-            <Show
-              when={leaver()}
-              fallback={<>캔버스를 수정한 뒤 다시 시도하세요</>}
-            >
-              {(actor) => (
-                <>
-                  <strong>{actor().name}</strong>님이 나가서 전송하지 못했어요
-                </>
-              )}
-            </Show>
-          </div>
-          <Show when={losers().length > 0}>
-            <div class="ds-pending-list">
-              <div class="ds-pending-row ds-pending-row--outcome" classList={{ "ds-pending-row--large": large() }}>
-                <For each={slots()}>
-                  {(entry) => (
-                    <OutcomeAvatar name={entry.item.name} color={entry.item.color} role={entry.role} compact={large()} />
-                  )}
-                </For>
-                <Show when={more()}>
-                  <MoreIndicator size={size()} hidden={hidden()} dashed={false} />
-                </Show>
-              </div>
-            </div>
-          </Show>
-        </div>
-        <div class="ds-ring-action ds-ring-action--critical">
-          <button
-            type="button"
-            class="ds-btn-critical"
-            data-action="doc-submit-close"
-            onClick={props.close}
-          >
-            <Icon name="arrow-left" size="small" />
-            돌아가기
-            <span class="ds-btn-critical__timer">({auto()}s)</span>
-          </button>
+    <div class="jt-consent-card ds-card" classList={{ "is-urgent": urgent() }}>
+      <div class="jt-consent-strip">
+        <div class="jt-consent-strip-fill" style={{ width: `${pct()}%` }}>
+          <div class="jt-consent-strip-layer" />
+          <div class="jt-consent-strip-layer is-red" classList={{ on: urgent() }} />
         </div>
       </div>
-      <div class="ds-ring-footer ds-ring-footer--spacer" aria-hidden="true" />
-    </>
+      <div class="jt-consent-body-in ds-body-scroll">
+        <Show
+          when={props.view === "waiting"}
+          fallback={
+            <VotingBody
+              state={props.state}
+              kind={props.kind}
+              preview={props.preview}
+              sdk={props.sdk}
+              actorID={props.actorID}
+              sec={sec()}
+              approve={props.approve}
+              cancel={props.cancel}
+            />
+          }
+        >
+          <WaitingBody state={props.state} kind={props.kind} actorID={props.actorID} sec={sec()} cancel={props.cancel} />
+        </Show>
+      </div>
+    </div>
   )
 }
 
 export function DialogDocSubmit(props: Props) {
   const state = () => props.state()
-  const actor = () => state()?.actors.find((item) => item.actorID === props.actorID)
+  const me = () => state()?.actors.find((item) => item.actorID === props.actorID)
   const pending = () => state()?.status === "pending"
-  const approved = () => actor()?.status === "approved"
+  const approved = () => me()?.status === "approved"
   const failed = () => {
     const value = state()?.status
     return value === "cancelled" || value === "expired" || value === "left"
   }
+
+  // Keyboard: Enter = approve (voting only), Esc = reject/cancel. Captured so the shared dialog
+  // provider's Esc-to-close does not also fire. On a terminal (failure) screen we leave keys alone
+  // so the provider can close normally.
+  onMount(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const current = state()
+      if (!current || current.status !== "pending") return
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      if (event.isComposing || event.keyCode === 229) return
+      if (event.key === "Enter" && !approved()) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        props.approve()
+      } else if (event.key === "Escape") {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        props.cancel()
+      }
+    }
+    window.addEventListener("keydown", onKey, true)
+    onCleanup(() => window.removeEventListener("keydown", onKey, true))
+  })
 
   return (
     <div
       data-component="doc-submit-overlay"
       role="alertdialog"
       aria-modal="true"
-      aria-label={failed() ? "합의 무산" : "팀 합의 투표"}
+      aria-label={failed() ? "합의 무산" : "전송 동의"}
     >
       <div data-slot="doc-submit-backdrop" />
-      <div data-slot="doc-submit-body">
-        <Show when={state()}>
-          {(current) => (
-            <Show
-              when={failed()}
-              fallback={
-                <Show
-                  when={pending() && approved()}
-                  fallback={
-                    <Show when={pending() && !approved()}>
-                      <VotingBody
-                        state={current()}
-                        kind={props.kind}
-                        preview={props.preview}
-                        approve={props.approve}
-                        cancel={props.cancel}
-                      />
-                    </Show>
-                  }
-                >
-                  <WaitingBody state={current()} kind={props.kind} preview={props.preview} />
-                </Show>
-              }
-            >
-              <FailureBody state={current()} close={props.close} />
-            </Show>
-          )}
-        </Show>
-      </div>
+      <Show when={state()}>
+        {(current) => (
+          <Show
+            when={!failed()}
+            fallback={<FailureCard state={current()} close={props.close} />}
+          >
+            <ConsentFrame
+              view={pending() && approved() ? "waiting" : "voting"}
+              state={current()}
+              kind={props.kind}
+              preview={props.preview}
+              sdk={props.sdk}
+              actorID={props.actorID}
+              approve={props.approve}
+              cancel={props.cancel}
+            />
+          </Show>
+        )}
+      </Show>
     </div>
   )
 }
