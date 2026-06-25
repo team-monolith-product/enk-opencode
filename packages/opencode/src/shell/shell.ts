@@ -15,7 +15,7 @@ export namespace Shell {
 
   export async function killTree(proc: ChildProcess, opts?: { exited?: () => boolean }): Promise<void> {
     const pid = proc.pid
-    if (!pid || opts?.exited?.()) return
+    if (!pid) return
 
     if (process.platform === "win32") {
       await new Promise<void>((resolve) => {
@@ -29,19 +29,45 @@ export namespace Shell {
       return
     }
 
-    try {
-      process.kill(-pid, "SIGTERM")
-      await sleep(SIGKILL_TIMEOUT_MS)
-      if (!opts?.exited?.()) {
-        process.kill(-pid, "SIGKILL")
-      }
-    } catch (_e) {
-      proc.kill("SIGTERM")
-      await sleep(SIGKILL_TIMEOUT_MS)
-      if (!opts?.exited?.()) {
-        proc.kill("SIGKILL")
+    // Send to the whole process group (negative pid). The final SIGKILL is sent
+    // unconditionally: opts.exited only reflects the parent process, so a child
+    // that ignores SIGTERM survives if we gate SIGKILL on the parent's exit.
+    // Killing an already-empty group throws ESRCH, which we treat as success.
+    const killGroup = (signal: NodeJS.Signals) => {
+      try {
+        process.kill(-pid, signal)
+        return true
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ESRCH") return false
+        // Group kill not possible (e.g. not a group leader): fall back to the
+        // direct child. This misses grandchildren but is better than nothing.
+        try {
+          proc.kill(signal)
+        } catch {
+          /* already gone */
+        }
+        return false
       }
     }
+
+    // Group is empty when signal 0 throws ESRCH; truthy means something survives.
+    const groupAlive = () => {
+      try {
+        process.kill(-pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    killGroup("SIGTERM")
+    // Skip the SIGKILL grace only when the parent reported exit AND the group is
+    // empty — i.e. the whole tree is already gone.
+    if (opts?.exited?.() && !groupAlive()) return
+    await sleep(SIGKILL_TIMEOUT_MS)
+    // Always SIGKILL the group: opts.exited only reflects the parent, so a child
+    // that ignored SIGTERM is still here even when the parent has exited.
+    killGroup("SIGKILL")
   }
 
   function full(file: string) {

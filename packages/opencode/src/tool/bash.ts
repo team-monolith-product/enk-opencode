@@ -353,19 +353,18 @@ async function run(
   let aborted = false
   let exited = false
 
-  const kill = () => Shell.killTree(proc, { exited: () => exited })
-
-  if (ctx.abort.aborted) {
-    aborted = true
-    await kill()
-  }
+  let killing: Promise<void> | undefined
+  const kill = () => (killing ??= Shell.killTree(proc, { exited: () => exited }))
 
   const abort = () => {
     aborted = true
     void kill()
   }
 
+  // Register the listener before checking `aborted` so a signal that fires between
+  // the check and the registration is not lost.
   ctx.abort.addEventListener("abort", abort, { once: true })
+  if (ctx.abort.aborted) abort()
   const timer = setTimeout(() => {
     expired = true
     void kill()

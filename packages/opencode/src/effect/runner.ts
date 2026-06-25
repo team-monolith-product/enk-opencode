@@ -103,6 +103,10 @@ export namespace Runner {
     const stopShell = (shell: ShellHandle<A, E>) =>
       Effect.gen(function* () {
         shell.abort.abort()
+        // Wait for the shell to exit on its own, then interrupt the fiber. The actual
+        // process kill is guaranteed independently by killTree, which runs
+        // detached/uninterruptible (SIGTERM -> SIGKILL_TIMEOUT_MS grace -> SIGKILL),
+        // so interrupting the fiber here does not abort the kill in flight.
         const exit = yield* Fiber.await(shell.fiber).pipe(Effect.timeoutOption("500 millis"))
         if (Option.isNone(exit)) yield* Fiber.interrupt(shell.fiber)
         yield* Fiber.await(shell.fiber).pipe(Effect.exit, Effect.asVoid)
