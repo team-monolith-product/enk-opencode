@@ -1,22 +1,27 @@
 {
   "permission": "allow",
-  "model": "google/gemini-3.5-flash",
   "plugin": ["./preview-bridge-plugin.js"],
   "provider": {
     "google": {
       "options": {
         "baseURL": "${GEMINI_BASE_URL}",
-        "apiKey": "proxy-auth"
-      }
-    }
+        "apiKey": "proxy-auth",
+      },
+    },
+    "deepseek": {
+      "options": {
+        "baseURL": "${DEEPSEEK_BASE_URL}",
+        "apiKey": "proxy-auth",
+      },
+    },
   },
   "mcp": {
     "playwright": {
       "type": "local",
       "command": ["playwright-mcp", "--headless", "--browser", "chromium"],
-      "enabled": true
-    }
+      "enabled": true,
+    },
   },
   "ensureSession": true,
-  "ensureOneSession": true
+  "ensureOneSession": true,
 }
