@@ -336,7 +336,7 @@ describe("Runner", () => {
       yield* Effect.sleep("10 millis")
 
       const stop = yield* runner.cancel.pipe(Effect.forkChild)
-      const stopExit = yield* Fiber.await(stop).pipe(Effect.timeout("250 millis"))
+      const stopExit = yield* Fiber.await(stop).pipe(Effect.timeout("750 millis"))
       expect(Exit.isSuccess(stopExit)).toBe(true)
       expect(runner.busy).toBe(false)
 

@@ -170,6 +170,31 @@ function toolPart(parts: MessageV2.Part[]) {
   return parts.find((part): part is MessageV2.ToolPart => part.type === "tool")
 }
 
+// Wait until the session runner reaches a given state, instead of relying on a fixed
+// sleep to let a forked shell/loop register. Runner registration is async (a few ms),
+// so a fixed sleep is racy under load — poll the actual state to stay deterministic.
+const waitForRunnerState = (
+  prompt: SessionPrompt.Interface,
+  sessionID: SessionID,
+  tag: "Idle" | "Running" | "Shell" | "ShellThenRun",
+) =>
+  Effect.gen(function* () {
+    while ((yield* prompt.runnerState(sessionID)) !== tag) {
+      yield* Effect.sleep(1)
+    }
+  }).pipe(Effect.timeout("10 seconds"))
+
+// Wait until a forked shell has actually persisted its assistant message. The shell's
+// message writes run asynchronously inside the forked fiber, after the runner registers,
+// so cancelling too early leaves the stream empty and `onInterrupt`/lastAssistant has
+// nothing to resolve with.
+const waitForAssistantMessage = (sessions: Session.Interface, sessionID: SessionID) =>
+  Effect.gen(function* () {
+    while (!(yield* sessions.messages({ sessionID })).some((msg) => msg.info.role === "assistant")) {
+      yield* Effect.sleep(1)
+    }
+  }).pipe(Effect.timeout("10 seconds"))
+
 type CompletedToolPart = MessageV2.ToolPart & { state: MessageV2.ToolStateCompleted }
 type ErrorToolPart = MessageV2.ToolPart & { state: MessageV2.ToolStateError }
 
@@ -1147,15 +1172,18 @@ unix(
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const { prompt, chat } = yield* boot()
+          const { prompt, sessions, chat } = yield* boot()
 
           const sh = yield* prompt
             .shell({ sessionID: chat.id, agent: "build", command: "sleep 30" })
             .pipe(Effect.forkChild)
-          yield* Effect.sleep(50)
+          // Shell registers, then asynchronously persists its assistant message — wait for both
+          // so the queued loop is genuinely behind a running shell that lastAssistant can resolve.
+          yield* waitForRunnerState(prompt, chat.id, "Shell")
+          yield* waitForAssistantMessage(sessions, chat.id)
 
           const run = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-          yield* Effect.sleep(50)
+          yield* waitForRunnerState(prompt, chat.id, "ShellThenRun")
 
           yield* prompt.cancel(chat.id)
 

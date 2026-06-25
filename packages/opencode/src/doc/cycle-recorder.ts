@@ -208,7 +208,7 @@ export function record(db: Database.TxOrDb, info: MessageV2.Info) {
   const cycleValues = {
     session_id: info.sessionID,
     user_message_id: parentID,
-    path: last.data.path?.cwd ?? info.path.cwd ?? null,
+    path: last.data.path?.cwd ?? info.path?.cwd ?? null,
     time_created: promptStart,
     assistant_message_id: last.id,
     response: responses.join("\n\n"),
