@@ -8,9 +8,9 @@ interface ImportMetaEnv {
    */
   readonly VITE_MODEL_PIN: string
   /**
-   * @example VITE_MODEL_PIN_TIER=high
+   * @example VITE_MODEL_PIN_VARIANT=high
    */
-  readonly VITE_MODEL_PIN_TIER: string
+  readonly VITE_MODEL_PIN_VARIANT: string
   /**
    * Set exactly to the string `true` to hide the sticky session title header.
    * @example VITE_DISABLE_SESSION_HEADER=true

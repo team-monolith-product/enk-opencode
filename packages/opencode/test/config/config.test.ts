@@ -2214,4 +2214,67 @@ describe("OPENCODE_CONFIG_CONTENT token substitution", () => {
       }
     }
   })
+
+  test("merges ENK_AI_MODEL when config model is unset", async () => {
+    const prev = process.env["ENK_AI_MODEL"]
+    process.env["ENK_AI_MODEL"] = "anthropic/claude-sonnet-4"
+    await Config.invalidate()
+    try {
+      await using tmp = await tmpdir()
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const config = await Config.get()
+          expect(config.model).toBe("anthropic/claude-sonnet-4")
+        },
+      })
+    } finally {
+      if (prev === undefined) delete process.env["ENK_AI_MODEL"]
+      else process.env["ENK_AI_MODEL"] = prev
+      await Config.invalidate()
+    }
+  })
+
+  test("does not override config model with ENK_AI_MODEL", async () => {
+    const prev = process.env["ENK_AI_MODEL"]
+    process.env["ENK_AI_MODEL"] = "anthropic/claude-sonnet-4"
+    await Config.invalidate()
+    try {
+      await using tmp = await tmpdir({
+        config: { model: "openai/gpt-4o" },
+      })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const config = await Config.get()
+          expect(config.model).toBe("openai/gpt-4o")
+        },
+      })
+    } finally {
+      if (prev === undefined) delete process.env["ENK_AI_MODEL"]
+      else process.env["ENK_AI_MODEL"] = prev
+      await Config.invalidate()
+    }
+  })
+
+  test("merges ENK_AI_MODEL_VARIANT into primary agents when variant unset", async () => {
+    const prev = process.env["ENK_AI_MODEL_VARIANT"]
+    process.env["ENK_AI_MODEL_VARIANT"] = "high"
+    await Config.invalidate()
+    try {
+      await using tmp = await tmpdir()
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const config = await Config.get()
+          expect(config.agent?.build?.variant).toBe("high")
+          expect(config.agent?.plan?.variant).toBe("high")
+        },
+      })
+    } finally {
+      if (prev === undefined) delete process.env["ENK_AI_MODEL_VARIANT"]
+      else process.env["ENK_AI_MODEL_VARIANT"] = prev
+      await Config.invalidate()
+    }
+  })
 })
