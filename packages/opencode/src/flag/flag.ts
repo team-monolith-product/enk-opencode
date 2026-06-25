@@ -54,6 +54,8 @@ export namespace Flag {
   // enk-hackathon-rails AI usage reporting (ai_usages API)
   export const ENK_HACKATHON_RAILS_URL = process.env["ENK_HACKATHON_RAILS_URL"]
   export const ENK_AI_USAGE_TOKEN = process.env["ENK_AI_USAGE_TOKEN"]
+  export declare const ENK_AI_MODEL: string | undefined
+  export declare const ENK_AI_MODEL_VARIANT: string | undefined
 
   // Serve proxy (subdomain routing)
   export const OPENCODE_SERVE_DOMAIN = process.env["OPENCODE_SERVE_DOMAIN"]
@@ -170,6 +172,22 @@ Object.defineProperty(Flag, "OPENCODE_PLUGIN_META_FILE", {
 Object.defineProperty(Flag, "OPENCODE_CLIENT", {
   get() {
     return process.env["OPENCODE_CLIENT"] ?? "cli"
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_AI_MODEL", {
+  get() {
+    return process.env["ENK_AI_MODEL"]
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_AI_MODEL_VARIANT", {
+  get() {
+    return process.env["ENK_AI_MODEL_VARIANT"]
   },
   enumerable: true,
   configurable: false,

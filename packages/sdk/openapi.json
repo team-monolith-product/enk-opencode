@@ -27,7 +27,10 @@
                       "type": "string"
                     }
                   },
-                  "required": ["healthy", "version"]
+                  "required": [
+                    "healthy",
+                    "version"
+                  ]
                 }
               }
             }
@@ -206,7 +209,10 @@
                           "type": "string"
                         }
                       },
-                      "required": ["success", "version"]
+                      "required": [
+                        "success",
+                        "version"
+                      ]
                     },
                     {
                       "type": "object",
@@ -219,7 +225,10 @@
                           "type": "string"
                         }
                       },
-                      "required": ["success", "error"]
+                      "required": [
+                        "success",
+                        "error"
+                      ]
                     }
                   ]
                 }
@@ -412,7 +421,12 @@
                   "level": {
                     "description": "Log level",
                     "type": "string",
-                    "enum": ["debug", "info", "error", "warn"]
+                    "enum": [
+                      "debug",
+                      "info",
+                      "error",
+                      "warn"
+                    ]
                   },
                   "message": {
                     "description": "Log message",
@@ -427,7 +441,11 @@
                     "additionalProperties": {}
                   }
                 },
-                "required": ["service", "level", "message"]
+                "required": [
+                  "service",
+                  "level",
+                  "message"
+                ]
               }
             }
           }
@@ -929,7 +947,10 @@
                         "type": "number"
                       }
                     },
-                    "required": ["rows", "cols"]
+                    "required": [
+                      "rows",
+                      "cols"
+                    ]
                   }
                 }
               }
@@ -1206,7 +1227,10 @@
                       }
                     }
                   },
-                  "required": ["providers", "default"]
+                  "required": [
+                    "providers",
+                    "default"
+                  ]
                 }
               }
             }
@@ -1454,7 +1478,11 @@
                     ]
                   }
                 },
-                "required": ["type", "branch", "extra"]
+                "required": [
+                  "type",
+                  "branch",
+                  "extra"
+                ]
               }
             }
           }
@@ -1929,6 +1957,91 @@
         ]
       }
     },
+    "/project-summary/generate": {
+      "post": {
+        "operationId": "projectSummary.generate",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Generate project summary",
+        "description": "Summarize the given session into a public-gallery project summary (title, description, usage). Runs in the background and is not appended to the session message stream.",
+        "responses": {
+          "200": {
+            "description": "Generated summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionID": {
+                    "type": "string",
+                    "pattern": "^ses.*"
+                  },
+                  "providerID": {
+                    "type": "string"
+                  },
+                  "modelID": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sessionID"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.projectSummary.generate({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/session": {
       "get": {
         "operationId": "session.list",
@@ -2167,7 +2280,9 @@
         ],
         "summary": "Get session",
         "description": "Retrieve detailed information about a specific OpenCode session.",
-        "tags": ["Session"],
+        "tags": [
+          "Session"
+        ],
         "responses": {
           "200": {
             "description": "Get session",
@@ -2395,7 +2510,9 @@
           }
         ],
         "summary": "Get session children",
-        "tags": ["Session"],
+        "tags": [
+          "Session"
+        ],
         "description": "Retrieve all child sessions that were forked from the specified parent session.",
         "responses": {
           "200": {
@@ -2592,7 +2709,11 @@
                     "pattern": "^msg.*"
                   }
                 },
-                "required": ["modelID", "providerID", "messageID"]
+                "required": [
+                  "modelID",
+                  "providerID",
+                  "messageID"
+                ]
               }
             }
           }
@@ -3018,7 +3139,10 @@
                     "type": "boolean"
                   }
                 },
-                "required": ["providerID", "modelID"]
+                "required": [
+                  "providerID",
+                  "modelID"
+                ]
               }
             }
           }
@@ -3098,7 +3222,10 @@
                         }
                       }
                     },
-                    "required": ["info", "parts"]
+                    "required": [
+                      "info",
+                      "parts"
+                    ]
                   }
                 }
               }
@@ -3179,7 +3306,10 @@
                       }
                     }
                   },
-                  "required": ["info", "parts"]
+                  "required": [
+                    "info",
+                    "parts"
+                  ]
                 }
               }
             }
@@ -3225,7 +3355,10 @@
                         "type": "string"
                       }
                     },
-                    "required": ["providerID", "modelID"]
+                    "required": [
+                      "providerID",
+                      "modelID"
+                    ]
                   },
                   "agent": {
                     "type": "string"
@@ -3272,7 +3405,9 @@
                     }
                   }
                 },
-                "required": ["parts"]
+                "required": [
+                  "parts"
+                ]
               }
             }
           }
@@ -3342,7 +3477,10 @@
                       }
                     }
                   },
-                  "required": ["info", "parts"]
+                  "required": [
+                    "info",
+                    "parts"
+                  ]
                 }
               }
             }
@@ -3709,7 +3847,10 @@
                         "type": "string"
                       }
                     },
-                    "required": ["providerID", "modelID"]
+                    "required": [
+                      "providerID",
+                      "modelID"
+                    ]
                   },
                   "agent": {
                     "type": "string"
@@ -3756,7 +3897,9 @@
                     }
                   }
                 },
-                "required": ["parts"]
+                "required": [
+                  "parts"
+                ]
               }
             }
           }
@@ -3817,7 +3960,10 @@
                       }
                     }
                   },
-                  "required": ["info", "parts"]
+                  "required": [
+                    "info",
+                    "parts"
+                  ]
                 }
               }
             }
@@ -3896,13 +4042,20 @@
                               "$ref": "#/components/schemas/FilePartSource"
                             }
                           },
-                          "required": ["type", "mime", "url"]
+                          "required": [
+                            "type",
+                            "mime",
+                            "url"
+                          ]
                         }
                       ]
                     }
                   }
                 },
-                "required": ["arguments", "command"]
+                "required": [
+                  "arguments",
+                  "command"
+                ]
               }
             }
           }
@@ -3996,13 +4149,19 @@
                         "type": "string"
                       }
                     },
-                    "required": ["providerID", "modelID"]
+                    "required": [
+                      "providerID",
+                      "modelID"
+                    ]
                   },
                   "command": {
                     "type": "string"
                   }
                 },
-                "required": ["agent", "command"]
+                "required": [
+                  "agent",
+                  "command"
+                ]
               }
             }
           }
@@ -4092,7 +4251,9 @@
                     "pattern": "^prt.*"
                   }
                 },
-                "required": ["messageID"]
+                "required": [
+                  "messageID"
+                ]
               }
             }
           }
@@ -4255,10 +4416,16 @@
                 "properties": {
                   "response": {
                     "type": "string",
-                    "enum": ["once", "always", "reject"]
+                    "enum": [
+                      "once",
+                      "always",
+                      "reject"
+                    ]
                   }
                 },
-                "required": ["response"]
+                "required": [
+                  "response"
+                ]
               }
             }
           }
@@ -4267,6 +4434,1811 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.permission.respond({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/prompt-doc": {
+      "get": {
+        "operationId": "session.promptDoc",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Get session prompt doc",
+        "description": "Get or create the collaborative prompt doc for a session.",
+        "responses": {
+          "200": {
+            "description": "Prompt doc",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPromptDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/prompt-doc/advance": {
+      "post": {
+        "operationId": "session.promptDoc.advance",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Advance session prompt doc",
+        "description": "Create a new collaborative prompt doc for the session.",
+        "responses": {
+          "200": {
+            "description": "New prompt doc",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPromptDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "clientID": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc.advance({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/prompt-doc/ready": {
+      "post": {
+        "operationId": "session.promptDoc.ready",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Activate session prompt doc",
+        "description": "Mark a collaborative prompt doc as ready for the session and notify connected clients to switch.",
+        "responses": {
+          "200": {
+            "description": "Ready prompt doc",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPromptDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "docID": {
+                    "type": "string",
+                    "pattern": "^doc.*"
+                  },
+                  "clientID": {
+                    "type": "string"
+                  },
+                  "init": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "docID"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc.ready({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/prompt-doc/submit": {
+      "post": {
+        "operationId": "session.promptDoc.submit",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Create prompt doc submit approval",
+        "description": "Create a collaborative prompt doc submit approval request.",
+        "responses": {
+          "200": {
+            "description": "Submit approval state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocSubmit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "docID": {
+                    "type": "string",
+                    "pattern": "^doc.*"
+                  },
+                  "actorID": {
+                    "type": "string",
+                    "pattern": "^act.*"
+                  },
+                  "actorIDs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^act.*"
+                    }
+                  },
+                  "names": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "prompt": {
+                    "type": "object",
+                    "properties": {
+                      "messageID": {
+                        "type": "string",
+                        "pattern": "^msg.*"
+                      },
+                      "model": {
+                        "type": "object",
+                        "properties": {
+                          "providerID": {
+                            "type": "string"
+                          },
+                          "modelID": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "providerID",
+                          "modelID"
+                        ]
+                      },
+                      "agent": {
+                        "type": "string"
+                      },
+                      "noReply": {
+                        "type": "boolean"
+                      },
+                      "tools": {
+                        "description": "@deprecated tools and permissions have been merged, you can set permissions on the session itself now",
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "boolean"
+                        }
+                      },
+                      "format": {
+                        "$ref": "#/components/schemas/OutputFormat"
+                      },
+                      "system": {
+                        "type": "string"
+                      },
+                      "variant": {
+                        "type": "string"
+                      },
+                      "parts": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/components/schemas/TextPartInput"
+                            },
+                            {
+                              "$ref": "#/components/schemas/FilePartInput"
+                            },
+                            {
+                              "$ref": "#/components/schemas/AgentPartInput"
+                            },
+                            {
+                              "$ref": "#/components/schemas/SubtaskPartInput"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "parts"
+                    ]
+                  },
+                  "timeoutMs": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "docID",
+                  "actorID",
+                  "actorIDs",
+                  "prompt"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc.submit({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/prompt-doc/stop": {
+      "post": {
+        "operationId": "session.promptDoc.stop",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Create AI-response stop approval",
+        "description": "Create a collaborative consent vote to stop the session's in-flight AI response.",
+        "responses": {
+          "200": {
+            "description": "Submit approval state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocSubmit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "docID": {
+                    "type": "string",
+                    "pattern": "^doc.*"
+                  },
+                  "actorID": {
+                    "type": "string",
+                    "pattern": "^act.*"
+                  },
+                  "actorIDs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^act.*"
+                    }
+                  },
+                  "names": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "timeoutMs": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "docID",
+                  "actorID",
+                  "actorIDs"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc.stop({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/prompt-doc/submit/{submitID}/respond": {
+      "post": {
+        "operationId": "session.promptDoc.submit.respond",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "submitID",
+            "schema": {
+              "type": "string",
+              "pattern": "^sub.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Respond to prompt doc submit approval",
+        "description": "Approve or cancel a collaborative prompt doc submit approval request.",
+        "responses": {
+          "200": {
+            "description": "Submit approval state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocSubmit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "actorID": {
+                    "type": "string",
+                    "pattern": "^act.*"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "cancel"
+                    ]
+                  }
+                },
+                "required": [
+                  "actorID",
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc.submit.respond({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/prompt-doc/submit/connect": {
+      "get": {
+        "operationId": "session.promptDoc.submit.connect",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "docID",
+            "schema": {
+              "type": "string",
+              "pattern": "^doc.*"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "actorID",
+            "schema": {
+              "type": "string",
+              "pattern": "^act.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Connect to prompt doc submit approvals",
+        "description": "WebSocket connection for prompt doc submit approval lifecycle events.",
+        "responses": {
+          "200": {
+            "description": "Connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc.submit.connect({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/question/submit": {
+      "post": {
+        "operationId": "session.question.submit",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Create question reply submit approval",
+        "description": "Create a collaborative consent vote to send an AI question reply (or dismiss).",
+        "responses": {
+          "200": {
+            "description": "Submit approval state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocSubmit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "requestID": {
+                    "type": "string"
+                  },
+                  "actorID": {
+                    "type": "string",
+                    "pattern": "^act.*"
+                  },
+                  "actorIDs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^act.*"
+                    }
+                  },
+                  "names": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "payload": {
+                    "type": "object",
+                    "properties": {
+                      "requestID": {
+                        "type": "string"
+                      },
+                      "answers": {
+                        "type": "array",
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "reject": {
+                        "type": "boolean"
+                      },
+                      "step": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "requestID"
+                    ]
+                  },
+                  "timeoutMs": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "requestID",
+                  "actorID",
+                  "actorIDs",
+                  "payload"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.question.submit({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/question/submit/{submitID}/respond": {
+      "post": {
+        "operationId": "session.question.submit.respond",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "submitID",
+            "schema": {
+              "type": "string",
+              "pattern": "^sub.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Respond to question reply submit approval",
+        "description": "Approve or cancel a collaborative question reply consent vote.",
+        "responses": {
+          "200": {
+            "description": "Submit approval state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocSubmit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "actorID": {
+                    "type": "string",
+                    "pattern": "^act.*"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "cancel"
+                    ]
+                  }
+                },
+                "required": [
+                  "actorID",
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.question.submit.respond({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/question/submit/connect": {
+      "get": {
+        "operationId": "session.question.submit.connect",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "requestID",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "actorID",
+            "schema": {
+              "type": "string",
+              "pattern": "^act.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Connect to question reply submit approvals",
+        "description": "WebSocket connection for question reply consent vote lifecycle events.",
+        "responses": {
+          "200": {
+            "description": "Connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.question.submit.connect({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/question/draft/connect": {
+      "get": {
+        "operationId": "session.question.draft.connect",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "requestID",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "actorID",
+            "schema": {
+              "type": "string",
+              "pattern": "^act.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Connect to question answer draft",
+        "description": "Bidirectional WebSocket for co-editing a shared question answer draft and presence.",
+        "responses": {
+          "200": {
+            "description": "Connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.question.draft.connect({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/actor": {
+      "post": {
+        "operationId": "session.actor.upsert",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Register session actor",
+        "description": "Register or refresh a collaborative actor for a session.",
+        "responses": {
+          "200": {
+            "description": "Actor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionActor"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "actorID": {
+                    "type": "string",
+                    "pattern": "^act.*"
+                  },
+                  "userID": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "color": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.actor.upsert({\n  ...\n})"
+          }
+        ]
+      },
+      "get": {
+        "operationId": "session.actor.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "List session actors",
+        "description": "List collaborative actors registered for a session.",
+        "responses": {
+          "200": {
+            "description": "Actors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionActor"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.actor.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/doc/cycle": {
+      "get": {
+        "operationId": "doc.cycle.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            }
+          },
+          {
+            "in": "query",
+            "name": "docID",
+            "schema": {
+              "type": "string",
+              "pattern": "^doc.*"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "$ref": "#/components/schemas/PromptCycleStatus"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        ],
+        "summary": "List prompt cycles",
+        "description": "Return whole prompt→response cycles, newest first. Prompt/response text is not truncated.",
+        "responses": {
+          "200": {
+            "description": "Prompt cycles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PromptCycle"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.doc.cycle.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/doc/cycle/{cycleID}": {
+      "get": {
+        "operationId": "doc.cycle.get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cycleID",
+            "schema": {
+              "type": "string",
+              "pattern": "^cyc.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Get a prompt cycle",
+        "description": "Return a single prompt→response cycle with its inputs. Prompt/response text is not truncated.",
+        "responses": {
+          "200": {
+            "description": "Prompt cycle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptCycle"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.doc.cycle.get({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/doc/{docID}/sync": {
+      "get": {
+        "operationId": "doc.sync.pull",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "docID",
+            "schema": {
+              "type": "string",
+              "pattern": "^doc.*"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "guid",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Pull doc sync state",
+        "description": "Return Yjs sync update for a collaborative doc.",
+        "responses": {
+          "200": {
+            "description": "Sync state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "data"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.doc.sync.pull({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "operationId": "doc.sync.push",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "docID",
+            "schema": {
+              "type": "string",
+              "pattern": "^doc.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Push doc sync update",
+        "description": "Apply a Yjs update to a collaborative doc.",
+        "responses": {
+          "204": {
+            "description": "Update applied"
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "data": {
+                    "type": "string"
+                  },
+                  "guid": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "data"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.doc.sync.push({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/doc/{docID}/asset": {
+      "post": {
+        "operationId": "doc.asset.create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "docID",
+            "schema": {
+              "type": "string",
+              "pattern": "^doc.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Upload doc asset",
+        "description": "Store an asset for a collaborative doc.",
+        "responses": {
+          "200": {
+            "description": "Stored asset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocAsset"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "mime": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "data": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "mime",
+                  "data"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.doc.asset.create({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/doc/{docID}/asset/{assetID}": {
+      "get": {
+        "operationId": "doc.asset.get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "docID",
+            "schema": {
+              "type": "string",
+              "pattern": "^doc.*"
+            },
+            "required": true
+          },
+          {
+            "in": "path",
+            "name": "assetID",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "summary": "Get doc asset",
+        "description": "Return a stored asset for a collaborative doc.",
+        "responses": {
+          "200": {
+            "description": "Asset data",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.doc.asset.get({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/doc/{docID}/connect": {
+      "get": {
+        "operationId": "doc.connect",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "docID",
+            "schema": {
+              "type": "string",
+              "pattern": "^doc.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Connect to collaborative doc",
+        "description": "WebSocket connection for real-time doc and awareness sync.",
+        "responses": {
+          "200": {
+            "description": "Connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.doc.connect({\n  ...\n})"
           }
         ]
       }
@@ -4341,13 +6313,19 @@
                 "properties": {
                   "reply": {
                     "type": "string",
-                    "enum": ["once", "always", "reject"]
+                    "enum": [
+                      "once",
+                      "always",
+                      "reject"
+                    ]
                   },
                   "message": {
                     "type": "string"
                   }
                 },
-                "required": ["reply"]
+                "required": [
+                  "reply"
+                ]
               }
             }
           }
@@ -4524,7 +6502,9 @@
                     }
                   }
                 },
-                "required": ["answers"]
+                "required": [
+                  "answers"
+                ]
               }
             }
           }
@@ -4702,10 +6682,15 @@
                                       "properties": {
                                         "field": {
                                           "type": "string",
-                                          "enum": ["reasoning_content", "reasoning_details"]
+                                          "enum": [
+                                            "reasoning_content",
+                                            "reasoning_details"
+                                          ]
                                         }
                                       },
-                                      "required": ["field"],
+                                      "required": [
+                                        "field"
+                                      ],
                                       "additionalProperties": false
                                     }
                                   ]
@@ -4741,10 +6726,16 @@
                                           "type": "number"
                                         }
                                       },
-                                      "required": ["input", "output"]
+                                      "required": [
+                                        "input",
+                                        "output"
+                                      ]
                                     }
                                   },
-                                  "required": ["input", "output"]
+                                  "required": [
+                                    "input",
+                                    "output"
+                                  ]
                                 },
                                 "limit": {
                                   "type": "object",
@@ -4759,7 +6750,10 @@
                                       "type": "number"
                                     }
                                   },
-                                  "required": ["context", "output"]
+                                  "required": [
+                                    "context",
+                                    "output"
+                                  ]
                                 },
                                 "modalities": {
                                   "type": "object",
@@ -4768,25 +6762,44 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string",
-                                        "enum": ["text", "audio", "image", "video", "pdf"]
+                                        "enum": [
+                                          "text",
+                                          "audio",
+                                          "image",
+                                          "video",
+                                          "pdf"
+                                        ]
                                       }
                                     },
                                     "output": {
                                       "type": "array",
                                       "items": {
                                         "type": "string",
-                                        "enum": ["text", "audio", "image", "video", "pdf"]
+                                        "enum": [
+                                          "text",
+                                          "audio",
+                                          "image",
+                                          "video",
+                                          "pdf"
+                                        ]
                                       }
                                     }
                                   },
-                                  "required": ["input", "output"]
+                                  "required": [
+                                    "input",
+                                    "output"
+                                  ]
                                 },
                                 "experimental": {
                                   "type": "boolean"
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["alpha", "beta", "deprecated"]
+                                  "enum": [
+                                    "alpha",
+                                    "beta",
+                                    "deprecated"
+                                  ]
                                 },
                                 "options": {
                                   "type": "object",
@@ -4843,7 +6856,12 @@
                             }
                           }
                         },
-                        "required": ["name", "env", "id", "models"]
+                        "required": [
+                          "name",
+                          "env",
+                          "id",
+                          "models"
+                        ]
                       }
                     },
                     "default": {
@@ -4862,7 +6880,11 @@
                       }
                     }
                   },
-                  "required": ["all", "default", "connected"]
+                  "required": [
+                    "all",
+                    "default",
+                    "connected"
+                  ]
                 }
               }
             }
@@ -4999,7 +7021,9 @@
                     }
                   }
                 },
-                "required": ["method"]
+                "required": [
+                  "method"
+                ]
               }
             }
           }
@@ -5079,7 +7103,9 @@
                     "type": "string"
                   }
                 },
-                "required": ["method"]
+                "required": [
+                  "method"
+                ]
               }
             }
           }
@@ -5138,7 +7164,9 @@
                             "type": "string"
                           }
                         },
-                        "required": ["text"]
+                        "required": [
+                          "text"
+                        ]
                       },
                       "lines": {
                         "type": "object",
@@ -5147,7 +7175,9 @@
                             "type": "string"
                           }
                         },
-                        "required": ["text"]
+                        "required": [
+                          "text"
+                        ]
                       },
                       "line_number": {
                         "type": "number"
@@ -5167,7 +7197,9 @@
                                   "type": "string"
                                 }
                               },
-                              "required": ["text"]
+                              "required": [
+                                "text"
+                              ]
                             },
                             "start": {
                               "type": "number"
@@ -5176,11 +7208,21 @@
                               "type": "number"
                             }
                           },
-                          "required": ["match", "start", "end"]
+                          "required": [
+                            "match",
+                            "start",
+                            "end"
+                          ]
                         }
                       }
                     },
-                    "required": ["path", "lines", "line_number", "absolute_offset", "submatches"]
+                    "required": [
+                      "path",
+                      "lines",
+                      "line_number",
+                      "absolute_offset",
+                      "submatches"
+                    ]
                   }
                 }
               }
@@ -5226,7 +7268,10 @@
             "name": "dirs",
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": [
+                "true",
+                "false"
+              ]
             }
           },
           {
@@ -5234,7 +7279,10 @@
             "name": "type",
             "schema": {
               "type": "string",
-              "enum": ["file", "directory"]
+              "enum": [
+                "file",
+                "directory"
+              ]
             }
           },
           {
@@ -5624,7 +7672,10 @@
                     ]
                   }
                 },
-                "required": ["name", "config"]
+                "required": [
+                  "name",
+                  "config"
+                ]
               }
             }
           }
@@ -5679,7 +7730,9 @@
                       "type": "string"
                     }
                   },
-                  "required": ["authorizationUrl"]
+                  "required": [
+                    "authorizationUrl"
+                  ]
                 }
               }
             }
@@ -5753,7 +7806,9 @@
                       "const": true
                     }
                   },
-                  "required": ["success"]
+                  "required": [
+                    "success"
+                  ]
                 }
               }
             }
@@ -5849,7 +7904,9 @@
                     "type": "string"
                   }
                 },
-                "required": ["code"]
+                "required": [
+                  "code"
+                ]
               }
             }
           }
@@ -6080,7 +8137,9 @@
                     "type": "string"
                   }
                 },
-                "required": ["text"]
+                "required": [
+                  "text"
+                ]
               }
             }
           }
@@ -6392,7 +8451,9 @@
                     "type": "string"
                   }
                 },
-                "required": ["command"]
+                "required": [
+                  "command"
+                ]
               }
             }
           }
@@ -6452,7 +8513,12 @@
                   },
                   "variant": {
                     "type": "string",
-                    "enum": ["info", "success", "warning", "error"]
+                    "enum": [
+                      "info",
+                      "success",
+                      "warning",
+                      "error"
+                    ]
                   },
                   "duration": {
                     "description": "Duration in milliseconds",
@@ -6460,7 +8526,10 @@
                     "type": "number"
                   }
                 },
-                "required": ["message", "variant"]
+                "required": [
+                  "message",
+                  "variant"
+                ]
               }
             }
           }
@@ -6611,7 +8680,9 @@
                     "pattern": "^ses.*"
                   }
                 },
-                "required": ["sessionID"]
+                "required": [
+                  "sessionID"
+                ]
               }
             }
           }
@@ -6658,7 +8729,10 @@
                     },
                     "body": {}
                   },
-                  "required": ["path", "body"]
+                  "required": [
+                    "path",
+                    "body"
+                  ]
                 }
               }
             }
@@ -6975,7 +9049,12 @@
                         "type": "string"
                       }
                     },
-                    "required": ["name", "description", "location", "content"]
+                    "required": [
+                      "name",
+                      "description",
+                      "location",
+                      "content"
+                    ]
                   }
                 }
               }
@@ -7095,10 +9174,15 @@
                 "type": "string"
               }
             },
-            "required": ["version"]
+            "required": [
+              "version"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.installation.update-available": {
         "type": "object",
@@ -7114,10 +9198,15 @@
                 "type": "string"
               }
             },
-            "required": ["version"]
+            "required": [
+              "version"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Project": {
         "type": "object",
@@ -7171,7 +9260,10 @@
                 "type": "number"
               }
             },
-            "required": ["created", "updated"]
+            "required": [
+              "created",
+              "updated"
+            ]
           },
           "sandboxes": {
             "type": "array",
@@ -7180,7 +9272,12 @@
             }
           }
         },
-        "required": ["id", "worktree", "time", "sandboxes"]
+        "required": [
+          "id",
+          "worktree",
+          "time",
+          "sandboxes"
+        ]
       },
       "Event.project.updated": {
         "type": "object",
@@ -7193,7 +9290,10 @@
             "$ref": "#/components/schemas/Project"
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.server.instance.disposed": {
         "type": "object",
@@ -7209,10 +9309,15 @@
                 "type": "string"
               }
             },
-            "required": ["directory"]
+            "required": [
+              "directory"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.server.connected": {
         "type": "object",
@@ -7226,7 +9331,10 @@
             "properties": {}
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.global.disposed": {
         "type": "object",
@@ -7240,7 +9348,10 @@
             "properties": {}
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.lsp.client.diagnostics": {
         "type": "object",
@@ -7259,10 +9370,16 @@
                 "type": "string"
               }
             },
-            "required": ["serverID", "path"]
+            "required": [
+              "serverID",
+              "path"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.lsp.updated": {
         "type": "object",
@@ -7276,7 +9393,10 @@
             "properties": {}
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.message.part.delta": {
         "type": "object",
@@ -7307,10 +9427,19 @@
                 "type": "string"
               }
             },
-            "required": ["sessionID", "messageID", "partID", "field", "delta"]
+            "required": [
+              "sessionID",
+              "messageID",
+              "partID",
+              "field",
+              "delta"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "PermissionRequest": {
         "type": "object",
@@ -7356,10 +9485,20 @@
                 "type": "string"
               }
             },
-            "required": ["messageID", "callID"]
+            "required": [
+              "messageID",
+              "callID"
+            ]
           }
         },
-        "required": ["id", "sessionID", "permission", "patterns", "metadata", "always"]
+        "required": [
+          "id",
+          "sessionID",
+          "permission",
+          "patterns",
+          "metadata",
+          "always"
+        ]
       },
       "Event.permission.asked": {
         "type": "object",
@@ -7372,7 +9511,10 @@
             "$ref": "#/components/schemas/PermissionRequest"
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.permission.replied": {
         "type": "object",
@@ -7394,13 +9536,24 @@
               },
               "reply": {
                 "type": "string",
-                "enum": ["once", "always", "reject"]
+                "enum": [
+                  "once",
+                  "always",
+                  "reject"
+                ]
               }
             },
-            "required": ["sessionID", "requestID", "reply"]
+            "required": [
+              "sessionID",
+              "requestID",
+              "reply"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "SessionStatus": {
         "anyOf": [
@@ -7412,7 +9565,9 @@
                 "const": "idle"
               }
             },
-            "required": ["type"]
+            "required": [
+              "type"
+            ]
           },
           {
             "type": "object",
@@ -7431,7 +9586,12 @@
                 "type": "number"
               }
             },
-            "required": ["type", "attempt", "message", "next"]
+            "required": [
+              "type",
+              "attempt",
+              "message",
+              "next"
+            ]
           },
           {
             "type": "object",
@@ -7441,7 +9601,9 @@
                 "const": "busy"
               }
             },
-            "required": ["type"]
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -7463,10 +9625,16 @@
                 "$ref": "#/components/schemas/SessionStatus"
               }
             },
-            "required": ["sessionID", "status"]
+            "required": [
+              "sessionID",
+              "status"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.session.idle": {
         "type": "object",
@@ -7483,10 +9651,15 @@
                 "pattern": "^ses.*"
               }
             },
-            "required": ["sessionID"]
+            "required": [
+              "sessionID"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "QuestionOption": {
         "type": "object",
@@ -7500,7 +9673,10 @@
             "type": "string"
           }
         },
-        "required": ["label", "description"]
+        "required": [
+          "label",
+          "description"
+        ]
       },
       "QuestionInfo": {
         "type": "object",
@@ -7529,7 +9705,11 @@
             "type": "boolean"
           }
         },
-        "required": ["question", "header", "options"]
+        "required": [
+          "question",
+          "header",
+          "options"
+        ]
       },
       "QuestionRequest": {
         "type": "object",
@@ -7560,10 +9740,17 @@
                 "type": "string"
               }
             },
-            "required": ["messageID", "callID"]
+            "required": [
+              "messageID",
+              "callID"
+            ]
           }
         },
-        "required": ["id", "sessionID", "questions"]
+        "required": [
+          "id",
+          "sessionID",
+          "questions"
+        ]
       },
       "Event.question.asked": {
         "type": "object",
@@ -7576,7 +9763,10 @@
             "$ref": "#/components/schemas/QuestionRequest"
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "QuestionAnswer": {
         "type": "array",
@@ -7609,10 +9799,17 @@
                 }
               }
             },
-            "required": ["sessionID", "requestID", "answers"]
+            "required": [
+              "sessionID",
+              "requestID",
+              "answers"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.question.rejected": {
         "type": "object",
@@ -7633,10 +9830,16 @@
                 "pattern": "^que.*"
               }
             },
-            "required": ["sessionID", "requestID"]
+            "required": [
+              "sessionID",
+              "requestID"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.session.compacted": {
         "type": "object",
@@ -7653,10 +9856,15 @@
                 "pattern": "^ses.*"
               }
             },
-            "required": ["sessionID"]
+            "required": [
+              "sessionID"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.file.edited": {
         "type": "object",
@@ -7672,10 +9880,15 @@
                 "type": "string"
               }
             },
-            "required": ["file"]
+            "required": [
+              "file"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.file.watcher.updated": {
         "type": "object",
@@ -7707,10 +9920,16 @@
                 ]
               }
             },
-            "required": ["file", "event"]
+            "required": [
+              "file",
+              "event"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Todo": {
         "type": "object",
@@ -7728,7 +9947,11 @@
             "type": "string"
           }
         },
-        "required": ["content", "status", "priority"]
+        "required": [
+          "content",
+          "status",
+          "priority"
+        ]
       },
       "Event.todo.updated": {
         "type": "object",
@@ -7751,10 +9974,16 @@
                 }
               }
             },
-            "required": ["sessionID", "todos"]
+            "required": [
+              "sessionID",
+              "todos"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.tui.prompt.append": {
         "type": "object",
@@ -7770,10 +9999,15 @@
                 "type": "string"
               }
             },
-            "required": ["text"]
+            "required": [
+              "text"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.tui.command.execute": {
         "type": "object",
@@ -7814,10 +10048,15 @@
                 ]
               }
             },
-            "required": ["command"]
+            "required": [
+              "command"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.tui.toast.show": {
         "type": "object",
@@ -7837,7 +10076,12 @@
               },
               "variant": {
                 "type": "string",
-                "enum": ["info", "success", "warning", "error"]
+                "enum": [
+                  "info",
+                  "success",
+                  "warning",
+                  "error"
+                ]
               },
               "duration": {
                 "description": "Duration in milliseconds",
@@ -7845,10 +10089,16 @@
                 "type": "number"
               }
             },
-            "required": ["message", "variant"]
+            "required": [
+              "message",
+              "variant"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.tui.session.select": {
         "type": "object",
@@ -7866,10 +10116,15 @@
                 "pattern": "^ses.*"
               }
             },
-            "required": ["sessionID"]
+            "required": [
+              "sessionID"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.mcp.tools.changed": {
         "type": "object",
@@ -7885,10 +10140,15 @@
                 "type": "string"
               }
             },
-            "required": ["server"]
+            "required": [
+              "server"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.mcp.browser.open.failed": {
         "type": "object",
@@ -7907,10 +10167,16 @@
                 "type": "string"
               }
             },
-            "required": ["mcpName", "url"]
+            "required": [
+              "mcpName",
+              "url"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.command.executed": {
         "type": "object",
@@ -7937,10 +10203,18 @@
                 "pattern": "^msg.*"
               }
             },
-            "required": ["name", "sessionID", "arguments", "messageID"]
+            "required": [
+              "name",
+              "sessionID",
+              "arguments",
+              "messageID"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "FileDiff": {
         "type": "object",
@@ -7962,10 +10236,20 @@
           },
           "status": {
             "type": "string",
-            "enum": ["added", "deleted", "modified"]
+            "enum": [
+              "added",
+              "deleted",
+              "modified"
+            ]
           }
         },
-        "required": ["file", "before", "after", "additions", "deletions"]
+        "required": [
+          "file",
+          "before",
+          "after",
+          "additions",
+          "deletions"
+        ]
       },
       "Event.session.diff": {
         "type": "object",
@@ -7988,10 +10272,16 @@
                 }
               }
             },
-            "required": ["sessionID", "diff"]
+            "required": [
+              "sessionID",
+              "diff"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "ProviderAuthError": {
         "type": "object",
@@ -8010,10 +10300,16 @@
                 "type": "string"
               }
             },
-            "required": ["providerID", "message"]
+            "required": [
+              "providerID",
+              "message"
+            ]
           }
         },
-        "required": ["name", "data"]
+        "required": [
+          "name",
+          "data"
+        ]
       },
       "UnknownError": {
         "type": "object",
@@ -8029,10 +10325,15 @@
                 "type": "string"
               }
             },
-            "required": ["message"]
+            "required": [
+              "message"
+            ]
           }
         },
-        "required": ["name", "data"]
+        "required": [
+          "name",
+          "data"
+        ]
       },
       "MessageOutputLengthError": {
         "type": "object",
@@ -8046,7 +10347,10 @@
             "properties": {}
           }
         },
-        "required": ["name", "data"]
+        "required": [
+          "name",
+          "data"
+        ]
       },
       "MessageAbortedError": {
         "type": "object",
@@ -8062,10 +10366,15 @@
                 "type": "string"
               }
             },
-            "required": ["message"]
+            "required": [
+              "message"
+            ]
           }
         },
-        "required": ["name", "data"]
+        "required": [
+          "name",
+          "data"
+        ]
       },
       "StructuredOutputError": {
         "type": "object",
@@ -8084,10 +10393,16 @@
                 "type": "number"
               }
             },
-            "required": ["message", "retries"]
+            "required": [
+              "message",
+              "retries"
+            ]
           }
         },
-        "required": ["name", "data"]
+        "required": [
+          "name",
+          "data"
+        ]
       },
       "ContextOverflowError": {
         "type": "object",
@@ -8106,10 +10421,15 @@
                 "type": "string"
               }
             },
-            "required": ["message"]
+            "required": [
+              "message"
+            ]
           }
         },
-        "required": ["name", "data"]
+        "required": [
+          "name",
+          "data"
+        ]
       },
       "APIError": {
         "type": "object",
@@ -8152,10 +10472,16 @@
                 }
               }
             },
-            "required": ["message", "isRetryable"]
+            "required": [
+              "message",
+              "isRetryable"
+            ]
           }
         },
-        "required": ["name", "data"]
+        "required": [
+          "name",
+          "data"
+        ]
       },
       "Event.session.error": {
         "type": "object",
@@ -8199,7 +10525,46 @@
             }
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
+      },
+      "Event.doc.prompt.rotated": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "doc.prompt.rotated"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "docID": {
+                "type": "string",
+                "pattern": "^doc.*"
+              },
+              "clientID": {
+                "type": "string"
+              },
+              "init": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "sessionID",
+              "docID"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.vcs.branch.updated": {
         "type": "object",
@@ -8217,7 +10582,10 @@
             }
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.workspace.ready": {
         "type": "object",
@@ -8233,10 +10601,15 @@
                 "type": "string"
               }
             },
-            "required": ["name"]
+            "required": [
+              "name"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.workspace.failed": {
         "type": "object",
@@ -8252,10 +10625,15 @@
                 "type": "string"
               }
             },
-            "required": ["message"]
+            "required": [
+              "message"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Pty": {
         "type": "object",
@@ -8281,13 +10659,24 @@
           },
           "status": {
             "type": "string",
-            "enum": ["running", "exited"]
+            "enum": [
+              "running",
+              "exited"
+            ]
           },
           "pid": {
             "type": "number"
           }
         },
-        "required": ["id", "title", "command", "args", "cwd", "status", "pid"]
+        "required": [
+          "id",
+          "title",
+          "command",
+          "args",
+          "cwd",
+          "status",
+          "pid"
+        ]
       },
       "Event.pty.created": {
         "type": "object",
@@ -8303,10 +10692,15 @@
                 "$ref": "#/components/schemas/Pty"
               }
             },
-            "required": ["info"]
+            "required": [
+              "info"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.pty.updated": {
         "type": "object",
@@ -8322,10 +10716,15 @@
                 "$ref": "#/components/schemas/Pty"
               }
             },
-            "required": ["info"]
+            "required": [
+              "info"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.pty.exited": {
         "type": "object",
@@ -8345,10 +10744,16 @@
                 "type": "number"
               }
             },
-            "required": ["id", "exitCode"]
+            "required": [
+              "id",
+              "exitCode"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.pty.deleted": {
         "type": "object",
@@ -8365,10 +10770,15 @@
                 "pattern": "^pty.*"
               }
             },
-            "required": ["id"]
+            "required": [
+              "id"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.worktree.ready": {
         "type": "object",
@@ -8387,10 +10797,16 @@
                 "type": "string"
               }
             },
-            "required": ["name", "branch"]
+            "required": [
+              "name",
+              "branch"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.worktree.failed": {
         "type": "object",
@@ -8406,10 +10822,15 @@
                 "type": "string"
               }
             },
-            "required": ["message"]
+            "required": [
+              "message"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "OutputFormatText": {
         "type": "object",
@@ -8419,7 +10840,9 @@
             "const": "text"
           }
         },
-        "required": ["type"]
+        "required": [
+          "type"
+        ]
       },
       "JSONSchema": {
         "type": "object",
@@ -8445,7 +10868,10 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["type", "schema"]
+        "required": [
+          "type",
+          "schema"
+        ]
       },
       "OutputFormat": {
         "anyOf": [
@@ -8479,7 +10905,9 @@
                 "type": "number"
               }
             },
-            "required": ["created"]
+            "required": [
+              "created"
+            ]
           },
           "format": {
             "$ref": "#/components/schemas/OutputFormat"
@@ -8500,7 +10928,9 @@
                 }
               }
             },
-            "required": ["diffs"]
+            "required": [
+              "diffs"
+            ]
           },
           "agent": {
             "type": "string"
@@ -8515,7 +10945,10 @@
                 "type": "string"
               }
             },
-            "required": ["providerID", "modelID"]
+            "required": [
+              "providerID",
+              "modelID"
+            ]
           },
           "system": {
             "type": "string"
@@ -8533,7 +10966,14 @@
             "type": "string"
           }
         },
-        "required": ["id", "sessionID", "role", "time", "agent", "model"]
+        "required": [
+          "id",
+          "sessionID",
+          "role",
+          "time",
+          "agent",
+          "model"
+        ]
       },
       "AssistantMessage": {
         "type": "object",
@@ -8560,7 +11000,9 @@
                 "type": "number"
               }
             },
-            "required": ["created"]
+            "required": [
+              "created"
+            ]
           },
           "error": {
             "anyOf": [
@@ -8613,7 +11055,10 @@
                 "type": "string"
               }
             },
-            "required": ["cwd", "root"]
+            "required": [
+              "cwd",
+              "root"
+            ]
           },
           "summary": {
             "type": "boolean"
@@ -8646,10 +11091,18 @@
                     "type": "number"
                   }
                 },
-                "required": ["read", "write"]
+                "required": [
+                  "read",
+                  "write"
+                ]
               }
             },
-            "required": ["input", "output", "reasoning", "cache"]
+            "required": [
+              "input",
+              "output",
+              "reasoning",
+              "cache"
+            ]
           },
           "structured": {},
           "variant": {
@@ -8702,10 +11155,16 @@
                 "$ref": "#/components/schemas/Message"
               }
             },
-            "required": ["sessionID", "info"]
+            "required": [
+              "sessionID",
+              "info"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.message.removed": {
         "type": "object",
@@ -8726,10 +11185,16 @@
                 "pattern": "^msg.*"
               }
             },
-            "required": ["sessionID", "messageID"]
+            "required": [
+              "sessionID",
+              "messageID"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "TextPart": {
         "type": "object",
@@ -8769,7 +11234,9 @@
                 "type": "number"
               }
             },
-            "required": ["start"]
+            "required": [
+              "start"
+            ]
           },
           "metadata": {
             "type": "object",
@@ -8779,7 +11246,13 @@
             "additionalProperties": {}
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "text"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "text"
+        ]
       },
       "SubtaskPart": {
         "type": "object",
@@ -8819,13 +11292,24 @@
                 "type": "string"
               }
             },
-            "required": ["providerID", "modelID"]
+            "required": [
+              "providerID",
+              "modelID"
+            ]
           },
           "command": {
             "type": "string"
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "prompt", "description", "agent"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "prompt",
+          "description",
+          "agent"
+        ]
       },
       "ReasoningPart": {
         "type": "object",
@@ -8866,10 +11350,19 @@
                 "type": "number"
               }
             },
-            "required": ["start"]
+            "required": [
+              "start"
+            ]
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "text", "time"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "text",
+          "time"
+        ]
       },
       "FilePartSourceText": {
         "type": "object",
@@ -8888,7 +11381,11 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["value", "start", "end"]
+        "required": [
+          "value",
+          "start",
+          "end"
+        ]
       },
       "FileSource": {
         "type": "object",
@@ -8904,7 +11401,11 @@
             "type": "string"
           }
         },
-        "required": ["text", "type", "path"]
+        "required": [
+          "text",
+          "type",
+          "path"
+        ]
       },
       "Range": {
         "type": "object",
@@ -8919,7 +11420,10 @@
                 "type": "number"
               }
             },
-            "required": ["line", "character"]
+            "required": [
+              "line",
+              "character"
+            ]
           },
           "end": {
             "type": "object",
@@ -8931,10 +11435,16 @@
                 "type": "number"
               }
             },
-            "required": ["line", "character"]
+            "required": [
+              "line",
+              "character"
+            ]
           }
         },
-        "required": ["start", "end"]
+        "required": [
+          "start",
+          "end"
+        ]
       },
       "SymbolSource": {
         "type": "object",
@@ -8961,7 +11471,14 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["text", "type", "path", "range", "name", "kind"]
+        "required": [
+          "text",
+          "type",
+          "path",
+          "range",
+          "name",
+          "kind"
+        ]
       },
       "ResourceSource": {
         "type": "object",
@@ -8980,7 +11497,12 @@
             "type": "string"
           }
         },
-        "required": ["text", "type", "clientName", "uri"]
+        "required": [
+          "text",
+          "type",
+          "clientName",
+          "uri"
+        ]
       },
       "FilePartSource": {
         "anyOf": [
@@ -9027,7 +11549,14 @@
             "$ref": "#/components/schemas/FilePartSource"
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "mime", "url"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "mime",
+          "url"
+        ]
       },
       "ToolStatePending": {
         "type": "object",
@@ -9047,7 +11576,11 @@
             "type": "string"
           }
         },
-        "required": ["status", "input", "raw"]
+        "required": [
+          "status",
+          "input",
+          "raw"
+        ]
       },
       "ToolStateRunning": {
         "type": "object",
@@ -9080,10 +11613,16 @@
                 "type": "number"
               }
             },
-            "required": ["start"]
+            "required": [
+              "start"
+            ]
           }
         },
-        "required": ["status", "input", "time"]
+        "required": [
+          "status",
+          "input",
+          "time"
+        ]
       },
       "ToolStateCompleted": {
         "type": "object",
@@ -9125,7 +11664,10 @@
                 "type": "number"
               }
             },
-            "required": ["start", "end"]
+            "required": [
+              "start",
+              "end"
+            ]
           },
           "attachments": {
             "type": "array",
@@ -9134,7 +11676,14 @@
             }
           }
         },
-        "required": ["status", "input", "output", "title", "metadata", "time"]
+        "required": [
+          "status",
+          "input",
+          "output",
+          "title",
+          "metadata",
+          "time"
+        ]
       },
       "ToolStateError": {
         "type": "object",
@@ -9170,10 +11719,18 @@
                 "type": "number"
               }
             },
-            "required": ["start", "end"]
+            "required": [
+              "start",
+              "end"
+            ]
           }
         },
-        "required": ["status", "input", "error", "time"]
+        "required": [
+          "status",
+          "input",
+          "error",
+          "time"
+        ]
       },
       "ToolState": {
         "anyOf": [
@@ -9227,7 +11784,15 @@
             "additionalProperties": {}
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "callID", "tool", "state"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "callID",
+          "tool",
+          "state"
+        ]
       },
       "StepStartPart": {
         "type": "object",
@@ -9252,7 +11817,12 @@
             "type": "string"
           }
         },
-        "required": ["id", "sessionID", "messageID", "type"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type"
+        ]
       },
       "StepFinishPart": {
         "type": "object",
@@ -9307,13 +11877,29 @@
                     "type": "number"
                   }
                 },
-                "required": ["read", "write"]
+                "required": [
+                  "read",
+                  "write"
+                ]
               }
             },
-            "required": ["input", "output", "reasoning", "cache"]
+            "required": [
+              "input",
+              "output",
+              "reasoning",
+              "cache"
+            ]
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "reason", "cost", "tokens"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "reason",
+          "cost",
+          "tokens"
+        ]
       },
       "SnapshotPart": {
         "type": "object",
@@ -9338,7 +11924,13 @@
             "type": "string"
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "snapshot"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "snapshot"
+        ]
       },
       "PatchPart": {
         "type": "object",
@@ -9369,7 +11961,14 @@
             }
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "hash", "files"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "hash",
+          "files"
+        ]
       },
       "AgentPart": {
         "type": "object",
@@ -9410,10 +12009,20 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": ["value", "start", "end"]
+            "required": [
+              "value",
+              "start",
+              "end"
+            ]
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "name"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "name"
+        ]
       },
       "RetryPart": {
         "type": "object",
@@ -9447,10 +12056,20 @@
                 "type": "number"
               }
             },
-            "required": ["created"]
+            "required": [
+              "created"
+            ]
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "attempt", "error", "time"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "attempt",
+          "error",
+          "time"
+        ]
       },
       "CompactionPart": {
         "type": "object",
@@ -9478,7 +12097,13 @@
             "type": "boolean"
           }
         },
-        "required": ["id", "sessionID", "messageID", "type", "auto"]
+        "required": [
+          "id",
+          "sessionID",
+          "messageID",
+          "type",
+          "auto"
+        ]
       },
       "Part": {
         "anyOf": [
@@ -9541,10 +12166,17 @@
                 "type": "number"
               }
             },
-            "required": ["sessionID", "part", "time"]
+            "required": [
+              "sessionID",
+              "part",
+              "time"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.message.part.removed": {
         "type": "object",
@@ -9569,14 +12201,25 @@
                 "pattern": "^prt.*"
               }
             },
-            "required": ["sessionID", "messageID", "partID"]
+            "required": [
+              "sessionID",
+              "messageID",
+              "partID"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "PermissionAction": {
         "type": "string",
-        "enum": ["allow", "deny", "ask"]
+        "enum": [
+          "allow",
+          "deny",
+          "ask"
+        ]
       },
       "PermissionRule": {
         "type": "object",
@@ -9591,7 +12234,11 @@
             "$ref": "#/components/schemas/PermissionAction"
           }
         },
-        "required": ["permission", "pattern", "action"]
+        "required": [
+          "permission",
+          "pattern",
+          "action"
+        ]
       },
       "PermissionRuleset": {
         "type": "array",
@@ -9642,7 +12289,11 @@
                 }
               }
             },
-            "required": ["additions", "deletions", "files"]
+            "required": [
+              "additions",
+              "deletions",
+              "files"
+            ]
           },
           "share": {
             "type": "object",
@@ -9651,7 +12302,9 @@
                 "type": "string"
               }
             },
-            "required": ["url"]
+            "required": [
+              "url"
+            ]
           },
           "title": {
             "type": "string"
@@ -9675,7 +12328,10 @@
                 "type": "number"
               }
             },
-            "required": ["created", "updated"]
+            "required": [
+              "created",
+              "updated"
+            ]
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
@@ -9698,10 +12354,20 @@
                 "type": "string"
               }
             },
-            "required": ["messageID"]
+            "required": [
+              "messageID"
+            ]
           }
         },
-        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"]
+        "required": [
+          "id",
+          "slug",
+          "projectID",
+          "directory",
+          "title",
+          "version",
+          "time"
+        ]
       },
       "Event.session.created": {
         "type": "object",
@@ -9721,10 +12387,16 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": ["sessionID", "info"]
+            "required": [
+              "sessionID",
+              "info"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.session.updated": {
         "type": "object",
@@ -9744,10 +12416,16 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": ["sessionID", "info"]
+            "required": [
+              "sessionID",
+              "info"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event.session.deleted": {
         "type": "object",
@@ -9767,10 +12445,16 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": ["sessionID", "info"]
+            "required": [
+              "sessionID",
+              "info"
+            ]
           }
         },
-        "required": ["type", "properties"]
+        "required": [
+          "type",
+          "properties"
+        ]
       },
       "Event": {
         "anyOf": [
@@ -9862,6 +12546,9 @@
             "$ref": "#/components/schemas/Event.session.error"
           },
           {
+            "$ref": "#/components/schemas/Event.doc.prompt.rotated"
+          },
+          {
             "$ref": "#/components/schemas/Event.vcs.branch.updated"
           },
           {
@@ -9921,7 +12608,10 @@
             "$ref": "#/components/schemas/Event"
           }
         },
-        "required": ["directory", "payload"]
+        "required": [
+          "directory",
+          "payload"
+        ]
       },
       "SyncEvent.message.updated": {
         "type": "object",
@@ -9945,10 +12635,17 @@
                 "$ref": "#/components/schemas/Message"
               }
             },
-            "required": ["sessionID", "info"]
+            "required": [
+              "sessionID",
+              "info"
+            ]
           }
         },
-        "required": ["type", "aggregate", "data"]
+        "required": [
+          "type",
+          "aggregate",
+          "data"
+        ]
       },
       "SyncEvent.message.removed": {
         "type": "object",
@@ -9973,10 +12670,17 @@
                 "pattern": "^msg.*"
               }
             },
-            "required": ["sessionID", "messageID"]
+            "required": [
+              "sessionID",
+              "messageID"
+            ]
           }
         },
-        "required": ["type", "aggregate", "data"]
+        "required": [
+          "type",
+          "aggregate",
+          "data"
+        ]
       },
       "SyncEvent.message.part.updated": {
         "type": "object",
@@ -10003,10 +12707,18 @@
                 "type": "number"
               }
             },
-            "required": ["sessionID", "part", "time"]
+            "required": [
+              "sessionID",
+              "part",
+              "time"
+            ]
           }
         },
-        "required": ["type", "aggregate", "data"]
+        "required": [
+          "type",
+          "aggregate",
+          "data"
+        ]
       },
       "SyncEvent.message.part.removed": {
         "type": "object",
@@ -10035,10 +12747,18 @@
                 "pattern": "^prt.*"
               }
             },
-            "required": ["sessionID", "messageID", "partID"]
+            "required": [
+              "sessionID",
+              "messageID",
+              "partID"
+            ]
           }
         },
-        "required": ["type", "aggregate", "data"]
+        "required": [
+          "type",
+          "aggregate",
+          "data"
+        ]
       },
       "SyncEvent.session.created": {
         "type": "object",
@@ -10062,10 +12782,17 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": ["sessionID", "info"]
+            "required": [
+              "sessionID",
+              "info"
+            ]
           }
         },
-        "required": ["type", "aggregate", "data"]
+        "required": [
+          "type",
+          "aggregate",
+          "data"
+        ]
       },
       "SyncEvent.session.updated": {
         "type": "object",
@@ -10172,7 +12899,11 @@
                             }
                           }
                         },
-                        "required": ["additions", "deletions", "files"]
+                        "required": [
+                          "additions",
+                          "deletions",
+                          "files"
+                        ]
                       },
                       {
                         "type": "null"
@@ -10193,7 +12924,9 @@
                         ]
                       }
                     },
-                    "required": ["url"]
+                    "required": [
+                      "url"
+                    ]
                   },
                   "title": {
                     "anyOf": [
@@ -10259,7 +12992,12 @@
                         ]
                       }
                     },
-                    "required": ["created", "updated", "compacting", "archived"]
+                    "required": [
+                      "created",
+                      "updated",
+                      "compacting",
+                      "archived"
+                    ]
                   },
                   "permission": {
                     "anyOf": [
@@ -10291,7 +13029,9 @@
                             "type": "string"
                           }
                         },
-                        "required": ["messageID"]
+                        "required": [
+                          "messageID"
+                        ]
                       },
                       {
                         "type": "null"
@@ -10314,10 +13054,17 @@
                 ]
               }
             },
-            "required": ["sessionID", "info"]
+            "required": [
+              "sessionID",
+              "info"
+            ]
           }
         },
-        "required": ["type", "aggregate", "data"]
+        "required": [
+          "type",
+          "aggregate",
+          "data"
+        ]
       },
       "SyncEvent.session.deleted": {
         "type": "object",
@@ -10341,10 +13088,17 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": ["sessionID", "info"]
+            "required": [
+              "sessionID",
+              "info"
+            ]
           }
         },
-        "required": ["type", "aggregate", "data"]
+        "required": [
+          "type",
+          "aggregate",
+          "data"
+        ]
       },
       "SyncEvent": {
         "type": "object",
@@ -10353,12 +13107,19 @@
             "$ref": "#/components/schemas/SyncEvent"
           }
         },
-        "required": ["payload"]
+        "required": [
+          "payload"
+        ]
       },
       "LogLevel": {
         "description": "Log level",
         "type": "string",
-        "enum": ["DEBUG", "INFO", "WARN", "ERROR"]
+        "enum": [
+          "DEBUG",
+          "INFO",
+          "WARN",
+          "ERROR"
+        ]
       },
       "ServerConfig": {
         "description": "Server configuration for opencode serve and web commands",
@@ -10398,7 +13159,11 @@
       },
       "PermissionActionConfig": {
         "type": "string",
-        "enum": ["ask", "allow", "deny"]
+        "enum": [
+          "ask",
+          "allow",
+          "deny"
+        ]
       },
       "PermissionObjectConfig": {
         "type": "object",
@@ -10526,7 +13291,11 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["subagent", "primary", "all"]
+            "enum": [
+              "subagent",
+              "primary",
+              "all"
+            ]
           },
           "hidden": {
             "description": "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
@@ -10548,7 +13317,15 @@
               },
               {
                 "type": "string",
-                "enum": ["primary", "secondary", "accent", "success", "warning", "error", "info"]
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "success",
+                  "warning",
+                  "error",
+                  "info"
+                ]
               }
             ]
           },
@@ -10634,10 +13411,15 @@
                       "properties": {
                         "field": {
                           "type": "string",
-                          "enum": ["reasoning_content", "reasoning_details"]
+                          "enum": [
+                            "reasoning_content",
+                            "reasoning_details"
+                          ]
                         }
                       },
-                      "required": ["field"],
+                      "required": [
+                        "field"
+                      ],
                       "additionalProperties": false
                     }
                   ]
@@ -10673,10 +13455,16 @@
                           "type": "number"
                         }
                       },
-                      "required": ["input", "output"]
+                      "required": [
+                        "input",
+                        "output"
+                      ]
                     }
                   },
-                  "required": ["input", "output"]
+                  "required": [
+                    "input",
+                    "output"
+                  ]
                 },
                 "limit": {
                   "type": "object",
@@ -10691,7 +13479,10 @@
                       "type": "number"
                     }
                   },
-                  "required": ["context", "output"]
+                  "required": [
+                    "context",
+                    "output"
+                  ]
                 },
                 "modalities": {
                   "type": "object",
@@ -10700,25 +13491,44 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["text", "audio", "image", "video", "pdf"]
+                        "enum": [
+                          "text",
+                          "audio",
+                          "image",
+                          "video",
+                          "pdf"
+                        ]
                       }
                     },
                     "output": {
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": ["text", "audio", "image", "video", "pdf"]
+                        "enum": [
+                          "text",
+                          "audio",
+                          "image",
+                          "video",
+                          "pdf"
+                        ]
                       }
                     }
                   },
-                  "required": ["input", "output"]
+                  "required": [
+                    "input",
+                    "output"
+                  ]
                 },
                 "experimental": {
                   "type": "boolean"
                 },
                 "status": {
                   "type": "string",
-                  "enum": ["alpha", "beta", "deprecated"]
+                  "enum": [
+                    "alpha",
+                    "beta",
+                    "deprecated"
+                  ]
                 },
                 "options": {
                   "type": "object",
@@ -10860,7 +13670,10 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["type", "command"],
+        "required": [
+          "type",
+          "command"
+        ],
         "additionalProperties": false
       },
       "McpOAuthConfig": {
@@ -10926,13 +13739,19 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["type", "url"],
+        "required": [
+          "type",
+          "url"
+        ],
         "additionalProperties": false
       },
       "LayoutConfig": {
         "description": "@deprecated Always uses stretch layout.",
         "type": "string",
-        "enum": ["auto", "stretch"]
+        "enum": [
+          "auto",
+          "stretch"
+        ]
       },
       "Config": {
         "type": "object",
@@ -10972,7 +13791,9 @@
                   "type": "boolean"
                 }
               },
-              "required": ["template"]
+              "required": [
+                "template"
+              ]
             }
           },
           "skills": {
@@ -11038,7 +13859,11 @@
           "share": {
             "description": "Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing",
             "type": "string",
-            "enum": ["manual", "auto", "disabled"]
+            "enum": [
+              "manual",
+              "auto",
+              "disabled"
+            ]
           },
           "autoshare": {
             "description": "@deprecated Use 'share' field instead. Share newly created sessions automatically",
@@ -11166,7 +13991,9 @@
                       "type": "boolean"
                     }
                   },
-                  "required": ["enabled"],
+                  "required": [
+                    "enabled"
+                  ],
                   "additionalProperties": false
                 }
               ]
@@ -11236,7 +14063,9 @@
                           "const": true
                         }
                       },
-                      "required": ["disabled"]
+                      "required": [
+                        "disabled"
+                      ]
                     },
                     {
                       "type": "object",
@@ -11273,7 +14102,9 @@
                           "additionalProperties": {}
                         }
                       },
-                      "required": ["command"]
+                      "required": [
+                        "command"
+                      ]
                     }
                   ]
                 }
@@ -11330,6 +14161,14 @@
               }
             }
           },
+          "ensureSession": {
+            "description": "Create a root session on first instance bootstrap when none exist",
+            "type": "boolean"
+          },
+          "ensureOneSession": {
+            "description": "When true, only one active main session per directory; duplicate creates return existing or wait",
+            "type": "boolean"
+          },
           "experimental": {
             "type": "object",
             "properties": {
@@ -11385,7 +14224,11 @@
             "const": false
           }
         },
-        "required": ["data", "errors", "success"]
+        "required": [
+          "data",
+          "errors",
+          "success"
+        ]
       },
       "OAuth": {
         "type": "object",
@@ -11410,7 +14253,12 @@
             "type": "string"
           }
         },
-        "required": ["type", "refresh", "access", "expires"]
+        "required": [
+          "type",
+          "refresh",
+          "access",
+          "expires"
+        ]
       },
       "ApiAuth": {
         "type": "object",
@@ -11423,7 +14271,10 @@
             "type": "string"
           }
         },
-        "required": ["type", "key"]
+        "required": [
+          "type",
+          "key"
+        ]
       },
       "WellKnownAuth": {
         "type": "object",
@@ -11439,7 +14290,11 @@
             "type": "string"
           }
         },
-        "required": ["type", "key", "token"]
+        "required": [
+          "type",
+          "key",
+          "token"
+        ]
       },
       "Auth": {
         "anyOf": [
@@ -11468,10 +14323,15 @@
                 "type": "string"
               }
             },
-            "required": ["message"]
+            "required": [
+              "message"
+            ]
           }
         },
-        "required": ["name", "data"]
+        "required": [
+          "name",
+          "data"
+        ]
       },
       "Model": {
         "type": "object",
@@ -11495,7 +14355,11 @@
                 "type": "string"
               }
             },
-            "required": ["id", "url", "npm"]
+            "required": [
+              "id",
+              "url",
+              "npm"
+            ]
           },
           "name": {
             "type": "string"
@@ -11537,7 +14401,13 @@
                     "type": "boolean"
                   }
                 },
-                "required": ["text", "audio", "image", "video", "pdf"]
+                "required": [
+                  "text",
+                  "audio",
+                  "image",
+                  "video",
+                  "pdf"
+                ]
               },
               "output": {
                 "type": "object",
@@ -11558,7 +14428,13 @@
                     "type": "boolean"
                   }
                 },
-                "required": ["text", "audio", "image", "video", "pdf"]
+                "required": [
+                  "text",
+                  "audio",
+                  "image",
+                  "video",
+                  "pdf"
+                ]
               },
               "interleaved": {
                 "anyOf": [
@@ -11570,15 +14446,28 @@
                     "properties": {
                       "field": {
                         "type": "string",
-                        "enum": ["reasoning_content", "reasoning_details"]
+                        "enum": [
+                          "reasoning_content",
+                          "reasoning_details"
+                        ]
                       }
                     },
-                    "required": ["field"]
+                    "required": [
+                      "field"
+                    ]
                   }
                 ]
               }
             },
-            "required": ["temperature", "reasoning", "attachment", "toolcall", "input", "output", "interleaved"]
+            "required": [
+              "temperature",
+              "reasoning",
+              "attachment",
+              "toolcall",
+              "input",
+              "output",
+              "interleaved"
+            ]
           },
           "cost": {
             "type": "object",
@@ -11599,7 +14488,10 @@
                     "type": "number"
                   }
                 },
-                "required": ["read", "write"]
+                "required": [
+                  "read",
+                  "write"
+                ]
               },
               "experimentalOver200K": {
                 "type": "object",
@@ -11620,13 +14512,24 @@
                         "type": "number"
                       }
                     },
-                    "required": ["read", "write"]
+                    "required": [
+                      "read",
+                      "write"
+                    ]
                   }
                 },
-                "required": ["input", "output", "cache"]
+                "required": [
+                  "input",
+                  "output",
+                  "cache"
+                ]
               }
             },
-            "required": ["input", "output", "cache"]
+            "required": [
+              "input",
+              "output",
+              "cache"
+            ]
           },
           "limit": {
             "type": "object",
@@ -11641,11 +14544,19 @@
                 "type": "number"
               }
             },
-            "required": ["context", "output"]
+            "required": [
+              "context",
+              "output"
+            ]
           },
           "status": {
             "type": "string",
-            "enum": ["alpha", "beta", "deprecated", "active"]
+            "enum": [
+              "alpha",
+              "beta",
+              "deprecated",
+              "active"
+            ]
           },
           "options": {
             "type": "object",
@@ -11705,7 +14616,12 @@
           },
           "source": {
             "type": "string",
-            "enum": ["env", "config", "custom", "api"]
+            "enum": [
+              "env",
+              "config",
+              "custom",
+              "api"
+            ]
           },
           "env": {
             "type": "array",
@@ -11733,7 +14649,14 @@
             }
           }
         },
-        "required": ["id", "name", "source", "env", "options", "models"]
+        "required": [
+          "id",
+          "name",
+          "source",
+          "env",
+          "options",
+          "models"
+        ]
       },
       "Env": {
         "type": "object",
@@ -11742,6 +14665,15 @@
             "type": "string"
           },
           "jupyterhubUser": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "aiModel": {
+            "type": "string"
+          },
+          "aiModelVariant": {
             "type": "string"
           }
         }
@@ -11763,7 +14695,11 @@
           },
           "parameters": {}
         },
-        "required": ["id", "description", "parameters"]
+        "required": [
+          "id",
+          "description",
+          "parameters"
+        ]
       },
       "ToolList": {
         "type": "array",
@@ -11823,7 +14759,15 @@
             "type": "string"
           }
         },
-        "required": ["id", "type", "branch", "name", "directory", "extra", "projectID"]
+        "required": [
+          "id",
+          "type",
+          "branch",
+          "name",
+          "directory",
+          "extra",
+          "projectID"
+        ]
       },
       "Worktree": {
         "type": "object",
@@ -11838,7 +14782,11 @@
             "type": "string"
           }
         },
-        "required": ["name", "branch", "directory"]
+        "required": [
+          "name",
+          "branch",
+          "directory"
+        ]
       },
       "WorktreeCreateInput": {
         "type": "object",
@@ -11859,7 +14807,9 @@
             "type": "string"
           }
         },
-        "required": ["directory"]
+        "required": [
+          "directory"
+        ]
       },
       "WorktreeResetInput": {
         "type": "object",
@@ -11868,22 +14818,28 @@
             "type": "string"
           }
         },
-        "required": ["directory"]
+        "required": [
+          "directory"
+        ]
       },
       "ProjectSummary": {
         "type": "object",
         "properties": {
-          "id": {
+          "title": {
             "type": "string"
           },
-          "name": {
+          "description": {
             "type": "string"
           },
-          "worktree": {
+          "usage": {
             "type": "string"
           }
         },
-        "required": ["id", "worktree"]
+        "required": [
+          "title",
+          "description",
+          "usage"
+        ]
       },
       "GlobalSession": {
         "type": "object",
@@ -11928,7 +14884,11 @@
                 }
               }
             },
-            "required": ["additions", "deletions", "files"]
+            "required": [
+              "additions",
+              "deletions",
+              "files"
+            ]
           },
           "share": {
             "type": "object",
@@ -11937,7 +14897,9 @@
                 "type": "string"
               }
             },
-            "required": ["url"]
+            "required": [
+              "url"
+            ]
           },
           "title": {
             "type": "string"
@@ -11961,7 +14923,10 @@
                 "type": "number"
               }
             },
-            "required": ["created", "updated"]
+            "required": [
+              "created",
+              "updated"
+            ]
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
@@ -11984,7 +14949,9 @@
                 "type": "string"
               }
             },
-            "required": ["messageID"]
+            "required": [
+              "messageID"
+            ]
           },
           "project": {
             "anyOf": [
@@ -11997,7 +14964,16 @@
             ]
           }
         },
-        "required": ["id", "slug", "projectID", "directory", "title", "version", "time", "project"]
+        "required": [
+          "id",
+          "slug",
+          "projectID",
+          "directory",
+          "title",
+          "version",
+          "time",
+          "project"
+        ]
       },
       "McpResource": {
         "type": "object",
@@ -12018,7 +14994,11 @@
             "type": "string"
           }
         },
-        "required": ["name", "uri", "client"]
+        "required": [
+          "name",
+          "uri",
+          "client"
+        ]
       },
       "TextPartInput": {
         "type": "object",
@@ -12050,7 +15030,9 @@
                 "type": "number"
               }
             },
-            "required": ["start"]
+            "required": [
+              "start"
+            ]
           },
           "metadata": {
             "type": "object",
@@ -12060,7 +15042,10 @@
             "additionalProperties": {}
           }
         },
-        "required": ["type", "text"]
+        "required": [
+          "type",
+          "text"
+        ]
       },
       "FilePartInput": {
         "type": "object",
@@ -12086,7 +15071,11 @@
             "$ref": "#/components/schemas/FilePartSource"
           }
         },
-        "required": ["type", "mime", "url"]
+        "required": [
+          "type",
+          "mime",
+          "url"
+        ]
       },
       "AgentPartInput": {
         "type": "object",
@@ -12119,10 +15108,17 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": ["value", "start", "end"]
+            "required": [
+              "value",
+              "start",
+              "end"
+            ]
           }
         },
-        "required": ["type", "name"]
+        "required": [
+          "type",
+          "name"
+        ]
       },
       "SubtaskPartInput": {
         "type": "object",
@@ -12154,13 +15150,543 @@
                 "type": "string"
               }
             },
-            "required": ["providerID", "modelID"]
+            "required": [
+              "providerID",
+              "modelID"
+            ]
           },
           "command": {
             "type": "string"
           }
         },
-        "required": ["type", "prompt", "description", "agent"]
+        "required": [
+          "type",
+          "prompt",
+          "description",
+          "agent"
+        ]
+      },
+      "SessionPromptDoc": {
+        "type": "object",
+        "properties": {
+          "docID": {
+            "type": "string",
+            "pattern": "^doc.*"
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses.*"
+          }
+        },
+        "required": [
+          "docID",
+          "sessionID"
+        ]
+      },
+      "DocSubmitTargetKind": {
+        "type": "string",
+        "enum": [
+          "doc",
+          "question",
+          "stop"
+        ]
+      },
+      "DocSubmitStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "sent",
+          "cancelled",
+          "expired",
+          "left"
+        ]
+      },
+      "DocSubmitActor": {
+        "type": "object",
+        "properties": {
+          "actorID": {
+            "type": "string",
+            "pattern": "^act.*"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved"
+            ]
+          }
+        },
+        "required": [
+          "actorID",
+          "name",
+          "color",
+          "status"
+        ]
+      },
+      "DocSubmit": {
+        "type": "object",
+        "properties": {
+          "submitID": {
+            "type": "string",
+            "pattern": "^sub.*"
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses.*"
+          },
+          "targetKind": {
+            "$ref": "#/components/schemas/DocSubmitTargetKind"
+          },
+          "targetID": {
+            "type": "string"
+          },
+          "questionAction": {
+            "type": "string",
+            "enum": [
+              "send",
+              "dismiss",
+              "back"
+            ]
+          },
+          "actorID": {
+            "type": "string",
+            "pattern": "^act.*"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocSubmitStatus"
+          },
+          "actors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocSubmitActor"
+            }
+          },
+          "cancelledBy": {
+            "$ref": "#/components/schemas/DocSubmitActor"
+          },
+          "timeoutMs": {
+            "type": "number"
+          },
+          "expiresAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "submitID",
+          "sessionID",
+          "targetKind",
+          "targetID",
+          "actorID",
+          "status",
+          "actors",
+          "timeoutMs",
+          "expiresAt"
+        ]
+      },
+      "SessionActor": {
+        "type": "object",
+        "properties": {
+          "actorID": {
+            "type": "string",
+            "pattern": "^act.*"
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses.*"
+          },
+          "userID": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actorID",
+          "sessionID",
+          "name",
+          "color"
+        ]
+      },
+      "PromptCycleInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^cin.*"
+          },
+          "docID": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^doc.*"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "submitID": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^sub.*"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actorIDs": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^act.*"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "initiatorActorID": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^act.*"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "seq": {
+            "type": "number"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "assets": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "assetID": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "filename": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "mime"
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actorCount": {
+            "type": "number"
+          },
+          "userMessageID": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeCreated": {
+            "type": "number"
+          },
+          "timeConsented": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "consentMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "docID",
+          "submitID",
+          "actorIDs",
+          "initiatorActorID",
+          "seq",
+          "prompt",
+          "assets",
+          "actorCount",
+          "userMessageID",
+          "timeCreated",
+          "timeConsented",
+          "consentMs"
+        ]
+      },
+      "PromptCycleStatus": {
+        "type": "string",
+        "enum": [
+          "running",
+          "completed",
+          "aborted",
+          "error"
+        ]
+      },
+      "PromptCycle": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^cyc.*"
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses.*"
+          },
+          "timeCreated": {
+            "type": "number"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PromptCycleInput"
+            }
+          },
+          "assistantMessageID": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "response": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "modelID": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providerID": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeOutputStart": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeCompleted": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ttftMs": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tokensInput": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tokensOutput": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tokensReasoning": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tokensCacheRead": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tokensCacheWrite": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "costTotal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/PromptCycleStatus"
+          },
+          "aborted": {
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sessionID",
+          "timeCreated",
+          "inputs",
+          "assistantMessageID",
+          "response",
+          "modelID",
+          "providerID",
+          "timeOutputStart",
+          "timeCompleted",
+          "ttftMs",
+          "tokensInput",
+          "tokensOutput",
+          "tokensReasoning",
+          "tokensCacheRead",
+          "tokensCacheWrite",
+          "costTotal",
+          "status",
+          "aborted",
+          "error"
+        ]
+      },
+      "DocAsset": {
+        "type": "object",
+        "properties": {
+          "assetID": {
+            "type": "string",
+            "minLength": 1
+          },
+          "docID": {
+            "type": "string",
+            "pattern": "^doc.*"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "size": {
+            "type": "number"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetID",
+          "docID",
+          "mime",
+          "size",
+          "url"
+        ]
       },
       "ProviderAuthMethod": {
         "type": "object",
@@ -12222,10 +15748,18 @@
                           "type": "string"
                         }
                       },
-                      "required": ["key", "op", "value"]
+                      "required": [
+                        "key",
+                        "op",
+                        "value"
+                      ]
                     }
                   },
-                  "required": ["type", "key", "message"]
+                  "required": [
+                    "type",
+                    "key",
+                    "message"
+                  ]
                 },
                 {
                   "type": "object",
@@ -12255,7 +15789,10 @@
                             "type": "string"
                           }
                         },
-                        "required": ["label", "value"]
+                        "required": [
+                          "label",
+                          "value"
+                        ]
                       }
                     },
                     "when": {
@@ -12280,16 +15817,28 @@
                           "type": "string"
                         }
                       },
-                      "required": ["key", "op", "value"]
+                      "required": [
+                        "key",
+                        "op",
+                        "value"
+                      ]
                     }
                   },
-                  "required": ["type", "key", "message", "options"]
+                  "required": [
+                    "type",
+                    "key",
+                    "message",
+                    "options"
+                  ]
                 }
               ]
             }
           }
         },
-        "required": ["type", "label"]
+        "required": [
+          "type",
+          "label"
+        ]
       },
       "ProviderAuthAuthorization": {
         "type": "object",
@@ -12313,7 +15862,11 @@
             "type": "string"
           }
         },
-        "required": ["url", "method", "instructions"]
+        "required": [
+          "url",
+          "method",
+          "instructions"
+        ]
       },
       "Symbol": {
         "type": "object",
@@ -12334,10 +15887,17 @@
                 "$ref": "#/components/schemas/Range"
               }
             },
-            "required": ["uri", "range"]
+            "required": [
+              "uri",
+              "range"
+            ]
           }
         },
-        "required": ["name", "kind", "location"]
+        "required": [
+          "name",
+          "kind",
+          "location"
+        ]
       },
       "FileNode": {
         "type": "object",
@@ -12353,20 +15913,32 @@
           },
           "type": {
             "type": "string",
-            "enum": ["file", "directory"]
+            "enum": [
+              "file",
+              "directory"
+            ]
           },
           "ignored": {
             "type": "boolean"
           }
         },
-        "required": ["name", "path", "absolute", "type", "ignored"]
+        "required": [
+          "name",
+          "path",
+          "absolute",
+          "type",
+          "ignored"
+        ]
       },
       "FileContent": {
         "type": "object",
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["text", "binary"]
+            "enum": [
+              "text",
+              "binary"
+            ]
           },
           "content": {
             "type": "string"
@@ -12413,14 +15985,24 @@
                       }
                     }
                   },
-                  "required": ["oldStart", "oldLines", "newStart", "newLines", "lines"]
+                  "required": [
+                    "oldStart",
+                    "oldLines",
+                    "newStart",
+                    "newLines",
+                    "lines"
+                  ]
                 }
               },
               "index": {
                 "type": "string"
               }
             },
-            "required": ["oldFileName", "newFileName", "hunks"]
+            "required": [
+              "oldFileName",
+              "newFileName",
+              "hunks"
+            ]
           },
           "encoding": {
             "type": "string",
@@ -12430,7 +16012,10 @@
             "type": "string"
           }
         },
-        "required": ["type", "content"]
+        "required": [
+          "type",
+          "content"
+        ]
       },
       "File": {
         "type": "object",
@@ -12450,10 +16035,19 @@
           },
           "status": {
             "type": "string",
-            "enum": ["added", "deleted", "modified"]
+            "enum": [
+              "added",
+              "deleted",
+              "modified"
+            ]
           }
         },
-        "required": ["path", "added", "removed", "status"]
+        "required": [
+          "path",
+          "added",
+          "removed",
+          "status"
+        ]
       },
       "MCPStatusConnected": {
         "type": "object",
@@ -12463,7 +16057,9 @@
             "const": "connected"
           }
         },
-        "required": ["status"]
+        "required": [
+          "status"
+        ]
       },
       "MCPStatusDisabled": {
         "type": "object",
@@ -12473,7 +16069,9 @@
             "const": "disabled"
           }
         },
-        "required": ["status"]
+        "required": [
+          "status"
+        ]
       },
       "MCPStatusFailed": {
         "type": "object",
@@ -12486,7 +16084,10 @@
             "type": "string"
           }
         },
-        "required": ["status", "error"]
+        "required": [
+          "status",
+          "error"
+        ]
       },
       "MCPStatusNeedsAuth": {
         "type": "object",
@@ -12496,7 +16097,9 @@
             "const": "needs_auth"
           }
         },
-        "required": ["status"]
+        "required": [
+          "status"
+        ]
       },
       "MCPStatusNeedsClientRegistration": {
         "type": "object",
@@ -12509,7 +16112,10 @@
             "type": "string"
           }
         },
-        "required": ["status", "error"]
+        "required": [
+          "status",
+          "error"
+        ]
       },
       "MCPStatus": {
         "anyOf": [
@@ -12549,7 +16155,13 @@
             "type": "string"
           }
         },
-        "required": ["home", "state", "config", "worktree", "directory"]
+        "required": [
+          "home",
+          "state",
+          "config",
+          "worktree",
+          "directory"
+        ]
       },
       "VcsInfo": {
         "type": "object",
@@ -12576,7 +16188,11 @@
           },
           "source": {
             "type": "string",
-            "enum": ["command", "mcp", "skill"]
+            "enum": [
+              "command",
+              "mcp",
+              "skill"
+            ]
           },
           "template": {
             "anyOf": [
@@ -12598,7 +16214,11 @@
             }
           }
         },
-        "required": ["name", "template", "hints"]
+        "required": [
+          "name",
+          "template",
+          "hints"
+        ]
       },
       "Agent": {
         "type": "object",
@@ -12611,7 +16231,11 @@
           },
           "mode": {
             "type": "string",
-            "enum": ["subagent", "primary", "all"]
+            "enum": [
+              "subagent",
+              "primary",
+              "all"
+            ]
           },
           "native": {
             "type": "boolean"
@@ -12641,7 +16265,10 @@
                 "type": "string"
               }
             },
-            "required": ["modelID", "providerID"]
+            "required": [
+              "modelID",
+              "providerID"
+            ]
           },
           "variant": {
             "type": "string"
@@ -12662,7 +16289,12 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["name", "mode", "permission", "options"]
+        "required": [
+          "name",
+          "mode",
+          "permission",
+          "options"
+        ]
       },
       "LSPStatus": {
         "type": "object",
@@ -12689,7 +16321,12 @@
             ]
           }
         },
-        "required": ["id", "name", "root", "status"]
+        "required": [
+          "id",
+          "name",
+          "root",
+          "status"
+        ]
       },
       "FormatterStatus": {
         "type": "object",
@@ -12707,7 +16344,11 @@
             "type": "boolean"
           }
         },
-        "required": ["name", "extensions", "enabled"]
+        "required": [
+          "name",
+          "extensions",
+          "enabled"
+        ]
       }
     }
   }

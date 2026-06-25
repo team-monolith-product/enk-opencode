@@ -1609,6 +1609,14 @@ export type Config = {
      */
     reserved?: number
   }
+  /**
+   * Create a root session on first instance bootstrap when none exist
+   */
+  ensureSession?: boolean
+  /**
+   * When true, only one active main session per directory; duplicate creates return existing or wait
+   */
+  ensureOneSession?: boolean
   experimental?: {
     disable_paste_summary?: boolean
     /**
@@ -1760,6 +1768,8 @@ export type Env = {
   serveDomain?: string
   jupyterhubUser?: string
   environment?: string
+  aiModel?: string
+  aiModelVariant?: string
 }
 
 export type ToolIds = Array<string>

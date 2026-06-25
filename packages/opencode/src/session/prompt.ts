@@ -27,6 +27,7 @@ import { LSP } from "../lsp"
 import { ReadTool } from "../tool/read"
 import { FileTime } from "../file/time"
 import { Flag } from "../flag/flag"
+import { ModelPolicy } from "../enk/model-policy"
 import { ulid } from "ulid"
 import { spawn } from "child_process"
 import { Command } from "../command"
@@ -963,11 +964,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         const model = input.model ?? ag.model ?? (yield* lastModel(input.sessionID))
+        const envVariant = Flag.ENK_AI_MODEL_VARIANT
         const full =
-          !input.variant && ag.variant
+          !input.variant && (ag.variant || envVariant)
             ? yield* Effect.promise(() => Provider.getModel(model.providerID, model.modelID).catch(() => undefined))
             : undefined
-        const variant = input.variant ?? (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined)
+        const variant =
+          input.variant ??
+          (ag.variant && full?.variants?.[ag.variant] ? ag.variant : undefined) ??
+          ModelPolicy.validVariant(full?.variants, envVariant)
 
         const info: MessageV2.Info = {
           id: input.messageID ?? MessageID.ascending(),

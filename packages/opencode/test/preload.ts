@@ -73,6 +73,8 @@ delete process.env["CEREBRAS_API_KEY"]
 delete process.env["SAMBANOVA_API_KEY"]
 delete process.env["OPENCODE_SERVER_PASSWORD"]
 delete process.env["OPENCODE_SERVER_USERNAME"]
+delete process.env["ENK_AI_MODEL"]
+delete process.env["ENK_AI_MODEL_VARIANT"]
 
 // Use in-memory sqlite
 process.env["OPENCODE_DB"] = ":memory:"
