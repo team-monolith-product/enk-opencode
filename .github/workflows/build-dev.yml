@@ -9,7 +9,41 @@ permissions:
   contents: write
 
 jobs:
+  assets:
+    runs-on: ubuntu-22.04
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      asset_base: ${{ steps.base.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::631535140228:role/ped-role-github-actions-s3-upload
+          aws-region: ap-northeast-2
+      - id: base
+        run: echo "value=https://enk-bucket-jitda-asset-dev.s3.ap-northeast-2.amazonaws.com/" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build web assets
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: asset-export
+          build-args: |
+            OPENCODE_ASSET_BASE=${{ steps.base.outputs.value }}
+          outputs: type=local,dest=./asset-out
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Upload assets to S3
+        run: |
+          aws s3 sync ./asset-out/assets s3://enk-bucket-jitda-asset-dev/assets \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 sync ./asset-out s3://enk-bucket-jitda-asset-dev \
+            --exclude "assets/*" --cache-control "public,max-age=3600"
+
   build:
+    needs: assets
     uses: team-monolith-product/tmn-gh-actions/.github/workflows/build_v2.yml@develop
     with:
       env: dev
@@ -17,6 +51,8 @@ jobs:
       dockerTarget: dev
       helmRepository: enk-opencode-hub-helm
       propertyPath: jupyterhub.singleuser.image.tag
+      buildArgs: |
+        OPENCODE_ASSET_BASE=${{ needs.assets.outputs.asset_base }}
       updateTargets: |
         {
           "aws": {

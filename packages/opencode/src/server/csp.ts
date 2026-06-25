@@ -1,5 +1,8 @@
 import { Flag } from "../flag/flag"
 
+declare const OPENCODE_ASSET_ORIGIN: string
+const ASSET_ORIGIN = typeof OPENCODE_ASSET_ORIGIN === "string" ? OPENCODE_ASSET_ORIGIN : ""
+
 const SERVE_URL = Flag.OPENCODE_SERVE_DOMAIN ?? ""
 const SERVE_WILDCARD = SERVE_URL ? `https://*.${SERVE_URL}` : ""
 const PREVIEW_HOST = SERVE_URL && Flag.JUPYTERHUB_USER ? `https://${Flag.JUPYTERHUB_USER}.${SERVE_URL}` : ""
@@ -14,11 +17,15 @@ const origins = (...parts: string[]) => parts.filter(Boolean).join(" ")
 // checked at every navigation step. Narrowing to just the pod broke auth in 410f7fe.
 const FRAME_SRC = origins("'self'", PREVIEW_HOST, USER_RAILS_HOST)
 // Wildcard kept until the previewReady fetch chain is measured in a browser Network tab.
-const CONNECT_SRC = origins("'self'", "data:", SERVE_WILDCARD, SENTRY_INGEST)
+const CONNECT_SRC = origins("'self'", "data:", SERVE_WILDCARD, SENTRY_INGEST, ASSET_ORIGIN)
 const FRAME_ANCESTORS = origins("'self'", SERVE_URL)
+const SCRIPT_SRC = origins("'self'", "'wasm-unsafe-eval'", ASSET_ORIGIN)
+const STYLE_SRC = origins("'self'", "'unsafe-inline'", ASSET_ORIGIN)
+const FONT_SRC = origins("'self'", "data:", ASSET_ORIGIN)
+const MEDIA_SRC = origins("'self'", "data:", ASSET_ORIGIN)
 
 const buildCsp = (hash = "") =>
-  `frame-ancestors ${FRAME_ANCESTORS}; default-src 'self'; frame-src ${FRAME_SRC}; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' data:; connect-src ${CONNECT_SRC}`
+  `frame-ancestors ${FRAME_ANCESTORS}; default-src 'self'; frame-src ${FRAME_SRC}; script-src ${SCRIPT_SRC}${hash ? ` 'sha256-${hash}'` : ""}; style-src ${STYLE_SRC}; img-src 'self' data: blob: https:; font-src ${FONT_SRC}; media-src ${MEDIA_SRC}; connect-src ${CONNECT_SRC}`
 
 export const DEFAULT_CSP = buildCsp()
 export const csp = (hash = "") => buildCsp(hash)

@@ -8,8 +8,12 @@ WORKDIR /app
 COPY . .
 RUN bun install --frozen-lockfile --ignore-scripts
 
-ENV OPENCODE_CHANNEL=latest OPENCODE_VERSION=0.0.0-enk
+ARG OPENCODE_ASSET_BASE
+ENV OPENCODE_CHANNEL=latest OPENCODE_VERSION=0.0.0-enk OPENCODE_ASSET_BASE=${OPENCODE_ASSET_BASE}
 RUN cd packages/opencode && bun run build --single
+
+FROM scratch AS asset-export
+COPY --from=build /app/packages/app/dist /
 
 FROM node:22-slim AS dev
 
