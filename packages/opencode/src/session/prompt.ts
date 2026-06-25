@@ -68,6 +68,7 @@ export namespace SessionPrompt {
 
   export interface Interface {
     readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
+    readonly runnerState: (sessionID: SessionID) => Effect.Effect<Runner.State<MessageV2.WithParts, never>["_tag"]>
     readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
     readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
     readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
@@ -135,6 +136,11 @@ export namespace SessionPrompt {
         const s = yield* InstanceState.get(cache)
         const runner = s.runners.get(sessionID)
         if (runner?.busy) throw new Session.BusyError(sessionID)
+      })
+
+      const runnerState = Effect.fn("SessionPrompt.runnerState")(function* (sessionID: SessionID) {
+        const s = yield* InstanceState.get(cache)
+        return s.runners.get(sessionID)?.state._tag ?? "Idle"
       })
 
       const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
@@ -872,7 +878,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         let aborted = false
         let exited = false
         let finished = false
-        const kill = Effect.promise(() => Shell.killTree(proc, { exited: () => exited }))
+        // Uninterruptible so the SIGTERM -> grace -> SIGKILL sequence always finishes,
+        // even if the fiber is interrupted while the kill is in flight.
+        const kill = Effect.uninterruptible(Effect.promise(() => Shell.killTree(proc, { exited: () => exited })))
 
         const abortHandler = () => {
           if (aborted) return
@@ -1689,6 +1697,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       return Service.of({
         assertNotBusy,
+        runnerState,
         cancel,
         prompt,
         loop,

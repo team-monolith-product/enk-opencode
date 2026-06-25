@@ -359,6 +359,14 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const consensus = createMemo(() => {
     const self = actor()?.actorID
     const here = presence().filter((item) => item.qIndex === tab())
+    // A participant who selected the custom option but left the (shared) text empty has an INCOMPLETE
+    // selection — visually marked as selected but not yet a real answer. Since the text is shared, an
+    // empty text means EVERY custom-on participant is incomplete, so the gate can never be unanimous:
+    // block until text is entered or custom is deselected.
+    const customText = (draft.custom[tab()] ?? "").trim()
+    const customOn = here.map((item) => (item.actorID === self ? on() : item.customFocused))
+    if (self && !here.some((item) => item.actorID === self)) customOn.push(on())
+    if (!customText && customOn.some(Boolean)) return false
     const selections = here.map((item) =>
       item.actorID === self ? mineEffective() : effective(tab(), item.selection, item.customFocused),
     )
