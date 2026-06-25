@@ -878,7 +878,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         let aborted = false
         let exited = false
         let finished = false
-        const kill = Effect.promise(() => Shell.killTree(proc, { exited: () => exited }))
+        // Uninterruptible so the SIGTERM -> grace -> SIGKILL sequence always finishes,
+        // even if the fiber is interrupted while the kill is in flight.
+        const kill = Effect.uninterruptible(Effect.promise(() => Shell.killTree(proc, { exited: () => exited })))
 
         const abortHandler = () => {
           if (aborted) return
