@@ -7,6 +7,7 @@ import { useModels } from "@/context/models"
 import { useProviders } from "@/hooks/use-providers"
 import { modelEnabled, modelProbe } from "@/testing/model-selection"
 import { Persist, persisted } from "@/utils/persist"
+import { parseModel, resolveVariantLock } from "@/utils/model-env"
 import { cycleModelVariant, getConfiguredAgentVariant, resolveModelVariant } from "./model-variant"
 import { useSDK } from "./sdk"
 import { useSync } from "./sync"
@@ -52,17 +53,12 @@ const clone = (value: State | undefined) => {
   } satisfies State
 }
 
-// Prod 모델/티어 락. VITE_MODEL_PIN="<provider>/<model>", VITE_MODEL_PIN_TIER="<variant>".
-// 둘 다 세팅 시 IndexedDB sticky·agent fallback·사용자 variant 선택 모두 무시.
-const pin: ModelKey | undefined = (() => {
-  const raw = import.meta.env.VITE_MODEL_PIN
-  if (typeof raw !== "string") return undefined
-  const [providerID, modelID] = raw.split("/")
-  if (!providerID || !modelID) return undefined
-  return { providerID, modelID }
+// Prod 모델/variant 락 fallback. ENK runtime(`/env`) 우선, 없으면 VITE_MODEL_PIN / VITE_MODEL_PIN_VARIANT.
+const vitePin: ModelKey | undefined = (() => {
+  return parseModel(import.meta.env.VITE_MODEL_PIN)
 })()
-const tier: string | undefined =
-  typeof import.meta.env.VITE_MODEL_PIN_TIER === "string" ? import.meta.env.VITE_MODEL_PIN_TIER : undefined
+const viteVariant: string | undefined =
+  typeof import.meta.env.VITE_MODEL_PIN_VARIANT === "string" ? import.meta.env.VITE_MODEL_PIN_VARIANT : undefined
 
 export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
   name: "Local",
@@ -234,13 +230,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
+    const enkPin = () => {
+      const model = parseModel(sync.data.env.aiModel)
+      if (!model || !validModel(model)) return undefined
+      return models.find(model)
+    }
+
+    const lockedModel = () => {
+      const enk = enkPin()
+      if (enk) return enk
+      if (!vitePin || !validModel(vitePin)) return undefined
+      return models.find(vitePin)
+    }
+
     const current = () => {
-      // ENT-69 prod: IndexedDB sticky·agent fallback 무시하고 VITE_MODEL_PIN 모델로 강제 (env 미설정 시 일반 흐름).
-      if (pin) {
-        const locked = models.find(pin)
-        // 레지스트리 로드 race 등으로 잠금 모델이 없을 때만 일반 흐름으로 폴백
-        if (locked) return locked
-      }
+      const locked = lockedModel()
+      if (locked) return locked
       const item = firstModel(
         () => scope()?.model,
         () => agent.current()?.model,
@@ -261,10 +266,13 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     }
 
     const selected = () => {
-      if (pin && tier) {
-        const m = current()
-        if (m?.variants && tier in m.variants) return tier
-      }
+      const m = current()
+      const locked = resolveVariantLock({
+        enk: sync.data.env.aiModelVariant,
+        vite: viteVariant,
+        variants: m?.variants,
+      })
+      if (locked) return locked
       return scope()?.variant
     }
 

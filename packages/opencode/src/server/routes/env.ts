@@ -21,6 +21,8 @@ export const EnvRoutes = () =>
                     serveDomain: z.string().optional(),
                     jupyterhubUser: z.string().optional(),
                     environment: z.string().optional(),
+                    aiModel: z.string().optional(),
+                    aiModelVariant: z.string().optional(),
                   })
                   .meta({
                     ref: "Env",
@@ -36,6 +38,8 @@ export const EnvRoutes = () =>
         ...(Flag.OPENCODE_SERVE_DOMAIN ? { serveDomain: Flag.OPENCODE_SERVE_DOMAIN } : {}),
         ...(Flag.JUPYTERHUB_USER ? { jupyterhubUser: Flag.JUPYTERHUB_USER } : {}),
         ...(Flag.ENVIRONMENT ? { environment: Flag.ENVIRONMENT } : {}),
+        ...(Flag.ENK_AI_MODEL ? { aiModel: Flag.ENK_AI_MODEL } : {}),
+        ...(Flag.ENK_AI_MODEL_VARIANT ? { aiModelVariant: Flag.ENK_AI_MODEL_VARIANT } : {}),
       })
     },
   )

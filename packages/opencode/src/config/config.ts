@@ -9,6 +9,7 @@ import { Global } from "../global"
 import fsNode from "fs/promises"
 import { NamedError } from "@opencode-ai/util/error"
 import { Flag } from "../flag/flag"
+import { ModelPolicy } from "../enk/model-policy"
 import { Auth } from "../auth"
 import { Env } from "../env"
 import {
@@ -1467,6 +1468,19 @@ export namespace Config {
           }
 
           result.plugin = deduplicatePlugins(result.plugin ?? [])
+
+          if (!result.model && Flag.ENK_AI_MODEL && ModelPolicy.parseModel(Flag.ENK_AI_MODEL)) {
+            result.model = Flag.ENK_AI_MODEL
+          }
+
+          if (Flag.ENK_AI_MODEL_VARIANT) {
+            for (const name of ["build", "plan"] as const) {
+              if (result.agent?.[name]?.variant) continue
+              result.agent = mergeDeep(result.agent ?? {}, {
+                [name]: { variant: Flag.ENK_AI_MODEL_VARIANT },
+              })
+            }
+          }
 
           return {
             config: result,
