@@ -15,10 +15,7 @@
         "apiKey": "proxy-auth",
       },
       "models": {
-        "deepseek-v4-pro": {
-          "reasoning": true,
-          "limit": { "context": 128000, "output": 8192 },
-        },
+        "deepseek-v4-pro": {},
       },
     },
   },
