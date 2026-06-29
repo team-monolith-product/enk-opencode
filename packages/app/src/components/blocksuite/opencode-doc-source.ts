@@ -314,9 +314,28 @@ export class OpencodeAwarenessSource implements AwarenessSource {
       closed = true
       if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible)
       if (timer) clearTimeout(timer)
-      if (ws?.readyState === WebSocket.OPEN) awareness.setLocalState(null)
+      // Stop relaying our own changes, then explicitly clear and broadcast the removal so a CLEAN
+      // disconnect (unmount/navigation) drops our cursor on peers immediately. The send MUST land
+      // before close(); since the encoder lives behind a dynamic import, we send and then close
+      // inside that callback (the socket is still OPEN in this microtask). Otherwise the server's
+      // grace timer would leave our cursor as a ghost for the whole grace window.
       awareness.off("update", onUpdate)
-      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
+      const sock = ws
+      const shut = () => {
+        if (sock && sock.readyState !== WebSocket.CLOSED && sock.readyState !== WebSocket.CLOSING) sock.close(1000)
+      }
+      if (sock?.readyState === WebSocket.OPEN) {
+        void import("y-protocols/awareness").then((mod) => {
+          awareness.setLocalState(null)
+          try {
+            sock.send(pack(MSG_AWARENESS, "", mod.encodeAwarenessUpdate(awareness, [awareness.clientID])))
+          } catch {}
+          shut()
+        })
+      } else {
+        awareness.setLocalState(null)
+        shut()
+      }
     }
   }
 
