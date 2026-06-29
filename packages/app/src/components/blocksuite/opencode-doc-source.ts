@@ -3,6 +3,13 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { MSG_AWARENESS, MSG_DOC, pack, unpack } from "./doc-sync-protocol"
 import { apiUrl } from "@/utils/api-url"
 
+// Eagerly resolved so we can encode an awareness removal SYNCHRONOUSLY during page unload
+// (`pagehide`), where an async dynamic import would never resolve before the page is torn down.
+let awarenessMod: typeof import("y-protocols/awareness") | undefined
+void import("y-protocols/awareness").then((mod) => {
+  awarenessMod = mod
+})
+
 export type DocSyncOpts = {
   docID: string
   baseUrl: string
@@ -310,32 +317,41 @@ export class OpencodeAwarenessSource implements AwarenessSource {
     }
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible)
 
+    // Clear our local state and broadcast the removal so peers drop our cursor right away. Synchronous
+    // (uses the eagerly-loaded encoder) so it works even during page unload. The grace window on the
+    // server exists only to ride out an AMBIGUOUS close (tab switch / network blip / freeze) where we
+    // never got to signal; an explicit removal here makes a real leave immediate.
+    const announceLeave = () => {
+      const sock = ws
+      if (!awarenessMod || sock?.readyState !== WebSocket.OPEN) {
+        awareness.setLocalState(null)
+        return
+      }
+      awareness.off("update", onUpdate)
+      awareness.setLocalState(null)
+      try {
+        sock.send(pack(MSG_AWARENESS, "", awarenessMod.encodeAwarenessUpdate(awareness, [awareness.clientID])))
+      } catch {}
+    }
+
+    // A real browser/tab close or navigation fires `pagehide` (a mere tab switch does NOT). Skip the
+    // bfcache case (`persisted`) since the page may be restored with our cursor intact.
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (closed || event.persisted) return
+      announceLeave()
+    }
+    if (typeof window !== "undefined") window.addEventListener("pagehide", onPageHide)
+
     this.stop = () => {
       closed = true
       if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible)
+      if (typeof window !== "undefined") window.removeEventListener("pagehide", onPageHide)
       if (timer) clearTimeout(timer)
-      // Stop relaying our own changes, then explicitly clear and broadcast the removal so a CLEAN
-      // disconnect (unmount/navigation) drops our cursor on peers immediately. The send MUST land
-      // before close(); since the encoder lives behind a dynamic import, we send and then close
-      // inside that callback (the socket is still OPEN in this microtask). Otherwise the server's
-      // grace timer would leave our cursor as a ghost for the whole grace window.
+      // CLEAN disconnect (unmount/navigation): drop our cursor on peers immediately instead of letting
+      // the server's grace timer leave it as a ghost.
+      announceLeave()
       awareness.off("update", onUpdate)
-      const sock = ws
-      const shut = () => {
-        if (sock && sock.readyState !== WebSocket.CLOSED && sock.readyState !== WebSocket.CLOSING) sock.close(1000)
-      }
-      if (sock?.readyState === WebSocket.OPEN) {
-        void import("y-protocols/awareness").then((mod) => {
-          awareness.setLocalState(null)
-          try {
-            sock.send(pack(MSG_AWARENESS, "", mod.encodeAwarenessUpdate(awareness, [awareness.clientID])))
-          } catch {}
-          shut()
-        })
-      } else {
-        awareness.setLocalState(null)
-        shut()
-      }
+      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
     }
   }
 
