@@ -295,8 +295,24 @@ export class OpencodeAwarenessSource implements AwarenessSource {
 
     connect()
 
+    // Returning to a backgrounded tab: the browser may have closed the socket while throttling the
+    // reconnect backoff timer, so reconnect immediately instead of waiting it out. Reconnecting here
+    // re-announces our local awareness state (sent on socket "open"), restoring our cursor for peers.
+    const onVisible = () => {
+      if (closed) return
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return
+      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) return
+      if (timer) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+      connect()
+    }
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible)
+
     this.stop = () => {
       closed = true
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible)
       if (timer) clearTimeout(timer)
       if (ws?.readyState === WebSocket.OPEN) awareness.setLocalState(null)
       awareness.off("update", onUpdate)
