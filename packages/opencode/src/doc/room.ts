@@ -13,6 +13,22 @@ export type Peer = {
 type Room = {
   doc: Y.Doc
   peers: Set<Peer>
+  // Pending awareness removals, keyed by Yjs clientID. A peer's cursor is not removed the instant its
+  // socket closes (a backgrounded tab closes/freezes the WS within seconds); instead we wait out a
+  // grace window so a quick tab-switch + reconnect never makes the cursor flicker for other peers.
+  // A reconnect — an awareness update carrying the same clientID — cancels the pending removal.
+  leaving: Map<number, ReturnType<typeof setTimeout>>
+}
+
+// Kept under the Yjs client `outdatedTimeout` (30s): past that, peers prune the stale cursor on their
+// own, so a longer server grace buys nothing. Mirrors the LEAVE_GRACE idea in doc/index.ts.
+const AWARENESS_LEAVE_GRACE = 20_000
+let graceMs = AWARENESS_LEAVE_GRACE
+
+// Test-only: shrink the grace so expiry/cancel can be asserted without a 20s wait. Call with no
+// argument to restore the default.
+export function setAwarenessGraceForTest(ms?: number) {
+  graceMs = ms ?? AWARENESS_LEAVE_GRACE
 }
 
 type Target = {
@@ -28,9 +44,49 @@ function room(id: DocID) {
   r = {
     doc: new Y.Doc({ guid: id }),
     peers: new Set(),
+    leaving: new Map(),
   }
   rooms.set(id, r)
   return r
+}
+
+// Pull the Yjs clientIDs out of an encoded awareness update without depending on lib0 (not a direct
+// dependency here). Wire format: varUint count, then per client { varUint clientID, varUint clock,
+// varString state }, where varString is a varUint byte-length followed by that many bytes.
+function clients(update: Uint8Array): number[] {
+  let pos = 0
+  const readVarUint = () => {
+    let num = 0
+    let mult = 1
+    for (;;) {
+      const byte = update[pos++]
+      if (byte === undefined) throw new Error("eof")
+      num += (byte & 0x7f) * mult
+      if (byte < 0x80) return num
+      mult *= 128
+    }
+  }
+  const ids: number[] = []
+  try {
+    const count = readVarUint()
+    for (let i = 0; i < count; i++) {
+      const clientID = readVarUint()
+      readVarUint() // clock
+      pos += readVarUint() // skip the state bytes
+      ids.push(clientID)
+    }
+  } catch {
+    return ids
+  }
+  return ids
+}
+
+// Tear the room down only once it has no live peers AND no pending grace removals, so a peer that
+// reconnects mid-grace still finds the same room (and its `leaving` timers) to cancel against.
+function reap(id: DocID, r: Room) {
+  if (r.peers.size > 0 || r.leaving.size > 0) return
+  r.doc.destroy()
+  rooms.delete(id)
 }
 
 function target(r: Room, guid: string): Target {
@@ -69,9 +125,18 @@ export function push(id: DocID, guid: string, data: Uint8Array, from?: Peer) {
 }
 
 export function awareness(id: DocID, data: Uint8Array, from?: Peer) {
+  const r = room(id)
   if (from) from.awareness = data
+  // A still-active (or just-reconnected) client cancels any pending removal for its clientID, so its
+  // grace timer never fires and the cursor stays put.
+  for (const clientID of clients(data)) {
+    const timer = r.leaving.get(clientID)
+    if (!timer) continue
+    clearTimeout(timer)
+    r.leaving.delete(clientID)
+  }
   const payload = pack(MSG_AWARENESS, "", data)
-  for (const peer of room(id).peers) {
+  for (const peer of r.peers) {
     if (peer === from) continue
     peer.send(payload)
   }
@@ -98,17 +163,26 @@ export function connect(id: DocID, peer: Peer) {
   }
   return () => {
     r.peers.delete(peer)
-    const left = peer.awareness ? remove(peer.awareness) : undefined
-    if (left) {
-      const payload = pack(MSG_AWARENESS, "", left)
-      for (const next of r.peers) {
-        next.send(payload)
-      }
+    // Defer the cursor removal: only broadcast it if the same client hasn't reconnected within the
+    // grace window. `awareness()` cancels the timer on reconnect.
+    const data = peer.awareness
+    const ids = data ? clients(data) : []
+    for (const clientID of ids) {
+      const existing = r.leaving.get(clientID)
+      if (existing) clearTimeout(existing)
+      const timer = setTimeout(() => {
+        r.leaving.delete(clientID)
+        const left = remove(data!)
+        if (left) {
+          const payload = pack(MSG_AWARENESS, "", left)
+          for (const next of r.peers) next.send(payload)
+        }
+        reap(id, r)
+      }, graceMs)
+      timer.unref?.()
+      r.leaving.set(clientID, timer)
     }
-    if (r.peers.size === 0) {
-      r.doc.destroy()
-      rooms.delete(id)
-    }
+    reap(id, r)
   }
 }
 

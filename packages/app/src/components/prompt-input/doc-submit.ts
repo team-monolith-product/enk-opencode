@@ -321,11 +321,21 @@ export function connectQuestionDraft(input: DraftSocketInput): QuestionDraftChan
   let ws: WebSocket | undefined
   // Buffer outbound ops while (re)connecting so a click never gets dropped mid-handshake.
   let queue: string[] = []
+  // Our latest presence, replayed on every (re)connect. A backgrounded tab that the browser froze
+  // stops sending, so the server drops our presence past its grace; on resume the socket reconnects
+  // and we must re-announce, otherwise our consensus selection stays invisible to peers until a fresh
+  // click.
+  let lastPresence: string | undefined
 
   const flush = () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     for (const data of queue) ws.send(data)
     queue = []
+  }
+
+  const onOpen = () => {
+    if (lastPresence && ws?.readyState === WebSocket.OPEN) ws.send(lastPresence)
+    flush()
   }
 
   const push = (msg: unknown) => {
@@ -345,7 +355,7 @@ export function connectQuestionDraft(input: DraftSocketInput): QuestionDraftChan
     if (closed) return
     const socket = new WebSocket(url)
     ws = socket
-    socket.addEventListener("open", flush)
+    socket.addEventListener("open", onOpen)
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") return
       if (handlePing(socket, event.data)) return
@@ -368,7 +378,11 @@ export function connectQuestionDraft(input: DraftSocketInput): QuestionDraftChan
 
   return {
     sendOp: (op) => push({ type: "op", op }),
-    sendPresence: (entry) => push({ type: "presence", entry }),
+    sendPresence: (entry) => {
+      // Remember it so onOpen can replay it after a reconnect; send now if we're already connected.
+      lastPresence = JSON.stringify({ type: "presence", entry })
+      if (ws?.readyState === WebSocket.OPEN) ws.send(lastPresence)
+    },
     close: () => {
       closed = true
       if (timer) clearTimeout(timer)
