@@ -1,22 +1,33 @@
 {
   "permission": "allow",
-  "model": "google/gemini-3.5-flash",
   "plugin": ["./preview-bridge-plugin.js"],
   "provider": {
     "google": {
       "options": {
         "baseURL": "${GEMINI_BASE_URL}",
-        "apiKey": "proxy-auth"
-      }
-    }
+        "apiKey": "proxy-auth",
+      },
+    },
+    "deepseek": {
+      // CHP가 anthropic 규약을 제공함으로, 여기에도 anthropic 규약을 사용한다.
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "baseURL": "${DEEPSEEK_BASE_URL}",
+        "apiKey": "proxy-auth",
+      },
+      "models": {
+        // 아직 deepseek-v4-pro 모델이 제공되지 않음. 추후 제공되면 아래 주석을 해제하고 사용 가능.
+        "deepseek-v4-pro": {},
+      },
+    },
   },
   "mcp": {
     "playwright": {
       "type": "local",
       "command": ["playwright-mcp", "--headless", "--browser", "chromium"],
-      "enabled": true
-    }
+      "enabled": true,
+    },
   },
   "ensureSession": true,
-  "ensureOneSession": true
+  "ensureOneSession": true,
 }
