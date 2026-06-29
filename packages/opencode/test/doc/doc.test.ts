@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, setSystemTime, spyOn, test } from "bun:test"
 import * as Y from "yjs"
+import { Awareness, encodeAwarenessUpdate } from "y-protocols/awareness"
 import { Instance } from "../../src/project/instance"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Session } from "../../src/session"
@@ -264,6 +265,72 @@ describe("doc", () => {
 
     stopTwo()
     stopOne()
+  })
+
+  // Build a real encoded awareness update (and surface its clientID) for the grace tests below.
+  function awarenessUpdate() {
+    const doc = new Y.Doc()
+    const aware = new Awareness(doc)
+    aware.setLocalStateField("user", { actorID: "actor", name: "Tester" })
+    const update = encodeAwarenessUpdate(aware, [aware.clientID])
+    const clientID = aware.clientID
+    aware.destroy()
+    doc.destroy()
+    return { update, clientID }
+  }
+
+  const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+  const awarenessCount = (messages: Uint8Array[], docID: string) =>
+    messages.filter((data) => Room.decode(data, docID)?.type === Room.MSG_AWARENESS).length
+
+  test("awareness removal waits out the grace window, then fires", async () => {
+    Room.setAwarenessGraceForTest(50)
+    const docID = DocID.ascending()
+    const messages: Uint8Array[] = []
+    const one: Room.Peer = { send: () => {} }
+    const two: Room.Peer = { send: (data) => messages.push(data) }
+    const { update } = awarenessUpdate()
+
+    const stopOne = Room.connect(docID, one)
+    Room.awareness(docID, update, one) // one announces its cursor
+    const stopTwo = Room.connect(docID, two)
+    messages.length = 0 // drop two's initial-sync copy of one's cursor
+
+    stopOne() // one's tab backgrounds and the socket closes
+    expect(awarenessCount(messages, docID)).toBe(0) // not removed synchronously — no flicker
+
+    await wait(120)
+    expect(awarenessCount(messages, docID)).toBe(1) // removed only after the grace window
+
+    stopTwo()
+    Room.setAwarenessGraceForTest()
+  })
+
+  test("reconnect within the grace window cancels the awareness removal", async () => {
+    Room.setAwarenessGraceForTest(80)
+    const docID = DocID.ascending()
+    const messages: Uint8Array[] = []
+    const one: Room.Peer = { send: () => {} }
+    const two: Room.Peer = { send: (data) => messages.push(data) }
+    const { update } = awarenessUpdate()
+
+    const stopOne = Room.connect(docID, one)
+    Room.awareness(docID, update, one)
+    const stopTwo = Room.connect(docID, two)
+    messages.length = 0
+
+    stopOne() // disconnect schedules the removal
+    const oneAgain: Room.Peer = { send: () => {} }
+    const stopOneAgain = Room.connect(docID, oneAgain)
+    Room.awareness(docID, update, oneAgain) // same clientID reconnects -> cancels the pending removal
+    messages.length = 0 // ignore the reconnect relay
+
+    await wait(140) // past the grace window
+    expect(awarenessCount(messages, docID)).toBe(0) // removal never fired
+
+    stopOneAgain()
+    stopTwo()
+    Room.setAwarenessGraceForTest()
   })
 
   test("submit approval broadcasts created and reconnect receives pending state", async () => {
