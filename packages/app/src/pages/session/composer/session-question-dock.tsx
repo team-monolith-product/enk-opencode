@@ -103,6 +103,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const language = useLanguage()
   const dialog = useDialog()
   const parentParams = useParentParams()
+  // `?readonly=true` makes this client a pure observer: it sees the live shared draft/presence but
+  // never registers an actor, broadcasts its own presence, or joins the consent vote.
+  const readonly = parentParams.readonly
   const clientEnv = useClientEnv()
 
   const sessionID = props.request.sessionID
@@ -175,6 +178,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
 
   // ── Presence ────────────────────────────────────────────────────────────────────────────────
   const broadcastPresence = () => {
+    // A readonly viewer never announces itself, so it stays out of every peer's presence list (and
+    // thus out of the consensus roster's allow-set).
+    if (readonly) return
     const a = actor()
     if (!a || !channel) return
     channel.sendPresence({
@@ -387,8 +393,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   let finalizedID: string | undefined
 
   const sending = createMemo(() => pendingSend() || approval()?.status === "pending")
-  // Any in-flight action that should freeze the dock's controls.
-  const busy = createMemo(() => sending() || submitting())
+  // Any in-flight action that should freeze the dock's controls. A readonly viewer is always frozen —
+  // every option/custom/Next/Back/Dismiss control is disabled so it can only observe.
+  const busy = createMemo(() => sending() || submitting() || readonly)
 
   // What the consent dialog shows. A back vote shows just the question we'd return to; a dismiss
   // shows every question (no answers); a send would show each question + its agreed answer.
@@ -585,6 +592,27 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   let disposed = false
   const init = async () => {
     const user = parentParams.user[0]
+
+    // A readonly viewer never registers a server actor (no SessionActorTable row, no consensus
+    // standing). It still opens the draft channel — receive-only — so it sees the live shared answers
+    // and everyone else's selections. The synthetic actorID is local-only; it just satisfies the
+    // draft socket's `act`-prefixed id validation and is never broadcast.
+    if (readonly) {
+      const actorID = `act${crypto.randomUUID().replace(/-/g, "")}`
+      setActor({ actorID, name: user?.name ?? "Viewer", color: user?.color ?? "#888888" })
+      channel = connectQuestionDraft({
+        baseUrl: sdk.url,
+        directory: sdk.directory,
+        sessionID,
+        requestID,
+        actorID,
+        onDraft: (d) => setDraft({ answers: d.answers, custom: d.custom, customOn: d.customOn, step: d.step ?? 0, rev: d.rev }),
+        onPresence: (list) => setPresence(list),
+      })
+      // No broadcastPresence(), no connectQuestionSubmit() → invisible to peers and to every vote.
+      return
+    }
+
     const stored = loadActor(sessionID, user?.id)
     // The dock mounts before the server may be reachable; without retry the actor registration would
     // fail once and the dock would stay dead until a manual reload. Back off until it succeeds or the

@@ -1,7 +1,7 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 
 type IdName = { id: string; name: string; color?: string }
-type ParentParams = { user: IdName[]; team: IdName[] }
+type ParentParams = { user: IdName[]; team: IdName[]; readonly: boolean }
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
 
@@ -21,11 +21,14 @@ const filterIdName = (values: string[]): IdName[] =>
 
 const STORAGE_KEY = "parent-params:v1"
 
+const parseReadonly = (value: string | null): boolean => value === "true" || value === "1"
+
 const parseSearch = (search: string): ParentParams => {
   const params = new URLSearchParams(search)
   return {
     user: filterIdName(params.getAll("user")),
     team: filterIdName(params.getAll("team")),
+    readonly: parseReadonly(params.get("readonly")),
   }
 }
 
@@ -40,9 +43,11 @@ const parseSearch = (search: string): ParentParams => {
 // survives a later full reload of the param-less `/session/...` url. Reading `searchParams`
 // reactively/at-init is NOT enough: the value legitimately disappears after the redirect.
 const capture = (): ParentParams => {
-  if (typeof window === "undefined") return { user: [], team: [] }
+  if (typeof window === "undefined") return { user: [], team: [], readonly: false }
   const fromUrl = parseSearch(window.location.search)
-  if (fromUrl.user.length || fromUrl.team.length) {
+  // `readonly` matters even with no user/team — a bare `?readonly=true` must still be captured and
+  // survive the post-redirect reload.
+  if (fromUrl.user.length || fromUrl.team.length || fromUrl.readonly) {
     try {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(fromUrl))
     } catch {
@@ -52,11 +57,14 @@ const capture = (): ParentParams => {
   }
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as ParentParams
+    if (raw) {
+      const stored = JSON.parse(raw) as Partial<ParentParams>
+      return { user: stored.user ?? [], team: stored.team ?? [], readonly: stored.readonly ?? false }
+    }
   } catch {
     // ignore
   }
-  return { user: [], team: [] }
+  return { user: [], team: [], readonly: false }
 }
 
 const captured = capture()

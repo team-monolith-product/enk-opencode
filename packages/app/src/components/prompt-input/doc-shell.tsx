@@ -13,6 +13,8 @@ import type { createPromptDoc } from "./doc"
 
 type ShellProps = {
   doc: ReturnType<typeof createPromptDoc>
+  /** A readonly viewer sees the doc content but no editing/submit affordances. */
+  readonly?: boolean
   submitIcon: IconProps["name"]
   submitLabel: string
   submitDisabled?: boolean
@@ -103,6 +105,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
           </div>
         </Show>
       </div>
+      <Show when={!props.readonly}>
       <div
         data-component="prompt-doc-actions"
         class="relative flex h-11 shrink-0 items-center justify-between gap-2 border-t border-border-weaker-base bg-surface-raised-stronger-non-alpha px-2 py-0"
@@ -283,6 +286,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
           />
         </Tooltip>
       </div>
+      </Show>
     </div>
   )
 }

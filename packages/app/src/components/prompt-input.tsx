@@ -551,12 +551,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
 
   const parentParams = useParentParams()
+  // `?readonly=true` makes this client a pure observer (captured once at module load, so it is stable).
+  const readonly = parentParams.readonly
   const [docConfig, setDocConfig] = createStore<PromptDocConfig>({
     sessionID: params.id,
     url: sdk.url,
     directory: sdk.directory,
     submitKey: env.promptSubmitKey(),
     user: parentParams.user[0],
+    readonly,
   })
   createEffect(() => {
     setDocConfig({
@@ -565,6 +568,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       directory: sdk.directory,
       submitKey: env.promptSubmitKey(),
       user: parentParams.user[0],
+      readonly,
     })
   })
   const doc = createPromptDoc({
@@ -812,7 +816,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const sessionID = params.id
     const docID = doc.docID()
     const actorID = doc.actorID()
-    if (store.mode !== "doc" || !sessionID || !docID || !actorID) return
+    // A readonly viewer never joins the consensus channel — staying off the submit socket keeps them
+    // out of the server's connected-peers set, so they are never counted as a 동시전송 target.
+    if (readonly || store.mode !== "doc" || !sessionID || !docID || !actorID) return
     const stop = connectSubmit({
       baseUrl: sdk.url,
       directory: sdk.directory,
@@ -1022,6 +1028,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   onCleanup(() => previewBridge.setCaptureHandler(undefined))
 
   const setMode = (mode: PromptMode) => {
+    // A readonly viewer stays locked in the read-only doc view — no switching into the editable
+    // normal/shell composers.
+    if (readonly) return
     if (store.mode === mode) return
     if (store.mode === "doc" && mode !== "doc") doc.detach()
     setStore("mode", mode)
@@ -1037,7 +1046,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   ] as const
 
   const modeButtons = () => (
-    <Show when={!wysiwygOnly}>
+    <Show when={!wysiwygOnly && !readonly}>
       {modes.map((item) => {
         const selected = store.mode === item.mode
         return (
@@ -1886,6 +1895,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
 
   async function submit() {
+    // A readonly viewer cannot send or stop — the submit affordances are hidden, this is defensive.
+    if (readonly) return
     if (submitAction() === "stop") {
       await requestStop()
       return
@@ -2296,6 +2307,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           >
             <PromptDocShell
               doc={doc}
+              readonly={readonly}
               submitIcon={submitIcon()}
               submitLabel={submitLabel()}
               submitDisabled={submitAction() === "send" && !hasDraft()}

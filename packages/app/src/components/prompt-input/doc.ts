@@ -16,6 +16,10 @@ export type PromptDocConfig = {
   directory: string
   submitKey?: string
   user?: { id: string; name: string; color?: string }
+  // A `?readonly=true` viewer is a pure observer: the editor mounts read-only and we never register a
+  // server actor, broadcast awareness, or open the submit socket — so this client is excluded from the
+  // collaborative roster (동시편집 presence) and consensus targets (동시전송) entirely.
+  readonly?: boolean
 }
 
 export type PromptDocInput = {
@@ -74,6 +78,10 @@ async function promptDoc(input: PromptDocInput, sessionID: string, alive?: () =>
 
 export function createPromptDoc(input: PromptDocInput) {
   const clientID = crypto.randomUUID()
+  // Stable local-only identity for a readonly viewer. Never sent to the server (no actor.upsert) and
+  // never broadcast (no awareness/submit socket) — it only fills the local sync object's actorID,
+  // which the `kind=doc` socket does not use as a routing key.
+  const viewerActorID = `viewer-${clientID}`
   let handle: DocHandle | undefined
   let theme: "light" | "dark" | undefined
   let sync: DocSyncOpts | undefined
@@ -137,7 +145,14 @@ export function createPromptDoc(input: PromptDocInput) {
   }
 
   const ensure = async (sessionID: string, alive?: () => boolean) => {
-    const actor = await register(input, sessionID, alive)
+    const actor: SessionActor = input.config.readonly
+      ? {
+          actorID: viewerActorID,
+          sessionID,
+          name: input.config.user?.name ?? "Viewer",
+          color: input.config.user?.color ?? "#888888",
+        }
+      : await register(input, sessionID, alive)
     setActor(actor)
     // If an editor handle is already live for this session (re-ensure without a remount), push the
     // freshly resolved identity into its awareness so a corrected name/color self-heals live for
@@ -179,6 +194,7 @@ export function createPromptDoc(input: PromptDocInput) {
       theme: scheme,
       sync: next,
       init: opts?.init ?? init,
+      readonly: input.config.readonly,
       onSubmit: input.onSubmit,
       submitKey: input.config.submitKey,
       onDraftChange: () => {
