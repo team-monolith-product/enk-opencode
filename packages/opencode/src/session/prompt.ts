@@ -148,15 +148,49 @@ export namespace SessionPrompt {
         return s.runners.get(sessionID)?.state._tag ?? "Idle"
       })
 
+      // Mark any unfinished assistant message (and its still-running tool parts) as
+      // completed. The client derives "busy" from both session status AND whether the
+      // latest assistant message has `time.completed`, so a message left unfinished by a
+      // hung/dead runner keeps the stop button stuck even after status goes idle. This
+      // runs by sessionID off storage, so it can recover a session whose runner is gone.
+      const finalizeDangling = Effect.fn("SessionPrompt.finalizeDangling")(function* (sessionID: SessionID) {
+        const msgs = yield* Effect.promise(() => Array.fromAsync(MessageV2.stream(sessionID)))
+        for (const item of msgs) {
+          if (item.info.role !== "assistant") continue
+          if (typeof item.info.time.completed === "number") continue
+          for (const part of item.parts) {
+            if (part.type !== "tool" || part.state.status !== "running") continue
+            yield* sessions.updatePart({
+              ...part,
+              state: {
+                status: "error",
+                error: "Cancelled",
+                time: { start: part.state.time.start, end: Date.now() },
+                metadata: part.state.metadata,
+                input: part.state.input,
+              },
+            } satisfies MessageV2.ToolPart)
+          }
+          item.info.finish ??= "tool-calls"
+          item.info.time.completed = Date.now()
+          yield* sessions.updateMessage(item.info)
+        }
+      })
+
       const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
         log.info("cancel", { sessionID })
         const s = yield* InstanceState.get(cache)
         const runner = s.runners.get(sessionID)
         if (!runner || !runner.busy) {
+          // Recovery path: no live/busy runner. Finalize any dangling message so the
+          // client's stop button unblocks, then force idle.
+          yield* finalizeDangling(sessionID)
           yield* status.set(sessionID, { type: "idle" })
           return
         }
         yield* runner.cancel
+        // Belt-and-suspenders: ensure the message is finalized even if teardown didn't.
+        yield* finalizeDangling(sessionID)
       })
 
       const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
