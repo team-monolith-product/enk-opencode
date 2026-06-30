@@ -13,6 +13,42 @@ export namespace Shell {
   const LOGIN = new Set(["bash", "dash", "fish", "ksh", "sh", "zsh"])
   const POSIX = new Set(["bash", "dash", "ksh", "sh", "zsh"])
 
+  // Snapshot every transitive descendant of `root` by walking PPID links. setsid /
+  // disown / "new session" children change their session and process group but NOT
+  // their parent pid, so a PPID walk still reaches them — as long as the snapshot is
+  // taken while the parent is alive (before it exits and they reparent to init).
+  function descendants(root: number): Promise<Set<number>> {
+    return new Promise((resolve) => {
+      const ps = spawn("ps", ["-A", "-o", "pid=,ppid="], { stdio: ["ignore", "pipe", "ignore"] })
+      let buf = ""
+      ps.stdout.on("data", (d) => (buf += d.toString()))
+      ps.once("error", () => resolve(new Set()))
+      ps.once("close", () => {
+        const children = new Map<number, number[]>()
+        for (const line of buf.split("\n")) {
+          const m = line.trim().match(/^(\d+)\s+(\d+)$/)
+          if (!m) continue
+          const childPid = Number(m[1])
+          const parentPid = Number(m[2])
+          const arr = children.get(parentPid)
+          if (arr) arr.push(childPid)
+          else children.set(parentPid, [childPid])
+        }
+        const out = new Set<number>()
+        const stack = [root]
+        while (stack.length) {
+          const p = stack.pop()!
+          for (const child of children.get(p) ?? []) {
+            if (out.has(child) || child === root) continue
+            out.add(child)
+            stack.push(child)
+          }
+        }
+        resolve(out)
+      })
+    })
+  }
+
   export async function killTree(proc: ChildProcess, opts?: { exited?: () => boolean }): Promise<void> {
     const pid = proc.pid
     if (!pid) return
@@ -28,6 +64,10 @@ export namespace Shell {
       })
       return
     }
+
+    // Capture descendants up front, while the parent is still alive, so we can also
+    // reach children that escaped the process group (setsid/disown/dev servers).
+    const tree = await descendants(pid)
 
     // Send to the whole process group (negative pid). The final SIGKILL is sent
     // unconditionally: opts.exited only reflects the parent process, so a child
@@ -50,24 +90,37 @@ export namespace Shell {
       }
     }
 
-    // Group is empty when signal 0 throws ESRCH; truthy means something survives.
-    const groupAlive = () => {
+    // Signal the captured descendants directly — catches the ones that left the group.
+    const killTreePids = (signal: NodeJS.Signals) => {
+      for (const p of tree) {
+        try {
+          process.kill(p, signal)
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+
+    const alive = (p: number) => {
       try {
-        process.kill(-pid, 0)
+        process.kill(p, 0)
         return true
       } catch {
         return false
       }
     }
+    // Anything still running in the group or among the captured descendants.
+    const anyAlive = () => alive(-pid) || [...tree].some(alive)
 
     killGroup("SIGTERM")
-    // Skip the SIGKILL grace only when the parent reported exit AND the group is
-    // empty — i.e. the whole tree is already gone.
-    if (opts?.exited?.() && !groupAlive()) return
+    killTreePids("SIGTERM")
+    // Skip the SIGKILL grace only when the parent reported exit AND nothing else
+    // (group or escaped descendant) is still alive — i.e. the whole tree is gone.
+    if (opts?.exited?.() && !anyAlive()) return
     await sleep(SIGKILL_TIMEOUT_MS)
-    // Always SIGKILL the group: opts.exited only reflects the parent, so a child
-    // that ignored SIGTERM is still here even when the parent has exited.
+    // Force-kill: the group plus every escaped descendant that ignored SIGTERM.
     killGroup("SIGKILL")
+    killTreePids("SIGKILL")
   }
 
   function full(file: string) {
