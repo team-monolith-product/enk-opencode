@@ -229,14 +229,6 @@
   text-align: center;
 }
 
-/* ── spectator (readonly) badge ── */
-[data-component="doc-submit-overlay"] .ds-spectator-pill {
-  align-self: center;
-  background: var(--c-stone);
-  color: var(--c-slate);
-  letter-spacing: 0.02em;
-}
-
 /* ── voting header ── */
 [data-component="doc-submit-overlay"] .ds-vote-header {
   display: flex;

@@ -422,18 +422,15 @@ function WaitingBody(props: {
     if (props.kind === "question-back") return "모두 동의하면 이전 질문으로 돌아가요"
     return "모두 동의하면 바로 AI에게 전송돼요"
   }
-  const head = () => {
-    if (props.spectator) return allOk() ? "모두 동의했어요. 진행돼요" : "팀원들이 동의하고 있어요"
-    return allOk() ? "모두 동의했어요. 진행할게요" : "동의했어요. 팀원을 기다려요"
-  }
+  // A readonly spectator sees the SAME waiting/status view an already-approved participant sees — same
+  // copy and layout. The only difference: it cannot cancel, so the "동의 취소" button is hidden.
   return (
     <div class="ds-body ds-body--waiting">
-      <Show when={props.spectator}>
-        <span class="jt-pill ds-spectator-pill">관전 중</span>
-      </Show>
       <SessionPreviewMascot size={52} />
       <div class="ds-waiting-head">
-        <h2 class="ds-headline ds-headline--center">{head()}</h2>
+        <h2 class="ds-headline ds-headline--center">
+          {allOk() ? "모두 동의했어요. 진행할게요" : "동의했어요. 팀원을 기다려요"}
+        </h2>
         <p class="ds-waiting-sub">
           {sub()} · <span class="ds-nowrap">자동 거절까지 {props.sec}초</span>
         </p>
