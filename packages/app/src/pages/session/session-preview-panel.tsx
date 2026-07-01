@@ -259,7 +259,9 @@ export function SessionBrowserChrome(props: {
   }
 
   const ghostBtn =
-    "inline-flex items-center justify-center size-6 shrink-0 rounded-md text-icon-base hover:bg-surface-raised-base-hover active:bg-surface-base-active transition-colors disabled:opacity-40 disabled:cursor-default"
+    "inline-flex items-center justify-center size-6 shrink-0 rounded-md text-icon-base " +
+    "enabled:hover:bg-surface-raised-base-hover enabled:active:bg-surface-base-active " +
+    "transition-colors disabled:opacity-40 disabled:cursor-default disabled:pointer-events-none"
 
   // 호스트(span)와 경로(input)가 폰트·크기·줄높이·색이 완전히 같도록 인라인으로 고정한다.
   // input 은 폼 요소 UA 스타일·레이어 순서 때문에 클래스만으로는 span 과 색/폰트가 달라지므로(인라인이 이긴다).
