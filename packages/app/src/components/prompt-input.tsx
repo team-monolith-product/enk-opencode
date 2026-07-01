@@ -713,7 +713,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const showApproval = (state: DocSubmitState) => {
     const actorID = approvalActor()
     if (!actorID) return
-    if (!state.actors.some((item) => item.actorID === actorID)) return
+    // A readonly spectator isn't in state.actors but should still see the dialog (spectator mode).
+    if (!readonly && !state.actors.some((item) => item.actorID === actorID)) return
     // Terminal states are handled exactly once per submit: a server replay on reconnect (or a
     // duplicate cast) for an already-resolved submit must not re-clear context or re-open a dialog.
     if (state.status !== "pending") {
@@ -740,6 +741,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         <DialogDocSubmit
           state={approval}
           actorID={actorID}
+          spectator={readonly}
           kind={approval()?.targetKind === "stop" ? "stop" : "doc"}
           sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
           approve={() => {
@@ -816,15 +818,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const sessionID = params.id
     const docID = doc.docID()
     const actorID = doc.actorID()
-    // A readonly viewer never joins the consensus channel — staying off the submit socket keeps them
-    // out of the server's connected-peers set, so they are never counted as a 동시전송 target.
-    if (readonly || store.mode !== "doc" || !sessionID || !docID || !actorID) return
+    if (store.mode !== "doc" || !sessionID || !docID || !actorID) return
+    // A readonly viewer connects observer-only: it WATCHES the consent vote (spectator dialog) but the
+    // server keeps observers out of `peers`/targets(), so it is never counted as a 동시전송 target.
     const stop = connectSubmit({
       baseUrl: sdk.url,
       directory: sdk.directory,
       sessionID,
       docID,
       actorID,
+      observer: readonly,
       event: (event) => showApproval(event.state),
     })
     onCleanup(stop)

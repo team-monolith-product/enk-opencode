@@ -79,9 +79,9 @@ async function promptDoc(input: PromptDocInput, sessionID: string, alive?: () =>
 export function createPromptDoc(input: PromptDocInput) {
   const clientID = crypto.randomUUID()
   // Stable local-only identity for a readonly viewer. Never sent to the server (no actor.upsert) and
-  // never broadcast (no awareness/submit socket) — it only fills the local sync object's actorID,
-  // which the `kind=doc` socket does not use as a routing key.
-  const viewerActorID = `viewer-${clientID}`
+  // never broadcast. It fills the local sync object's actorID and is used to open the observer-only
+  // submit socket, whose route validates ActorID.zod (`startsWith("act")`) — hence the `act` prefix.
+  const viewerActorID = `act${clientID.replace(/-/g, "")}`
   let handle: DocHandle | undefined
   let theme: "light" | "dark" | undefined
   let sync: DocSyncOpts | undefined

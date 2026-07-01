@@ -419,7 +419,8 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const showApproval = (state: DocSubmitState) => {
     const a = actor()
     if (!a) return
-    if (!state.actors.some((item) => item.actorID === a.actorID)) return
+    // A readonly spectator isn't in state.actors but should still see the dialog (spectator mode).
+    if (!readonly && !state.actors.some((item) => item.actorID === a.actorID)) return
     // Show the right copy even for participants who did not start the vote.
     if (state.questionAction)
       setVoteKind(
@@ -447,6 +448,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
         <DialogDocSubmit
           state={approval}
           actorID={a.actorID}
+          spectator={readonly}
           kind={voteKind()}
           preview={previewItems}
           approve={() => {
@@ -609,7 +611,19 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
         onDraft: (d) => setDraft({ answers: d.answers, custom: d.custom, customOn: d.customOn, step: d.step ?? 0, rev: d.rev }),
         onPresence: (list) => setPresence(list),
       })
-      // No broadcastPresence(), no connectQuestionSubmit() → invisible to peers and to every vote.
+      // No broadcastPresence() → invisible in the presence list. Connect the consent socket
+      // observer-only so the spectator WATCHES the vote (server keeps observers out of peers/targets,
+      // so it never joins or blocks consensus).
+      const stopVote = connectQuestionSubmit({
+        baseUrl: sdk.url,
+        directory: sdk.directory,
+        sessionID,
+        requestID,
+        actorID,
+        observer: true,
+        event: (event) => showApproval(event.state),
+      })
+      onCleanup(stopVote)
       return
     }
 

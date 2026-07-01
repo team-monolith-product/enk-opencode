@@ -206,10 +206,12 @@ export const SessionDocRoutes = () =>
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod })),
-      validator("query", z.object({ docID: DocID.zod, actorID: ActorID.zod })),
+      validator("query", z.object({ docID: DocID.zod, actorID: ActorID.zod, observer: z.coerce.boolean().optional() })),
       upgradeWebSocket(async (c) => {
         const param = z.object({ sessionID: SessionID.zod }).parse(c.req.param())
-        const query = z.object({ docID: DocID.zod, actorID: ActorID.zod }).parse(c.req.query())
+        const query = z
+          .object({ docID: DocID.zod, actorID: ActorID.zod, observer: z.coerce.boolean().optional() })
+          .parse(c.req.query())
 
         type Socket = {
           readyState: number
@@ -237,6 +239,7 @@ export const SessionDocRoutes = () =>
               sessionID: param.sessionID,
               docID: query.docID,
               actorID: query.actorID,
+              observer: query.observer,
               peer: {
                 send: (data) => {
                   if (socket.readyState === 1) socket.send(data)
@@ -319,10 +322,12 @@ export const SessionDocRoutes = () =>
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod })),
-      validator("query", z.object({ requestID: z.string(), actorID: ActorID.zod })),
+      validator("query", z.object({ requestID: z.string(), actorID: ActorID.zod, observer: z.coerce.boolean().optional() })),
       upgradeWebSocket(async (c) => {
         const param = z.object({ sessionID: SessionID.zod }).parse(c.req.param())
-        const query = z.object({ requestID: z.string(), actorID: ActorID.zod }).parse(c.req.query())
+        const query = z
+          .object({ requestID: z.string(), actorID: ActorID.zod, observer: z.coerce.boolean().optional() })
+          .parse(c.req.query())
 
         type Socket = { readyState: number; send: (data: string) => void; close: (code?: number, reason?: string) => void }
         const isSocket = (value: unknown): value is Socket => {
@@ -344,6 +349,7 @@ export const SessionDocRoutes = () =>
               sessionID: param.sessionID,
               requestID: query.requestID,
               actorID: query.actorID,
+              observer: query.observer,
               peer: { send: (data) => { if (socket.readyState === 1) socket.send(data) }, close: () => socket.close() },
             })
           },

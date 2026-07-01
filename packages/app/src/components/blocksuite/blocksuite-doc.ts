@@ -219,11 +219,17 @@ export async function createPage(input: DocMountInput) {
     })
   }
 
-  if (input.sync && !input.readonly) {
+  if (input.sync) {
+    // link() sets up BOTH remote→local subscribe and local→remote push. A readonly viewer must still
+    // link() so it receives other participants' LIVE edits (without it, only the initial snapshot
+    // arrives). The push side is a no-op for readonly — the Preview editor never mutates the doc, so
+    // link()'s `page.on("update", push)` listener never fires.
     unlink = await link(direct!, collection.doc, doc.spaceDoc)
-    const onY = () => notifyDraft()
-    doc.spaceDoc.on("update", onY)
-    offY = () => doc.spaceDoc.off("update", onY)
+    if (!input.readonly) {
+      const onY = () => notifyDraft()
+      doc.spaceDoc.on("update", onY)
+      offY = () => doc.spaceDoc.off("update", onY)
+    }
   }
 
   const rebind = () => {

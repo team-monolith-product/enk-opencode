@@ -139,8 +139,9 @@ describe("createPromptDoc plain props", () => {
     const el = document.createElement("div")
     await doc.mount({ el, theme: "light" })
     expect(mounts.at(-1)?.readonly).toBe(true)
-    // No actor.upsert → no SessionActorTable row; identity is a local-only synthetic id.
+    // No actor.upsert → no SessionActorTable row; identity is a local-only synthetic id. It carries
+    // the `act` prefix so it passes ActorID.zod on the observer-only submit socket.
     expect(upsert).not.toHaveBeenCalled()
-    expect(doc.actorID()?.startsWith("viewer-")).toBe(true)
+    expect(doc.actorID()?.startsWith("act")).toBe(true)
   })
 })

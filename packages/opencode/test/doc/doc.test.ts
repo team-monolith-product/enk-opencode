@@ -537,6 +537,61 @@ describe("doc", () => {
     })
   })
 
+  test("observer receives casts but is never a target", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+
+        // A readonly spectator connects observer-only. Its actorID is a local synthetic id that is
+        // NOT registered as a session actor.
+        const viewerID = "actviewer000000000000000001"
+        const seen: Doc.SubmitEvent[] = []
+        const stopViewer = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: viewerID as never,
+          observer: true,
+          peer: { send: (data) => seen.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+
+        // Only Alice creates the vote; Bob is a real connected participant.
+        const stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+
+        const state = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          // Even if the client mistakenly passes the viewer id, it is never a connected peer.
+          actorIDs: [alice.actorID, bob.actorID, viewerID as never],
+          prompt,
+        })
+
+        // The observer is not counted as a vote target...
+        const ids = state.actors.map((actor) => actor.actorID)
+        expect(ids).toContain(alice.actorID)
+        expect(ids).toContain(bob.actorID)
+        expect(ids).not.toContain(viewerID)
+        // ...but still receives the vote cast (created state) so it can render the spectator dialog.
+        expect(seen.some((event) => event.type === "created" && event.state.submitID === state.submitID)).toBe(true)
+
+        stopViewer()
+        stopBob()
+      },
+    })
+  })
+
   test("submit approval caps overly long names", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
