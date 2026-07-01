@@ -109,8 +109,11 @@ export default [
       log.warn("cycle record failed", { messageID: id, sessionID, err: String(err) })
     }
 
-    // Report token usage to enk-hackathon-rails (no-op unless ENK_* env is set). Enqueue only;
-    // the actual POST runs in a background queue so it never blocks this projector.
+    // Report the completed-turn total to enk-hackathon-rails as the phase:"final" record. This
+    // is the reconciliation backstop: realtime per-step reports fire from the processor's
+    // finish-step hook, but if any of those were permanently dropped, this authoritative turn
+    // total still lands. No-op unless ENK_* env is set. Enqueue only; the actual POST runs in a
+    // background queue so it never blocks this projector.
     try {
       AiUsage.report(data.info)
     } catch (err) {
