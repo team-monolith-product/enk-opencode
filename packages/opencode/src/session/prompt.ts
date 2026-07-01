@@ -63,6 +63,11 @@ IMPORTANT:
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
+// After a shell process exits, wait briefly for any buffered stdout/stderr to flush
+// before settling — covers the case where a backgrounded child keeps the pipe open
+// so the "close" event never fires.
+const OUTPUT_DRAIN_MS = 100
+
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
 
@@ -143,15 +148,49 @@ export namespace SessionPrompt {
         return s.runners.get(sessionID)?.state._tag ?? "Idle"
       })
 
+      // Mark any unfinished assistant message (and its still-running tool parts) as
+      // completed. The client derives "busy" from both session status AND whether the
+      // latest assistant message has `time.completed`, so a message left unfinished by a
+      // hung/dead runner keeps the stop button stuck even after status goes idle. This
+      // runs by sessionID off storage, so it can recover a session whose runner is gone.
+      const finalizeDangling = Effect.fn("SessionPrompt.finalizeDangling")(function* (sessionID: SessionID) {
+        const msgs = yield* Effect.promise(() => Array.fromAsync(MessageV2.stream(sessionID)))
+        for (const item of msgs) {
+          if (item.info.role !== "assistant") continue
+          if (typeof item.info.time.completed === "number") continue
+          for (const part of item.parts) {
+            if (part.type !== "tool" || part.state.status !== "running") continue
+            yield* sessions.updatePart({
+              ...part,
+              state: {
+                status: "error",
+                error: "Cancelled",
+                time: { start: part.state.time.start, end: Date.now() },
+                metadata: part.state.metadata,
+                input: part.state.input,
+              },
+            } satisfies MessageV2.ToolPart)
+          }
+          item.info.finish ??= "tool-calls"
+          item.info.time.completed = Date.now()
+          yield* sessions.updateMessage(item.info)
+        }
+      })
+
       const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
         log.info("cancel", { sessionID })
         const s = yield* InstanceState.get(cache)
         const runner = s.runners.get(sessionID)
         if (!runner || !runner.busy) {
+          // Recovery path: no live/busy runner. Finalize any dangling message so the
+          // client's stop button unblocks, then force idle.
+          yield* finalizeDangling(sessionID)
           yield* status.set(sessionID, { type: "idle" })
           return
         }
         yield* runner.cancel
+        // Belt-and-suspenders: ensure the message is finalized even if teardown didn't.
+        yield* finalizeDangling(sessionID)
       })
 
       const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
@@ -917,12 +956,28 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           signal.addEventListener("abort", abortHandler, { once: true })
           if (signal.aborted) abortHandler()
           return new Promise<void>((resolve) => {
-            const close = () => {
+            let settled = false
+            const settle = () => {
+              if (settled) return
+              settled = true
               exited = true
-              proc.off("close", close)
+              proc.off("close", onClose)
+              proc.off("exit", onExit)
               resolve()
             }
-            proc.once("close", close)
+            // "close" fires once the process exited AND every inherited stdio pipe is
+            // closed — the clean path with all output drained.
+            const onClose = () => settle()
+            // "exit" fires as soon as the process terminates, even if a backgrounded
+            // child (e.g. a restarted dev server) still holds the stdout pipe open and
+            // keeps "close" from ever firing. Mark exited so killTree can skip, then
+            // give a short window to drain buffered output before settling.
+            const onExit = () => {
+              exited = true
+              setTimeout(settle, OUTPUT_DRAIN_MS).unref?.()
+            }
+            proc.once("close", onClose)
+            proc.once("exit", onExit)
           })
         }).pipe(
           Effect.onInterrupt(() => Effect.sync(abortHandler)),

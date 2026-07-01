@@ -717,6 +717,38 @@ it.effect(
 )
 
 it.effect(
+  "cancel finalizes a dangling assistant message when no runner is active",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const { prompt, chat } = yield* boot()
+          // Dangling: assistant message with no time.completed and no busy runner —
+          // models a session left stuck by a hung/dead runner.
+          const { assistant } = yield* seed(chat.id)
+
+          const before = yield* Effect.promise(() => Array.fromAsync(MessageV2.stream(chat.id)))
+          const stuck = before.find((m) => m.info.id === assistant.id)
+          expect(stuck?.info.role).toBe("assistant")
+          if (stuck?.info.role === "assistant") expect(stuck.info.time.completed).toBeUndefined()
+
+          // Stop on an already-stuck session must recover it.
+          yield* prompt.cancel(chat.id)
+
+          const after = yield* Effect.promise(() => Array.fromAsync(MessageV2.stream(chat.id)))
+          const recovered = after.find((m) => m.info.id === assistant.id)
+          expect(recovered?.info.role).toBe("assistant")
+          if (recovered?.info.role === "assistant") {
+            expect(recovered.info.time.completed).toBeDefined()
+            expect(recovered.info.finish).toBeDefined()
+          }
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+it.effect(
   "cancel with queued callers resolves all cleanly",
   () =>
     provideTmpdirInstance(

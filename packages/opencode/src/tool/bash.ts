@@ -21,6 +21,9 @@ import { Plugin } from "@/plugin"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
+// Drain window after the process exits, in case a backgrounded child holds the
+// stdout pipe open and "close" never fires.
+const OUTPUT_DRAIN_MS = 100
 const PS = new Set(["powershell", "pwsh"])
 const CWD = new Set(["cd", "push-location", "set-location"])
 const FILES = new Set([
@@ -371,22 +374,33 @@ async function run(
   }, input.timeout + 100)
 
   await new Promise<void>((resolve, reject) => {
+    let settled = false
     const cleanup = () => {
       clearTimeout(timer)
       ctx.abort.removeEventListener("abort", abort)
     }
-
-    proc.once("exit", () => {
-      exited = true
-    })
-
-    proc.once("close", () => {
+    const finish = () => {
+      if (settled) return
+      settled = true
       exited = true
       cleanup()
       resolve()
+    }
+
+    // "close" is the clean path: process exited and all stdio pipes drained.
+    proc.once("close", finish)
+
+    // "exit" fires even when a backgrounded child keeps the stdout pipe open and
+    // prevents "close" from ever firing. Mark exited, then settle after a short
+    // drain window so we don't hang on an orphaned pipe.
+    proc.once("exit", () => {
+      exited = true
+      setTimeout(finish, OUTPUT_DRAIN_MS).unref?.()
     })
 
     proc.once("error", (error) => {
+      if (settled) return
+      settled = true
       exited = true
       cleanup()
       reject(error)
