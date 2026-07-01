@@ -28,7 +28,6 @@ jobs:
       - name: Build web assets
         uses: docker/build-push-action@v5
         with:
-          context: .
           target: asset-export
           build-args: |
             OPENCODE_ASSET_BASE=${{ steps.base.outputs.value }}
