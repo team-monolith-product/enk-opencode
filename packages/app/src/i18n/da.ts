@@ -283,6 +283,8 @@ export const dict = {
 
   "prompt.toast.pasteUnsupported.title": "Ikke understøttet vedhæftning",
   "prompt.toast.pasteUnsupported.description": "Kun billeder, PDF'er eller tekstfiler kan vedhæftes her.",
+  "prompt.toast.fileTooLarge.title": "Filen er for stor",
+  "prompt.toast.fileTooLarge.description": "Vedhæftninger må højst være 10 MB.",
   "prompt.toast.modelAgentRequired.title": "Vælg en agent og model",
   "prompt.toast.modelAgentRequired.description": "Vælg en agent og model før du sender en forespørgsel.",
   "prompt.toast.worktreeCreateFailed.title": "Kunne ikke oprette worktree",

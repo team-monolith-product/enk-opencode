@@ -265,6 +265,8 @@ export const dict = {
   "prompt.action.collapseView": "Collapse",
   "prompt.toast.pasteUnsupported.title": "Nieobsługiwany załącznik",
   "prompt.toast.pasteUnsupported.description": "Można tutaj załączać tylko obrazy, pliki PDF lub pliki tekstowe.",
+  "prompt.toast.fileTooLarge.title": "Plik jest za duży",
+  "prompt.toast.fileTooLarge.description": "Załączniki mogą mieć maksymalnie 10 MB.",
   "prompt.toast.modelAgentRequired.title": "Wybierz agenta i model",
   "prompt.toast.modelAgentRequired.description": "Wybierz agenta i model przed wysłaniem zapytania.",
   "prompt.toast.worktreeCreateFailed.title": "Nie udało się utworzyć drzewa roboczego",

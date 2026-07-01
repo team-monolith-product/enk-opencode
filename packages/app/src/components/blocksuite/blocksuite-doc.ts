@@ -18,6 +18,7 @@ import { actor, label, type DocActor } from "./actor"
 import { matchKeybind, parseKeybind } from "@/context/command"
 import { patchSlashMenu } from "./slash-menu-patch"
 import { patchFormatBar } from "./format-bar-patch"
+import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
 
 export type { DocActor } from "./actor"
 
@@ -483,6 +484,9 @@ export async function createPage(input: DocMountInput) {
 
   const addFile = async (file: File) => {
     if (input.readonly) return false
+    // Reject oversized files before blobSync.set reads the whole blob (arrayBuffer
+    // + base64) into memory, which would crash the tab. Callers surface the toast.
+    if (file.size > MAX_ATTACHMENT_BYTES) return false
     ensureEditable(doc)
     const parent = doc.getBlockByFlavour("affine:note")[0]
     if (!parent) return false

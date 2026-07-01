@@ -284,6 +284,8 @@ export const dict = {
 
   "prompt.toast.pasteUnsupported.title": "ไฟล์แนบที่ไม่รองรับ",
   "prompt.toast.pasteUnsupported.description": "แนบได้เฉพาะรูปภาพ, PDF หรือไฟล์ข้อความเท่านั้น",
+  "prompt.toast.fileTooLarge.title": "ไฟล์ใหญ่เกินไป",
+  "prompt.toast.fileTooLarge.description": "ไฟล์แนบต้องมีขนาดไม่เกิน 10 MB",
   "prompt.toast.modelAgentRequired.title": "เลือกเอเจนต์และโมเดล",
   "prompt.toast.modelAgentRequired.description": "เลือกเอเจนต์และโมเดลก่อนส่งพร้อมท์",
   "prompt.toast.worktreeCreateFailed.title": "ไม่สามารถสร้าง worktree",
