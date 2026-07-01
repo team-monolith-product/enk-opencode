@@ -185,6 +185,7 @@ function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
       theme: snapshotTheme(),
       init: false,
       readonly: true,
+      preview: true,
       sync: {
         docID: props.docID,
         baseUrl: props.sdk.url,

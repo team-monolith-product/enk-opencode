@@ -1049,7 +1049,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   ] as const
 
   const modeButtons = () => (
-    <Show when={!wysiwygOnly && !readonly}>
+    <Show when={!wysiwygOnly}>
       {modes.map((item) => {
         const selected = store.mode === item.mode
         return (
@@ -1059,14 +1059,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               data-selected={selected ? "true" : undefined}
               type="button"
               variant="ghost"
+              disabled={readonly}
               classList={{
                 "size-7.5 p-0": true,
                 "pointer-events-none bg-surface-base-active text-text-strong [&_[data-slot=icon-svg]]:text-icon-strong":
                   selected,
               }}
               style={canvasMode(store.mode) ? undefined : buttons()}
-              aria-disabled={selected}
-              tabIndex={selected ? -1 : undefined}
+              aria-disabled={selected || readonly}
+              tabIndex={selected || readonly ? -1 : undefined}
               onClick={() => setMode(item.mode)}
               aria-label={language.t(item.label)}
               aria-pressed={selected}
@@ -2313,7 +2314,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               readonly={readonly}
               submitIcon={submitIcon()}
               submitLabel={submitLabel()}
-              submitDisabled={submitAction() === "send" && !hasDraft()}
+              submitDisabled={readonly || (submitAction() === "send" && !hasDraft())}
               tip={tip()}
               onExit={exitDoc}
               modes={modeButtons()}

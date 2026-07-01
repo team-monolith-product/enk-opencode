@@ -105,7 +105,6 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
           </div>
         </Show>
       </div>
-      <Show when={!props.readonly}>
       <div
         data-component="prompt-doc-actions"
         class="relative flex h-11 shrink-0 items-center justify-between gap-2 border-t border-border-weaker-base bg-surface-raised-stronger-non-alpha px-2 py-0"
@@ -195,7 +194,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               variant="ghost"
               class="size-7.5 oc-attach-btn"
               classList={{ "is-open": attachOpen() }}
-              disabled={!props.doc.ready()}
+              disabled={props.readonly || !props.doc.ready()}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => attachOpen() ? closeAttach() : openAttach()}
               aria-label={language.t("prompt.action.attachFile")}
@@ -286,7 +285,6 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
           />
         </Tooltip>
       </div>
-      </Show>
     </div>
   )
 }

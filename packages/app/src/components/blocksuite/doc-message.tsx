@@ -51,6 +51,7 @@ export const DocMessage: Component<{ id: string; fallback?: JSX.Element }> = (pr
       theme: theme(),
       init: false,
       readonly: true,
+      preview: true,
       sync: {
         docID: props.id,
         baseUrl: sdk.url,
