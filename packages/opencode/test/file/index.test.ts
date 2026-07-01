@@ -581,9 +581,10 @@ describe("file/index Filesystem patterns", () => {
       })
     })
 
-    test("excludes .git and .DS_Store", async () => {
+    test("excludes .git, .DS_Store and __preview-bridge.js", async () => {
       await using tmp = await tmpdir({ git: true })
       await fs.writeFile(path.join(tmp.path, ".DS_Store"), "", "utf-8")
+      await fs.writeFile(path.join(tmp.path, "__preview-bridge.js"), "", "utf-8")
       await fs.writeFile(path.join(tmp.path, "visible.txt"), "", "utf-8")
 
       await Instance.provide({
@@ -593,6 +594,7 @@ describe("file/index Filesystem patterns", () => {
           const names = nodes.map((n) => n.name)
           expect(names).not.toContain(".git")
           expect(names).not.toContain(".DS_Store")
+          expect(names).not.toContain("__preview-bridge.js")
           expect(names).toContain("visible.txt")
         },
       })
