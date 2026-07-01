@@ -28,7 +28,13 @@
         "apiKey": "proxy-auth",
       },
       "models": {
-        "MiniMax-M3": {},
+        "MiniMax-M3": {
+          "variants": {
+            "adaptive": {
+              "thinking": { "type": "adaptive" },
+            },
+          },
+        },
       },
     },
   },
