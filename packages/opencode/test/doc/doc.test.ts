@@ -592,6 +592,72 @@ describe("doc", () => {
     })
   })
 
+  test("observer receives casts through the real submit-connect route (?observer=true)", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+
+        const app = Server.Default()
+        const { websocket } = await import("hono/bun")
+        const server = Bun.serve({ port: 0, fetch: app.fetch, websocket })
+        try {
+          const dir = encodeURIComponent(tmp.path)
+          const base = `ws://localhost:${server.port}/session/${session.id}/prompt-doc/submit/connect`
+          const viewerID = "actviewer000000000000000009"
+          const seen: Doc.SubmitEvent[] = []
+
+          const open = (ws: WebSocket) =>
+            new Promise<WebSocket>((res, rej) => {
+              ws.onopen = () => res(ws)
+              ws.onerror = (e) => rej(e)
+            })
+
+          const aliceWs = new WebSocket(`${base}?directory=${dir}&docID=${docID}&actorID=${alice.actorID}`)
+          const bobWs = new WebSocket(`${base}?directory=${dir}&docID=${docID}&actorID=${bob.actorID}`)
+          const viewerWs = new WebSocket(`${base}?directory=${dir}&docID=${docID}&actorID=${viewerID}&observer=true`)
+          viewerWs.onmessage = (e) => {
+            try {
+              seen.push(JSON.parse(e.data as string) as Doc.SubmitEvent)
+            } catch {
+              // ignore ping frames etc.
+            }
+          }
+          await Promise.all([open(aliceWs), open(bobWs), open(viewerWs)])
+          // Let the server-side onOpen handlers register the peers/observer.
+          await new Promise((r) => setTimeout(r, 100))
+
+          const state = Doc.submitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            actorIDs: [alice.actorID, bob.actorID],
+            prompt,
+          })
+          expect(state.status).toBe("pending")
+          // Observer is not a vote target...
+          expect(state.actors.map((a) => a.actorID)).not.toContain(viewerID)
+
+          // ...but the real route must deliver the cast to it.
+          await new Promise((r) => setTimeout(r, 100))
+          expect(seen.some((event) => event.type === "created" && event.state.submitID === state.submitID)).toBe(true)
+
+          aliceWs.close()
+          bobWs.close()
+          viewerWs.close()
+        } finally {
+          server.stop(true)
+        }
+      },
+    })
+  })
+
   test("submit approval caps overly long names", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
