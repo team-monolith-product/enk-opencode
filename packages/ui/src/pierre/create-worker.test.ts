@@ -15,7 +15,11 @@ describe("worker construction guard", () => {
     for await (const rel of new Bun.Glob("**/*.{ts,tsx}").scan({ cwd: SRC_ROOT })) {
       if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue
       if (rel === ALLOWED) continue
-      if (CONSTRUCT_RE.test(readFileSync(join(SRC_ROOT, rel), "utf8"))) offenders.push(rel)
+      // 주석 속 예시 문구가 아니라 실제 코드만 검사하도록 블록·라인 주석을 먼저 제거한다.
+      const code = readFileSync(join(SRC_ROOT, rel), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/.*$/gm, "")
+      if (CONSTRUCT_RE.test(code)) offenders.push(rel)
     }
 
     if (offenders.length > 0) {
