@@ -229,11 +229,11 @@ export async function createPage(input: DocMountInput) {
     })
   }
 
-  if (input.sync) {
-    // link() sets up BOTH remote→local subscribe and local→remote push. A readonly viewer must still
-    // link() so it receives other participants' LIVE edits (without it, only the initial snapshot
-    // arrives). The push side is a no-op for readonly — the Preview editor never mutates the doc, so
-    // link()'s `page.on("update", push)` listener never fires.
+  // A message BUBBLE / snapshot (preview) is a frozen one-time render — it loads its state once and
+  // must NOT open a live sync socket (one per bubble would pile up). The editable composer and the
+  // readonly prompt VIEWER both link(): the viewer needs remote→local live edits, and its push side is
+  // a no-op because the Preview editor never mutates the doc.
+  if (input.sync && !input.preview) {
     unlink = await link(direct!, collection.doc, doc.spaceDoc)
     if (!input.readonly) {
       const onY = () => notifyDraft()
