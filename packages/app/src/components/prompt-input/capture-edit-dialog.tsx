@@ -94,17 +94,20 @@ export const CaptureEditDialog: Component<CaptureEditDialogProps> = (props) => {
     // 가로 콘텐츠 핏: 모달 폭을 이미지(baseW)와 툴바 폭 중 큰 쪽 + 좌우 chrome 에 맞춰 줄인다.
     // 90vw 로 펼친 상태에서 측정하므로 줄이기만 하고, min(90vw, …px) 로 두어 캡을 반응형으로 유지.
     if (dialogContainer) {
-      // 툴바 intrinsic 폭: 닫기·추가의 ml-auto 때문에 평소 scrollWidth 는 가용폭 전체로 잡힌다.
+      // 툴바/푸터 intrinsic 폭: 평소 scrollWidth 는 가용폭 전체로 잡히므로
       // max-content 로 잠깐 바꿔 한 줄 실제 필요 폭만 잰 뒤 되돌린다.
-      const toolbarEl = containerRef.parentElement?.querySelector<HTMLElement>('[data-slot="toolbar"]')
-      let toolbarW = 0
-      if (toolbarEl) {
-        const prevWidth = toolbarEl.style.width
-        toolbarEl.style.width = "max-content"
-        toolbarW = toolbarEl.scrollWidth
-        toolbarEl.style.width = prevWidth
+      const measureIntrinsicW = (selector: string) => {
+        const el = containerRef.parentElement?.querySelector<HTMLElement>(selector)
+        if (!el) return 0
+        const prevWidth = el.style.width
+        el.style.width = "max-content"
+        const w = el.scrollWidth
+        el.style.width = prevWidth
+        return w
       }
-      const desiredStageW = Math.max(baseW, toolbarW)
+      const toolbarW = measureIntrinsicW('[data-slot="toolbar"]')
+      const footerW = measureIntrinsicW('[data-slot="footer"]')
+      const desiredStageW = Math.max(baseW, toolbarW, footerW)
       const chromeW = dialogContainer.clientWidth - containerRef.clientWidth // 좌우 패딩 합
       const targetW = Math.round(desiredStageW + chromeW)
       dialogContainer.style.width = `min(90vw, ${targetW}px)`
@@ -555,15 +558,6 @@ export const CaptureEditDialog: Component<CaptureEditDialogProps> = (props) => {
               aria-label={language.t("prompt.capture.zoomIn")}
             />
           </Tooltip>
-          {/* 닫기 / 추가 */}
-          <div class="ml-auto flex items-center gap-2">
-            <Button type="button" variant="ghost" class="h-7.5" onClick={() => dialog.close()}>
-              {language.t("prompt.capture.close")}
-            </Button>
-            <Button type="button" variant="primary" class="h-7.5" disabled={adding()} onClick={onAddClick}>
-              {language.t("prompt.capture.add")}
-            </Button>
-          </div>
         </div>
 
         <div
@@ -575,6 +569,16 @@ export const CaptureEditDialog: Component<CaptureEditDialogProps> = (props) => {
           classList={{ "cursor-crosshair": cropping() }}
           onWheel={onWheel}
         />
+
+        {/* 닫기 / 추가 */}
+        <div data-slot="footer" class="flex shrink-0 items-center justify-end gap-2">
+          <Button type="button" variant="ghost" class="h-7.5" onClick={() => dialog.close()}>
+            {language.t("prompt.capture.close")}
+          </Button>
+          <Button type="button" variant="primary" class="h-7.5" disabled={adding()} onClick={onAddClick}>
+            {language.t("prompt.capture.add")}
+          </Button>
+        </div>
       </div>
     </Dialog>
   )
