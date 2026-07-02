@@ -1,4 +1,5 @@
 import { Server } from "../../server/server"
+import * as Room from "../../doc/room"
 import { UI } from "../ui"
 import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
@@ -75,6 +76,14 @@ export const WebCommand = cmd({
       UI.println(UI.Style.TEXT_INFO_BOLD + "  Web interface:    ", UI.Style.TEXT_NORMAL, displayUrl)
       open(displayUrl).catch(() => {})
     }
+
+    // Graceful shutdown (cull/manual pod stop sends SIGTERM): tell every doc client the session is
+    // over so it stops reconnecting, instead of letting sockets die without a close code.
+    process.once("SIGTERM", async () => {
+      Room.closeAll(Room.CLOSE_SESSION_ENDED, "session ended")
+      await server.stop(true)
+      process.exit(0)
+    })
 
     await new Promise(() => {})
     await server.stop()

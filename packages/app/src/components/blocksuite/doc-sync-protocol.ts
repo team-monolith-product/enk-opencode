@@ -1,6 +1,9 @@
 export const MSG_DOC = 0
 export const MSG_AWARENESS = 1
 
+// Server-initiated close meaning the session is gone for good (mirrored in opencode's doc/wire.ts).
+export const CLOSE_SESSION_ENDED = 4001
+
 export function pack(type: number, guid: string, data: Uint8Array) {
   const g = new TextEncoder().encode(guid)
   const out = new Uint8Array(1 + 2 + g.length + data.length)

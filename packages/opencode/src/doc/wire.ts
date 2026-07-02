@@ -1,6 +1,10 @@
 export const MSG_DOC = 0
 export const MSG_AWARENESS = 1
 
+// Close code telling clients the session is gone for good, so they must not reconnect (mirrored in
+// the web app's doc-sync-protocol.ts).
+export const CLOSE_SESSION_ENDED = 4001
+
 export function pack(type: number, guid: string, data: Uint8Array) {
   const g = new TextEncoder().encode(guid)
   const out = new Uint8Array(1 + 2 + g.length + data.length)
