@@ -286,8 +286,6 @@ export function SessionSidePanel(props: {
               tabs().setActive("preview")
               preview.goHome()
             }}
-            onCapture={previewBridge.requestCapture}
-            capturing={previewBridge.capturing()}
           />
           <div class="flex-1 min-h-0 flex">
           <div
