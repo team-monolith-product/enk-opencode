@@ -23,9 +23,14 @@ const SCRIPT_SRC = origins("'self'", "'wasm-unsafe-eval'", ASSET_ORIGIN)
 const STYLE_SRC = origins("'self'", "'unsafe-inline'", ASSET_ORIGIN)
 const FONT_SRC = origins("'self'", "data:", ASSET_ORIGIN)
 const MEDIA_SRC = origins("'self'", "data:", ASSET_ORIGIN)
+// CDN 자산은 cross-origin 이라 워커를 same-origin blob 모듈로 부트스트랩한다(create-worker.ts).
+// worker-src 미지정 시 default-src 'self' 로 폴백되어 blob 워커가 막히므로 명시한다.
+// ASSET_ORIGIN 은 넣지 않는다. worker-src 는 최상위 blob 스크립트만 관장하고, blob 내부의
+// CDN 워커 모듈 import 는 script-src(ASSET_ORIGIN 포함)가 관장하기 때문이다.
+const WORKER_SRC = origins("'self'", "blob:")
 
 const buildCsp = (hash = "") =>
-  `frame-ancestors ${FRAME_ANCESTORS}; default-src 'self'; frame-src ${FRAME_SRC}; script-src ${SCRIPT_SRC}${hash ? ` 'sha256-${hash}'` : ""}; style-src ${STYLE_SRC}; img-src 'self' data: blob: https:; font-src ${FONT_SRC}; media-src ${MEDIA_SRC}; connect-src ${CONNECT_SRC}`
+  `frame-ancestors ${FRAME_ANCESTORS}; default-src 'self'; frame-src ${FRAME_SRC}; script-src ${SCRIPT_SRC}${hash ? ` 'sha256-${hash}'` : ""}; style-src ${STYLE_SRC}; img-src 'self' data: blob: https:; font-src ${FONT_SRC}; media-src ${MEDIA_SRC}; worker-src ${WORKER_SRC}; connect-src ${CONNECT_SRC}`
 
 export const DEFAULT_CSP = buildCsp()
 export const csp = (hash = "") => buildCsp(hash)

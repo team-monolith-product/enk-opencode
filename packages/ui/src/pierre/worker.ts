@@ -1,10 +1,11 @@
 import { WorkerPoolManager } from "@pierre/diffs/worker"
 import ShikiWorkerUrl from "@pierre/diffs/worker/worker.js?worker&url"
+import { createWorker } from "./create-worker"
 
 export type WorkerPoolStyle = "unified" | "split"
 
 export function workerFactory(): Worker {
-  return new Worker(ShikiWorkerUrl, { type: "module" })
+  return createWorker(ShikiWorkerUrl)
 }
 
 function createPool(lineDiffType: "none" | "word-alt") {
