@@ -1,8 +1,8 @@
 export const MSG_DOC = 0
 export const MSG_AWARENESS = 1
 
-// Close code telling clients the session is gone for good, so they must not reconnect (mirrored in
-// the web app's doc-sync-protocol.ts).
+// 세션이 완전히 종료됐으니 재연결하지 말라고 클라이언트에 알리는 close code
+// (웹앱의 doc-sync-protocol.ts와 미러).
 export const CLOSE_SESSION_ENDED = 4001
 
 export function pack(type: number, guid: string, data: Uint8Array) {

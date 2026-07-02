@@ -681,7 +681,7 @@ describe("doc", () => {
             ws.onopen = () => res()
             ws.onerror = (e) => rej(e)
           })
-          // Let the server-side onOpen handler register the peer with the room.
+          // 서버 쪽 onOpen 핸들러가 peer를 room에 등록할 시간을 준다.
           await new Promise((r) => setTimeout(r, 100))
 
           await Server.shutdown(server)

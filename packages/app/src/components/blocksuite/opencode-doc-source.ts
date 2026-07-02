@@ -46,9 +46,9 @@ async function blobB64(blob: Blob) {
 const RETRY_BASE = 250
 const RETRY_MAX = 4_000
 const RETRY_DEADLINE = 60_000
-// What the hub proxy answers once the session pod is gone and the route no longer exists. 503 is
-// deliberately excluded: it can be a transient proxy restart / scale event, and treating it as gone
-// would permanently kill a live session. Ambiguous cases are absorbed by the retry deadline instead.
+// 세션 pod이 죽어 라우트가 사라졌을 때 허브 프록시가 반환하는 상태 코드. 503은 의도적으로 제외:
+// 프록시 재시작·스케일링 중 일시적으로 발생할 수 있어 gone으로 취급하면 살아있는 세션을 영구
+// 중단시킨다. 모호한 케이스는 재시도 데드라인이 흡수한다.
 const GONE_STATUSES = new Set([404, 424])
 
 function sessionGone(opts: DocSyncOpts) {
@@ -66,9 +66,9 @@ function notifySessionEnded() {
   window.parent.postMessage({ type: "opencode:session-ended" }, "*")
 }
 
-// Reconnect state machine shared by the doc and awareness sockets. Backs off exponentially, probes
-// whether the session still exists before each attempt, and gives up for good (telling the embedding
-// page) once the session is confirmed dead or the deadline since the first failure has passed.
+// doc/awareness 소켓이 공유하는 재연결 상태 머신. 지수 백오프로 재시도하고, 매 시도 전에 세션
+// 생존을 프로브하며, 세션 사망이 확정되거나 최초 실패 후 데드라인이 지나면 (임베딩 페이지에
+// 알리고) 영구 중단한다.
 function reconnector(input: { connect: () => void; stop: () => void; gone: () => Promise<boolean> }) {
   let timer: ReturnType<typeof setTimeout> | undefined
   let tries = 0
@@ -379,10 +379,9 @@ export class OpencodeAwarenessSource implements AwarenessSource {
 
     connect()
 
-    // Returning to a backgrounded tab: the browser may have closed the socket while throttling the
-    // reconnect backoff timer, so restart the backoff from scratch instead of waiting it out.
-    // Reconnecting re-announces our local awareness state (sent on socket "open"), restoring our
-    // cursor for peers.
+    // 백그라운드 탭에서 복귀: 브라우저가 백오프 타이머를 스로틀링하는 동안 소켓을 닫았을 수
+    // 있으므로, 타이머를 기다리는 대신 백오프를 처음부터 다시 시작한다. 재연결되면 소켓 "open"
+    // 시점에 로컬 awareness 상태를 다시 알려 피어들에게 내 커서가 복원된다.
     const onVisible = () => {
       if (closed) return
       if (typeof document === "undefined" || document.visibilityState !== "visible") return
