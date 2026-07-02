@@ -1,12 +1,13 @@
 import * as Y from "yjs"
 import { modifyAwarenessUpdate } from "y-protocols/awareness"
 import type { DocID } from "./schema"
-import { MSG_AWARENESS, MSG_DOC, pack, unpack, unpackLegacy } from "./wire"
+import { CLOSE_SESSION_ENDED, MSG_AWARENESS, MSG_DOC, pack, unpack, unpackLegacy } from "./wire"
 
-export { MSG_DOC, MSG_AWARENESS }
+export { CLOSE_SESSION_ENDED, MSG_DOC, MSG_AWARENESS }
 
 export type Peer = {
   send: (data: Uint8Array) => void
+  close?: (code?: number, reason?: string) => void
   awareness?: Uint8Array
 }
 
@@ -183,6 +184,12 @@ export function connect(id: DocID, peer: Peer) {
       r.leaving.set(clientID, timer)
     }
     reap(id, r)
+  }
+}
+
+export function closeAll(code?: number, reason?: string) {
+  for (const r of rooms.values()) {
+    for (const peer of r.peers) peer.close?.(code, reason)
   }
 }
 

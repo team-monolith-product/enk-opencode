@@ -1,6 +1,6 @@
 import type { AwarenessSource, BlobSource, DocSource } from "@blocksuite/sync"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
-import { MSG_AWARENESS, MSG_DOC, pack, unpack } from "./doc-sync-protocol"
+import { CLOSE_SESSION_ENDED, MSG_AWARENESS, MSG_DOC, pack, unpack } from "./doc-sync-protocol"
 import { apiUrl } from "@/utils/api-url"
 
 // Eagerly resolved so we can encode an awareness removal SYNCHRONOUSLY during page unload
@@ -41,6 +41,93 @@ function url(opts: DocSyncOpts, path: string) {
 
 async function blobB64(blob: Blob) {
   return b64(new Uint8Array(await blob.arrayBuffer()))
+}
+
+const RETRY_BASE = 250
+const RETRY_MAX = 4_000
+const RETRY_DEADLINE = 60_000
+// 세션 pod이 죽어 라우트가 사라졌을 때 허브 프록시가 반환하는 상태 코드. 503은 의도적으로 제외:
+// 프록시 재시작·스케일링 중 일시적으로 발생할 수 있어 gone으로 취급하면 살아있는 세션을 영구
+// 중단시킨다. 모호한 케이스는 재시도 데드라인이 흡수한다.
+const GONE_STATUSES = new Set([404, 424])
+
+function sessionGone(opts: DocSyncOpts) {
+  return opts.client.doc.cycle
+    .list(
+      { docID: opts.docID, directory: opts.directory, limit: 1 },
+      { cache: "no-store", throwOnError: false },
+    )
+    .then((res) => GONE_STATUSES.has(res.response?.status ?? 0))
+    .catch(() => false)
+}
+
+function notifySessionEnded() {
+  if (typeof window === "undefined" || window.parent === window) return
+  window.parent.postMessage({ type: "opencode:session-ended" }, "*")
+}
+
+// doc/awareness 소켓이 공유하는 재연결 상태 머신. 지수 백오프로 재시도하고, 매 시도 전에 세션
+// 생존을 프로브하며, 세션 사망이 확정되거나 최초 실패 후 데드라인이 지나면 (임베딩 페이지에
+// 알리고) 영구 중단한다.
+function reconnector(input: { connect: () => void; stop: () => void; gone: () => Promise<boolean> }) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let tries = 0
+  let firstFailure: number | undefined
+  let disposed = false
+
+  const ended = () => {
+    notifySessionEnded()
+    input.stop()
+  }
+
+  const retry = () => {
+    if (disposed || timer) return
+    const now = Date.now()
+    firstFailure ??= now
+    if (now - firstFailure > RETRY_DEADLINE) {
+      ended()
+      return
+    }
+    const ms = Math.min(RETRY_BASE * 2 ** Math.min(tries, 4), RETRY_MAX)
+    timer = setTimeout(async () => {
+      timer = undefined
+      if (disposed) return
+      if (await input.gone()) {
+        if (disposed) return
+        ended()
+        return
+      }
+      if (disposed) return
+      tries += 1
+      input.connect()
+    }, ms)
+  }
+
+  return {
+    retry,
+    reset() {
+      tries = 0
+      firstFailure = undefined
+      if (timer) clearTimeout(timer)
+      timer = undefined
+    },
+    close(code: number) {
+      if (code === 1000) {
+        input.stop()
+        return
+      }
+      if (code === CLOSE_SESSION_ENDED) {
+        ended()
+        return
+      }
+      retry()
+    },
+    dispose() {
+      disposed = true
+      if (timer) clearTimeout(timer)
+      timer = undefined
+    },
+  }
 }
 
 export class OpencodeDocSource implements DocSource {
@@ -100,7 +187,6 @@ export class OpencodeDocSource implements DocSource {
     next.protocol = next.protocol === "https:" ? "wss:" : "ws:"
     let done = false
     let closed = false
-    let timer: ReturnType<typeof setTimeout> | undefined
     let ready: ((stop: () => void) => void) | undefined
     let ws: WebSocket | undefined
     this.ready = Promise.resolve()
@@ -123,7 +209,7 @@ export class OpencodeDocSource implements DocSource {
 
     const stop = () => {
       closed = true
-      if (timer) clearTimeout(timer)
+      recon.dispose()
       ws?.removeEventListener("message", onMsg)
       if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
       if (done) return
@@ -131,14 +217,6 @@ export class OpencodeDocSource implements DocSource {
       ready?.(stop)
     }
     this.unsub = stop
-
-    const retry = () => {
-      if (closed || timer) return
-      timer = setTimeout(() => {
-        timer = undefined
-        connect()
-      }, 250)
-    }
 
     const connect = () => {
       if (closed) return
@@ -148,19 +226,23 @@ export class OpencodeDocSource implements DocSource {
       this.ws = socket
       socket.addEventListener("message", onMsg)
       socket.addEventListener("open", () => {
+        recon.reset()
         if (done) return
         done = true
         ready?.(stop)
       })
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         if (ws === socket) this.ws = undefined
-        retry()
+        if (closed) return
+        recon.close(event.code)
       })
       socket.addEventListener("error", () => {
         if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close()
-        retry()
+        recon.retry()
       })
     }
+
+    const recon = reconnector({ connect, stop, gone: () => sessionGone(this.opts) })
 
     connect()
 
@@ -235,7 +317,6 @@ export class OpencodeAwarenessSource implements AwarenessSource {
     next.searchParams.set("kind", "awareness")
     next.protocol = next.protocol === "https:" ? "wss:" : "ws:"
     let closed = false
-    let timer: ReturnType<typeof setTimeout> | undefined
     let ws: WebSocket | undefined
 
     const onUpdate = (
@@ -270,14 +351,6 @@ export class OpencodeAwarenessSource implements AwarenessSource {
       })
     }
 
-    const retry = () => {
-      if (closed || timer) return
-      timer = setTimeout(() => {
-        timer = undefined
-        connect()
-      }, 250)
-    }
-
     const connect = () => {
       if (closed) return
       const socket = new WebSocket(next)
@@ -285,35 +358,36 @@ export class OpencodeAwarenessSource implements AwarenessSource {
       ws = socket
       this.ws = socket
       socket.addEventListener("open", () => {
+        recon.reset()
         void import("y-protocols/awareness").then((mod) => {
           socket.send(pack(MSG_AWARENESS, "", mod.encodeAwarenessUpdate(awareness, [awareness.clientID])))
         })
       })
       socket.addEventListener("message", onMsg)
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         if (ws === socket) this.ws = undefined
-        retry()
+        if (closed) return
+        recon.close(event.code)
       })
       socket.addEventListener("error", () => {
         if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close()
-        retry()
+        recon.retry()
       })
     }
 
+    const recon = reconnector({ connect, stop: () => stop(), gone: () => sessionGone(this.opts) })
+
     connect()
 
-    // Returning to a backgrounded tab: the browser may have closed the socket while throttling the
-    // reconnect backoff timer, so reconnect immediately instead of waiting it out. Reconnecting here
-    // re-announces our local awareness state (sent on socket "open"), restoring our cursor for peers.
+    // 백그라운드 탭에서 복귀: 브라우저가 백오프 타이머를 스로틀링하는 동안 소켓을 닫았을 수
+    // 있으므로, 타이머를 기다리는 대신 백오프를 처음부터 다시 시작한다. 재연결되면 소켓 "open"
+    // 시점에 로컬 awareness 상태를 다시 알려 피어들에게 내 커서가 복원된다.
     const onVisible = () => {
       if (closed) return
       if (typeof document === "undefined" || document.visibilityState !== "visible") return
       if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) return
-      if (timer) {
-        clearTimeout(timer)
-        timer = undefined
-      }
-      connect()
+      recon.reset()
+      recon.retry()
     }
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible)
 
@@ -342,17 +416,19 @@ export class OpencodeAwarenessSource implements AwarenessSource {
     }
     if (typeof window !== "undefined") window.addEventListener("pagehide", onPageHide)
 
-    this.stop = () => {
+    const stop = () => {
+      if (closed) return
       closed = true
+      recon.dispose()
       if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible)
       if (typeof window !== "undefined") window.removeEventListener("pagehide", onPageHide)
-      if (timer) clearTimeout(timer)
       // CLEAN disconnect (unmount/navigation): drop our cursor on peers immediately instead of letting
       // the server's grace timer leave it as a ghost.
       announceLeave()
       awareness.off("update", onUpdate)
       if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
     }
+    this.stop = stop
   }
 
   disconnect() {

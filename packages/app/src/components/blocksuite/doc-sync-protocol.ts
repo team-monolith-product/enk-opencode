@@ -1,6 +1,9 @@
 export const MSG_DOC = 0
 export const MSG_AWARENESS = 1
 
+// 세션이 완전히 종료됐음을 뜻하는 서버 발신 close code (opencode의 doc/wire.ts와 미러).
+export const CLOSE_SESSION_ENDED = 4001
+
 export function pack(type: number, guid: string, data: Uint8Array) {
   const g = new TextEncoder().encode(guid)
   const out = new Uint8Array(1 + 2 + g.length + data.length)
