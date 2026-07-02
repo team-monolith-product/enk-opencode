@@ -58,6 +58,9 @@ type SocketInput = {
   docID: string
   actorID: string
   event: (event: DocSubmitEvent) => void
+  // A readonly spectator connects observer-only: it receives every vote cast but the server keeps it
+  // out of `peers`/targets() so it is never counted in consensus.
+  observer?: boolean
 }
 
 const path = (input: { baseUrl: string; directory: string }, value: string) => {
@@ -205,6 +208,8 @@ type QuestionSocketInput = {
   requestID: string
   actorID: string
   event: (event: DocSubmitEvent) => void
+  // See SocketInput.observer — readonly spectators watch the vote without joining it.
+  observer?: boolean
 }
 
 // Reconnecting websocket for question-reply consent lifecycle events (mirrors connectSubmit).
@@ -212,6 +217,7 @@ export function connectQuestionSubmit(input: QuestionSocketInput) {
   const url = path(input, `/session/${input.sessionID}/question/submit/connect`)
   url.searchParams.set("requestID", input.requestID)
   url.searchParams.set("actorID", input.actorID)
+  if (input.observer) url.searchParams.set("observer", "true")
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
 
   let closed = false
@@ -395,6 +401,7 @@ export function connectSubmit(input: SocketInput) {
   const url = path(input, `/session/${input.sessionID}/prompt-doc/submit/connect`)
   url.searchParams.set("docID", input.docID)
   url.searchParams.set("actorID", input.actorID)
+  if (input.observer) url.searchParams.set("observer", "true")
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
 
   let closed = false

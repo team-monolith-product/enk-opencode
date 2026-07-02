@@ -287,6 +287,7 @@ export const DocRoutes = lazy(() =>
                 if (socket.readyState !== 1) return
                 socket.send(data)
               },
+              close: (code, reason) => socket.close(code, reason),
             }
             stop = Room.connect(docID, peer)
           },

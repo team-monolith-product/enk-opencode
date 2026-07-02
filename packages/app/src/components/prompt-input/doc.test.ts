@@ -124,4 +124,24 @@ describe("createPromptDoc plain props", () => {
     await doc.refresh("session_2")
     expect(promptDocs.at(-1)?.sessionID).toBe("session_2")
   })
+
+  test("readonly mounts read-only and never registers a server actor", async () => {
+    mounts.length = 0
+    const upsert = mock(async () => ({ data: { actorID: "act_1", name: "Test", color: "#3574D9" } }))
+    const readonlyClient = {
+      session: {
+        actor: { upsert },
+        promptDoc: async () => ({ data: { docID: "doc_1" } }),
+      },
+    } as never
+    const [store] = createStore(config({ readonly: true }))
+    const doc = createPromptDoc({ config: store, client: readonlyClient, onSubmit: () => {} })
+    const el = document.createElement("div")
+    await doc.mount({ el, theme: "light" })
+    expect(mounts.at(-1)?.readonly).toBe(true)
+    // No actor.upsert → no SessionActorTable row; identity is a local-only synthetic id. It carries
+    // the `act` prefix so it passes ActorID.zod on the observer-only submit socket.
+    expect(upsert).not.toHaveBeenCalled()
+    expect(doc.actorID()?.startsWith("act")).toBe(true)
+  })
 })

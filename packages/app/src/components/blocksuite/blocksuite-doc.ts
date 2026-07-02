@@ -25,7 +25,13 @@ export type DocMountInput = {
   theme: "light" | "dark"
   sync?: DocSyncOpts
   init?: boolean
+  // `readonly` = not editable (typing/collab blocked) but still the full composer layout — used by the
+  // ?readonly=true prompt viewer. `preview` = the sent-message BUBBLE layout (Preview specs, grow to
+  // content height, no inner scroll) — used by DocMessage and the consent-dialog snapshot. A preview
+  // is always readonly; a readonly viewer is NOT a preview. Keeping them separate lets the viewer match
+  // the editable composer exactly (padding + scroll) while messages keep their bubble sizing.
   readonly?: boolean
+  preview?: boolean
   onSubmit?: () => void
   /** Submit shortcut in parseKeybind format. Defaults to `enter`. */
   submitKey?: string
@@ -171,7 +177,9 @@ export async function createPage(input: DocMountInput) {
   const editor = new PageEditor()
   editor.doc = doc
   editor.specs = [
-    ...(input.readonly ? PreviewEditorBlockSpecs : PageEditorBlockSpecs),
+    // Only the sent-message BUBBLE uses Preview specs. A readonly viewer uses the full PageEditor
+    // specs so its chrome/layout is identical to the editable composer.
+    ...(input.preview ? PreviewEditorBlockSpecs : PageEditorBlockSpecs),
     DocModeExtension({
       getEditorMode: () => "page",
       getPrimaryMode: () => "page",
@@ -194,6 +202,8 @@ export async function createPage(input: DocMountInput) {
   }
 
   const focus = async (ready?: Awaited<ReturnType<typeof inlineReady>>) => {
+    // A readonly viewer is never focused/edited; skip so ensureEditable() can't inject a paragraph.
+    if (input.readonly) return
     ensureEditable(doc)
     const root = editor.querySelector("affine-page-root")
     if (root instanceof HTMLElement) root.focus()
@@ -219,11 +229,17 @@ export async function createPage(input: DocMountInput) {
     })
   }
 
-  if (input.sync && !input.readonly) {
+  // A message BUBBLE / snapshot (preview) is a frozen one-time render — it loads its state once and
+  // must NOT open a live sync socket (one per bubble would pile up). The editable composer and the
+  // readonly prompt VIEWER both link(): the viewer needs remote→local live edits, and its push side is
+  // a no-op because the Preview editor never mutates the doc.
+  if (input.sync && !input.preview) {
     unlink = await link(direct!, collection.doc, doc.spaceDoc)
-    const onY = () => notifyDraft()
-    doc.spaceDoc.on("update", onY)
-    offY = () => doc.spaceDoc.off("update", onY)
+    if (!input.readonly) {
+      const onY = () => notifyDraft()
+      doc.spaceDoc.on("update", onY)
+      offY = () => doc.spaceDoc.off("update", onY)
+    }
   }
 
   const rebind = () => {
@@ -306,16 +322,18 @@ export async function createPage(input: DocMountInput) {
     const width = host.clientWidth
     const root = editor.querySelector(".affine-page-root-block-container")
     const preview = editor.querySelector("affine-preview-root")
-    const height = input.readonly
+    // Only the message bubble (input.preview) grows to content height with no inner scroll. A readonly
+    // viewer uses the composer's own sizing (host height + inner scroll) so it matches the editor.
+    const height = input.preview
       ? content(
           host,
           root instanceof HTMLElement ? root : undefined,
           preview instanceof HTMLElement ? preview : undefined,
         )
       : host.clientHeight
-    const tall = input.readonly ? clamp(height) : height
+    const tall = input.preview ? clamp(height) : height
     if (tall <= 0) return
-    if (input.readonly) host.style.height = `${tall}px`
+    if (input.preview) host.style.height = `${tall}px`
     editor.style.display = "block"
     editor.style.height = `${tall}px`
     editor.style.width = width > 0 ? `${width}px` : "100%"
@@ -323,15 +341,15 @@ export async function createPage(input: DocMountInput) {
     if (viewport instanceof HTMLElement) {
       viewport.style.width = width > 0 ? `${width}px` : "100%"
       viewport.style.height = `${tall}px`
-      viewport.style.minHeight = input.readonly ? "0" : `${tall}px`
-      // Readonly (a sent message): never scroll — grow to full content. Editing keeps default.
-      viewport.style.overflowY = input.readonly ? "visible" : ""
+      viewport.style.minHeight = input.preview ? "0" : `${tall}px`
+      // Preview (a sent message): never scroll — grow to full content. Editing/viewer keeps default.
+      viewport.style.overflowY = input.preview ? "visible" : ""
     }
     if (root instanceof HTMLElement) {
       root.style.maxWidth = "none"
       root.style.margin = "0"
       if (width > 0) root.style.width = `${width}px`
-      if (input.readonly) root.style.minHeight = "0"
+      if (input.preview) root.style.minHeight = "0"
     }
     if (preview instanceof HTMLElement) {
       preview.style.display = "block"
@@ -358,7 +376,7 @@ export async function createPage(input: DocMountInput) {
       fit(el)
       // A sent message can finish laying out a frame after the first measure; re-fit once so its
       // full height is captured (no clipping). Guarded so a detached node never collapses to min.
-      if (input.readonly) requestAnimationFrame(() => el.isConnected && fit(el))
+      if (input.preview) requestAnimationFrame(() => el.isConnected && fit(el))
       resize?.disconnect()
       resize = new ResizeObserver(() => fit(el))
       resize.observe(el)
@@ -368,7 +386,9 @@ export async function createPage(input: DocMountInput) {
       const preview = editor.querySelector("affine-preview-root")
       if (preview instanceof HTMLElement) resize.observe(preview)
       mutate?.disconnect()
-      mutate = input.readonly
+      // The bubble (preview) is static, so no observer. A readonly viewer keeps the observer so live
+      // remote edits re-fit and update draft/filled state, exactly like the editable composer.
+      mutate = input.preview
         ? undefined
         : new MutationObserver(() => {
             fit(el)
@@ -430,7 +450,8 @@ export async function createPage(input: DocMountInput) {
   let hadText = false
 
   const settle = () => {
-    ensureEditable(doc)
+    // A readonly viewer must never mutate the doc — ensureEditable() would inject a paragraph.
+    if (!input.readonly) ensureEditable(doc)
     const empty = !docPlain(doc)
     if (empty) {
       if (!input.sync) doc.resetHistory()
@@ -446,11 +467,12 @@ export async function createPage(input: DocMountInput) {
     const empty = !docPlain(doc)
     if (hadText && empty && !input.sync) doc.resetHistory()
     hadText = !empty
-    ensureEditable(doc)
+    if (!input.readonly) ensureEditable(doc)
     notifyDraft()
   }
 
   const guard = () => {
+    if (input.readonly) return
     ensureEditable(doc)
   }
 

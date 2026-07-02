@@ -27,6 +27,9 @@ type Props = {
   preview?: () => DocSubmitPreviewItem[]
   // Required for kind === "doc": lets the snapshot mount the prompt doc read-only.
   sdk?: DocSubmitSdk
+  // A readonly spectator watches the vote (live status list) but cannot approve/reject — the action
+  // buttons and approve/reject keybinds are suppressed.
+  spectator?: boolean
   approve: () => void
   cancel: () => void
   close: () => void
@@ -182,6 +185,7 @@ function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
       theme: snapshotTheme(),
       init: false,
       readonly: true,
+      preview: true,
       sync: {
         docID: props.docID,
         baseUrl: props.sdk.url,
@@ -403,7 +407,14 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
   )
 }
 
-function WaitingBody(props: { state: DocSubmitState; kind?: DocSubmitKind; actorID: string; sec: number; cancel: () => void }) {
+function WaitingBody(props: {
+  state: DocSubmitState
+  kind?: DocSubmitKind
+  actorID: string
+  sec: number
+  cancel: () => void
+  spectator?: boolean
+}) {
   const allOk = createMemo(() => props.state.actors.every((item) => item.status === "approved"))
   const sub = () => {
     if (props.kind === "stop") return "모두 동의하면 AI 응답을 멈춰요"
@@ -411,11 +422,15 @@ function WaitingBody(props: { state: DocSubmitState; kind?: DocSubmitKind; actor
     if (props.kind === "question-back") return "모두 동의하면 이전 질문으로 돌아가요"
     return "모두 동의하면 바로 AI에게 전송돼요"
   }
+  // A readonly spectator sees the SAME waiting/status view an already-approved participant sees — same
+  // copy and layout. The only difference: it cannot cancel, so the "동의 취소" button is hidden.
   return (
     <div class="ds-body ds-body--waiting">
       <SessionPreviewMascot size={52} />
       <div class="ds-waiting-head">
-        <h2 class="ds-headline ds-headline--center">{allOk() ? "모두 동의했어요. 진행할게요" : "동의했어요. 팀원을 기다려요"}</h2>
+        <h2 class="ds-headline ds-headline--center">
+          {allOk() ? "모두 동의했어요. 진행할게요" : "동의했어요. 팀원을 기다려요"}
+        </h2>
         <p class="ds-waiting-sub">
           {sub()} · <span class="ds-nowrap">자동 거절까지 {props.sec}초</span>
         </p>
@@ -425,9 +440,11 @@ function WaitingBody(props: { state: DocSubmitState; kind?: DocSubmitKind; actor
           {(item) => <StatusRow actor={item} me={props.actorID} requesterID={props.state.actorID} />}
         </For>
       </div>
-      <button type="button" class="jt-btn jt-btn-secondary" onClick={props.cancel}>
-        동의 취소 <span class="ds-kbd">Esc</span>
-      </button>
+      <Show when={!props.spectator}>
+        <button type="button" class="jt-btn jt-btn-secondary" onClick={props.cancel}>
+          동의 취소 <span class="ds-kbd">Esc</span>
+        </button>
+      </Show>
     </div>
   )
 }
@@ -485,6 +502,7 @@ function ConsentFrame(props: {
   preview?: () => DocSubmitPreviewItem[]
   sdk?: DocSubmitSdk
   actorID: string
+  spectator?: boolean
   approve: () => void
   cancel: () => void
 }) {
@@ -496,8 +514,9 @@ function ConsentFrame(props: {
     const t = total()
     return t > 0 ? Math.max(0, Math.min(100, (sec() / t) * 100)) : 0
   }
-  // Urgency (red strip + heartbeat) only nudges an undecided voter — never the already-agreed waiter.
-  const urgent = () => sec() <= 5 && props.view === "voting"
+  // Urgency (red strip + heartbeat) only nudges an undecided voter — never the already-agreed waiter,
+  // and never a spectator who can't act anyway.
+  const urgent = () => sec() <= 5 && props.view === "voting" && !props.spectator
 
   return (
     <div class="jt-consent-card ds-card" classList={{ "is-urgent": urgent() }}>
@@ -523,7 +542,14 @@ function ConsentFrame(props: {
             />
           }
         >
-          <WaitingBody state={props.state} kind={props.kind} actorID={props.actorID} sec={sec()} cancel={props.cancel} />
+          <WaitingBody
+            state={props.state}
+            kind={props.kind}
+            actorID={props.actorID}
+            sec={sec()}
+            cancel={props.cancel}
+            spectator={props.spectator}
+          />
         </Show>
       </div>
     </div>
@@ -544,6 +570,8 @@ export function DialogDocSubmit(props: Props) {
   // provider's Esc-to-close does not also fire. On a terminal (failure) screen we leave keys alone
   // so the provider can close normally.
   onMount(() => {
+    // A spectator has no approve/reject action, so leave the keys to the dialog provider.
+    if (props.spectator) return
     const onKey = (event: KeyboardEvent) => {
       const current = state()
       if (!current || current.status !== "pending") return
@@ -578,12 +606,13 @@ export function DialogDocSubmit(props: Props) {
             fallback={<FailureCard state={current()} close={props.close} />}
           >
             <ConsentFrame
-              view={pending() && approved() ? "waiting" : "voting"}
+              view={props.spectator || (pending() && approved()) ? "waiting" : "voting"}
               state={current()}
               kind={props.kind}
               preview={props.preview}
               sdk={props.sdk}
               actorID={props.actorID}
+              spectator={props.spectator}
               approve={props.approve}
               cancel={props.cancel}
             />

@@ -537,6 +537,165 @@ describe("doc", () => {
     })
   })
 
+  test("observer receives casts but is never a target", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+
+        // A readonly spectator connects observer-only. Its actorID is a local synthetic id that is
+        // NOT registered as a session actor.
+        const viewerID = "actviewer000000000000000001"
+        const seen: Doc.SubmitEvent[] = []
+        const stopViewer = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: viewerID as never,
+          observer: true,
+          peer: { send: (data) => seen.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+
+        // Only Alice creates the vote; Bob is a real connected participant.
+        const stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+
+        const state = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          // Even if the client mistakenly passes the viewer id, it is never a connected peer.
+          actorIDs: [alice.actorID, bob.actorID, viewerID as never],
+          prompt,
+        })
+
+        // The observer is not counted as a vote target...
+        const ids = state.actors.map((actor) => actor.actorID)
+        expect(ids).toContain(alice.actorID)
+        expect(ids).toContain(bob.actorID)
+        expect(ids).not.toContain(viewerID)
+        // ...but still receives the vote cast (created state) so it can render the spectator dialog.
+        expect(seen.some((event) => event.type === "created" && event.state.submitID === state.submitID)).toBe(true)
+
+        stopViewer()
+        stopBob()
+      },
+    })
+  })
+
+  test("observer receives casts through the real submit-connect route (?observer=true)", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+
+        const app = Server.Default()
+        const { websocket } = await import("hono/bun")
+        const server = Bun.serve({ port: 0, fetch: app.fetch, websocket })
+        try {
+          const dir = encodeURIComponent(tmp.path)
+          const base = `ws://localhost:${server.port}/session/${session.id}/prompt-doc/submit/connect`
+          const viewerID = "actviewer000000000000000009"
+          const seen: Doc.SubmitEvent[] = []
+
+          const open = (ws: WebSocket) =>
+            new Promise<WebSocket>((res, rej) => {
+              ws.onopen = () => res(ws)
+              ws.onerror = (e) => rej(e)
+            })
+
+          const aliceWs = new WebSocket(`${base}?directory=${dir}&docID=${docID}&actorID=${alice.actorID}`)
+          const bobWs = new WebSocket(`${base}?directory=${dir}&docID=${docID}&actorID=${bob.actorID}`)
+          const viewerWs = new WebSocket(`${base}?directory=${dir}&docID=${docID}&actorID=${viewerID}&observer=true`)
+          viewerWs.onmessage = (e) => {
+            try {
+              seen.push(JSON.parse(e.data as string) as Doc.SubmitEvent)
+            } catch {
+              // ignore ping frames etc.
+            }
+          }
+          await Promise.all([open(aliceWs), open(bobWs), open(viewerWs)])
+          // Let the server-side onOpen handlers register the peers/observer.
+          await new Promise((r) => setTimeout(r, 100))
+
+          const state = Doc.submitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            actorIDs: [alice.actorID, bob.actorID],
+            prompt,
+          })
+          expect(state.status).toBe("pending")
+          // Observer is not a vote target...
+          expect(state.actors.map((a) => a.actorID)).not.toContain(viewerID)
+
+          // ...but the real route must deliver the cast to it.
+          await new Promise((r) => setTimeout(r, 100))
+          expect(seen.some((event) => event.type === "created" && event.state.submitID === state.submitID)).toBe(true)
+
+          aliceWs.close()
+          bobWs.close()
+          viewerWs.close()
+        } finally {
+          server.stop(true)
+        }
+      },
+    })
+  })
+
+  test("shutdown flushes the session-ended close frame to connected doc sockets", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+
+        const app = Server.Default()
+        const { websocket } = await import("hono/bun")
+        const server = Bun.serve({ port: 0, fetch: app.fetch, websocket })
+        try {
+          const dir = encodeURIComponent(tmp.path)
+          const ws = new WebSocket(`ws://localhost:${server.port}/doc/${docID}/connect?directory=${dir}&kind=doc`)
+          const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+            ws.onclose = (event) => resolve({ code: event.code, reason: event.reason })
+          })
+          await new Promise<void>((res, rej) => {
+            ws.onopen = () => res()
+            ws.onerror = (e) => rej(e)
+          })
+          // 서버 쪽 onOpen 핸들러가 peer를 room에 등록할 시간을 준다.
+          await new Promise((r) => setTimeout(r, 100))
+
+          await Server.shutdown(server)
+
+          const event = await closed
+          expect(event.code).toBe(Room.CLOSE_SESSION_ENDED)
+          expect(event.reason).toBe("session ended")
+        } finally {
+          server.stop(true)
+        }
+      },
+    })
+  })
+
   test("submit approval caps overly long names", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

@@ -17,6 +17,7 @@ import { lazy } from "@/util/lazy"
 import { errorHandler } from "./middleware"
 import { InstanceRoutes } from "./instance"
 import { initProjectors } from "./projectors"
+import * as Room from "../doc/room"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -325,6 +326,25 @@ export namespace Server {
       return originalStop(closeActiveConnections)
     }
 
+    // 우아한 종료 (cull/수동 pod 종료 시 SIGTERM 수신): 소켓이 close code 없이 죽게 두지 말고,
+    // 모든 doc 클라이언트에 세션 종료를 알려 재연결을 멈추게 한다.
+    process.once("SIGTERM", () => {
+      shutdown(server).finally(() => process.exit(0))
+    })
+
     return server
+  }
+
+  const SHUTDOWN_FLUSH_TIMEOUT = 3_000
+
+  // 모든 doc 소켓을 CLOSE_SESSION_ENDED로 닫은 뒤 서버를 graceful하게 정지해 close frame이
+  // 실제로 전송되게 한다. close 핸드셰이크에 응답하지 않는 클라이언트나 장수 SSE 스트림이
+  // 종료를 붙잡지 못하도록 타임아웃으로 제한한다.
+  export async function shutdown(server: { stop: (closeActiveConnections?: boolean) => void | Promise<void> }) {
+    Room.closeAll(Room.CLOSE_SESSION_ENDED, "session ended")
+    await Promise.race([
+      Promise.resolve(server.stop()),
+      new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_FLUSH_TIMEOUT)),
+    ])
   }
 }
