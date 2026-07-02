@@ -589,6 +589,9 @@ export namespace Doc {
   const PING_TIMEOUT = 9_000
   // Keyed by targetID (doc id or question request id) — the single routing key for a vote's peers.
   const peers = new Map<string, Set<SubmitPeer>>()
+  // Read-only spectators (?readonly=true viewers). They receive every cast for a targetID but are
+  // NEVER in `peers`, so targets() never counts them — they watch a vote without joining or blocking it.
+  const observers = new Map<string, Set<LivePeer>>()
   const timers = new Map<SubmitID, ReturnType<typeof setTimeout>>()
   const leaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let heartbeat: ReturnType<typeof setInterval> | undefined
@@ -611,6 +614,7 @@ export namespace Doc {
     }
     for (const set of peers.values()) reap(set)
     for (const set of draftPeers.values()) reap(set)
+    for (const set of observers.values()) reap(set)
   }
 
   function heartbeatStart() {
@@ -622,7 +626,7 @@ export namespace Doc {
 
   function heartbeatStop() {
     if (!heartbeat) return
-    if (peers.size > 0 || draftPeers.size > 0) return
+    if (peers.size > 0 || draftPeers.size > 0 || observers.size > 0) return
     clearInterval(heartbeat)
     heartbeat = undefined
   }
@@ -685,13 +689,16 @@ export namespace Doc {
   }
 
   function cast(type: SubmitEvent["type"], state: SubmitState) {
-    const set = peers.get(state.targetID)
-    if (!set) return
-    const ids = new Set(state.actors.map((actor) => actor.actorID))
     const data = JSON.stringify({ type, state } satisfies SubmitEvent)
-    set.forEach((peer) => {
-      if (ids.has(peer.actorID)) peer.send(data)
-    })
+    const set = peers.get(state.targetID)
+    if (set) {
+      const ids = new Set(state.actors.map((actor) => actor.actorID))
+      set.forEach((peer) => {
+        if (ids.has(peer.actorID)) peer.send(data)
+      })
+    }
+    // Spectators receive every state regardless of membership — they aren't in `state.actors`.
+    observers.get(state.targetID)?.forEach((peer) => peer.send(data))
   }
 
   function done(id: SubmitID) {
@@ -1162,7 +1169,26 @@ export namespace Doc {
     targetID: string
     actorID: ActorID
     peer: { send: (data: string) => void; close?: () => void }
+    observer?: boolean
   }) {
+    // A spectator (?readonly=true) only WATCHES a vote: it joins `observers`, never `peers`, so it is
+    // invisible to targets()/cast()/leave() and can never join or block consensus. It still gets the
+    // in-progress state on connect (queried with NO actorID so membership isn't required to see it).
+    if (input.observer) {
+      const peer: LivePeer = { send: input.peer.send, close: input.peer.close, lastSeen: Date.now() }
+      const set = observers.get(input.targetID) ?? new Set<LivePeer>()
+      set.add(peer)
+      observers.set(input.targetID, set)
+      heartbeatStart()
+      const state = active(input.sessionID, input.targetID)
+      if (state) peer.send(JSON.stringify({ type: "created", state } satisfies SubmitEvent))
+      const stop = () => {
+        set.delete(peer)
+        if (set.size === 0) observers.delete(input.targetID)
+        heartbeatStop()
+      }
+      return Object.assign(stop, { pong: () => { peer.lastSeen = Date.now() } })
+    }
     const peer: SubmitPeer = {
       actorID: input.actorID,
       send: input.peer.send,
@@ -1203,11 +1229,18 @@ export namespace Doc {
       docID: DocID.zod,
       actorID: ActorID.zod,
       peer: z.custom<{ send: (data: string) => void; close?: () => void }>(),
+      observer: z.boolean().optional(),
     }),
     (input) => {
       Session.get(input.sessionID)
       get(input.docID)
-      return connect({ sessionID: input.sessionID, targetID: input.docID, actorID: input.actorID, peer: input.peer })
+      return connect({
+        sessionID: input.sessionID,
+        targetID: input.docID,
+        actorID: input.actorID,
+        peer: input.peer,
+        observer: input.observer,
+      })
     },
   )
 
@@ -1217,10 +1250,17 @@ export namespace Doc {
       requestID: z.string(),
       actorID: ActorID.zod,
       peer: z.custom<{ send: (data: string) => void; close?: () => void }>(),
+      observer: z.boolean().optional(),
     }),
     (input) => {
       Session.get(input.sessionID)
-      return connect({ sessionID: input.sessionID, targetID: input.requestID, actorID: input.actorID, peer: input.peer })
+      return connect({
+        sessionID: input.sessionID,
+        targetID: input.requestID,
+        actorID: input.actorID,
+        peer: input.peer,
+        observer: input.observer,
+      })
     },
   )
 

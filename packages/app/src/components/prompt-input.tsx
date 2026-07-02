@@ -551,12 +551,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
 
   const parentParams = useParentParams()
+  // `?readonly=true` makes this client a pure observer (captured once at module load, so it is stable).
+  const readonly = parentParams.readonly
   const [docConfig, setDocConfig] = createStore<PromptDocConfig>({
     sessionID: params.id,
     url: sdk.url,
     directory: sdk.directory,
     submitKey: env.promptSubmitKey(),
     user: parentParams.user[0],
+    readonly,
   })
   createEffect(() => {
     setDocConfig({
@@ -565,6 +568,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       directory: sdk.directory,
       submitKey: env.promptSubmitKey(),
       user: parentParams.user[0],
+      readonly,
     })
   })
   const doc = createPromptDoc({
@@ -709,7 +713,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const showApproval = (state: DocSubmitState) => {
     const actorID = approvalActor()
     if (!actorID) return
-    if (!state.actors.some((item) => item.actorID === actorID)) return
+    // A readonly spectator isn't in state.actors but should still see the dialog (spectator mode).
+    if (!readonly && !state.actors.some((item) => item.actorID === actorID)) return
     // Terminal states are handled exactly once per submit: a server replay on reconnect (or a
     // duplicate cast) for an already-resolved submit must not re-clear context or re-open a dialog.
     if (state.status !== "pending") {
@@ -736,6 +741,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         <DialogDocSubmit
           state={approval}
           actorID={actorID}
+          spectator={readonly}
           kind={approval()?.targetKind === "stop" ? "stop" : "doc"}
           sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
           approve={() => {
@@ -813,12 +819,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const docID = doc.docID()
     const actorID = doc.actorID()
     if (store.mode !== "doc" || !sessionID || !docID || !actorID) return
+    // A readonly viewer connects observer-only: it WATCHES the consent vote (spectator dialog) but the
+    // server keeps observers out of `peers`/targets(), so it is never counted as a 동시전송 target.
     const stop = connectSubmit({
       baseUrl: sdk.url,
       directory: sdk.directory,
       sessionID,
       docID,
       actorID,
+      observer: readonly,
       event: (event) => showApproval(event.state),
     })
     onCleanup(stop)
@@ -1022,6 +1031,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   onCleanup(() => previewBridge.setCaptureHandler(undefined))
 
   const setMode = (mode: PromptMode) => {
+    // A readonly viewer stays locked in the read-only doc view — no switching into the editable
+    // normal/shell composers.
+    if (readonly) return
     if (store.mode === mode) return
     if (store.mode === "doc" && mode !== "doc") doc.detach()
     setStore("mode", mode)
@@ -1047,14 +1059,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               data-selected={selected ? "true" : undefined}
               type="button"
               variant="ghost"
+              disabled={readonly}
               classList={{
                 "size-7.5 p-0": true,
                 "pointer-events-none bg-surface-base-active text-text-strong [&_[data-slot=icon-svg]]:text-icon-strong":
                   selected,
               }}
               style={canvasMode(store.mode) ? undefined : buttons()}
-              aria-disabled={selected}
-              tabIndex={selected ? -1 : undefined}
+              aria-disabled={selected || readonly}
+              tabIndex={selected || readonly ? -1 : undefined}
               onClick={() => setMode(item.mode)}
               aria-label={language.t(item.label)}
               aria-pressed={selected}
@@ -1886,6 +1899,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
 
   async function submit() {
+    // A readonly viewer cannot send or stop — the submit affordances are hidden, this is defensive.
+    if (readonly) return
     if (submitAction() === "stop") {
       await requestStop()
       return
@@ -2296,9 +2311,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           >
             <PromptDocShell
               doc={doc}
+              readonly={readonly}
               submitIcon={submitIcon()}
               submitLabel={submitLabel()}
-              submitDisabled={submitAction() === "send" && !hasDraft()}
+              submitDisabled={readonly || (submitAction() === "send" && !hasDraft())}
               tip={tip()}
               onExit={exitDoc}
               modes={modeButtons()}

@@ -13,6 +13,8 @@ import type { createPromptDoc } from "./doc"
 
 type ShellProps = {
   doc: ReturnType<typeof createPromptDoc>
+  /** A readonly viewer sees the doc content but no editing/submit affordances. */
+  readonly?: boolean
   submitIcon: IconProps["name"]
   submitLabel: string
   submitDisabled?: boolean
@@ -192,7 +194,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               variant="ghost"
               class="size-7.5 oc-attach-btn"
               classList={{ "is-open": attachOpen() }}
-              disabled={!props.doc.ready()}
+              disabled={props.readonly || !props.doc.ready()}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => attachOpen() ? closeAttach() : openAttach()}
               aria-label={language.t("prompt.action.attachFile")}
