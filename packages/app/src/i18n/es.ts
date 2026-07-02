@@ -284,6 +284,8 @@ export const dict = {
 
   "prompt.toast.pasteUnsupported.title": "Adjunto no compatible",
   "prompt.toast.pasteUnsupported.description": "Solo se pueden adjuntar imágenes, PDFs o archivos de texto aquí.",
+  "prompt.toast.fileTooLarge.title": "Archivo demasiado grande",
+  "prompt.toast.fileTooLarge.description": "Los archivos adjuntos deben ser de 10 MB o menos.",
   "prompt.toast.modelAgentRequired.title": "Selecciona un agente y modelo",
   "prompt.toast.modelAgentRequired.description": "Elige un agente y modelo antes de enviar un prompt.",
   "prompt.toast.worktreeCreateFailed.title": "Fallo al crear el árbol de trabajo",

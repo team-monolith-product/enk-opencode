@@ -264,6 +264,8 @@ export const dict = {
   "prompt.action.collapseView": "Collapse",
   "prompt.toast.pasteUnsupported.title": "مرفق غير مدعوم",
   "prompt.toast.pasteUnsupported.description": "يمكن إرفاق الصور أو ملفات PDF أو الملفات النصية فقط هنا.",
+  "prompt.toast.fileTooLarge.title": "الملف كبير جدًا",
+  "prompt.toast.fileTooLarge.description": "يجب ألا يتجاوز حجم المرفقات 10 ميغابايت.",
   "prompt.toast.modelAgentRequired.title": "حدد وكيلاً ونموذجاً",
   "prompt.toast.modelAgentRequired.description": "اختر وكيلاً ونموذجاً قبل إرسال الموجه.",
   "prompt.toast.worktreeCreateFailed.title": "فشل إنشاء شجرة العمل",

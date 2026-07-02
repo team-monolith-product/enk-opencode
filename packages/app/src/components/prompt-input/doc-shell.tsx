@@ -4,6 +4,7 @@ import type { IconProps } from "@opencode-ai/ui/icon"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
+import { showToast } from "@opencode-ai/ui/toast"
 import { useClientEnv } from "@/context/client-env"
 import { useLanguage } from "@/context/language"
 import { ACCEPTED_FILE_TYPES } from "./files"
@@ -51,6 +52,15 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
     setAttachOpen(true)
   }
   const closeAttach = () => { setAttachOpen(false); setAttachPos(null) }
+  const pickFiles = async (list: File[]) => {
+    const { tooLarge } = await props.doc.addFiles(list)
+    if (tooLarge) {
+      showToast({
+        title: language.t("prompt.toast.fileTooLarge.title"),
+        description: language.t("prompt.toast.fileTooLarge.description"),
+      })
+    }
+  }
   const history = () => props.doc.history
   const undo = () => props.doc.undo()
   const redo = () => props.doc.redo()
@@ -127,7 +137,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               aria-hidden="true"
               onChange={(e) => {
                 const list = e.currentTarget.files
-                if (list?.length) void props.doc.addFiles(Array.from(list))
+                if (list?.length) void pickFiles(Array.from(list))
                 e.currentTarget.value = ""
               }}
             />
@@ -141,7 +151,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               aria-hidden="true"
               onChange={(e) => {
                 const list = e.currentTarget.files
-                if (list?.length) void props.doc.addFiles(Array.from(list))
+                if (list?.length) void pickFiles(Array.from(list))
                 e.currentTarget.value = ""
               }}
             />

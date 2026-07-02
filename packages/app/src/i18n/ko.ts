@@ -292,6 +292,8 @@ export const dict = {
   "prompt.action.docAutoExpandHint": "켜면 입력창을 클릭할 때 자동으로 커져요",
   "prompt.toast.pasteUnsupported.title": "지원되지 않는 첨부 파일",
   "prompt.toast.pasteUnsupported.description": "이미지, PDF 또는 텍스트 파일만 첨부할 수 있습니다.",
+  "prompt.toast.fileTooLarge.title": "파일이 너무 큼",
+  "prompt.toast.fileTooLarge.description": "첨부 파일은 10MB 이하여야 합니다.",
   "prompt.toast.docEmpty.title": "보낼 내용 없음",
   "prompt.toast.docEmpty.description": "문서에 텍스트를 추가한 뒤 전송하세요.",
   "prompt.toast.docRotated.title": "새 협업 문서",

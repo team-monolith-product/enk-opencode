@@ -263,6 +263,8 @@ export const dict = {
   "prompt.action.collapseView": "Collapse",
   "prompt.toast.pasteUnsupported.title": "サポートされていない添付ファイル",
   "prompt.toast.pasteUnsupported.description": "画像、PDF、またはテキストファイルのみ添付できます。",
+  "prompt.toast.fileTooLarge.title": "ファイルが大きすぎます",
+  "prompt.toast.fileTooLarge.description": "添付ファイルは 10 MB 以下にしてください。",
   "prompt.toast.modelAgentRequired.title": "エージェントとモデルを選択",
   "prompt.toast.modelAgentRequired.description": "プロンプトを送信する前にエージェントとモデルを選択してください。",
   "prompt.toast.worktreeCreateFailed.title": "ワークツリーの作成に失敗しました",

@@ -1,3 +1,10 @@
+// Max size of a single attachment the client will read into memory.
+// Must match the server-side doc-asset limit in
+// packages/opencode/src/doc/routes.ts (MAX = 10 * 1024 * 1024). Files over this
+// are rejected synchronously (via file.size) before any FileReader/arrayBuffer
+// read, so an oversized file never crashes the tab.
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 
 export const ACCEPTED_FILE_TYPES = [

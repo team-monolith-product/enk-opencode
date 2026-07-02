@@ -1737,8 +1737,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     },
     dropFiles: async (list) => {
       if (store.mode !== "doc") return false
-      const ok = await doc.addFiles(list)
-      if (!ok && list.length > 0) {
+      const { added, tooLarge } = await doc.addFiles(list)
+      if (tooLarge) {
+        showToast({
+          title: language.t("prompt.toast.fileTooLarge.title"),
+          description: language.t("prompt.toast.fileTooLarge.description"),
+        })
+      } else if (!added && list.length > 0) {
         showToast({
           title: language.t("common.requestFailed"),
         })

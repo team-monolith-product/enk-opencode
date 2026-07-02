@@ -264,6 +264,8 @@ export const dict = {
   "prompt.action.collapseView": "Collapse",
   "prompt.toast.pasteUnsupported.title": "Anexo não suportado",
   "prompt.toast.pasteUnsupported.description": "Apenas imagens, PDFs ou arquivos de texto podem ser anexados aqui.",
+  "prompt.toast.fileTooLarge.title": "Arquivo muito grande",
+  "prompt.toast.fileTooLarge.description": "Os anexos devem ter 10 MB ou menos.",
   "prompt.toast.modelAgentRequired.title": "Selecione um agente e modelo",
   "prompt.toast.modelAgentRequired.description": "Escolha um agente e modelo antes de enviar um prompt.",
   "prompt.toast.worktreeCreateFailed.title": "Falha ao criar worktree",
