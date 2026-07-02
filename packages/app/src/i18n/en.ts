@@ -326,6 +326,8 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Failed to send command",
   "prompt.toast.promptSendFailed.title": "Failed to send prompt",
   "prompt.toast.promptSendFailed.description": "Unable to retrieve session",
+  "prompt.toast.captureFailed.title": "Capture failed",
+  "prompt.toast.captureFailed.description": "Couldn't capture the preview. Make sure it's loaded, then try again.",
 
   "dialog.mcp.title": "MCPs",
   "dialog.mcp.description": "{{enabled}} of {{total}} enabled",
