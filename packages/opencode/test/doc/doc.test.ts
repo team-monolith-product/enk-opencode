@@ -658,6 +658,44 @@ describe("doc", () => {
     })
   })
 
+  test("shutdown flushes the session-ended close frame to connected doc sockets", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+
+        const app = Server.Default()
+        const { websocket } = await import("hono/bun")
+        const server = Bun.serve({ port: 0, fetch: app.fetch, websocket })
+        try {
+          const dir = encodeURIComponent(tmp.path)
+          const ws = new WebSocket(`ws://localhost:${server.port}/doc/${docID}/connect?directory=${dir}&kind=doc`)
+          const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+            ws.onclose = (event) => resolve({ code: event.code, reason: event.reason })
+          })
+          await new Promise<void>((res, rej) => {
+            ws.onopen = () => res()
+            ws.onerror = (e) => rej(e)
+          })
+          // Let the server-side onOpen handler register the peer with the room.
+          await new Promise((r) => setTimeout(r, 100))
+
+          await Server.shutdown(server)
+
+          const event = await closed
+          expect(event.code).toBe(Room.CLOSE_SESSION_ENDED)
+          expect(event.reason).toBe("session ended")
+        } finally {
+          server.stop(true)
+        }
+      },
+    })
+  })
+
   test("submit approval caps overly long names", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

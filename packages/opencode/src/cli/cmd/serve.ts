@@ -1,5 +1,4 @@
 import { Server } from "../../server/server"
-import * as Room from "../../doc/room"
 import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
@@ -18,14 +17,6 @@ export const ServeCommand = cmd({
     const opts = await resolveNetworkOptions(args)
     const server = Server.listen(opts)
     console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
-
-    // Graceful shutdown (cull/manual pod stop sends SIGTERM): tell every doc client the session is
-    // over so it stops reconnecting, instead of letting sockets die without a close code.
-    process.once("SIGTERM", async () => {
-      Room.closeAll(Room.CLOSE_SESSION_ENDED, "session ended")
-      await server.stop(true)
-      process.exit(0)
-    })
 
     await new Promise(() => {})
     await server.stop()

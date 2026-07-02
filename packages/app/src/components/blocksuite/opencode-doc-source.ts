@@ -46,13 +46,15 @@ async function blobB64(blob: Blob) {
 const RETRY_BASE = 250
 const RETRY_MAX = 4_000
 const RETRY_DEADLINE = 60_000
-// What the hub proxy answers once the session pod is gone and the route no longer exists.
-const GONE_STATUSES = new Set([404, 424, 503])
+// What the hub proxy answers once the session pod is gone and the route no longer exists. 503 is
+// deliberately excluded: it can be a transient proxy restart / scale event, and treating it as gone
+// would permanently kill a live session. Ambiguous cases are absorbed by the retry deadline instead.
+const GONE_STATUSES = new Set([404, 424])
 
 function sessionGone(opts: DocSyncOpts) {
-  return opts.client.doc.sync
-    .pull(
-      { docID: opts.docID, directory: opts.directory, guid: opts.docID },
+  return opts.client.doc.cycle
+    .list(
+      { docID: opts.docID, directory: opts.directory, limit: 1 },
       { cache: "no-store", throwOnError: false },
     )
     .then((res) => GONE_STATUSES.has(res.response?.status ?? 0))
