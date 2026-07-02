@@ -1,7 +1,6 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
-import { Spinner } from "@opencode-ai/ui/spinner"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
@@ -218,8 +217,6 @@ export function SessionBrowserChrome(props: {
   url?: string
   onReload: () => void
   onHome?: () => void
-  onCapture?: () => void
-  capturing?: boolean
   previewReady?: boolean
 }) {
   const layout = useLayout()
@@ -404,21 +401,8 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 우 그룹 — 스크린샷 + 새 탭에서 열기 + 주소 복사 */}
+      {/* 우 그룹 — 새 탭에서 열기 + 주소 복사 */}
       <div class="flex shrink-0 items-center justify-end gap-1">
-        <Show when={props.onCapture}>
-          <button
-            type="button"
-            class={ghostBtn}
-            disabled={previewBlocked() || props.capturing}
-            onClick={() => props.onCapture!()}
-            aria-label={language.t("prompt.action.captureTab")}
-          >
-            <Show when={props.capturing} fallback={<Icon name="pencil-line" size="small" />}>
-              <Spinner class="size-4" />
-            </Show>
-          </button>
-        </Show>
         <button
           type="button"
           class={ghostBtn}

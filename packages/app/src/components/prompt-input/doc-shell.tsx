@@ -21,6 +21,8 @@ type ShellProps = {
   tip: JSX.Element
   onExit: () => void | Promise<void>
   modes?: JSX.Element
+  onCapture: () => void
+  capturing?: boolean
   expand?: {
     expanded: boolean
     onExpand: () => void
@@ -112,7 +114,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
         <div class="flex items-center gap-0.5">
           {props.modes}
 
-          {/* + Attach — 클릭 시 이미지·파일 메뉴 팝오버 (캡처 미구현) */}
+          {/* + Attach — 클릭 시 이미지·파일·미리보기 캡처 메뉴 팝오버 */}
           <div>
             {/* file inputs — 포털 밖에 두어 doc.addFiles 클로저가 작동하도록 */}
             <input
@@ -182,6 +184,18 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
                   >
                     <Icon name="file" class="size-3.75 shrink-0 text-icon-base" />
                     {language.t("prompt.action.attachFile")}
+                  </button>
+                  <button
+                    class="oc-attach-item"
+                    role="menuitem"
+                    type="button"
+                    disabled={props.capturing}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => { props.onCapture(); closeAttach() }}
+                    aria-label={language.t("prompt.action.captureTab")}
+                  >
+                    <Icon name="pencil-line" class="size-3.75 shrink-0 text-icon-base" />
+                    {language.t("prompt.action.captureTab")}
                   </button>
                 </div>
               </Portal>

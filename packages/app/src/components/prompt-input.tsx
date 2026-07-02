@@ -1026,10 +1026,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     )
   }
 
-  // 미리보기 헤더(SessionBrowserChrome)의 캡처 버튼이 이 플로우를 호출할 수 있게 등록.
-  previewBridge.setCaptureHandler(captureTab)
-  onCleanup(() => previewBridge.setCaptureHandler(undefined))
-
   const setMode = (mode: PromptMode) => {
     // A readonly viewer stays locked in the read-only doc view — no switching into the editable
     // normal/shell composers.
@@ -2318,6 +2314,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               tip={tip()}
               onExit={exitDoc}
               modes={modeButtons()}
+              onCapture={captureTab}
+              capturing={capturing()}
               expand={composerExpand()}
               autoExpand={{ enabled: autoExpand(), onToggle: toggleAutoExpand }}
             />
