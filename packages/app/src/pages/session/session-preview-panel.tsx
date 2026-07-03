@@ -11,6 +11,10 @@ import { SessionPreviewFallback } from "./session-preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
 import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./session-preview-address"
 
+// session.idle 리로드 뒤 자가치유(브릿지 주입) 파일 쓰기가 도착하길 기다리는 유예 시간.
+// 이 시간 뒤에도 dirty 면 heal 쓰기가 들어온 것으로 보고 1회 더 리로드한다.
+const HEAL_RELOAD_GRACE_MS = 1500
+
 export function createSessionPreview() {
   const sdk = useSDK()
   const sync = useSync()
@@ -48,12 +52,23 @@ export function createSessionPreview() {
         .catch(() => setPreviewReady(true))
 
     void check()
-    const unsubIdle = sdk.event.on("session.idle", () => {
-      void check()
+    // 브릿지 자가치유는 session.idle 때 서버 플러그인이 결과물 HTML 에 <script> 를 주입하고 번들을 복사하는데,
+    // 그 파일 쓰기 이벤트(file.watcher.updated)는 아래 idle 리로드 '직후' 도착한다. 그래서 첫 미리보기는
+    // 브릿지가 없는 페이지를 로드하고(→ penpal 미연결 → 캡처 등 불가), 다음 턴에야 브릿지가 실린다.
+    // idle 리로드 후 잠깐 기다렸다가, heal 쓰기로 dirty 가 다시 세워졌으면 1회 더 리로드해 첫 미리보기부터
+    // 브릿지가 실린 페이지를 로드하게 한다. heal 이 아무것도 안 쓰면 dirty=false 라 추가 리로드는 없다.
+    let healReloadTimer: ReturnType<typeof setTimeout> | undefined
+    const reloadIfDirty = () => {
       if (dirty()) {
         setReloadCount((n) => n + 1)
         setDirty(false)
       }
+    }
+    const unsubIdle = sdk.event.on("session.idle", () => {
+      void check()
+      reloadIfDirty()
+      if (healReloadTimer) clearTimeout(healReloadTimer)
+      healReloadTimer = setTimeout(reloadIfDirty, HEAL_RELOAD_GRACE_MS)
     })
     const unsubFile = sdk.event.on("file.watcher.updated", (event) => {
       const file = event.properties.file
@@ -65,6 +80,7 @@ export function createSessionPreview() {
       ctrl.abort()
       unsubIdle()
       unsubFile()
+      if (healReloadTimer) clearTimeout(healReloadTimer)
     })
   })
 
