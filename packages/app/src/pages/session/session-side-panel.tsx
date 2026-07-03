@@ -286,8 +286,6 @@ export function SessionSidePanel(props: {
               tabs().setActive("preview")
               preview.goHome()
             }}
-            onCapture={previewBridge.requestCapture}
-            capturing={previewBridge.capturing()}
           />
           <div class="flex-1 min-h-0 flex">
           <div
@@ -308,8 +306,10 @@ export function SessionSidePanel(props: {
                 <DragDropSensors />
                 <ConstrainDragYAxis />
                 <Tabs value={activeTab()} onChange={openTab}>
-                  <Show when={showTabStrip()}>
-                  <div class="sticky top-0 shrink-0 flex">
+                  {/* 탭 스트립은 미리보기뿐일 때 시각적으로만 숨긴다. <Show>로 언마운트하면
+                      Kobalte 트리거(미리보기 등)가 사라졌다가 첫 파일 클릭 때 통째로 다시
+                      마운트되며 첫 트리거(preview)로 폴백해 파일 탭이 안 열리는 경합이 생긴다. */}
+                  <div class="sticky top-0 shrink-0" classList={{ flex: showTabStrip(), hidden: !showTabStrip() }}>
                     <Tabs.List
                       ref={(el: HTMLDivElement) => {
                         const stop = createFileTabListSync({ el, contextOpen })
@@ -382,7 +382,6 @@ export function SessionSidePanel(props: {
                       </div>
                     </Tabs.List>
                   </div>
-                  </Show>
 
                   <Show when={reviewTab()}>
                     <Tabs.Content value="review" class="flex flex-col h-full overflow-hidden contain-strict">

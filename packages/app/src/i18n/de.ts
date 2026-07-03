@@ -269,6 +269,8 @@ export const dict = {
   "prompt.action.collapseView": "Collapse",
   "prompt.toast.pasteUnsupported.title": "Nicht unterstützter Anhang",
   "prompt.toast.pasteUnsupported.description": "Hier können nur Bilder, PDFs oder Textdateien angehängt werden.",
+  "prompt.toast.fileTooLarge.title": "Datei zu groß",
+  "prompt.toast.fileTooLarge.description": "Anhänge dürfen höchstens 10 MB groß sein.",
   "prompt.toast.modelAgentRequired.title": "Wählen Sie einen Agenten und ein Modell",
   "prompt.toast.modelAgentRequired.description":
     "Wählen Sie einen Agenten und ein Modell, bevor Sie eine Eingabe senden.",

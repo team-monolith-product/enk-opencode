@@ -4,6 +4,7 @@ import type { IconProps } from "@opencode-ai/ui/icon"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
+import { showToast } from "@opencode-ai/ui/toast"
 import { useClientEnv } from "@/context/client-env"
 import { useLanguage } from "@/context/language"
 import { ACCEPTED_FILE_TYPES } from "./files"
@@ -21,6 +22,8 @@ type ShellProps = {
   tip: JSX.Element
   onExit: () => void | Promise<void>
   modes?: JSX.Element
+  onCapture: () => void
+  capturing?: boolean
   expand?: {
     expanded: boolean
     onExpand: () => void
@@ -49,6 +52,15 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
     setAttachOpen(true)
   }
   const closeAttach = () => { setAttachOpen(false); setAttachPos(null) }
+  const pickFiles = async (list: File[]) => {
+    const { tooLarge } = await props.doc.addFiles(list)
+    if (tooLarge) {
+      showToast({
+        title: language.t("prompt.toast.fileTooLarge.title"),
+        description: language.t("prompt.toast.fileTooLarge.description"),
+      })
+    }
+  }
   const history = () => props.doc.history
   const undo = () => props.doc.undo()
   const redo = () => props.doc.redo()
@@ -112,7 +124,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
         <div class="flex items-center gap-0.5">
           {props.modes}
 
-          {/* + Attach — 클릭 시 이미지·파일 메뉴 팝오버 (캡처 미구현) */}
+          {/* + Attach — 클릭 시 이미지·파일·미리보기 캡처 메뉴 팝오버 */}
           <div>
             {/* file inputs — 포털 밖에 두어 doc.addFiles 클로저가 작동하도록 */}
             <input
@@ -125,7 +137,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               aria-hidden="true"
               onChange={(e) => {
                 const list = e.currentTarget.files
-                if (list?.length) void props.doc.addFiles(Array.from(list))
+                if (list?.length) void pickFiles(Array.from(list))
                 e.currentTarget.value = ""
               }}
             />
@@ -139,7 +151,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               aria-hidden="true"
               onChange={(e) => {
                 const list = e.currentTarget.files
-                if (list?.length) void props.doc.addFiles(Array.from(list))
+                if (list?.length) void pickFiles(Array.from(list))
                 e.currentTarget.value = ""
               }}
             />
@@ -182,6 +194,18 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
                   >
                     <Icon name="file" class="size-3.75 shrink-0 text-icon-base" />
                     {language.t("prompt.action.attachFile")}
+                  </button>
+                  <button
+                    class="oc-attach-item"
+                    role="menuitem"
+                    type="button"
+                    disabled={props.capturing}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => { props.onCapture(); closeAttach() }}
+                    aria-label={language.t("prompt.action.captureTab")}
+                  >
+                    <Icon name="pencil-line" class="size-3.75 shrink-0 text-icon-base" />
+                    {language.t("prompt.action.captureTab")}
                   </button>
                 </div>
               </Portal>

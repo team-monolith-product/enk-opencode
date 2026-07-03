@@ -993,16 +993,20 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const captureTab = async () => {
     if (capturing()) return
     setCapturing(true)
-    // 미리보기 iframe 안에서 화면을 캡처(dataURL). 미연결/실패 시 undefined → 아무 일도 일어나지 않는다.
+    // 미리보기 iframe 안에서 화면을 캡처(dataURL). 미연결/실패 시 undefined → 아래 !file 분기에서 실패 토스트.
     let file: File | null = null
     try {
       const dataUrl = await previewBridge.capture()
       if (dataUrl) file = await dataUrlToPngFile(dataUrl)
     } catch {
-      // 캡처 실패는 조용히 무시(토스트 없음).
+      // 캡처 실패 → file 은 null 로 남고 아래 분기에서 처리.
     }
     if (!file) {
-      // 이미지를 못 받음 → 모달 없이 컴포저 복귀.
+      // 이미지를 못 받음 → 실패를 알리고 모달 없이 컴포저 복귀.
+      showToast({
+        title: language.t("prompt.toast.captureFailed.title"),
+        description: language.t("prompt.toast.captureFailed.description"),
+      })
       setCapturing(false)
       return
     }
@@ -1025,10 +1029,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       () => setCapturing(false),
     )
   }
-
-  // 미리보기 헤더(SessionBrowserChrome)의 캡처 버튼이 이 플로우를 호출할 수 있게 등록.
-  previewBridge.setCaptureHandler(captureTab)
-  onCleanup(() => previewBridge.setCaptureHandler(undefined))
 
   const setMode = (mode: PromptMode) => {
     // A readonly viewer stays locked in the read-only doc view — no switching into the editable
@@ -1737,8 +1737,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     },
     dropFiles: async (list) => {
       if (store.mode !== "doc") return false
-      const ok = await doc.addFiles(list)
-      if (!ok && list.length > 0) {
+      const { added, tooLarge } = await doc.addFiles(list)
+      if (tooLarge) {
+        showToast({
+          title: language.t("prompt.toast.fileTooLarge.title"),
+          description: language.t("prompt.toast.fileTooLarge.description"),
+        })
+      } else if (!added && list.length > 0) {
         showToast({
           title: language.t("common.requestFailed"),
         })
@@ -2318,6 +2323,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               tip={tip()}
               onExit={exitDoc}
               modes={modeButtons()}
+              onCapture={captureTab}
+              capturing={capturing()}
               expand={composerExpand()}
               autoExpand={{ enabled: autoExpand(), onToggle: toggleAutoExpand }}
             />

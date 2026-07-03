@@ -303,6 +303,8 @@ export const dict = {
   "prompt.action.collapseView": "Collapse",
   "prompt.toast.pasteUnsupported.title": "不支持的附件",
   "prompt.toast.pasteUnsupported.description": "此处仅能附加图片、PDF 或文本文件。",
+  "prompt.toast.fileTooLarge.title": "文件过大",
+  "prompt.toast.fileTooLarge.description": "附件必须不超过 10 MB。",
   "prompt.toast.modelAgentRequired.title": "请选择智能体和模型",
   "prompt.toast.modelAgentRequired.description": "发送提示前请先选择智能体和模型。",
   "prompt.toast.worktreeCreateFailed.title": "创建工作树失败",

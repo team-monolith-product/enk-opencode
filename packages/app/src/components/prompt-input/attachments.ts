@@ -2,6 +2,7 @@ import { onCleanup, onMount } from "solid-js"
 import { showToast } from "@opencode-ai/ui/toast"
 import { usePrompt, type ContentPart, type ImageAttachmentPart } from "@/context/prompt"
 import { useLanguage } from "@/context/language"
+import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
 import { uuid } from "@/utils/uuid"
 import { getCursorPosition } from "./editor-dom"
 import { attachmentMime } from "./files"
@@ -47,7 +48,21 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     })
   }
 
+  const warnTooLarge = () => {
+    showToast({
+      title: language.t("prompt.toast.fileTooLarge.title"),
+      description: language.t("prompt.toast.fileTooLarge.description"),
+    })
+  }
+
   const add = async (file: File, toast = true) => {
+    // Guard on file.size (synchronous, no read) before any FileReader read so an
+    // oversized file never gets base64-encoded into memory and crashes the tab.
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      if (toast) warnTooLarge()
+      return false
+    }
+
     const mime = await attachmentMime(file)
     if (!mime) {
       if (toast) warn()
@@ -74,13 +89,25 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
 
   const addAttachments = async (files: File[], toast = true) => {
     let found = false
+    let rejectedForSize = false
+    let rejectedForType = false
 
     for (const file of files) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        rejectedForSize = true
+        continue
+      }
       const ok = await add(file, false)
       if (ok) found = true
+      else rejectedForType = true
     }
 
-    if (!found && files.length > 0 && toast) warn()
+    if (toast) {
+      // Surface the size rejection once for the batch (valid files still attach).
+      // Only fall back to the unsupported-type warning when nothing else fired.
+      if (rejectedForSize) warnTooLarge()
+      else if (rejectedForType && !found) warn()
+    }
     return found
   }
 

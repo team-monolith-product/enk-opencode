@@ -312,6 +312,8 @@ export const dict = {
 
   "prompt.toast.pasteUnsupported.title": "Unsupported attachment",
   "prompt.toast.pasteUnsupported.description": "Only images, PDFs, or text files can be attached here.",
+  "prompt.toast.fileTooLarge.title": "File too large",
+  "prompt.toast.fileTooLarge.description": "Attachments must be 10 MB or smaller.",
   "prompt.toast.docEmpty.title": "Nothing to send",
   "prompt.toast.docEmpty.description": "Add text to the document before sending.",
   "prompt.toast.docRotated.title": "New collaboration document",
@@ -326,6 +328,8 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Failed to send command",
   "prompt.toast.promptSendFailed.title": "Failed to send prompt",
   "prompt.toast.promptSendFailed.description": "Unable to retrieve session",
+  "prompt.toast.captureFailed.title": "Capture failed",
+  "prompt.toast.captureFailed.description": "Couldn't capture the preview. Make sure it's loaded, then try again.",
 
   "dialog.mcp.title": "MCPs",
   "dialog.mcp.description": "{{enabled}} of {{total}} enabled",

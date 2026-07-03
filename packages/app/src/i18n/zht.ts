@@ -284,6 +284,8 @@ export const dict = {
 
   "prompt.toast.pasteUnsupported.title": "不支援的附件",
   "prompt.toast.pasteUnsupported.description": "此處僅能附加圖片、PDF 或文字檔案。",
+  "prompt.toast.fileTooLarge.title": "檔案過大",
+  "prompt.toast.fileTooLarge.description": "附件必須不超過 10 MB。",
   "prompt.toast.modelAgentRequired.title": "請選擇代理程式和模型",
   "prompt.toast.modelAgentRequired.description": "傳送提示前請先選擇代理程式和模型。",
   "prompt.toast.worktreeCreateFailed.title": "建立工作樹失敗",

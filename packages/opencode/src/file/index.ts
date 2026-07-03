@@ -589,7 +589,7 @@ export namespace File {
       })
 
       const list = Effect.fn("File.list")(function* (dir?: string) {
-        const exclude = [".git", ".DS_Store"]
+        const exclude = [".git", ".DS_Store", "__preview-bridge.js"]
         let ignored = (_: string) => false
         if (Instance.project.vcs === "git") {
           const ig = ignore()

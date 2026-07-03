@@ -1,7 +1,6 @@
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
-import { Spinner } from "@opencode-ai/ui/spinner"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
@@ -218,8 +217,6 @@ export function SessionBrowserChrome(props: {
   url?: string
   onReload: () => void
   onHome?: () => void
-  onCapture?: () => void
-  capturing?: boolean
   previewReady?: boolean
 }) {
   const layout = useLayout()
@@ -262,7 +259,9 @@ export function SessionBrowserChrome(props: {
   }
 
   const ghostBtn =
-    "inline-flex items-center justify-center size-6 shrink-0 rounded-md text-icon-base hover:bg-surface-raised-base-hover active:bg-surface-base-active transition-colors disabled:opacity-40 disabled:cursor-default"
+    "inline-flex items-center justify-center size-6 shrink-0 rounded-md text-icon-base " +
+    "enabled:hover:bg-surface-raised-base-hover enabled:active:bg-surface-base-active " +
+    "transition-colors disabled:opacity-40 disabled:cursor-default disabled:pointer-events-none"
 
   // 호스트(span)와 경로(input)가 폰트·크기·줄높이·색이 완전히 같도록 인라인으로 고정한다.
   // input 은 폼 요소 UA 스타일·레이어 순서 때문에 클래스만으로는 span 과 색/폰트가 달라지므로(인라인이 이긴다).
@@ -404,21 +403,8 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 우 그룹 — 스크린샷 + 새 탭에서 열기 + 주소 복사 */}
+      {/* 우 그룹 — 새 탭에서 열기 + 주소 복사 */}
       <div class="flex shrink-0 items-center justify-end gap-1">
-        <Show when={props.onCapture}>
-          <button
-            type="button"
-            class={ghostBtn}
-            disabled={previewBlocked() || props.capturing}
-            onClick={() => props.onCapture!()}
-            aria-label={language.t("prompt.action.captureTab")}
-          >
-            <Show when={props.capturing} fallback={<Icon name="pencil-line" size="small" />}>
-              <Spinner class="size-4" />
-            </Show>
-          </button>
-        </Show>
         <button
           type="button"
           class={ghostBtn}

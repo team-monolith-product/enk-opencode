@@ -7,6 +7,7 @@ import type { LineRefInput } from "@/components/blocksuite/line-reference-url"
 import type { DocSyncOpts } from "@/components/blocksuite/opencode-doc-source"
 import { label } from "@/components/blocksuite/actor"
 import { clearActor, loadActor, saveActor } from "./doc-actor"
+import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
 
 type DocHandle = Awaited<ReturnType<typeof createPage>>
 
@@ -350,8 +351,12 @@ export function createPromptDoc(input: PromptDocInput) {
   const empty = () => (handle ? handle.empty() : true)
 
   const addFiles = async (files: File[]) => {
-    const result = await Promise.all(files.map((file) => handle?.addFile(file) ?? false))
-    return result.some(Boolean)
+    // Pre-filter on file.size (synchronous, no read) so an oversized file never
+    // reaches blobSync. tooLarge lets callers show the size-specific toast.
+    const tooLarge = files.some((file) => file.size > MAX_ATTACHMENT_BYTES)
+    const eligible = files.filter((file) => file.size <= MAX_ATTACHMENT_BYTES)
+    const result = await Promise.all(eligible.map((file) => handle?.addFile(file) ?? false))
+    return { added: result.some(Boolean), tooLarge }
   }
 
   const addReference = (path: string, nodeType?: FileNodeType) => handle?.addReference(path, nodeType) ?? false

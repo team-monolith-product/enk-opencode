@@ -3,7 +3,6 @@ import { DeleteIcon, DragHandleConfigExtension, getAttachmentFileIcons, HoverCon
 import { defineBlockSchema, type BlockSchemaType, type SchemaToModel } from "@blocksuite/store"
 import { css, html } from "lit"
 import { literal } from "lit/static-html.js"
-import { OPEN_FILE_REFERENCE, type OpenFileReferenceDetail } from "./doc-block-events"
 
 export type FileNodeType = "file" | "directory"
 
@@ -57,16 +56,12 @@ export class FileReferenceBlockComponent extends BlockComponent<FileReferenceBlo
       border: 1px solid var(--border-base);
       border-radius: 8px;
       color: var(--text-base);
+      cursor: default;
       display: flex;
       gap: 10px;
       min-width: 0;
       padding: 8px 10px;
       text-decoration: none;
-    }
-
-    .wrap:hover .card,
-    .wrap:focus-within .card {
-      background: var(--surface-raised-base-hover);
     }
 
     .icon {
@@ -144,25 +139,12 @@ export class FileReferenceBlockComponent extends BlockComponent<FileReferenceBlo
     ])
   }
 
-  private open() {
-    const detail: OpenFileReferenceDetail = {
-      path: this.model.path,
-      nodeType: this.model.nodeType === "directory" ? "directory" : "file",
-    }
-    this.dispatchEvent(
-      new CustomEvent(OPEN_FILE_REFERENCE, {
-        bubbles: true,
-        composed: true,
-        detail,
-      }),
-    )
-  }
-
   private press = (event: MouseEvent) => {
+    // Plain file references are non-interactive: swallow the click so it does not
+    // propagate into the doc, and do not open anything. Line references
+    // (opencode:line-reference) remain openable via their own block.
     event.preventDefault()
     event.stopPropagation()
-    this.open()
-    this.focus()
   }
 
   private keys = (event: KeyboardEvent) => {
@@ -226,7 +208,6 @@ export class FileReferenceBlockComponent extends BlockComponent<FileReferenceBlo
     super.connectedCallback()
     this.setAttribute("contenteditable", "false")
     if (this.model.nodeType === "directory") this.dataset.nodeType = "directory"
-    this.tabIndex = 0
     this.hover.setReference(this)
     this.addEventListener("click", this.press)
     this.addEventListener("keydown", this.keys)
@@ -243,13 +224,13 @@ export class FileReferenceBlockComponent extends BlockComponent<FileReferenceBlo
   override renderBlock() {
     return html`
       <div class="wrap" contenteditable="false">
-        <a class="card" href=${this.model.url || this.model.path} title=${this.model.path}>
+        <div class="card" title=${this.model.path}>
           <span class="icon">${this.icon()}</span>
           <span class="body">
             <span class="name">${this.model.name || this.model.path}</span>
             <span class="path">${this.model.path}</span>
           </span>
-        </a>
+        </div>
       </div>
     `
   }

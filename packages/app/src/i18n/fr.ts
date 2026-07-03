@@ -265,6 +265,8 @@ export const dict = {
   "prompt.toast.pasteUnsupported.title": "Pièce jointe non prise en charge",
   "prompt.toast.pasteUnsupported.description":
     "Seules les images, les PDF ou les fichiers texte peuvent être joints ici.",
+  "prompt.toast.fileTooLarge.title": "Fichier trop volumineux",
+  "prompt.toast.fileTooLarge.description": "Les pièces jointes doivent faire 10 Mo ou moins.",
   "prompt.toast.modelAgentRequired.title": "Sélectionnez un agent et un modèle",
   "prompt.toast.modelAgentRequired.description": "Choisissez un agent et un modèle avant d'envoyer un message.",
   "prompt.toast.worktreeCreateFailed.title": "Échec de la création de l'arbre de travail",
