@@ -182,8 +182,6 @@ npx create-react-app my-app
 npx serve -l 3000 ./dist
 ```
 
-- **`npx browser-sync` 명령은 절대 사용하지 마세요.** 미리보기 핫 리로드는 아래 `ensure_dev_server` 도구만 사용합니다.
-
 프로젝트에 패키지를 설치하려면 npm을 사용하세요.
 
 ```bash
@@ -220,7 +218,7 @@ echo "https://$JUPYTERHUB_USER.$OPENCODE_SERVE_DOMAIN/"
 
 ## 미리보기 핫 리로드
 
-학생은 매 응답마다 **미리보기 화면에 결과가 즉시 반영되길** 기대합니다. dev 서버는 `ensure_dev_server` 도구로 띄우세요 — 매 응답 턴마다 같은 인자로 한 번씩 호출하면 idempotent 하게 처리됩니다. `npx browser-sync`는 사용하지 마세요.
+학생은 매 응답마다 **미리보기 화면에 결과가 즉시 반영되길** 기대합니다. dev 서버는 `ensure_dev_server` 도구로 띄우세요 — 매 응답 턴마다 같은 인자로 한 번씩 호출하면 idempotent 하게 처리됩니다. 미리보기 리로드는 파일 변경 감지로 자동 처리됩니다.
 
 ### 응답을 마무리할 때
 

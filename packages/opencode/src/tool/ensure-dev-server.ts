@@ -53,8 +53,7 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     cmd: z
       .string()
       .describe(
-        "실행할 셸 명령. 예: 'npm run dev -- --host 0.0.0.0 --port 3000', " +
-          "'npx --yes browser-sync start --server --port 3000 --files \"**/*.{html,css,js}\" --no-open --no-ui'",
+        "실행할 셸 명령. 예: 'npm run dev -- --host 0.0.0.0 --port 3000', 'npx --yes serve -l 3000 .'",
       ),
     port: z.number().describe("서버가 LISTEN 할 포트. OpenCode 환경에서는 3000 고정.").default(3000),
     ready_timeout_ms: z
