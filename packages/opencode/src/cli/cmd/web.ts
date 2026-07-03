@@ -38,7 +38,7 @@ export const WebCommand = cmd({
       UI.println(UI.Style.TEXT_WARNING_BOLD + "!  " + "OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
     const opts = await resolveNetworkOptions(args)
-    void DevServerReplay.replay()
+    void DevServerReplay.replay().catch(() => {})
     const server = Server.listen(opts)
     const suffix = opts.basePath && opts.basePath !== "/" ? opts.basePath : ""
     UI.empty()

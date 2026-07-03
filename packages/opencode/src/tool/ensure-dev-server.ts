@@ -1,5 +1,6 @@
 import z from "zod"
 import { existsSync } from "node:fs"
+import { resolve } from "node:path"
 import { Tool } from "./tool"
 import DESCRIPTION from "./ensure-dev-server.txt"
 import { Instance } from "../project/instance"
@@ -44,7 +45,8 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
   }),
   async execute(params, ctx) {
     const startedAt = Date.now()
-    const cwd = params.cwd ?? Instance.directory
+    // replay 는 부팅 프로세스(다른 cwd)에서 도므로 절대경로로 고정해 기록한다.
+    const cwd = resolve(params.cwd ?? Instance.directory)
 
     type Payload = {
       status: "already_running" | "started" | "failed"
@@ -70,6 +72,9 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     }
 
     if (await probePort(params.port)) {
+      // 이미 떠 있어도 기록은 갱신한다. 서버를 bash 로 먼저 띄웠거나 부팅 replay 로
+      // 살아난 경우에도 재스폰 시 replay 가 동작하도록, 그리고 커맨드가 바뀌었으면 최신화한다.
+      await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port })
       return result(`ensure_dev_server: already_running (:${params.port})`, {
         status: "already_running",
         url: serveUrl(params.port),
@@ -86,7 +91,7 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       metadata: {},
     })
 
-    const child = DevServerReplay.spawnDetached(params.cmd, cwd)
+    const child = DevServerReplay.launch(params.cmd, cwd)
     log.info("spawned dev server", { pid: child.pid, port: params.port, cwd })
 
     const ready = await waitForPort(params.port, params.ready_timeout_ms, ctx.abort)

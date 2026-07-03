@@ -64,7 +64,7 @@ async function writeState(projectDir: string, state: DevServerReplay.State) {
 
 describe("DevServerReplay", () => {
   describe("record", () => {
-    test("writes the state file under .opencode in the project directory", async () => {
+    test("writes the state file under .opencode in the fallback directory", async () => {
       const dir = await tempProjectDir()
       const state = { cmd: "npm run dev -- --port 3000", cwd: dir, port: 3000 }
 
@@ -72,6 +72,19 @@ describe("DevServerReplay", () => {
 
       const raw = await readFile(join(dir, ".opencode", "dev-server.json"), "utf8")
       expect(JSON.parse(raw)).toEqual(state)
+    })
+
+    test("prefers ENK_PROJECT_DIRECTORY over the fallback so record and replay agree", async () => {
+      const canonical = await tempProjectDir()
+      const session = await tempProjectDir()
+      const state = { cmd: "npm run dev -- --port 3000", cwd: session, port: 3000 }
+
+      process.env["ENK_PROJECT_DIRECTORY"] = canonical
+      await DevServerReplay.record(session, state)
+
+      const raw = await readFile(join(canonical, ".opencode", "dev-server.json"), "utf8")
+      expect(JSON.parse(raw)).toEqual(state)
+      expect(existsSync(join(session, ".opencode", "dev-server.json"))).toBe(false)
     })
   })
 
