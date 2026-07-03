@@ -6,6 +6,7 @@ import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
 import { uuid } from "@/utils/uuid"
 import { getCursorPosition } from "./editor-dom"
 import { attachmentMime } from "./files"
+import { fitImageToByteLimit } from "./capture-export"
 import { normalizePaste, pasteMode } from "./paste"
 
 function dataUrl(file: File, mime: string) {
@@ -55,28 +56,35 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     })
   }
 
+  // 상한 초과 이미지는 거절하지 않고 상한 이하로 재인코딩/축소해 붙인다(미리보기 캡처처럼 풀 해상도라
+  // 커지는 경우 대응). 이미지가 아니거나 못 줄이면 원본 그대로 → 호출부가 크기 재확인 후 거절.
+  const fitForAttach = async (file: File) => {
+    if (file.size <= MAX_ATTACHMENT_BYTES) return file
+    return fitImageToByteLimit(file, MAX_ATTACHMENT_BYTES)
+  }
+
   const add = async (file: File, toast = true) => {
-    // Guard on file.size (synchronous, no read) before any FileReader read so an
-    // oversized file never gets base64-encoded into memory and crashes the tab.
-    if (file.size > MAX_ATTACHMENT_BYTES) {
+    const fitted = await fitForAttach(file)
+    // 축소 후에도 상한을 넘으면(비이미지이거나 못 줄임) 거절 — base64 로 메모리에 올리기 전에 막는다.
+    if (fitted.size > MAX_ATTACHMENT_BYTES) {
       if (toast) warnTooLarge()
       return false
     }
 
-    const mime = await attachmentMime(file)
+    const mime = await attachmentMime(fitted)
     if (!mime) {
       if (toast) warn()
       return false
     }
 
     const editor = input.editor()
-    const url = await dataUrl(file, mime)
+    const url = await dataUrl(fitted, mime)
     if (!url) return false
 
     const attachment: ImageAttachmentPart = {
       type: "image",
       id: uuid(),
-      filename: file.name,
+      filename: fitted.name,
       mime,
       dataUrl: url,
     }
@@ -93,11 +101,12 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     let rejectedForType = false
 
     for (const file of files) {
-      if (file.size > MAX_ATTACHMENT_BYTES) {
+      const fitted = await fitForAttach(file)
+      if (fitted.size > MAX_ATTACHMENT_BYTES) {
         rejectedForSize = true
         continue
       }
-      const ok = await add(file, false)
+      const ok = await add(fitted, false)
       if (ok) found = true
       else rejectedForType = true
     }

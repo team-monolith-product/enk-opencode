@@ -7,6 +7,7 @@ import type { LineRefInput } from "@/components/blocksuite/line-reference-url"
 import type { DocSyncOpts } from "@/components/blocksuite/opencode-doc-source"
 import { label } from "@/components/blocksuite/actor"
 import { clearActor, loadActor, saveActor } from "./doc-actor"
+import { fitImageToByteLimit } from "./capture-export"
 import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
 
 type DocHandle = Awaited<ReturnType<typeof createPage>>
@@ -351,10 +352,15 @@ export function createPromptDoc(input: PromptDocInput) {
   const empty = () => (handle ? handle.empty() : true)
 
   const addFiles = async (files: File[]) => {
+    // 상한 초과 이미지는 거절하지 않고 상한 이하로 재인코딩/축소한다(미리보기 캡처 대응).
+    // 이미지가 아니거나 못 줄인 파일은 그대로 남아 아래 크기 필터에서 걸러진다.
+    const prepared = await Promise.all(
+      files.map((file) => (file.size > MAX_ATTACHMENT_BYTES ? fitImageToByteLimit(file, MAX_ATTACHMENT_BYTES) : file)),
+    )
     // Pre-filter on file.size (synchronous, no read) so an oversized file never
     // reaches blobSync. tooLarge lets callers show the size-specific toast.
-    const tooLarge = files.some((file) => file.size > MAX_ATTACHMENT_BYTES)
-    const eligible = files.filter((file) => file.size <= MAX_ATTACHMENT_BYTES)
+    const tooLarge = prepared.some((file) => file.size > MAX_ATTACHMENT_BYTES)
+    const eligible = prepared.filter((file) => file.size <= MAX_ATTACHMENT_BYTES)
     const result = await Promise.all(eligible.map((file) => handle?.addFile(file) ?? false))
     return { added: result.some(Boolean), tooLarge }
   }
