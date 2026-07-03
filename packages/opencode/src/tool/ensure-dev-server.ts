@@ -1,31 +1,14 @@
 import z from "zod"
-import { spawn } from "node:child_process"
-import { createConnection } from "node:net"
 import { existsSync } from "node:fs"
 import { Tool } from "./tool"
 import DESCRIPTION from "./ensure-dev-server.txt"
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
+import { DevServerReplay, probePort } from "../enk/dev-server-replay"
+
+export { probePort }
 
 const log = Log.create({ service: "ensure-dev-server" })
-
-/**
- * 지정 포트가 LISTEN 중인지 빠르게 확인한다.
- * lsof/ss/netstat 없이 TCP connect 시도만으로 판별 — `(echo > /dev/tcp/...)` 의 Node 버전.
- */
-export function probePort(port: number, host = "127.0.0.1", timeoutMs = 250): Promise<boolean> {
-  return new Promise((resolve) => {
-    const sock = createConnection({ host, port })
-    const done = (ok: boolean) => {
-      sock.removeAllListeners()
-      sock.destroy()
-      resolve(ok)
-    }
-    sock.once("connect", () => done(true))
-    sock.once("error", () => done(false))
-    sock.setTimeout(timeoutMs, () => done(false))
-  })
-}
 
 async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
@@ -57,10 +40,7 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
           "'npx --yes browser-sync start --server --port 3000 --files \"**/*.{html,css,js}\" --no-open --no-ui'",
       ),
     port: z.number().describe("서버가 LISTEN 할 포트. OpenCode 환경에서는 3000 고정.").default(3000),
-    ready_timeout_ms: z
-      .number()
-      .describe("새로 띄울 때 LISTEN 시작을 기다리는 최대 시간(ms).")
-      .default(15000),
+    ready_timeout_ms: z.number().describe("새로 띄울 때 LISTEN 시작을 기다리는 최대 시간(ms).").default(15000),
   }),
   async execute(params, ctx) {
     const startedAt = Date.now()
@@ -106,15 +86,7 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       metadata: {},
     })
 
-    // 백그라운드 launch. detached + stdio:ignore + unref 로 OpenCode 프로세스가 stdout 파이프를 잡지 않게 한다.
-    // 이게 빠지면 도구 호출이 반환되지 않고 응답 턴이 hang 된다.
-    const child = spawn("/bin/sh", ["-lc", params.cmd], {
-      cwd,
-      detached: true,
-      stdio: "ignore",
-      env: process.env,
-    })
-    child.unref()
+    const child = DevServerReplay.spawnDetached(params.cmd, cwd)
     log.info("spawned dev server", { pid: child.pid, port: params.port, cwd })
 
     const ready = await waitForPort(params.port, params.ready_timeout_ms, ctx.abort)
@@ -128,6 +100,8 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
         reason: `포트 ${params.port} 가 ${params.ready_timeout_ms}ms 안에 LISTEN 되지 않았습니다. 명령어를 확인하세요: ${params.cmd}`,
       })
     }
+
+    await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port })
 
     return result(`ensure_dev_server: started (:${params.port}, ${ms}ms)`, {
       status: "started",
