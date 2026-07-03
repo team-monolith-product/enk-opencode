@@ -182,8 +182,6 @@ npx create-react-app my-app
 npx serve -l 3000 ./dist
 ```
 
-- 정적 파일 서빙은 `npx serve` 를 사용하고, 미리보기 핫 리로드는 아래 `ensure_dev_server` 도구만 사용합니다.
-
 프로젝트에 패키지를 설치하려면 npm을 사용하세요.
 
 ```bash
