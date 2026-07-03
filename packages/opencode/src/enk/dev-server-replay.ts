@@ -44,6 +44,11 @@ export namespace DevServerReplay {
 
   const FILE = ".opencode/dev-server.json"
 
+  /** 기록 파일 존재 여부 — 폴백(DevServerAgent)이 replay 담당 여부를 판단하는 규약. */
+  export function hasRecord(dir: string): boolean {
+    return existsSync(resolve(dir, FILE))
+  }
+
   const State = z.object({
     cmd: z.string(),
     cwd: z.string(),

@@ -36,6 +36,7 @@ export namespace AiUsage {
 
   const pending: Attributes[] = [] // bounded FIFO queue
   const sent = new Set<string>() // messageIDs already enqueued — dedupes repeated updates
+  const excluded = new Set<string>() // sessionIDs whose usage must not be reported (internal runs)
   let draining = false // serial-drain guard: at most one request in flight
   let dropped = 0 // records discarded due to MAX_PENDING overflow
   let warnedDisabled = false // suppress repeated "not configured" warnings
@@ -56,6 +57,14 @@ export namespace AiUsage {
     }
   }
 
+  /**
+   * 내부(숨김) 세션의 사용량을 집계에서 제외한다 — 참가자 토큰 결산이 시스템 실행
+   * (예: DevServerAgent 부팅 폴백)으로 오염되지 않게 한다.
+   */
+  export function exclude(sessionID: string) {
+    excluded.add(sessionID)
+  }
+
   /** Enqueue one completed assistant turn's usage. Non-blocking; never throws into the caller. */
   export function report(info: MessageV2.Info) {
     if (!enabled()) {
@@ -66,6 +75,7 @@ export namespace AiUsage {
       return
     }
     if (info.role !== "assistant") return
+    if (excluded.has(info.sessionID)) return // internal runs are not billed to participants
     if (!info.time.completed) return // only finished turns
     if (sent.has(info.id)) return // already enqueued
     if (!info.path?.cwd) return // no mount_path → rails can't resolve owner

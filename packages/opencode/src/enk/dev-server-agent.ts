@@ -1,0 +1,133 @@
+import { existsSync } from "node:fs"
+import { resolve } from "node:path"
+import { Log } from "@/util/log"
+import { Instance } from "@/project/instance"
+import { InstanceBootstrap } from "@/project/bootstrap"
+import { Session } from "@/session"
+import { SessionID } from "@/session/schema"
+import { SessionPrompt } from "@/session/prompt"
+import type { Permission } from "@/permission"
+import { DevServerReplay, probePort } from "./dev-server-replay"
+import { AiUsage } from "./ai-usage"
+
+/**
+ * Dev 서버 기록(dev-server.json)이 없는 레거시 프로젝트의 폴백 — 부팅 시 숨김 AI 세션을
+ * 만들어 ensure_dev_server 로 dev 서버를 띄우게 한다.
+ *
+ * 기록은 이 기능 배포 이후 ensure_dev_server 가 실행될 때만 남으므로, 그 이전에 마지막으로
+ * 작업된 프로젝트는 갤러리 깨우기(스폰 대행)로 pod 가 살아나도 :3000 이 영영 뜨지 않는다.
+ * AI 가 성공하면 ensure_dev_server 의 record 경로가 기록 파일을 남겨 스스로 백필되고,
+ * 다음 부팅부터는 기계적 replay 로 복귀한다 — 즉 프로젝트당 최대 1회의 LLM 실행이다.
+ *
+ * 사용자에게 보이지 않아야 한다:
+ * - 세션 목록은 parent_id IS NULL 만 노출하므로(session/index.ts list), 실존하지 않는
+ *   parentID 를 달아 숨긴다. parent_id 에는 FK 가 없어 안전하다(session.sql.ts).
+ * - 완료 후 Session.remove 로 흔적을 지운다.
+ * - 토큰 사용량 집계(AiUsage)는 참가자 결산을 오염시키지 않도록 세션 단위로 제외한다.
+ * - 모델은 config 가 ENK_AI_MODEL 을 기본값으로 강제하므로 별도 지정하지 않는다.
+ */
+export namespace DevServerAgent {
+  const log = Log.create({ service: "enk.dev-server-agent" })
+
+  const MARKER_FILE = ".opencode/dev-server-agent.json"
+  const DEV_SERVER_PORT = 3000
+  const ATTEMPT_COOLDOWN_MS = 10 * 60 * 1000
+  const PROMPT_TIMEOUT_MS = 4 * 60 * 1000
+
+  // findLast 매칭이라 뒤의 allow 가 앞의 전면 deny 를 덮는다(permission/evaluate.ts).
+  // 매칭 없음의 기본값이 "ask"(응답 대기 hang)이므로 전면 deny 로 반드시 전부 커버한다.
+  // deny 는 도구를 모델에 아예 노출하지 않으므로(llm.ts resolveTools) 코드 수정이 불가능하다.
+  const PERMISSION: Permission.Ruleset = [
+    { permission: "*", pattern: "*", action: "deny" },
+    { permission: "read", pattern: "*", action: "allow" },
+    { permission: "glob", pattern: "*", action: "allow" },
+    { permission: "grep", pattern: "*", action: "allow" },
+    { permission: "list", pattern: "*", action: "allow" },
+    { permission: "ensure_dev_server", pattern: "*", action: "allow" },
+  ]
+
+  const PROMPT = [
+    `이 프로젝트의 dev 서버를 ${DEV_SERVER_PORT} 포트로 실행해 주세요.`,
+    "- 반드시 ensure_dev_server 도구로 실행하세요. 코드/파일은 절대 수정하지 마세요.",
+    "- package.json 의 scripts 를 확인해 적절한 명령을 정하세요.",
+    "- 외부 접근이 가능해야 하므로 host 0.0.0.0 으로 바인딩하세요.",
+    "- node_modules 가 없으면 cmd 에 설치를 포함하세요 (예: 'npm install && npm run dev -- --host 0.0.0.0 --port 3000').",
+    "- 서버를 띄우는 것 외의 작업은 하지 마세요.",
+  ].join("\n")
+
+  type Marker = { attemptedAt: number }
+
+  /**
+   * 부팅 시 폴백을 시도해야 하는지 판정한다. 기록 파일이 있으면 replay 가 담당하고,
+   * 포트가 이미 살아 있으면 할 일이 없고, package.json 이 없으면(빈/비 node 프로젝트)
+   * AI 를 돌릴 근거가 없다. 최근 시도 마커는 스폰-실패 반복 루프를 쿨다운으로 막는다.
+   */
+  export async function shouldAttempt(dir: string, port = DEV_SERVER_PORT): Promise<boolean> {
+    if (DevServerReplay.hasRecord(dir)) return false
+    if (!existsSync(resolve(dir, "package.json"))) return false
+    if (await probePort(port)) return false
+    try {
+      const marker = (await Bun.file(resolve(dir, MARKER_FILE)).json()) as Marker
+      if (Date.now() - marker.attemptedAt < ATTEMPT_COOLDOWN_MS) return false
+    } catch {
+      // 마커 없음/파싱 불가 — 시도 가능.
+    }
+    return true
+  }
+
+  async function writeMarker(dir: string) {
+    try {
+      await Bun.write(resolve(dir, MARKER_FILE), JSON.stringify({ attemptedAt: Date.now() } satisfies Marker) + "\n")
+    } catch (err) {
+      log.warn("failed to write attempt marker", { err: String(err) })
+    }
+  }
+
+  export async function ensure() {
+    const dir = process.env["ENK_PROJECT_DIRECTORY"]
+    if (!dir || !existsSync(dir)) return
+    if (!(await shouldAttempt(dir))) return
+
+    await writeMarker(dir)
+    log.info("starting hidden dev-server agent session", { dir })
+
+    await Instance.provide({
+      directory: dir,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const session = await Session.create({
+          parentID: SessionID.descending(),
+          title: "enk: dev server autostart (internal)",
+          permission: PERMISSION,
+        })
+        AiUsage.exclude(session.id)
+        try {
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              void SessionPrompt.cancel(session.id).catch(() => {})
+              reject(new Error("dev-server agent timed out"))
+            }, PROMPT_TIMEOUT_MS)
+          })
+          await Promise.race([
+            SessionPrompt.prompt({
+              sessionID: session.id,
+              parts: [{ type: "text", text: PROMPT }],
+            }),
+            timeout,
+          ]).finally(() => clearTimeout(timer))
+        } finally {
+          await Session.remove(session.id).catch((err) => {
+            log.warn("failed to remove hidden session", { sessionID: session.id, err: String(err) })
+          })
+        }
+
+        if (await probePort(DEV_SERVER_PORT)) {
+          log.info("dev server started by agent", { dir, port: DEV_SERVER_PORT })
+        } else {
+          log.warn("agent finished but dev server not listening", { dir, port: DEV_SERVER_PORT })
+        }
+      },
+    })
+  }
+}

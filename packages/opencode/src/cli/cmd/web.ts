@@ -4,6 +4,7 @@ import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
 import { DevServerReplay } from "../../enk/dev-server-replay"
+import { DevServerAgent } from "../../enk/dev-server-agent"
 import open from "open"
 import { networkInterfaces } from "os"
 
@@ -39,6 +40,8 @@ export const WebCommand = cmd({
     }
     const opts = await resolveNetworkOptions(args)
     void DevServerReplay.replay().catch(() => {})
+    // 기록이 없는 레거시 프로젝트는 숨김 AI 세션으로 dev 서버를 띄운다(1회성 자가 백필).
+    void DevServerAgent.ensure().catch(() => {})
     const server = Server.listen(opts)
     const suffix = opts.basePath && opts.basePath !== "/" ? opts.basePath : ""
     UI.empty()
