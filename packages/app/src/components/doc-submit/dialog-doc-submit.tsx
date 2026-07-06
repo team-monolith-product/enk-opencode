@@ -33,6 +33,10 @@ type Props = {
   approve: () => void
   cancel: () => void
   close: () => void
+  // Fired when the local countdown passes the deadline (+grace) without a server terminal cast — the
+  // parent synthesizes an "expired" state so a finished vote never lingers on screen. Optional so a
+  // spectator-only mount can omit it.
+  onExpire?: () => void
 }
 
 // ── copy helpers (kind-aware) ──────────────────────────────────────────────
@@ -505,11 +509,13 @@ function ConsentFrame(props: {
   spectator?: boolean
   approve: () => void
   cancel: () => void
+  onExpire?: () => void
 }) {
-  const remaining = useCountdown(() => props.state.expiresAt)
+  const remaining = useCountdown(() => props.state.expiresAt, props.onExpire)
   const total = () => props.state.timeoutMs / 1000
-  // ceil → 1s steps; the strip's CSS `transition: width 1s linear` smooths between them.
-  const sec = () => Math.max(0, Math.ceil(remaining()))
+  // round → the chip reaches "0" in the final half-second instead of clinging to "1" (which read as
+  // "0초 남았는데 1초로 표기"). The strip's CSS `transition: width 1s linear` smooths the 1s steps.
+  const sec = () => Math.max(0, Math.round(remaining()))
   const pct = () => {
     const t = total()
     return t > 0 ? Math.max(0, Math.min(100, (sec() / t) * 100)) : 0
@@ -615,6 +621,7 @@ export function DialogDocSubmit(props: Props) {
               spectator={props.spectator}
               approve={props.approve}
               cancel={props.cancel}
+              onExpire={props.onExpire}
             />
           </Show>
         )}
