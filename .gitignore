@@ -38,3 +38,6 @@ tsconfig.tsbuildinfo
 !/.claude/settings.json
 !/.claude/hooks/
 !/.claude/hooks/**
+
+# opencode run continuation marker 등 로컬 상태
+.omo/
