@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { buildWorkerBootstrap } from "./create-worker"
 
 // packages/ui/src 전체를 스캔해 raw worker 생성을 금지한다. CDN 자산 base 에서 워커는
 // same-origin blob 부트스트랩(create-worker.ts)을 거쳐야 하며, 직접 new Worker 는 cross-origin
@@ -25,5 +26,30 @@ describe("worker construction guard", () => {
       )
     }
     expect(offenders).toEqual([])
+  })
+})
+
+describe("cross-origin worker bootstrap", () => {
+  const href = "https://cdn.example.com/assets/worker-abc123.js"
+  const boot = buildWorkerBootstrap(href)
+
+  test("imports the CDN worker dynamically, not with a hoisted static import", () => {
+    // 정적 `import "..."` 는 hoisting 되어 동기 리스너 앞에 평가되므로 조기 메시지가 유실된다.
+    expect(boot).not.toMatch(/(^|\n)\s*import\s+["']/)
+    expect(boot).toContain(`import(${JSON.stringify(href)})`)
+  })
+
+  test("registers a message buffer BEFORE importing the CDN worker", () => {
+    // 워커 포트가 CDN 모듈 로드보다 먼저 enable 돼도 조기 메시지를 잃지 않으려면
+    // 동기 message 리스너가 import 보다 먼저 있어야 한다.
+    const listenAt = boot.indexOf('addEventListener("message"')
+    const importAt = boot.indexOf("import(")
+    expect(listenAt).toBeGreaterThanOrEqual(0)
+    expect(importAt).toBeGreaterThan(listenAt)
+  })
+
+  test("replays buffered messages once the CDN worker has loaded", () => {
+    expect(boot).toContain('removeEventListener("message"')
+    expect(boot).toContain('dispatchEvent(new MessageEvent("message"')
   })
 })
