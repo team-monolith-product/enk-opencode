@@ -34,3 +34,7 @@ tsconfig.tsbuildinfo
 
 /.agents/**/*
 /.claude/**/*
+# 워크트리 생성용 설정/훅은 트래킹한다 (나머지 .claude 는 무시)
+!/.claude/settings.json
+!/.claude/hooks/
+!/.claude/hooks/**
