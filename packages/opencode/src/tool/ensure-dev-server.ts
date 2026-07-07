@@ -6,6 +6,7 @@ import DESCRIPTION from "./ensure-dev-server.txt"
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
 import { DevServerReplay, probePort } from "../enk/dev-server-replay"
+import { ServeTargets } from "../enk/serve-targets"
 
 export { probePort }
 
@@ -21,12 +22,15 @@ async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal):
   return false
 }
 
-export function serveUrl(port: number): string {
+export function serveUrl(port: number, kind?: ServeTargets.Kind): string {
   // 학생에게 안내할 외부 접근 주소. JUPYTERHUB_USER/OPENCODE_SERVE_DOMAIN 환경변수가 있으면 외부 URL,
-  // 없으면 로컬 URL 로 폴백.
+  // 없으면 로컬 URL 로 폴백. 튜토리얼은 CHP 가 :3001 로 라우팅하는 전용 서브도메인을 쓴다.
   const user = process.env["JUPYTERHUB_USER"]
   const domain = process.env["OPENCODE_SERVE_DOMAIN"]
-  if (user && domain) return `https://${user}.${domain}/`
+  if (user && domain) {
+    const suffix = kind === "tutorial" ? ServeTargets.TUTORIAL_HOST_SUFFIX : ""
+    return `https://${user}${suffix}.${domain}/`
+  }
   return `http://localhost:${port}/`
 }
 
@@ -37,15 +41,28 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     cmd: z
       .string()
       .describe(
-        "실행할 셸 명령. 예: 'npm run dev -- --host 0.0.0.0 --port 3000', 'npx --yes serve -l 3000 .'",
+        "실행할 셸 명령. 포트는 도구 결과의 port 와 일치해야 한다. " +
+          "예: 'npm run dev -- --host 0.0.0.0 --port 3000 --strictPort', 'npx --yes serve -l 3000 .'",
       ),
-    port: z.number().describe("서버가 LISTEN 할 포트. OpenCode 환경에서는 3000 고정.").default(3000),
+    port: z
+      .number()
+      .describe("서버가 LISTEN 할 포트. 본행사 3000 / 튜토리얼 3001 — cwd 기준으로 도구가 강제한다.")
+      .default(3000),
     ready_timeout_ms: z.number().describe("새로 띄울 때 LISTEN 시작을 기다리는 최대 시간(ms).").default(15000),
   }),
   async execute(params, ctx) {
     const startedAt = Date.now()
     // replay 는 부팅 프로세스(다른 cwd)에서 도므로 절대경로로 고정해 기록한다.
     const cwd = resolve(params.cwd ?? Instance.directory)
+
+    // 포트는 AI 인자가 아니라 cwd 의 서빙 타깃이 결정한다(본행사 3000/튜토리얼 3001).
+    // 미리보기 서브도메인·재부팅 replay·CHP 라우팅이 모두 이 규약에 묶여 있으므로
+    // 모델이 다른 값을 넘겨도 여기서 교정한다.
+    const target = ServeTargets.forCwd(cwd)
+    const port = target?.port ?? params.port
+    if (port !== params.port) {
+      log.info("port overridden by serve target", { requested: params.port, port, kind: target?.kind, cwd })
+    }
 
     type Payload = {
       status: "already_running" | "started" | "failed"
@@ -64,20 +81,20 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     if (!existsSync(cwd)) {
       return result("ensure_dev_server: failed", {
         status: "failed",
-        port: params.port,
+        port,
         ms: Date.now() - startedAt,
         reason: `cwd 가 존재하지 않습니다: ${cwd}`,
       })
     }
 
-    if (await probePort(params.port)) {
+    if (await probePort(port)) {
       // 이미 떠 있어도 기록은 갱신한다. 서버를 bash 로 먼저 띄웠거나 부팅 replay 로
       // 살아난 경우에도 재스폰 시 replay 가 동작하도록, 그리고 커맨드가 바뀌었으면 최신화한다.
-      await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port })
-      return result(`ensure_dev_server: already_running (:${params.port})`, {
+      await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port })
+      return result(`ensure_dev_server: already_running (:${port})`, {
         status: "already_running",
-        url: serveUrl(params.port),
-        port: params.port,
+        url: serveUrl(port, target?.kind),
+        port,
         ms: Date.now() - startedAt,
       })
     }
@@ -86,31 +103,33 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     await ctx.ask({
       permission: "bash",
       patterns: [params.cmd],
-      always: [`ensure_dev_server :${params.port}`],
+      always: [`ensure_dev_server :${port}`],
       metadata: {},
     })
 
     const child = DevServerReplay.launch(params.cmd, cwd)
-    log.info("spawned dev server", { pid: child.pid, port: params.port, cwd })
+    log.info("spawned dev server", { pid: child.pid, port, cwd })
 
-    const ready = await waitForPort(params.port, params.ready_timeout_ms, ctx.abort)
+    const ready = await waitForPort(port, params.ready_timeout_ms, ctx.abort)
     const ms = Date.now() - startedAt
 
     if (!ready) {
       return result("ensure_dev_server: failed", {
         status: "failed",
-        port: params.port,
+        port,
         ms,
-        reason: `포트 ${params.port} 가 ${params.ready_timeout_ms}ms 안에 LISTEN 되지 않았습니다. 명령어를 확인하세요: ${params.cmd}`,
+        reason:
+          `포트 ${port} 가 ${params.ready_timeout_ms}ms 안에 LISTEN 되지 않았습니다. ` +
+          `이 디렉토리의 서버는 반드시 ${port} 포트로 띄워야 합니다(cmd 의 포트 확인): ${params.cmd}`,
       })
     }
 
-    await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port })
+    await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port })
 
-    return result(`ensure_dev_server: started (:${params.port}, ${ms}ms)`, {
+    return result(`ensure_dev_server: started (:${port}, ${ms}ms)`, {
       status: "started",
-      url: serveUrl(params.port),
-      port: params.port,
+      url: serveUrl(port, target?.kind),
+      port,
       ms,
     })
   },

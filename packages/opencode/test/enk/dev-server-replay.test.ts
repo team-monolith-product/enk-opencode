@@ -144,5 +144,58 @@ describe("DevServerReplay", () => {
       await new Promise((r) => setTimeout(r, 200))
       expect(existsSync(marker)).toBe(false)
     })
+
+    test("replays project and tutorial records independently", async () => {
+      const root = await tempProjectDir()
+      const project = join(root, "project-directory")
+      const tutorial = join(root, "tutorial-directory")
+      await mkdir(project, { recursive: true })
+      await mkdir(tutorial, { recursive: true })
+      const projectMarker = join(project, "marker")
+      const tutorialMarker = join(tutorial, "marker")
+      await writeState(project, { cmd: `echo ok > ${projectMarker}`, cwd: project, port: await freePort() })
+      await writeState(tutorial, { cmd: `echo ok > ${tutorialMarker}`, cwd: tutorial, port: await freePort() })
+
+      process.env["ENK_PROJECT_DIRECTORY"] = project
+      await DevServerReplay.replay()
+
+      expect(await waitFor(() => existsSync(projectMarker))).toBe(true)
+      expect(await waitFor(() => existsSync(tutorialMarker))).toBe(true)
+    })
+
+    test("skips a record whose cwd belongs to another target", async () => {
+      const root = await tempProjectDir()
+      const project = join(root, "project-directory")
+      const tutorial = join(root, "tutorial-directory")
+      await mkdir(project, { recursive: true })
+      await mkdir(tutorial, { recursive: true })
+      const marker = join(root, "marker")
+      // 규약 이전에 남은 기록 — 본행사 파일에 튜토리얼 cwd 가 들어 있다.
+      await writeState(project, { cmd: `echo ok > ${marker}`, cwd: tutorial, port: await freePort() })
+
+      process.env["ENK_PROJECT_DIRECTORY"] = project
+      await DevServerReplay.replay()
+
+      await new Promise((r) => setTimeout(r, 200))
+      expect(existsSync(marker)).toBe(false)
+    })
+  })
+
+  describe("record with serve targets", () => {
+    test("writes a tutorial-cwd record into the tutorial directory", async () => {
+      const root = await tempProjectDir()
+      const project = join(root, "project-directory")
+      const tutorial = join(root, "tutorial-directory")
+      await mkdir(project, { recursive: true })
+      await mkdir(join(tutorial, "src"), { recursive: true })
+      const state = { cmd: "npm run dev -- --port 3001 --strictPort", cwd: join(tutorial, "src"), port: 3001 }
+
+      process.env["ENK_PROJECT_DIRECTORY"] = project
+      await DevServerReplay.record(project, state)
+
+      const raw = await readFile(join(tutorial, ".opencode", "dev-server.json"), "utf8")
+      expect(JSON.parse(raw)).toEqual(state)
+      expect(existsSync(join(project, ".opencode", "dev-server.json"))).toBe(false)
+    })
   })
 })

@@ -8,6 +8,7 @@ import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
 import type { Permission } from "@/permission"
 import { DevServerReplay, probePort } from "./dev-server-replay"
+import { ServeTargets } from "./serve-targets"
 import { AiUsage } from "./ai-usage"
 
 /**
@@ -15,9 +16,10 @@ import { AiUsage } from "./ai-usage"
  * 만들어 ensure_dev_server 로 dev 서버를 띄우게 한다.
  *
  * 기록은 이 기능 배포 이후 ensure_dev_server 가 실행될 때만 남으므로, 그 이전에 마지막으로
- * 작업된 프로젝트는 갤러리 깨우기(스폰 대행)로 pod 가 살아나도 :3000 이 영영 뜨지 않는다.
- * AI 가 성공하면 ensure_dev_server 의 record 경로가 기록 파일을 남겨 스스로 백필되고,
- * 다음 부팅부터는 기계적 replay 로 복귀한다 — 즉 프로젝트당 최대 1회의 LLM 실행이다.
+ * 작업된 프로젝트는 갤러리 깨우기(스폰 대행)로 pod 가 살아나도 타깃 포트가 영영 뜨지 않는다.
+ * 서빙 타깃(본행사 :3000 / 튜토리얼 :3001)별로 판정·시도하며, AI 가 성공하면
+ * ensure_dev_server 의 record 경로가 기록 파일을 남겨 스스로 백필되고, 다음 부팅부터는
+ * 기계적 replay 로 복귀한다 — 즉 타깃당 최대 1회의 LLM 실행이다.
  *
  * 사용자에게 보이지 않아야 한다:
  * - 세션 목록은 parent_id IS NULL 만 노출하므로(session/index.ts list), 실존하지 않는
@@ -30,7 +32,6 @@ export namespace DevServerAgent {
   const log = Log.create({ service: "enk.dev-server-agent" })
 
   const MARKER_FILE = ".opencode/dev-server-agent.json"
-  const DEV_SERVER_PORT = 3000
   const ATTEMPT_COOLDOWN_MS = 10 * 60 * 1000
   const PROMPT_TIMEOUT_MS = 4 * 60 * 1000
 
@@ -46,14 +47,16 @@ export namespace DevServerAgent {
     { permission: "ensure_dev_server", pattern: "*", action: "allow" },
   ]
 
-  const PROMPT = [
-    `이 프로젝트의 dev 서버를 ${DEV_SERVER_PORT} 포트로 실행해 주세요.`,
-    "- 반드시 ensure_dev_server 도구로 실행하세요. 코드/파일은 절대 수정하지 마세요.",
-    "- package.json 의 scripts 를 확인해 적절한 명령을 정하세요.",
-    "- 외부 접근이 가능해야 하므로 host 0.0.0.0 으로 바인딩하세요.",
-    "- node_modules 가 없으면 cmd 에 설치를 포함하세요 (예: 'npm install && npm run dev -- --host 0.0.0.0 --port 3000').",
-    "- 서버를 띄우는 것 외의 작업은 하지 마세요.",
-  ].join("\n")
+  function buildPrompt(port: number): string {
+    return [
+      `이 프로젝트의 dev 서버를 ${port} 포트로 실행해 주세요.`,
+      "- 반드시 ensure_dev_server 도구로 실행하세요. 코드/파일은 절대 수정하지 마세요.",
+      "- package.json 의 scripts 를 확인해 적절한 명령을 정하세요.",
+      "- 외부 접근이 가능해야 하므로 host 0.0.0.0 으로 바인딩하세요.",
+      `- node_modules 가 없으면 cmd 에 설치를 포함하세요 (예: 'npm install && npm run dev -- --host 0.0.0.0 --port ${port} --strictPort').`,
+      "- 서버를 띄우는 것 외의 작업은 하지 마세요.",
+    ].join("\n")
+  }
 
   type Marker = { attemptedAt: number }
 
@@ -62,7 +65,7 @@ export namespace DevServerAgent {
    * 포트가 이미 살아 있으면 할 일이 없고, package.json 이 없으면(빈/비 node 프로젝트)
    * AI 를 돌릴 근거가 없다. 최근 시도 마커는 스폰-실패 반복 루프를 쿨다운으로 막는다.
    */
-  export async function shouldAttempt(dir: string, port = DEV_SERVER_PORT): Promise<boolean> {
+  export async function shouldAttempt(dir: string, port: number): Promise<boolean> {
     if (DevServerReplay.hasRecord(dir)) return false
     if (!existsSync(resolve(dir, "package.json"))) return false
     if (await probePort(port)) return false
@@ -83,13 +86,18 @@ export namespace DevServerAgent {
     }
   }
 
+  /** 서빙 타깃(본행사/튜토리얼)별로 순차 시도한다 — 동시 LLM 실행으로 pod 를 압박하지 않는다. */
   export async function ensure() {
-    const dir = process.env["ENK_PROJECT_DIRECTORY"]
-    if (!dir || !existsSync(dir)) return
-    if (!(await shouldAttempt(dir))) return
+    for (const target of ServeTargets.all()) {
+      if (!(await shouldAttempt(target.dir, target.port))) continue
+      await ensureTarget(target)
+    }
+  }
 
+  async function ensureTarget(target: ServeTargets.Target) {
+    const { dir, port } = target
     await writeMarker(dir)
-    log.info("starting hidden dev-server agent session", { dir })
+    log.info("starting hidden dev-server agent session", { dir, port, kind: target.kind })
 
     await Instance.provide({
       directory: dir,
@@ -112,7 +120,7 @@ export namespace DevServerAgent {
           await Promise.race([
             SessionPrompt.prompt({
               sessionID: session.id,
-              parts: [{ type: "text", text: PROMPT }],
+              parts: [{ type: "text", text: buildPrompt(port) }],
             }),
             timeout,
           ]).finally(() => clearTimeout(timer))
@@ -122,10 +130,10 @@ export namespace DevServerAgent {
           })
         }
 
-        if (await probePort(DEV_SERVER_PORT)) {
-          log.info("dev server started by agent", { dir, port: DEV_SERVER_PORT })
+        if (await probePort(port)) {
+          log.info("dev server started by agent", { dir, port })
         } else {
-          log.warn("agent finished but dev server not listening", { dir, port: DEV_SERVER_PORT })
+          log.warn("agent finished but dev server not listening", { dir, port })
         }
       },
     })

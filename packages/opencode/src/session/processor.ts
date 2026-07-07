@@ -7,6 +7,7 @@ import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
 import { Snapshot } from "@/snapshot"
 import { Log } from "@/util/log"
+import { AiUsage } from "@/enk/ai-usage"
 import { Session } from "."
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
@@ -52,6 +53,9 @@ export namespace SessionProcessor {
     needsCompaction: boolean
     currentText: MessageV2.TextPart | undefined
     reasoningMap: Record<string, MessageV2.ReasoningPart>
+    // Monotonic per-turn model-step counter, used as the step_index for realtime usage reports
+    // so rails can order incremental step records within a turn.
+    stepIndex: number
   }
 
   type StreamEvent = Event
@@ -95,6 +99,7 @@ export namespace SessionProcessor {
           needsCompaction: false,
           currentText: undefined,
           reasoningMap: {},
+          stepIndex: 0,
         }
         let aborted = false
 
@@ -108,6 +113,11 @@ export namespace SessionProcessor {
           switch (value.type) {
             case "start":
               yield* status.set(ctx.sessionID, { type: "busy" })
+              // Optional realtime liveness ping ("answer started"). No-op unless ENK usage
+              // reporting is enabled with ENK_AI_USAGE_REALTIME=progress. Fire-and-forget.
+              try {
+                AiUsage.reportProgress(ctx.assistantMessage, "start")
+              } catch {}
               return
 
             case "reasoning-start":
@@ -283,6 +293,18 @@ export namespace SessionProcessor {
               ctx.assistantMessage.finish = value.finishReason
               ctx.assistantMessage.cost += usage.cost
               ctx.assistantMessage.tokens = usage.tokens
+              // Realtime per-step usage report (authoritative token/cost for THIS step). No-op
+              // unless ENK usage reporting is enabled and ENK_AI_USAGE_REALTIME !== "off".
+              // Fire-and-forget through the AiUsage queue; never awaited in the stream loop.
+              try {
+                AiUsage.reportStep(ctx.assistantMessage, {
+                  index: ctx.stepIndex,
+                  tokens: usage.tokens,
+                  cost: usage.cost,
+                  at: Date.now(),
+                })
+              } catch {}
+              ctx.stepIndex++
               yield* session.updatePart({
                 id: PartID.ascending(),
                 reason: value.finishReason,
