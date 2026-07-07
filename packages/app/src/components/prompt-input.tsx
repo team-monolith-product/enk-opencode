@@ -633,6 +633,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   })
 
+  // Bumped each time an over-limit submit is blocked, so the doc counter can replay its shake.
+  const [countShake, setCountShake] = createSignal(0)
+
   const hasDraft = createMemo(() => {
     if (store.mode === "doc") return doc.filled()
     if (imageAttachments().length > 0 || commentCount() > 0) return true
@@ -1913,8 +1916,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     }
 
     if (store.mode === "doc") {
-      // Guard both submit paths (button and submit-key) — the disabled button only blocks clicks.
+      // Over the limit: the submit button stays enabled so a press gives feedback — shake the red
+      // count and toast, but do not send. Covers both the button and the submit-key path.
       if (doc.length() > MAX_PROMPT_DOC_CHARS) {
+        setCountShake((n) => n + 1)
         showToast({
           title: language.t("prompt.toast.docTooLong.title"),
           description: language.t("prompt.toast.docTooLong.description", {
@@ -2332,11 +2337,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               submitLabel={submitLabel()}
               length={doc.length()}
               maxLength={MAX_PROMPT_DOC_CHARS}
-              submitDisabled={
-                readonly ||
-                (submitAction() === "send" && !hasDraft()) ||
-                (submitAction() !== "stop" && doc.length() > MAX_PROMPT_DOC_CHARS)
-              }
+              shake={countShake()}
+              submitDisabled={readonly || (submitAction() === "send" && !hasDraft())}
               tip={tip()}
               onExit={exitDoc}
               modes={modeButtons()}

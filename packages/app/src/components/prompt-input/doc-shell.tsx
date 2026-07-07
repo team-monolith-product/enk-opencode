@@ -1,4 +1,4 @@
-import { Component, createSignal, JSX, Show } from "solid-js"
+import { Component, createEffect, createSignal, JSX, on, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import type { IconProps } from "@opencode-ai/ui/icon"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -21,8 +21,10 @@ type ShellProps = {
   submitDisabled?: boolean
   /** Current prompt length in characters (code points). */
   length: number
-  /** Upper bound; the counter appears as it is approached and turns red when exceeded. */
+  /** Upper bound; the counter fades in as it is approached and turns red when exceeded. */
   maxLength: number
+  /** Nonce — bump it to replay the over-limit shake (e.g. when submit is blocked). */
+  shake: number
   tip: JSX.Element
   onExit: () => void | Promise<void>
   modes?: JSX.Element
@@ -48,6 +50,40 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
   const [copied, setCopied] = createSignal(false)
   const [attachOpen, setAttachOpen] = createSignal(false)
   const [attachPos, setAttachPos] = createSignal<{ left: number; bottom: number } | null>(null)
+  let countRef: HTMLSpanElement | undefined
+
+  const ratio = () => (props.maxLength > 0 ? props.length / props.maxLength : 0)
+  const over = () => props.length > props.maxLength
+  // 다 채워갈 즈음 은근히 페이드인 — 상한의 70%→90% 구간에서 opacity 0→1.
+  const fade = () => {
+    const r = ratio()
+    if (r <= 0.7) return 0
+    if (r >= 0.9) return 1
+    return (r - 0.7) / 0.2
+  }
+
+  // 전송이 막힐 때(props.shake 증가) 초과 글자수를 좌우로 흔들어 시선을 끈다. Web Animations API라
+  // 별도 CSS 키프레임 없이 매번 깔끔하게 재생된다.
+  createEffect(
+    on(
+      () => props.shake,
+      (v, prev) => {
+        if (!v || v === prev) return
+        countRef?.animate(
+          [
+            { transform: "translateX(0)" },
+            { transform: "translateX(-3px)" },
+            { transform: "translateX(3px)" },
+            { transform: "translateX(-2px)" },
+            { transform: "translateX(2px)" },
+            { transform: "translateX(0)" },
+          ],
+          { duration: 360, easing: "ease-in-out" },
+        )
+      },
+      { defer: true },
+    ),
+  )
 
   const openAttach = () => {
     if (!attachBtnRef) return
@@ -298,18 +334,19 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
           </Show>
         </div>
         <div class="flex items-center gap-2">
-          {/* 글자 수 카운터 — 상한 80% 이후에만 노출해 평소 액션바를 어지럽히지 않고, 초과 시 빨간색으로 전환 */}
-          <Show when={!props.readonly && props.length >= props.maxLength * 0.8}>
+          {/* 글자 수 카운터 — 다 채워갈 즈음 은근히 페이드인. 초과 시 현재 글자수만 빨간색으로 전환 */}
+          <Show when={!props.readonly && ratio() >= 0.7}>
             <span
               data-component="prompt-doc-count"
-              class="shrink-0 select-none tabular-nums text-11-regular"
-              classList={{
-                "text-text-weaker": props.length <= props.maxLength,
-                "text-text-danger-base": props.length > props.maxLength,
-              }}
+              class="shrink-0 select-none tabular-nums text-11-regular text-text-weaker transition-opacity duration-200"
+              style={{ opacity: `${fade()}` }}
               aria-live="polite"
             >
-              {props.length.toLocaleString()} / {props.maxLength.toLocaleString()}
+              <span ref={(el) => (countRef = el)} class="inline-block" classList={{ "text-icon-critical-base": over() }}>
+                {props.length.toLocaleString()}
+              </span>
+              {" / "}
+              {props.maxLength.toLocaleString()}
             </span>
           </Show>
           <Tooltip
