@@ -42,8 +42,7 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       .string()
       .describe(
         "실행할 셸 명령. 포트는 도구 결과의 port 와 일치해야 한다. " +
-          "예: 'npm run dev -- --host 0.0.0.0 --port 3000 --strictPort', " +
-          "'npx --yes browser-sync start --server --port 3000 --files \"**/*.{html,css,js}\" --no-open --no-ui'",
+          "예: 'npm run dev -- --host 0.0.0.0 --port 3000 --strictPort', 'npx --yes serve -l 3000 .'",
       ),
     port: z
       .number()

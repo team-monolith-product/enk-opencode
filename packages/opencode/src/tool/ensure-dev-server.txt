@@ -17,9 +17,11 @@
 
 ## 명령 예시 (`cmd` 인자 값 — 포트 숫자는 위 규칙에 맞게)
 
-- 정적 HTML/CSS/JS: `npx --yes browser-sync start --server --port 3000 --files "**/*.html,**/*.css,**/*.js" --no-open --no-ui`
+- 정적 HTML/CSS/JS: `npx --yes serve -l 3000 .`
 - Vite / CRA: `npm run dev -- --host 0.0.0.0 --port 3000 --strictPort` (vite 는 포트 점유 시 조용히 다음 포트로 옮기므로 `--strictPort` 필수)
 - Next.js: `npm run dev -- --hostname 0.0.0.0 --port 3000`
+
+`browser-sync` 는 사용하지 않는다. 미리보기 리로드는 앱이 파일 변경을 감지해 자체 처리한다.
 
 ## 반환
 
