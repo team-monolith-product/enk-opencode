@@ -80,6 +80,7 @@ import { promptPlaceholder } from "./prompt-input/placeholder"
 import { promptFromDocMarkdown } from "@/components/prompt-input/prompt-plain"
 import { PromptDocShell } from "./prompt-input/doc-shell"
 import { createPromptDoc, type PromptDocConfig } from "./prompt-input/doc"
+import { MAX_PROMPT_DOC_CHARS } from "@/constants/prompt"
 import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
@@ -1912,6 +1913,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     }
 
     if (store.mode === "doc") {
+      // Guard both submit paths (button and submit-key) — the disabled button only blocks clicks.
+      if (doc.length() > MAX_PROMPT_DOC_CHARS) {
+        showToast({
+          title: language.t("prompt.toast.docTooLong.title"),
+          description: language.t("prompt.toast.docTooLong.description", {
+            max: MAX_PROMPT_DOC_CHARS.toLocaleString(),
+          }),
+        })
+        return
+      }
       const next = await doc.commitMarkdown()
       const text = next?.text
       if (!text) {
@@ -2319,7 +2330,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               readonly={readonly}
               submitIcon={submitIcon()}
               submitLabel={submitLabel()}
-              submitDisabled={readonly || (submitAction() === "send" && !hasDraft())}
+              length={doc.length()}
+              maxLength={MAX_PROMPT_DOC_CHARS}
+              submitDisabled={
+                readonly ||
+                (submitAction() === "send" && !hasDraft()) ||
+                (submitAction() !== "stop" && doc.length() > MAX_PROMPT_DOC_CHARS)
+              }
               tip={tip()}
               onExit={exitDoc}
               modes={modeButtons()}

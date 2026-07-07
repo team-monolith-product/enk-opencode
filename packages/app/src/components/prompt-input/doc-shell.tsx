@@ -19,6 +19,10 @@ type ShellProps = {
   submitIcon: IconProps["name"]
   submitLabel: string
   submitDisabled?: boolean
+  /** Current prompt length in characters (code points). */
+  length: number
+  /** Upper bound; the counter appears as it is approached and turns red when exceeded. */
+  maxLength: number
   tip: JSX.Element
   onExit: () => void | Promise<void>
   modes?: JSX.Element
@@ -293,21 +297,37 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
             </Tooltip>
           </Show>
         </div>
-        <Tooltip
-          placement="top"
-          inactive={props.submitIcon === "arrow-up-bold" && !props.submitDisabled}
-          value={props.tip}
-        >
-          <IconButton
-            data-action="prompt-submit"
-            type="submit"
-            icon={props.submitIcon}
-            variant="primary"
-            class="size-7.5"
-            disabled={props.submitDisabled}
-            aria-label={props.submitLabel}
-          />
-        </Tooltip>
+        <div class="flex items-center gap-2">
+          {/* 글자 수 카운터 — 상한 80% 이후에만 노출해 평소 액션바를 어지럽히지 않고, 초과 시 빨간색으로 전환 */}
+          <Show when={!props.readonly && props.length >= props.maxLength * 0.8}>
+            <span
+              data-component="prompt-doc-count"
+              class="shrink-0 select-none tabular-nums text-11-regular"
+              classList={{
+                "text-text-weaker": props.length <= props.maxLength,
+                "text-text-danger-base": props.length > props.maxLength,
+              }}
+              aria-live="polite"
+            >
+              {props.length.toLocaleString()} / {props.maxLength.toLocaleString()}
+            </span>
+          </Show>
+          <Tooltip
+            placement="top"
+            inactive={props.submitIcon === "arrow-up-bold" && !props.submitDisabled}
+            value={props.tip}
+          >
+            <IconButton
+              data-action="prompt-submit"
+              type="submit"
+              icon={props.submitIcon}
+              variant="primary"
+              class="size-7.5"
+              disabled={props.submitDisabled}
+              aria-label={props.submitLabel}
+            />
+          </Tooltip>
+        </div>
       </div>
     </div>
   )

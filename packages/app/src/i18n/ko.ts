@@ -296,6 +296,8 @@ export const dict = {
   "prompt.toast.fileTooLarge.description": "첨부 파일은 10MB 이하여야 합니다.",
   "prompt.toast.docEmpty.title": "보낼 내용 없음",
   "prompt.toast.docEmpty.description": "문서에 텍스트를 추가한 뒤 전송하세요.",
+  "prompt.toast.docTooLong.title": "프롬프트가 너무 김",
+  "prompt.toast.docTooLong.description": "전송하려면 문서를 {max}자 이내로 줄이세요.",
   "prompt.toast.docRotated.title": "새 협업 문서",
   "prompt.toast.docRotated.description": "프롬프트가 전송되었습니다. 문서 모드에서 {docID}를 편집하세요.",
   "prompt.toast.docAdvanceFailed.title": "새 문서로 전환하지 못함",
