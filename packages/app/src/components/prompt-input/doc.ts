@@ -108,6 +108,7 @@ export function createPromptDoc(input: PromptDocInput) {
 
   const [ready, setReady] = createSignal(false)
   const [filled, setFilled] = createSignal(false)
+  const [length, setLength] = createSignal(0)
   const [docID, setDocID] = createSignal<string | undefined>()
   const [actor, setActor] = createSignal<SessionActor | undefined>()
   const [activeSync, setActiveSync] = createSignal<DocSyncOpts | undefined>()
@@ -121,8 +122,14 @@ export function createPromptDoc(input: PromptDocInput) {
     setHistory({ undo, redo })
   }
 
-  const syncFilled = () => {
-    setFilled(handle ? !handle.empty() : false)
+  // Derive both "has content" and the character count from a single plain-text extraction. plain()
+  // is already trimmed, so its code-point length is what the user perceives as the character count;
+  // [...text] counts by code point so emoji/surrogate pairs count as one, not two.
+  const syncContent = () => {
+    const text = handle ? handle.plain() : ""
+    const count = text ? [...text].length : 0
+    setFilled(count > 0)
+    setLength(count)
   }
 
   const bindHistory = () => {
@@ -131,7 +138,7 @@ export function createPromptDoc(input: PromptDocInput) {
     historySub = handle.doc.slots.historyUpdated.on(() => {
       handle?.onHistory()
       syncHistory()
-      syncFilled()
+      syncContent()
     })
   }
 
@@ -142,6 +149,7 @@ export function createPromptDoc(input: PromptDocInput) {
     handle = undefined
     setReady(false)
     setFilled(false)
+    setLength(0)
     await current?.dispose()
   }
 
@@ -199,7 +207,7 @@ export function createPromptDoc(input: PromptDocInput) {
       onSubmit: input.onSubmit,
       submitKey: input.config.submitKey,
       onDraftChange: () => {
-        syncFilled()
+        syncContent()
         syncHistory()
       },
     })
@@ -221,7 +229,7 @@ export function createPromptDoc(input: PromptDocInput) {
     setDocID(id)
     setReady(true)
     syncHistory()
-    syncFilled()
+    syncContent()
   }
 
   const pivot = (sessionID: string, next: string, opts?: { init?: boolean; force?: boolean }) => {
@@ -279,7 +287,7 @@ export function createPromptDoc(input: PromptDocInput) {
         await handle.attach(opts.el)
         setReady(true)
         syncHistory()
-        syncFilled()
+        syncContent()
         return
       }
 
@@ -322,6 +330,7 @@ export function createPromptDoc(input: PromptDocInput) {
     if (sessionID) clearActor(sessionID, input.config.user?.id)
     setHistory({ undo: false, redo: false })
     setFilled(false)
+    setLength(0)
     void serialize(async () => {
       await drop()
     })
@@ -389,13 +398,14 @@ export function createPromptDoc(input: PromptDocInput) {
       clientID,
     })
     if (!ready.data?.docID) throw new Error("prompt doc ready failed")
-    syncFilled()
+    syncContent()
     return next.docID
   }
 
   return {
     ready,
     filled,
+    length,
     docID,
     sync: activeSync,
     actorID: () => actor()?.actorID,
