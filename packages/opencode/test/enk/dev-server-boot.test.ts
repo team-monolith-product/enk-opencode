@@ -110,6 +110,17 @@ describe("DevServerBoot.boot", () => {
     expect(existsSync(marker)).toBe(false)
   })
 
+  test("replays a tutorial record even when the project target has no record", async () => {
+    const { project, tutorial } = await tempWorkspace()
+    const tutorialMarker = join(tutorial, "marker")
+    await writeState(tutorial, { cmd: `echo ok > ${tutorialMarker}`, cwd: tutorial, port: await freePort() })
+
+    process.env["ENK_PROJECT_DIRECTORY"] = project
+    await DevServerBoot.boot()
+
+    expect(await waitFor(() => existsSync(tutorialMarker))).toBe(true)
+  })
+
   test("does not replay a record whose cwd belongs to another target", async () => {
     const { project, tutorial } = await tempWorkspace()
     const marker = join(project, "marker")
