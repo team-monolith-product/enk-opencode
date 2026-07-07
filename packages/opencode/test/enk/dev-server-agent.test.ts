@@ -49,17 +49,6 @@ async function freePort(): Promise<number> {
 }
 
 describe("DevServerAgent.shouldAttempt", () => {
-  test("기록 파일이 있으면 replay 담당이므로 skip", async () => {
-    const dir = await tempProjectDir()
-    await withPackageJson(dir)
-    await mkdir(join(dir, ".opencode"), { recursive: true })
-    await writeFile(
-      join(dir, ".opencode/dev-server.json"),
-      JSON.stringify({ cmd: "npm run dev", cwd: dir, port: 3000 }),
-    )
-    expect(await DevServerAgent.shouldAttempt(dir, await freePort())).toBe(false)
-  })
-
   test("package.json 이 없으면 skip", async () => {
     const dir = await tempProjectDir()
     expect(await DevServerAgent.shouldAttempt(dir, await freePort())).toBe(false)

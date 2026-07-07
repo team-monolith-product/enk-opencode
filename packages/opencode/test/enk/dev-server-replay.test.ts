@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { createServer, type Server } from "node:net"
 import { existsSync } from "node:fs"
 import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -21,45 +20,19 @@ async function tempProjectDir(): Promise<string> {
   return dir
 }
 
-function listen(): Promise<{ server: Server; port: number }> {
-  return new Promise((resolve, reject) => {
-    const server = createServer()
-    server.once("error", reject)
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address()
-      if (!addr || typeof addr === "string") {
-        server.close()
-        reject(new Error("expected TCP address"))
-        return
-      }
-      resolve({ server, port: addr.port })
-    })
-  })
+// teams/{id}/{project,tutorial}-directory 형태의 워크스페이스를 만든다.
+async function tempWorkspace(): Promise<{ project: string; tutorial: string }> {
+  const root = await tempProjectDir()
+  const project = join(root, "project-directory")
+  const tutorial = join(root, "tutorial-directory")
+  await mkdir(project, { recursive: true })
+  await mkdir(tutorial, { recursive: true })
+  return { project, tutorial }
 }
 
-function close(server: Server): Promise<void> {
-  return new Promise((resolve) => server.close(() => resolve()))
-}
-
-async function freePort(): Promise<number> {
-  const { server, port } = await listen()
-  await close(server)
-  return port
-}
-
-async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (predicate()) return true
-    await new Promise((r) => setTimeout(r, 50))
-  }
-  return predicate()
-}
-
-async function writeState(projectDir: string, state: DevServerReplay.State) {
-  const file = join(projectDir, ".opencode", "dev-server.json")
-  await mkdir(join(projectDir, ".opencode"), { recursive: true })
-  await writeFile(file, JSON.stringify(state))
+async function writeState(dir: string, state: DevServerReplay.State) {
+  await mkdir(join(dir, ".opencode"), { recursive: true })
+  await writeFile(join(dir, ".opencode", "dev-server.json"), JSON.stringify(state))
 }
 
 describe("DevServerReplay", () => {
@@ -68,7 +41,7 @@ describe("DevServerReplay", () => {
       const dir = await tempProjectDir()
       const state = { cmd: "npm run dev -- --port 3000", cwd: dir, port: 3000 }
 
-      await DevServerReplay.record(dir, state)
+      await DevServerReplay.record(state, dir)
 
       const raw = await readFile(join(dir, ".opencode", "dev-server.json"), "utf8")
       expect(JSON.parse(raw)).toEqual(state)
@@ -80,122 +53,59 @@ describe("DevServerReplay", () => {
       const state = { cmd: "npm run dev -- --port 3000", cwd: session, port: 3000 }
 
       process.env["ENK_PROJECT_DIRECTORY"] = canonical
-      await DevServerReplay.record(session, state)
+      await DevServerReplay.record(state, session)
 
       const raw = await readFile(join(canonical, ".opencode", "dev-server.json"), "utf8")
       expect(JSON.parse(raw)).toEqual(state)
       expect(existsSync(join(session, ".opencode", "dev-server.json"))).toBe(false)
     })
-  })
 
-  describe("replay", () => {
-    test("does nothing when ENK_PROJECT_DIRECTORY is not set", async () => {
-      const dir = await tempProjectDir()
-      const marker = join(dir, "marker")
-      await writeState(dir, { cmd: `echo ok > ${marker}`, cwd: dir, port: await freePort() })
-
-      delete process.env["ENK_PROJECT_DIRECTORY"]
-      await DevServerReplay.replay()
-
-      await new Promise((r) => setTimeout(r, 200))
-      expect(existsSync(marker)).toBe(false)
-    })
-
-    test("does nothing when the state file is missing", async () => {
-      const dir = await tempProjectDir()
-      process.env["ENK_PROJECT_DIRECTORY"] = dir
-
-      await DevServerReplay.replay()
-    })
-
-    test("replays the recorded command", async () => {
-      const dir = await tempProjectDir()
-      const marker = join(dir, "marker")
-      await writeState(dir, { cmd: `echo ok > ${marker}`, cwd: dir, port: await freePort() })
-
-      process.env["ENK_PROJECT_DIRECTORY"] = dir
-      await DevServerReplay.replay()
-
-      expect(await waitFor(() => existsSync(marker))).toBe(true)
-    })
-
-    test("skips replay when the port is already listening", async () => {
-      const dir = await tempProjectDir()
-      const marker = join(dir, "marker")
-      const { server, port } = await listen()
-      cleanups.push(() => close(server))
-      await writeState(dir, { cmd: `echo ok > ${marker}`, cwd: dir, port })
-
-      process.env["ENK_PROJECT_DIRECTORY"] = dir
-      await DevServerReplay.replay()
-
-      await new Promise((r) => setTimeout(r, 200))
-      expect(existsSync(marker)).toBe(false)
-    })
-
-    test("skips replay when the recorded cwd no longer exists", async () => {
-      const dir = await tempProjectDir()
-      const marker = join(dir, "marker")
-      await writeState(dir, { cmd: `echo ok > ${marker}`, cwd: join(dir, "gone"), port: await freePort() })
-
-      process.env["ENK_PROJECT_DIRECTORY"] = dir
-      await DevServerReplay.replay()
-
-      await new Promise((r) => setTimeout(r, 200))
-      expect(existsSync(marker)).toBe(false)
-    })
-
-    test("replays project and tutorial records independently", async () => {
-      const root = await tempProjectDir()
-      const project = join(root, "project-directory")
-      const tutorial = join(root, "tutorial-directory")
-      await mkdir(project, { recursive: true })
-      await mkdir(tutorial, { recursive: true })
-      const projectMarker = join(project, "marker")
-      const tutorialMarker = join(tutorial, "marker")
-      await writeState(project, { cmd: `echo ok > ${projectMarker}`, cwd: project, port: await freePort() })
-      await writeState(tutorial, { cmd: `echo ok > ${tutorialMarker}`, cwd: tutorial, port: await freePort() })
-
-      process.env["ENK_PROJECT_DIRECTORY"] = project
-      await DevServerReplay.replay()
-
-      expect(await waitFor(() => existsSync(projectMarker))).toBe(true)
-      expect(await waitFor(() => existsSync(tutorialMarker))).toBe(true)
-    })
-
-    test("skips a record whose cwd belongs to another target", async () => {
-      const root = await tempProjectDir()
-      const project = join(root, "project-directory")
-      const tutorial = join(root, "tutorial-directory")
-      await mkdir(project, { recursive: true })
-      await mkdir(tutorial, { recursive: true })
-      const marker = join(root, "marker")
-      // 규약 이전에 남은 기록 — 본행사 파일에 튜토리얼 cwd 가 들어 있다.
-      await writeState(project, { cmd: `echo ok > ${marker}`, cwd: tutorial, port: await freePort() })
-
-      process.env["ENK_PROJECT_DIRECTORY"] = project
-      await DevServerReplay.replay()
-
-      await new Promise((r) => setTimeout(r, 200))
-      expect(existsSync(marker)).toBe(false)
-    })
-  })
-
-  describe("record with serve targets", () => {
     test("writes a tutorial-cwd record into the tutorial directory", async () => {
-      const root = await tempProjectDir()
-      const project = join(root, "project-directory")
-      const tutorial = join(root, "tutorial-directory")
-      await mkdir(project, { recursive: true })
+      const { project, tutorial } = await tempWorkspace()
       await mkdir(join(tutorial, "src"), { recursive: true })
       const state = { cmd: "npm run dev -- --port 3001 --strictPort", cwd: join(tutorial, "src"), port: 3001 }
 
       process.env["ENK_PROJECT_DIRECTORY"] = project
-      await DevServerReplay.record(project, state)
+      await DevServerReplay.record(state, project)
 
       const raw = await readFile(join(tutorial, ".opencode", "dev-server.json"), "utf8")
       expect(JSON.parse(raw)).toEqual(state)
       expect(existsSync(join(project, ".opencode", "dev-server.json"))).toBe(false)
+    })
+  })
+
+  describe("loadRecord", () => {
+    test("returns the record when cwd belongs to the target", async () => {
+      const { project } = await tempWorkspace()
+      const state = { cmd: "npm run dev", cwd: project, port: 3000 }
+      await writeState(project, state)
+
+      process.env["ENK_PROJECT_DIRECTORY"] = project
+      const loaded = await DevServerReplay.loadRecord({ kind: "project", dir: project, port: 3000 })
+      expect(loaded).toEqual(state)
+    })
+
+    test("returns undefined when the state file is missing", async () => {
+      const { project } = await tempWorkspace()
+      process.env["ENK_PROJECT_DIRECTORY"] = project
+      expect(await DevServerReplay.loadRecord({ kind: "project", dir: project, port: 3000 })).toBeUndefined()
+    })
+
+    test("returns undefined for a record whose cwd belongs to another target", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      // 규약 이전에 남은 기록 — 본행사 파일에 튜토리얼 cwd 가 들어 있다.
+      await writeState(project, { cmd: "npm run dev", cwd: tutorial, port: 3000 })
+
+      process.env["ENK_PROJECT_DIRECTORY"] = project
+      expect(await DevServerReplay.loadRecord({ kind: "project", dir: project, port: 3000 })).toBeUndefined()
+    })
+
+    test("returns undefined when the recorded cwd no longer exists", async () => {
+      const { project } = await tempWorkspace()
+      await writeState(project, { cmd: "npm run dev", cwd: join(project, "gone"), port: 3000 })
+
+      process.env["ENK_PROJECT_DIRECTORY"] = project
+      expect(await DevServerReplay.loadRecord({ kind: "project", dir: project, port: 3000 })).toBeUndefined()
     })
   })
 })

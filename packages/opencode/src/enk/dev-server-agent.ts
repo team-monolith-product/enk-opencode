@@ -7,23 +7,23 @@ import { Session } from "@/session"
 import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
 import type { Permission } from "@/permission"
-import { DevServerReplay, probePort } from "./dev-server-replay"
+import { probePort } from "./dev-server-replay"
 import { ServeTargets } from "./serve-targets"
 import { AiUsage } from "./ai-usage"
 
 /**
- * Dev 서버 기록(dev-server.json)이 없는 레거시 프로젝트의 폴백 — 부팅 시 숨김 AI 세션을
- * 만들어 ensure_dev_server 로 dev 서버를 띄우게 한다.
+ * 재실행 가능한 기록이 없는 타깃의 폴백 — 숨김 AI 세션을 만들어 ensure_dev_server 로
+ * dev 서버를 띄우게 한다. 호출 여부는 부팅 오케스트레이션(DevServerBoot)이 결정한다.
  *
  * 기록은 이 기능 배포 이후 ensure_dev_server 가 실행될 때만 남으므로, 그 이전에 마지막으로
  * 작업된 프로젝트는 갤러리 깨우기(스폰 대행)로 pod 가 살아나도 타깃 포트가 영영 뜨지 않는다.
- * 서빙 타깃(본행사 :3000 / 튜토리얼 :3001)별로 판정·시도하며, AI 가 성공하면
- * ensure_dev_server 의 record 경로가 기록 파일을 남겨 스스로 백필되고, 다음 부팅부터는
- * 기계적 replay 로 복귀한다 — 즉 타깃당 최대 1회의 LLM 실행이다.
+ * AI 가 성공하면 ensure_dev_server 의 record 경로가 기록 파일을 남겨 스스로 백필되고,
+ * 다음 부팅부터는 기계적 재실행으로 복귀한다 — 즉 타깃당 최대 1회의 LLM 실행이다.
  *
  * 사용자에게 보이지 않아야 한다:
- * - 세션 목록은 parent_id IS NULL 만 노출하므로(session/index.ts list), 실존하지 않는
- *   parentID 를 달아 숨긴다. parent_id 에는 FK 가 없어 안전하다(session.sql.ts).
+ * - 세션 목록은 parent_id IS NULL 만 노출하고(session/index.ts list) 자동 복원도
+ *   루트 세션만 집으므로(directory-layout.tsx), 실존하지 않는 parentID 를 달아 숨긴다.
+ *   parent_id 에는 FK 가 없어 안전하다(session.sql.ts).
  * - 완료 후 Session.remove 로 흔적을 지운다.
  * - 토큰 사용량 집계(AiUsage)는 참가자 결산을 오염시키지 않도록 세션 단위로 제외한다.
  * - 모델은 config 가 ENK_AI_MODEL 을 기본값으로 강제하므로 별도 지정하지 않는다.
@@ -61,12 +61,11 @@ export namespace DevServerAgent {
   type Marker = { attemptedAt: number }
 
   /**
-   * 부팅 시 폴백을 시도해야 하는지 판정한다. 기록 파일이 있으면 replay 가 담당하고,
-   * 포트가 이미 살아 있으면 할 일이 없고, package.json 이 없으면(빈/비 node 프로젝트)
-   * AI 를 돌릴 근거가 없다. 최근 시도 마커는 스폰-실패 반복 루프를 쿨다운으로 막는다.
+   * 폴백을 시도해야 하는지 판정한다. 포트가 이미 살아 있으면 할 일이 없고,
+   * package.json 이 없으면(빈/비 node 프로젝트) AI 를 돌릴 근거가 없다.
+   * 최근 시도 마커는 스폰-실패 반복 루프를 쿨다운으로 막는다.
    */
   export async function shouldAttempt(dir: string, port: number): Promise<boolean> {
-    if (DevServerReplay.hasRecord(dir)) return false
     if (!existsSync(resolve(dir, "package.json"))) return false
     if (await probePort(port)) return false
     try {
@@ -86,16 +85,11 @@ export namespace DevServerAgent {
     }
   }
 
-  /** 서빙 타깃(본행사/튜토리얼)별로 순차 시도한다 — 동시 LLM 실행으로 pod 를 압박하지 않는다. */
-  export async function ensure() {
-    for (const target of ServeTargets.all()) {
-      if (!(await shouldAttempt(target.dir, target.port))) continue
-      await ensureTarget(target)
-    }
-  }
-
-  async function ensureTarget(target: ServeTargets.Target) {
+  /** 타깃 하나에 대한 AI 폴백. 게이트(shouldAttempt) 통과 시에만 숨김 세션을 돌린다. */
+  export async function fallback(target: ServeTargets.Target) {
     const { dir, port } = target
+    if (!(await shouldAttempt(dir, port))) return
+
     await writeMarker(dir)
     log.info("starting hidden dev-server agent session", { dir, port, kind: target.kind })
 
@@ -113,8 +107,11 @@ export namespace DevServerAgent {
           let timer: ReturnType<typeof setTimeout> | undefined
           const timeout = new Promise<never>((_, reject) => {
             timer = setTimeout(() => {
-              void SessionPrompt.cancel(session.id).catch(() => {})
-              reject(new Error("dev-server agent timed out"))
+              // cancel 완료 후 reject 해, finally 의 Session.remove 가 진행 중인
+              // 프롬프트 루프와 경합하지 않게 한다.
+              void SessionPrompt.cancel(session.id)
+                .catch(() => {})
+                .finally(() => reject(new Error("dev-server agent timed out")))
             }, PROMPT_TIMEOUT_MS)
           })
           await Promise.race([
