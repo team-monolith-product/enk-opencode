@@ -74,6 +74,7 @@ export namespace AiUsage {
   const pending: Attributes[] = [] // bounded FIFO queue
   const sent = new Set<string>() // idempotency keys already enqueued — dedupes repeated updates
   const lastProgressAt = new Map<string, number>() // sessionID -> last progress ping timestamp
+  const excluded = new Set<string>() // sessionIDs whose usage must not be reported (internal runs)
   let draining = false // serial-drain guard: at most one request in flight
   let dropped = 0 // records discarded due to MAX_PENDING overflow
   let warnedDisabled = false // suppress repeated "not configured" warnings
@@ -143,6 +144,14 @@ export namespace AiUsage {
     }
   }
 
+  /**
+   * 내부(숨김) 세션의 사용량을 집계에서 제외한다 — 참가자 토큰 결산이 시스템 실행
+   * (예: DevServerAgent 부팅 폴백)으로 오염되지 않게 한다.
+   */
+  export function exclude(sessionID: string) {
+    excluded.add(sessionID)
+  }
+
   function enqueue(record: Attributes) {
     const key = idempotencyKey(record.message_id, record.step_index, record.phase)
     if (sent.has(key)) return // already enqueued — dedupe retries / re-renders
@@ -166,6 +175,7 @@ export namespace AiUsage {
       return
     }
     if (info.role !== "assistant") return
+    if (excluded.has(info.sessionID)) return // internal runs are not billed to participants
     if (!info.time.completed) return // only finished turns
     if (!info.path?.cwd) return // no mount_path → rails can't resolve owner
     enqueue(buildAttributes(info))
@@ -179,6 +189,7 @@ export namespace AiUsage {
     }
     if (Flag.ENK_AI_USAGE_REALTIME === "off") return // realtime disabled → final-only
     if (info.role !== "assistant") return
+    if (excluded.has(info.sessionID)) return // internal runs are not billed to participants
     if (!info.path?.cwd) return
     enqueue(buildStepAttributes(info, step))
   }
@@ -195,6 +206,7 @@ export namespace AiUsage {
     }
     if (Flag.ENK_AI_USAGE_REALTIME !== "progress") return
     if (info.role !== "assistant") return
+    if (excluded.has(info.sessionID)) return // internal runs are not billed to participants
     if (!info.path?.cwd) return
 
     const now = Date.now()

@@ -783,6 +783,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               )
           }}
           close={closeApproval}
+          onExpire={() => {
+            // Server terminal cast never arrived — drive the same "expired" transition locally so the
+            // dialog resolves instead of freezing at 0초. Routed through showApproval so finalizedID is
+            // set: a late server cast for this submit is then ignored rather than re-opening the dialog.
+            const current = approval()
+            if (current?.status === "pending") showApproval({ ...current, status: "expired" })
+          }}
         />
       ),
       () => {
