@@ -54,13 +54,8 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
 
   const ratio = () => (props.maxLength > 0 ? props.length / props.maxLength : 0)
   const over = () => props.length > props.maxLength
-  // 다 채워갈 즈음 은근히 페이드인 — 상한의 70%→90% 구간에서 opacity 0→1.
-  const fade = () => {
-    const r = ratio()
-    if (r <= 0.7) return 0
-    if (r >= 0.9) return 1
-    return (r - 0.7) / 0.2
-  }
+  // 어느 정도 차면(상한의 80%) 그냥 나타난다 — 글자 수에 따라 서서히 진해지는 램프는 쓰지 않는다.
+  const SHOW_AT = 0.8
 
   // 전송이 막힐 때(props.shake 증가) 초과 글자수를 좌우로 흔들어 시선을 끈다. Web Animations API라
   // 별도 CSS 키프레임 없이 매번 깔끔하게 재생된다.
@@ -334,12 +329,11 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
           </Show>
         </div>
         <div class="flex items-center gap-2">
-          {/* 글자 수 카운터 — 다 채워갈 즈음 은근히 페이드인. 초과 시 현재 글자수만 빨간색으로 전환 */}
-          <Show when={!props.readonly && ratio() >= 0.7}>
+          {/* 글자 수 카운터 — 상한 80%에 닿는 순간 그냥 나타난다. 초과 시 현재 글자수만 빨간색으로 전환 */}
+          <Show when={!props.readonly && ratio() >= SHOW_AT}>
             <span
               data-component="prompt-doc-count"
-              class="shrink-0 select-none tabular-nums text-11-regular text-text-weaker transition-opacity duration-200"
-              style={{ opacity: `${fade()}` }}
+              class="shrink-0 select-none tabular-nums text-11-regular text-text-weaker"
               aria-live="polite"
             >
               <span ref={(el) => (countRef = el)} class="inline-block" classList={{ "text-icon-critical-base": over() }}>
