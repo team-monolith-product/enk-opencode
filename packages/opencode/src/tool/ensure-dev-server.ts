@@ -22,13 +22,13 @@ async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal):
   return false
 }
 
-export function serveUrl(port: number, kind?: ServeTargets.Kind): string {
+export function serveUrl(port: number, target?: ServeTargets.Target): string {
   // 학생에게 안내할 외부 접근 주소. JUPYTERHUB_USER/OPENCODE_SERVE_DOMAIN 환경변수가 있으면 외부 URL,
   // 없으면 로컬 URL 로 폴백. 튜토리얼은 CHP 가 :3001 로 라우팅하는 전용 서브도메인을 쓴다.
   const user = process.env["JUPYTERHUB_USER"]
   const domain = process.env["OPENCODE_SERVE_DOMAIN"]
   if (user && domain) {
-    const suffix = kind === "tutorial" ? ServeTargets.TUTORIAL_HOST_SUFFIX : ""
+    const suffix = target?.kind === "tutorial" ? ServeTargets.TUTORIAL_HOST_SUFFIX : ""
     return `https://${user}${suffix}.${domain}/`
   }
   return `http://localhost:${port}/`
@@ -90,10 +90,10 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     if (await probePort(port)) {
       // 이미 떠 있어도 기록은 갱신한다. 서버를 bash 로 먼저 띄웠거나 부팅 replay 로
       // 살아난 경우에도 재스폰 시 replay 가 동작하도록, 그리고 커맨드가 바뀌었으면 최신화한다.
-      await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port })
+      await DevServerReplay.record({ cmd: params.cmd, cwd, port }, Instance.directory)
       return result(`ensure_dev_server: already_running (:${port})`, {
         status: "already_running",
-        url: serveUrl(port, target?.kind),
+        url: serveUrl(port, target),
         port,
         ms: Date.now() - startedAt,
       })
@@ -124,11 +124,11 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       })
     }
 
-    await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port })
+    await DevServerReplay.record({ cmd: params.cmd, cwd, port }, Instance.directory)
 
     return result(`ensure_dev_server: started (:${port}, ${ms}ms)`, {
       status: "started",
-      url: serveUrl(port, target?.kind),
+      url: serveUrl(port, target),
       port,
       ms,
     })
