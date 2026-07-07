@@ -54,6 +54,10 @@ export namespace Flag {
   // enk-hackathon-rails AI usage reporting (ai_usages API)
   export const ENK_HACKATHON_RAILS_URL = process.env["ENK_HACKATHON_RAILS_URL"]
   export const ENK_AI_USAGE_TOKEN = process.env["ENK_AI_USAGE_TOKEN"]
+  // 부팅 시 기록 없는 타깃을 숨김 AI 세션으로 살리는 폴백(DevServerAgent) 활성화.
+  // LLM 실행·의존성 설치가 1CPU pod 에서 첫 IDE 로드와 경합해 API 를 기아 상태로
+  // 만들 수 있어(504) 기본 꺼짐 — 자원 격리 방안이 검증되면 환경별로 켠다.
+  export const ENK_DEV_SERVER_AGENT = truthy("ENK_DEV_SERVER_AGENT")
   // Realtime usage reporting mode: "off" | "step" | "progress" (default "step").
   // - "off"      : legacy behavior, one POST per completed turn (phase:"final") only.
   // - "step"     : per-step (finish-step) authoritative usage + final reconciliation.
