@@ -507,6 +507,9 @@ export const dict = {
   "session.preview.startable.prompt": "미리보기가 실행되지 않습니다. 원인을 확인하고 실행되도록 수정해 주세요.",
   "session.preview.errored.prompt":
     "미리보기 실행 중 오류가 발생합니다. 원인을 확인하고 정상 실행되도록 수정해 주세요.",
+  "session.preview.clientError.title": "미리보기에서 오류가 발생했어요",
+  "session.preview.clientError.dismiss": "닫기",
+  "session.preview.clientError.reopen": "미리보기 오류 보기",
   "session.panel.reviewAndFiles": "검토 및 파일",
   "session.review.filesChanged": "{{count}}개 파일 변경됨",
   "session.review.change.one": "변경",
