@@ -52,8 +52,8 @@ export namespace DevServerAgent {
       `이 프로젝트의 dev 서버를 ${port} 포트로 실행해 주세요.`,
       "- 반드시 ensure_dev_server 도구로 실행하세요. 코드/파일은 절대 수정하지 마세요.",
       "- package.json 의 scripts 를 확인해 적절한 명령을 정하세요.",
-      "- 외부 접근이 가능해야 하므로 host 0.0.0.0 으로 바인딩하세요.",
-      `- node_modules 가 없으면 cmd 에 설치를 포함하세요 (예: 'npm install && npm run dev -- --host 0.0.0.0 --port ${port} --strictPort').`,
+      `- 외부 접근이 가능해야 하므로 host 0.0.0.0 으로 바인딩하세요 (예: 'npm run dev -- --host 0.0.0.0 --port ${port} --strictPort').`,
+      "- cmd 에 의존성 설치(npm install 등)를 절대 포함하지 마세요. node_modules 가 없으면 시도하지 말고 그대로 마치세요.",
       "- 서버를 띄우는 것 외의 작업은 하지 마세요.",
     ].join("\n")
   }

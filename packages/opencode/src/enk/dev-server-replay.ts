@@ -85,10 +85,28 @@ export namespace DevServerReplay {
     }
   }
 
+  // `설치 && 서브` 형태 커맨드의 선행 설치 단계. yarn 은 bare 호출도 설치라 별도 처리.
+  const INSTALL_STEP =
+    /^\s*(?:(?:npm\s+(?:install|ci)|pnpm\s+(?:install|i)|bun\s+install|yarn\s+install)(?:\s|$)|yarn\s*$)/
+
+  /**
+   * 기록된 커맨드에서 선행 설치 단계(npm install && ...)를 제거하고 서브 커맨드만 남긴다.
+   * EFS 에서는 no-op 설치도 stat 폭풍으로 분 단위 CPU 를 점유해, 부팅마다 재실행되면
+   * 인스턴스 부트스트랩이 기아 상태에 빠져 IDE API 가 504 로 죽는다. 설치가 전부라
+   * 서브 커맨드가 남지 않으면 빈 문자열을 반환한다.
+   */
+  export function stripInstallSteps(cmd: string): string {
+    const parts = cmd.split("&&")
+    let start = 0
+    while (start < parts.length && INSTALL_STEP.test(parts[start])) start++
+    return parts.slice(start).join("&&").trim()
+  }
+
   /**
    * 타깃에 재실행 가능한 기록이 있으면 반환한다 — "유효한 기록" 판정의 단일 진실.
-   * 파싱 실패, cwd 소멸, cwd 가 다른 타깃 소속(규약 이전 레거시 기록)이면 undefined 를
-   * 반환하고, 호출부(DevServerBoot)가 AI 폴백으로 재구축한다.
+   * 파싱 실패, cwd 소멸, cwd 가 다른 타깃 소속(규약 이전 레거시 기록), 설치 단계만
+   * 남은 커맨드면 undefined 를 반환하고, 호출부(DevServerBoot)가 폴백으로 처리한다.
+   * 반환되는 cmd 는 설치 단계가 제거된 재실행용 커맨드다.
    */
   export async function loadRecord(target: ServeTargets.Target): Promise<State | undefined> {
     const file = resolve(target.dir, FILE)
@@ -106,6 +124,14 @@ export namespace DevServerReplay {
       log.warn("recorded cwd no longer exists, falling back", { cwd: state.cwd })
       return undefined
     }
-    return state
+    const cmd = stripInstallSteps(state.cmd)
+    if (!cmd) {
+      log.warn("recorded cmd has no serve step after stripping installs, falling back", { file, cmd: state.cmd })
+      return undefined
+    }
+    if (cmd !== state.cmd) {
+      log.info("stripped install steps from recorded cmd", { file, cmd })
+    }
+    return { ...state, cmd }
   }
 }
