@@ -61,9 +61,6 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
       })
     }
   }
-  const history = () => props.doc.history
-  const undo = () => props.doc.undo()
-  const redo = () => props.doc.redo()
   const label = () => {
     const id = props.doc.docID()
     if (!id) return "—"
@@ -226,35 +223,6 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               aria-expanded={attachOpen()}
             />
           </div>
-
-          {/* | 구분자 */}
-          <span class="mx-1 h-4 w-px shrink-0 bg-border-weaker-base" />
-
-          {/* ← → undo/redo */}
-          <Tooltip placement="top" value={language.t("prompt.action.docUndo")}>
-            <IconButton
-              data-action="prompt-doc-undo"
-              type="button"
-              icon="arrow-left"
-              variant="ghost"
-              class="size-7.5"
-              disabled={!history().undo}
-              onClick={undo}
-              aria-label={language.t("prompt.action.docUndo")}
-            />
-          </Tooltip>
-          <Tooltip placement="top" value={language.t("prompt.action.docRedo")}>
-            <IconButton
-              data-action="prompt-doc-redo"
-              type="button"
-              icon="arrow-right"
-              variant="ghost"
-              class="size-7.5"
-              disabled={!history().redo}
-              onClick={redo}
-              aria-label={language.t("prompt.action.docRedo")}
-            />
-          </Tooltip>
 
           <Show when={props.expand && !env.productionLayout()}>
             <Tooltip placement="top" value={expandLabel()}>
