@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
 import { resolve } from "node:path"
 import { Log } from "@/util/log"
 import { Instance } from "@/project/instance"
@@ -59,13 +59,22 @@ export namespace DevServerAgent {
 
   type Marker = { attemptedAt: number }
 
+  /** 결과물이 없는(빈) 디렉토리인지. 마커성 숨김 항목(.opencode 등)은 결과물로 치지 않는다. */
+  function isEmpty(dir: string): boolean {
+    try {
+      return readdirSync(dir).every((name) => name.startsWith("."))
+    } catch {
+      return true
+    }
+  }
+
   /**
-   * 폴백을 시도해야 하는지 판정한다. 포트가 이미 살아 있으면 할 일이 없고,
-   * package.json 이 없으면(빈/비 node 프로젝트) AI 를 돌릴 근거가 없다.
-   * 최근 시도 마커는 스폰-실패 반복 루프를 쿨다운으로 막는다.
+   * 폴백을 시도해야 하는지 판정한다. 디렉토리가 비어(결과물 없음) 있으면 미리보기
+   * 대상이 아니고, 포트가 이미 살아 있으면 할 일이 없다. 최근 시도 마커는
+   * 스폰-실패 반복 루프를 쿨다운으로 막는다.
    */
   export async function shouldAttempt(dir: string, port: number): Promise<boolean> {
-    if (!existsSync(resolve(dir, "package.json"))) return false
+    if (isEmpty(dir)) return false
     if (await probePort(port)) return false
     try {
       const marker = (await Bun.file(resolve(dir, MARKER_FILE)).json()) as Marker
