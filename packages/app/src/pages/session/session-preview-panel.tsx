@@ -10,7 +10,7 @@ import { usePlatform } from "@/context/platform"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
-import { restartDevServer } from "@/utils/server"
+import { getDevServerStatus, restartDevServer, type DevServerStatusResult } from "@/utils/server"
 import { SessionPreviewFallback } from "./session-preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
 import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./session-preview-address"
@@ -21,6 +21,9 @@ const HEAL_RELOAD_GRACE_MS = 1500
 
 // "다시 시도" 연타 방어용 쿨다운 — 재시작 왕복이 끝난 뒤 이 시간 동안 재클릭을 무시한다.
 const RETRY_COOLDOWN_MS = 1500
+
+// 상태가 starting(기동 중)일 때 자동 재폴링 간격 — ready/errored 로 전이되면 자동 종료된다.
+const STARTING_POLL_MS = 2000
 
 export function createSessionPreview() {
   const sdk = useSDK()
@@ -46,30 +49,51 @@ export function createSessionPreview() {
     return `https://${user}.${domain}`
   })
 
-  const [previewReady, setPreviewReady] = createSignal(false)
+  // 미리보기 상태 5분기 — 서버 /dev-server/status 판정을 그대로 담는다.
+  // none | starting | startable | ready | errored. ready 일 때만 iframe 을 띄운다.
+  const [previewStatus, setPreviewStatus] = createSignal<DevServerStatusResult>({ state: "starting" })
+  const previewReady = () => previewStatus().state === "ready"
   const [dirty, setDirty] = createSignal(false)
   const [reloadCount, setReloadCount] = createSignal(0)
 
-  // 마운트된 readiness 체크로의 핸들 — restart() 등 외부에서 수동 재확인을 트리거하기 위해 밖으로 끌어올린다.
-  // 미리보기 URL 이 없거나 언마운트되면 no-op 으로 되돌린다.
+  // 상태 폴링 핸들 — restart() 등 외부에서 수동 재확인을 트리거하기 위해 밖으로 끌어올린다.
+  // 서버 연결이 없거나 언마운트되면 no-op 으로 되돌린다.
   let recheck: () => void = () => {}
 
   createEffect(() => {
-    const url = previewUrl()
-    if (!url) {
+    // dev override(VITE_PREVIEW_URL): 상태 판정 없이 항상 미리보기 표시.
+    if (previewOverride) {
+      setPreviewStatus({ state: "ready" })
       recheck = () => {}
-      return setPreviewReady(false)
+      return
     }
 
-    const ctrl = new AbortController()
-    const check = () =>
-      fetch(url, { cache: "no-store", mode: "cors", signal: ctrl.signal })
-        // Hide only on 503 (service unavailable); show preview for any other status.
-        .then((res) => setPreviewReady(res.status !== 503))
-        .catch(() => setPreviewReady(true))
-    recheck = check
+    const conn = server.current
+    if (!conn) {
+      recheck = () => {}
+      return
+    }
 
-    void check()
+    let disposed = false
+    let pollTimer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
+      if (disposed) return
+      try {
+        const s = await getDevServerStatus({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
+        if (disposed) return
+        setPreviewStatus(s)
+        // 기동 중이면 곧 전이되므로 짧게 재폴링(ready/errored 로 바뀌면 자동 종료).
+        if (s.state === "starting") {
+          if (pollTimer) clearTimeout(pollTimer)
+          pollTimer = setTimeout(() => void poll(), STARTING_POLL_MS)
+        }
+      } catch {
+        /* 네트워크 실패는 무시 — 다음 트리거(session.idle 등)에서 재시도 */
+      }
+    }
+    recheck = () => void poll()
+
+    void poll()
     // 브릿지 자가치유는 session.idle 때 서버 플러그인이 결과물 HTML 에 <script> 를 주입하고 번들을 복사하는데,
     // 그 파일 쓰기 이벤트(file.watcher.updated)는 아래 idle 리로드 '직후' 도착한다. 그래서 첫 미리보기는
     // 브릿지가 없는 페이지를 로드하고(→ penpal 미연결 → 캡처 등 불가), 다음 턴에야 브릿지가 실린다.
@@ -83,7 +107,7 @@ export function createSessionPreview() {
       }
     }
     const unsubIdle = sdk.event.on("session.idle", () => {
-      void check()
+      void poll()
       reloadIfDirty()
       if (healReloadTimer) clearTimeout(healReloadTimer)
       healReloadTimer = setTimeout(reloadIfDirty, HEAL_RELOAD_GRACE_MS)
@@ -95,7 +119,8 @@ export function createSessionPreview() {
     })
 
     onCleanup(() => {
-      ctrl.abort()
+      disposed = true
+      if (pollTimer) clearTimeout(pollTimer)
       recheck = () => {}
       unsubIdle()
       unsubFile()
@@ -243,6 +268,7 @@ export function createSessionPreview() {
   return {
     previewUrl,
     previewReady,
+    previewStatus,
     previewSrc,
     reload,
     restart,
@@ -266,10 +292,22 @@ export function SessionPreviewPanel(props: {
   bridge?: PreviewBridge
   onRetry?: () => void
   retrying?: boolean
+  state?: DevServerStatusResult["state"]
+  httpStatus?: number
 }) {
   return (
     <div data-component="codle-preview-panel" class="size-full min-w-0 overflow-hidden rounded-none">
-      <Show when={props.src} fallback={<SessionPreviewFallback onRetry={props.onRetry} retrying={props.retrying} />}>
+      <Show
+        when={props.src}
+        fallback={
+          <SessionPreviewFallback
+            state={props.state}
+            httpStatus={props.httpStatus}
+            onRetry={props.onRetry}
+            retrying={props.retrying}
+          />
+        }
+      >
         {(src) => (
           <iframe
             ref={(el) => props.bridge?.attach(el)}
@@ -360,7 +398,7 @@ export function SessionBrowserChrome(props: {
   return (
     <div
       data-component="codle-browser-chrome"
-      class="@container flex items-center gap-2.5 px-3 h-9 shrink-0 border-b border-border-weaker-base bg-background-base"
+      class="flex items-center gap-2.5 px-3 h-9 shrink-0 border-b border-border-weaker-base bg-background-base"
     >
       {/* 좌 그룹 — 트래픽 라이트 + 파일 탐색기 토글 + 뒤로/앞으로 */}
       <div class="flex shrink-0 items-center gap-2.5">
@@ -406,11 +444,9 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 중앙 — 주소 pill (홈 · 주소 · 새로고침), 360px 고정·좁은 크롬에서는 max-w-full 로 축소.
-          크롬 폭이 임계치(400px) 아래로 좁아지면 pill 이 뭉개져 보이므로 아예 렌더링을 내린다.
-          flex-1 래퍼는 남겨 좌/우 버튼 그룹의 양끝 정렬을 유지한다(@container 는 루트 크롬). */}
+      {/* 중앙 — 주소 pill (홈 · 주소 · 새로고침), 360px 고정·좁은 크롬에서는 max-w-full 로 축소 */}
       <div class="flex flex-1 min-w-0 items-center justify-center">
-        <div class="@max-[400px]:hidden flex h-6 w-[360px] max-w-full min-w-0 items-center gap-1 px-1 rounded-md border border-border-weak-base bg-background-stronger">
+        <div class="flex h-6 w-[360px] max-w-full min-w-0 items-center gap-1 px-1 rounded-md border border-border-weak-base bg-background-stronger">
           <button
             type="button"
             class={ghostBtn + " !size-5"}

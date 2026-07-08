@@ -22,23 +22,11 @@ export function createSdkForServer({
   })
 }
 
-export type DevServerRestartResult = {
-  status: "already_running" | "started" | "failed" | "no_command" | "already_starting"
-  url?: string
-  port?: number
-  ms: number
-  reason?: string
-}
-
-// POST /dev-server/restart 는 아직 SDK 코드젠(sdk.gen.ts)에 포함되지 않아, SDK 가 쓰는 것과 동일한 저수준 client 로
+// /dev-server/* 라우트는 아직 SDK 코드젠(sdk.gen.ts)에 포함되지 않아, SDK 가 쓰는 것과 동일한 저수준 client 로
 // 직접 호출한다. baseUrl·Basic auth·디렉토리 헤더(x-opencode-directory)를 createOpencodeClient 와 동일하게 세팅한다.
-// (POST 라 디렉토리는 헤더로 전달되고, 서버 WorkspaceRouterMiddleware 가 이 값으로 instance 컨텍스트를 잡는다.)
-export function restartDevServer(opts: {
-  server: ServerConnection.HttpBase
-  directory: string
-  fetch?: typeof fetch
-}): Promise<DevServerRestartResult> {
-  const client = createClient({
+// (디렉토리는 헤더로 전달되고, 서버 WorkspaceRouterMiddleware 가 이 값으로 instance 컨텍스트를 잡는다 — GET/POST 공통.)
+function devServerClient(opts: { server: ServerConnection.HttpBase; directory: string; fetch?: typeof fetch }) {
+  return createClient({
     baseUrl: opts.server.url,
     throwOnError: true,
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
@@ -47,5 +35,40 @@ export function restartDevServer(opts: {
       "x-opencode-directory": encodeURIComponent(opts.directory),
     },
   })
-  return client.post({ url: "/dev-server/restart" }).then((res) => res.data as DevServerRestartResult)
+}
+
+export type DevServerState = "none" | "starting" | "startable" | "ready" | "errored"
+
+export type DevServerStatusResult = {
+  state: DevServerState
+  port?: number
+  httpStatus?: number
+}
+
+export function getDevServerStatus(opts: {
+  server: ServerConnection.HttpBase
+  directory: string
+  fetch?: typeof fetch
+}): Promise<DevServerStatusResult> {
+  return devServerClient(opts)
+    .get({ url: "/dev-server/status" })
+    .then((res) => res.data as DevServerStatusResult)
+}
+
+export type DevServerRestartResult = {
+  status: "already_running" | "started" | "failed" | "no_command" | "already_starting"
+  url?: string
+  port?: number
+  ms: number
+  reason?: string
+}
+
+export function restartDevServer(opts: {
+  server: ServerConnection.HttpBase
+  directory: string
+  fetch?: typeof fetch
+}): Promise<DevServerRestartResult> {
+  return devServerClient(opts)
+    .post({ url: "/dev-server/restart" })
+    .then((res) => res.data as DevServerRestartResult)
 }
