@@ -174,6 +174,12 @@ export function SessionSidePanel(props: {
   // 미리보기 헤더의 스크린샷 버튼 ↔ 컴포저(PromptInput)의 캡처 플로우를 공유.
   const previewBridge = useSessionPreviewBridge()
   previewBridge.setBridge(preview.bridge)
+  // 캡처 가능 여부를 컴포저(캡처 버튼)로 전달. 미리보기 URL·ready 에 더해 리뷰 패널이 열려 있어야(reviewOpen)
+  // 미리보기 레이어가 실제 크기를 가져 캡처가 유효하다 — 닫히면 폭 0 이라 빈 이미지가 된다. 연결 여부는
+  // 조건에서 뺀다(재연결 순간 깜빡임 방지, capture() 의 2.5초 대기가 흡수).
+  createEffect(() => {
+    previewBridge.setCanCapture(!!preview.previewUrl() && preview.previewReady() && reviewOpen())
+  })
   // 주소창 입력: 파일 탭이 활성이면 파일 경로를 읽기 전용 표시, 아니면(미리보기) host 고정 + 경로 편집 가능.
   const browserAddress = createMemo(() => {
     const active = activeFileTab()
@@ -305,7 +311,7 @@ export function SessionSidePanel(props: {
               >
                 <DragDropSensors />
                 <ConstrainDragYAxis />
-                <Tabs value={activeTab()} onChange={openTab}>
+                <Tabs value={activeTab()} onChange={openTab} class="relative">
                   {/* 탭 스트립은 미리보기뿐일 때 시각적으로만 숨긴다. <Show>로 언마운트하면
                       Kobalte 트리거(미리보기 등)가 사라졌다가 첫 파일 클릭 때 통째로 다시
                       마운트되며 첫 트리거(preview)로 폴백해 파일 탭이 안 열리는 경합이 생긴다. */}
@@ -389,12 +395,23 @@ export function SessionSidePanel(props: {
                     </Tabs.Content>
                   </Show>
 
+                  {/* 미리보기 iframe 은 탭 활성과 무관하게 상시 마운트한다 — 다른 탭(파일·리뷰)을 보는 중에도
+                      penpal 연결을 유지해 컴포저의 "미리보기 캡처"가 동작하게 하기 위함. Kobalte Tabs.Content 는
+                      비활성 탭을 언마운트(=브릿지 소멸)하거나 display:none(=iframe 크기 0 → html-to-image 캡처 blank)
+                      으로 숨기므로 여기 두지 않고, 별도 레이어에서 visibility 로만 숨긴다(실측상 visibility:hidden
+                      iframe 은 캡처 가능, display:none 은 불가). 활성 시 스트립 아래 흐름(flex-1), 비활성 시
+                      absolute inset-0 로 패널 크기를 유지한 채 안 보이게 깐다. */}
                   <Show when={previewTab()}>
-                    <Tabs.Content value="preview" class="flex flex-col h-full overflow-hidden contain-strict">
-                      <Show when={activeTab() === "preview"}>
-                        <SessionPreviewPanel src={preview.previewSrc()} bridge={preview.bridge} />
-                      </Show>
-                    </Tabs.Content>
+                    <div
+                      data-slot="preview-persist-layer"
+                      class="overflow-hidden"
+                      classList={{
+                        "flex flex-col flex-1 min-h-0": activeTab() === "preview",
+                        "absolute inset-0 invisible pointer-events-none": activeTab() !== "preview",
+                      }}
+                    >
+                      <SessionPreviewPanel src={preview.previewSrc()} bridge={preview.bridge} />
+                    </div>
                   </Show>
 
                   <Tabs.Content value="empty" class="flex flex-col h-full overflow-hidden contain-strict">

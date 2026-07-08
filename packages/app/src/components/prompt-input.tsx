@@ -2325,6 +2325,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               modes={modeButtons()}
               onCapture={captureTab}
               capturing={capturing()}
+              canCapture={previewBridge.canCapture()}
               expand={composerExpand()}
               autoExpand={{ enabled: autoExpand(), onToggle: toggleAutoExpand }}
             />

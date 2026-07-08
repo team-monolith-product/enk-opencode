@@ -16,12 +16,18 @@ export const { use: useSessionPreviewBridge, provider: SessionPreviewBridgeProvi
     // 캡처 진행 상태는 컴포저(PromptInput, 캡처→편집→첨부 플로우 소유)가 관리하며
     // doc 첨부 메뉴의 "미리보기 캡처" 항목이 진행 중 여부를 표시하는 데 쓴다.
     const [capturing, setCapturing] = createSignal(false)
+    // 캡처 가능 여부 — 미리보기 URL·ready·리뷰 패널 열림을 아는 SessionSidePanel 이 push 한다.
+    // (미리보기 탭을 안 보고 있어도 패널만 열려 있으면 상시 마운트된 iframe 을 캡처할 수 있어 true.
+    //  패널이 닫혀 레이어 크기가 0 이면 캡처가 빈 이미지라 false → 캡처 버튼을 비활성화한다.)
+    const [canCapture, setCanCapture] = createSignal(false)
 
     return {
       bridge,
       setBridge,
       capturing,
       setCapturing,
+      canCapture,
+      setCanCapture,
       /** 미리보기 iframe 안에서 화면을 캡처해 dataURL 반환. 미연결/실패 시 undefined. */
       capture: async (): Promise<string | undefined> => {
         const b = bridge()

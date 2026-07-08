@@ -24,6 +24,8 @@ type ShellProps = {
   modes?: JSX.Element
   onCapture: () => void
   capturing?: boolean
+  /** 미리보기가 캡처 가능한 상태(URL·ready·패널 열림)인지. false 면 캡처 항목을 비활성화한다. */
+  canCapture?: boolean
   expand?: {
     expanded: boolean
     onExpand: () => void
@@ -199,7 +201,8 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
                     class="oc-attach-item"
                     role="menuitem"
                     type="button"
-                    disabled={props.capturing}
+                    disabled={props.capturing || !props.canCapture}
+                    title={!props.canCapture ? language.t("prompt.action.captureTab.disabledHint") : undefined}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => { props.onCapture(); closeAttach() }}
                     aria-label={language.t("prompt.action.captureTab")}
