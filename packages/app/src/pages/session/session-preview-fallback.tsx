@@ -2,6 +2,7 @@ import { useLanguage } from "@/context/language"
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import { Icon } from "@opencode-ai/ui/icon"
+import type { DevServerState } from "@/utils/server"
 import { SessionPreviewMascot } from "./session-preview-mascot"
 
 const round = Math.round
@@ -114,10 +115,44 @@ function DigBurst(props: { x: number; y: number }) {
   )
 }
 
-export function SessionPreviewFallback(props: { onRetry?: () => void; retrying?: boolean }) {
+export function SessionPreviewFallback(props: {
+  state?: DevServerState
+  httpStatus?: number
+  onRetry?: () => void
+  retrying?: boolean
+}) {
   const language = useLanguage()
-  const title = () => language.t("session.preview.generating.title")
-  const hint = () => language.t("session.preview.generating.hint")
+
+  // 미리보기 상태 5분기 UI. ready 는 iframe 이 뜨므로 여기 안 옴 — 나머지 4개(+기본 starting)를 렌더.
+  const state = () => props.state ?? "starting"
+  // 재시도가 의미 있는 상태에서만 버튼 노출: startable(뜰 수 있는데 안 뜸) · errored(실행됐지만 오류).
+  // starting(기동 중)·none(서버 자체 없음)에서는 재시도해도 소용없어 숨긴다.
+  const showRetry = () => state() === "startable" || state() === "errored"
+
+  const title = () => {
+    switch (state()) {
+      case "none":
+        return language.t("session.preview.none.title")
+      case "startable":
+        return language.t("session.preview.startable.title")
+      case "errored":
+        return language.t("session.preview.errored.title")
+      default:
+        return language.t("session.preview.generating.title")
+    }
+  }
+  const hint = () => {
+    switch (state()) {
+      case "none":
+        return language.t("session.preview.none.hint")
+      case "startable":
+        return language.t("session.preview.startable.hint")
+      case "errored":
+        return language.t("session.preview.errored.hint", { status: String(props.httpStatus ?? "5xx") })
+      default:
+        return language.t("session.preview.generating.hint")
+    }
+  }
 
   const [pickaxeMode, setPickaxeMode] = createSignal(false)
   const [pointer, setPointer] = createSignal({ x: -200, y: -200 })
@@ -193,10 +228,7 @@ export function SessionPreviewFallback(props: { onRetry?: () => void; retrying?:
   })
 
   return (
-    <div
-      data-slot="preview-fallback"
-      class="size-full min-h-0 flex items-center justify-center px-6 py-8 text-center"
-    >
+    <div data-slot="preview-fallback" class="size-full min-h-0 flex items-center justify-center px-6 py-8 text-center">
       <div role="status" class="flex w-full max-w-160 flex-col items-center gap-[14px]" aria-label={title()}>
         {/* 마스코트 — 연속 3클릭 트리거 */}
         <span onClick={onMascotClick} style={{ display: "inline-flex", cursor: "pointer" }}>
@@ -206,8 +238,9 @@ export function SessionPreviewFallback(props: { onRetry?: () => void; retrying?:
           <span style={{ "font-size": "13.5px", "font-weight": "600", color: "var(--app-ink)" }}>{title()}</span>
           <span style={{ "font-size": "11.5px", color: "var(--app-muted)" }}>{hint()}</span>
         </div>
-        {/* 미리보기가 안 뜰 때를 위한 수동 재시도 — 항상 노출. 연타는 상위 restart() 의 in-flight 잠금+쿨다운이 막는다. */}
-        <Show when={props.onRetry}>
+        {/* 수동 재시도 — startable·errored 에서만 노출(starting/none 은 소용없어 숨김).
+            연타는 상위 restart() 의 in-flight 잠금+쿨다운이 막는다. */}
+        <Show when={showRetry() && props.onRetry}>
           <button
             type="button"
             disabled={props.retrying}
