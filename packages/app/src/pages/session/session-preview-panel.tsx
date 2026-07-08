@@ -2,11 +2,15 @@ import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-j
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
+import { showToast } from "@opencode-ai/ui/toast"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
+import { useServer } from "@/context/server"
+import { usePlatform } from "@/context/platform"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
+import { restartDevServer } from "@/utils/server"
 import { SessionPreviewFallback } from "./session-preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
 import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./session-preview-address"
@@ -15,9 +19,15 @@ import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./sessi
 // 이 시간 뒤에도 dirty 면 heal 쓰기가 들어온 것으로 보고 1회 더 리로드한다.
 const HEAL_RELOAD_GRACE_MS = 1500
 
+// "다시 시도" 연타 방어용 쿨다운 — 재시작 왕복이 끝난 뒤 이 시간 동안 재클릭을 무시한다.
+const RETRY_COOLDOWN_MS = 1500
+
 export function createSessionPreview() {
   const sdk = useSDK()
   const sync = useSync()
+  const server = useServer()
+  const platform = usePlatform()
+  const language = useLanguage()
 
   // 미리보기 URL 임시 오버라이드 — .env 의 VITE_PREVIEW_URL 로 지정(개발/레이아웃 확인용).
   // 비어 있으면 평소처럼 sync.data.env(serveDomain·jupyterhubUser) 기반 URL을 쓴다.
@@ -40,9 +50,16 @@ export function createSessionPreview() {
   const [dirty, setDirty] = createSignal(false)
   const [reloadCount, setReloadCount] = createSignal(0)
 
+  // 마운트된 readiness 체크로의 핸들 — restart() 등 외부에서 수동 재확인을 트리거하기 위해 밖으로 끌어올린다.
+  // 미리보기 URL 이 없거나 언마운트되면 no-op 으로 되돌린다.
+  let recheck: () => void = () => {}
+
   createEffect(() => {
     const url = previewUrl()
-    if (!url) return setPreviewReady(false)
+    if (!url) {
+      recheck = () => {}
+      return setPreviewReady(false)
+    }
 
     const ctrl = new AbortController()
     const check = () =>
@@ -50,6 +67,7 @@ export function createSessionPreview() {
         // Hide only on 503 (service unavailable); show preview for any other status.
         .then((res) => setPreviewReady(res.status !== 503))
         .catch(() => setPreviewReady(true))
+    recheck = check
 
     void check()
     // 브릿지 자가치유는 session.idle 때 서버 플러그인이 결과물 HTML 에 <script> 를 주입하고 번들을 복사하는데,
@@ -78,6 +96,7 @@ export function createSessionPreview() {
 
     onCleanup(() => {
       ctrl.abort()
+      recheck = () => {}
       unsubIdle()
       unsubFile()
       if (healReloadTimer) clearTimeout(healReloadTimer)
@@ -100,6 +119,47 @@ export function createSessionPreview() {
 
   // 새로고침 버튼 — reloadCount 를 올려 iframe src 를 바꿔 재탐색(DOM remount 없음).
   const reload = () => setReloadCount((n) => n + 1)
+
+  // "다시 시도" — fallback(미리보기 안 뜸) 상태에서 서버에 dev 서버 재시작을 요청한다.
+  // 연타 방어: in-flight 잠금(진행 중이면 기존 프라미스 반환) + 완료 후 쿨다운. 서버가 실제로 떠 있을 때만
+  // (started/already_running) recheck + reload 해서, 아직 뜰 게 없는데 iframe 재탐색이 폭주하는 걸 막는다.
+  const [restarting, setRestarting] = createSignal(false)
+  let restartCooldownUntil = 0
+  let restartInflight: Promise<void> | undefined
+  const restart = () => {
+    if (restartInflight) return restartInflight
+    if (Date.now() < restartCooldownUntil) return Promise.resolve()
+    const conn = server.current
+    if (!conn) return Promise.resolve()
+    setRestarting(true)
+    restartInflight = restartDevServer({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
+      .then((res) => {
+        if (res.status === "started" || res.status === "already_running") {
+          recheck()
+          setReloadCount((n) => n + 1)
+        } else if (res.status === "already_starting") {
+          // 이미 뜨는 중 — 조용히 상태만 재확인하고 쿨다운 뒤 재시도할 수 있게 둔다.
+          recheck()
+        } else if (res.status === "no_command") {
+          showToast({ variant: "error", title: language.t("session.preview.retry.noServer") })
+        } else {
+          showToast({
+            variant: "error",
+            title: language.t("session.preview.retry.failed"),
+            description: res.reason,
+          })
+        }
+      })
+      .catch(() => {
+        showToast({ variant: "error", title: language.t("session.preview.retry.failed") })
+      })
+      .finally(() => {
+        restartInflight = undefined
+        restartCooldownUntil = Date.now() + RETRY_COOLDOWN_MS
+        setRestarting(false)
+      })
+    return restartInflight
+  }
 
   // 미리보기 결과물(iframe)과 penpal 로 연결되는 부모측 브릿지. previewUrl 을 오리진으로 사용.
   const bridge = createPreviewBridge({ origin: previewUrl })
@@ -185,6 +245,8 @@ export function createSessionPreview() {
     previewReady,
     previewSrc,
     reload,
+    restart,
+    restarting,
     goHome,
     hardReload,
     bridge,
@@ -199,10 +261,15 @@ export function createSessionPreview() {
   }
 }
 
-export function SessionPreviewPanel(props: { src?: string; bridge?: PreviewBridge }) {
+export function SessionPreviewPanel(props: {
+  src?: string
+  bridge?: PreviewBridge
+  onRetry?: () => void
+  retrying?: boolean
+}) {
   return (
     <div data-component="codle-preview-panel" class="size-full min-w-0 overflow-hidden rounded-none">
-      <Show when={props.src} fallback={<SessionPreviewFallback />}>
+      <Show when={props.src} fallback={<SessionPreviewFallback onRetry={props.onRetry} retrying={props.retrying} />}>
         {(src) => (
           <iframe
             ref={(el) => props.bridge?.attach(el)}
