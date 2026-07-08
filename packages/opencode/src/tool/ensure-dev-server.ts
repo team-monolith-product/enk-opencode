@@ -5,7 +5,7 @@ import { Tool } from "./tool"
 import DESCRIPTION from "./ensure-dev-server.txt"
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
-import { DevServerReplay, probePort } from "../enk/dev-server-replay"
+import { launch, probePort } from "../enk/dev-server-launch"
 import { ServeTargets } from "../enk/serve-targets"
 
 export { probePort }
@@ -88,9 +88,6 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     }
 
     if (await probePort(port)) {
-      // 이미 떠 있어도 기록은 갱신한다. 서버를 bash 로 먼저 띄웠거나 부팅 replay 로
-      // 살아난 경우에도 재스폰 시 replay 가 동작하도록, 그리고 커맨드가 바뀌었으면 최신화한다.
-      await DevServerReplay.record({ cmd: params.cmd, cwd, port }, Instance.directory)
       return result(`ensure_dev_server: already_running (:${port})`, {
         status: "already_running",
         url: serveUrl(port, target),
@@ -99,15 +96,18 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       })
     }
 
-    // 권한 게이트는 bash 와 동일한 채널로 받는다. 학생 환경에선 opencode.jsonc 의 "permission": "allow" 로 자동 통과.
+    // 권한 게이트는 이 도구 자신의 이름으로 받는다. 학생 환경에선 opencode.jsonc 의
+    // "permission": "allow" 로 자동 통과하고, 내부 부팅 세션(DevServerAgent)은 ruleset 에서
+    // ensure_dev_server 를 allow 하므로 통과한다. bash 로 받으면 그 세션의 전면 deny 에 막혀
+    // 도구가 거부되어 서버를 못 띄운다.
     await ctx.ask({
-      permission: "bash",
+      permission: "ensure_dev_server",
       patterns: [params.cmd],
       always: [`ensure_dev_server :${port}`],
       metadata: {},
     })
 
-    const child = DevServerReplay.launch(params.cmd, cwd)
+    const child = launch(params.cmd, cwd)
     log.info("spawned dev server", { pid: child.pid, port, cwd })
 
     const ready = await waitForPort(port, params.ready_timeout_ms, ctx.abort)
@@ -123,8 +123,6 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
           `이 디렉토리의 서버는 반드시 ${port} 포트로 띄워야 합니다(cmd 의 포트 확인): ${params.cmd}`,
       })
     }
-
-    await DevServerReplay.record({ cmd: params.cmd, cwd, port }, Instance.directory)
 
     return result(`ensure_dev_server: started (:${port}, ${ms}ms)`, {
       status: "started",

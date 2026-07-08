@@ -7,18 +7,17 @@ import { Session } from "@/session"
 import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
 import type { Permission } from "@/permission"
-import { probePort } from "./dev-server-replay"
+import { probePort } from "./dev-server-launch"
 import { ServeTargets } from "./serve-targets"
 import { AiUsage } from "./ai-usage"
 
 /**
- * 재실행 가능한 기록이 없는 타깃의 폴백 — 숨김 AI 세션을 만들어 ensure_dev_server 로
- * dev 서버를 띄우게 한다. 호출 여부는 부팅 오케스트레이션(DevServerBoot)이 결정한다.
+ * 타깃 포트가 비어 있을 때 숨김 AI 세션을 만들어 ensure_dev_server 로 dev 서버를 띄운다.
+ * 호출 여부는 부팅 오케스트레이션(DevServerBoot)이 결정한다.
  *
- * 기록은 이 기능 배포 이후 ensure_dev_server 가 실행될 때만 남으므로, 그 이전에 마지막으로
- * 작업된 프로젝트는 갤러리 깨우기(스폰 대행)로 pod 가 살아나도 타깃 포트가 영영 뜨지 않는다.
- * AI 가 성공하면 ensure_dev_server 의 record 경로가 기록 파일을 남겨 스스로 백필되고,
- * 다음 부팅부터는 기계적 재실행으로 복귀한다 — 즉 타깃당 최대 1회의 LLM 실행이다.
+ * 커맨드를 저장/재실행하지 않는다 — pod 는 EFS 작업 디렉토리를 그대로 물고 재스폰되므로,
+ * 부팅 때 AI 가 매번 판단해 띄운다. 같은 pod 가 살아있는 동안엔 이미 떠 있어(boot 의
+ * probePort) skip 되므로, LLM 은 "컬링 후 첫 부팅"에서만 돈다.
  *
  * 사용자에게 보이지 않아야 한다:
  * - 세션 목록은 parent_id IS NULL 만 노출하고(session/index.ts list) 자동 복원도
@@ -69,13 +68,12 @@ export namespace DevServerAgent {
   }
 
   /**
-   * 폴백을 시도해야 하는지 판정한다. 디렉토리가 비어(결과물 없음) 있으면 미리보기
-   * 대상이 아니고, 포트가 이미 살아 있으면 할 일이 없다. 최근 시도 마커는
-   * 스폰-실패 반복 루프를 쿨다운으로 막는다.
+   * 시도해야 하는지 판정한다. 디렉토리가 비어(결과물 없음) 있으면 미리보기 대상이
+   * 아니다. 최근 시도 마커는 스폰-실패 반복 루프를 쿨다운으로 막는다.
+   * (포트 생존 확인은 호출부 boot 이 이미 했다.)
    */
-  export async function shouldAttempt(dir: string, port: number): Promise<boolean> {
+  export async function shouldAttempt(dir: string): Promise<boolean> {
     if (isEmpty(dir)) return false
-    if (await probePort(port)) return false
     try {
       const marker = (await Bun.file(resolve(dir, MARKER_FILE)).json()) as Marker
       if (Date.now() - marker.attemptedAt < ATTEMPT_COOLDOWN_MS) return false
@@ -93,10 +91,10 @@ export namespace DevServerAgent {
     }
   }
 
-  /** 타깃 하나에 대한 AI 폴백. 게이트(shouldAttempt) 통과 시에만 숨김 세션을 돌린다. */
-  export async function fallback(target: ServeTargets.Target) {
+  /** 타깃 하나에 대해 숨김 AI 세션으로 서버를 띄운다. 게이트(shouldAttempt) 통과 시에만. */
+  export async function ensure(target: ServeTargets.Target) {
     const { dir, port } = target
-    if (!(await shouldAttempt(dir, port))) return
+    if (!(await shouldAttempt(dir))) return
 
     await writeMarker(dir)
     log.info("starting hidden dev-server agent session", { dir, port, kind: target.kind })

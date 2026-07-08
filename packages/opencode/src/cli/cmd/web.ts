@@ -38,8 +38,10 @@ export const WebCommand = cmd({
       UI.println(UI.Style.TEXT_WARNING_BOLD + "!  " + "OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
     const opts = await resolveNetworkOptions(args)
-    void DevServerBoot.boot().catch(() => {})
     const server = Server.listen(opts)
+    // 서버가 먼저 LISTEN 하도록 boot 을 뒤에 둔다 — dev 서버 기동(AI 세션 포함)이
+    // 첫 IDE 요청 처리보다 앞서 CPU 를 잡지 않게 한다.
+    void DevServerBoot.boot().catch(() => {})
     const suffix = opts.basePath && opts.basePath !== "/" ? opts.basePath : ""
     UI.empty()
     UI.println(UI.logo("  "))
