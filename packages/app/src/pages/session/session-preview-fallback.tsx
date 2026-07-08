@@ -1,6 +1,7 @@
 import { useLanguage } from "@/context/language"
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import { Portal } from "solid-js/web"
+import { Icon } from "@opencode-ai/ui/icon"
 import { SessionPreviewMascot } from "./session-preview-mascot"
 
 const round = Math.round
@@ -113,7 +114,7 @@ function DigBurst(props: { x: number; y: number }) {
   )
 }
 
-export function SessionPreviewFallback() {
+export function SessionPreviewFallback(props: { onRetry?: () => void; retrying?: boolean }) {
   const language = useLanguage()
   const title = () => language.t("session.preview.generating.title")
   const hint = () => language.t("session.preview.generating.hint")
@@ -205,6 +206,18 @@ export function SessionPreviewFallback() {
           <span style={{ "font-size": "13.5px", "font-weight": "600", color: "var(--app-ink)" }}>{title()}</span>
           <span style={{ "font-size": "11.5px", color: "var(--app-muted)" }}>{hint()}</span>
         </div>
+        {/* 미리보기가 안 뜰 때를 위한 수동 재시도 — 항상 노출. 연타는 상위 restart() 의 in-flight 잠금+쿨다운이 막는다. */}
+        <Show when={props.onRetry}>
+          <button
+            type="button"
+            disabled={props.retrying}
+            onClick={() => props.onRetry?.()}
+            class="mt-1 inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-12-medium text-text-base bg-surface-raised-base-hover enabled:hover:bg-surface-base-active disabled:opacity-50 disabled:cursor-default transition-colors"
+          >
+            <Icon name="refresh" size="small" classList={{ "animate-spin": props.retrying }} />
+            {language.t("session.preview.retry.button")}
+          </button>
+        </Show>
       </div>
 
       {/* 전체 화면 오버레이 — 곡괭이 포인터 + 클릭 지점 땅 파임 이펙트 */}

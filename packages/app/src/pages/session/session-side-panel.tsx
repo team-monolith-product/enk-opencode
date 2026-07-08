@@ -392,7 +392,12 @@ export function SessionSidePanel(props: {
                   <Show when={previewTab()}>
                     <Tabs.Content value="preview" class="flex flex-col h-full overflow-hidden contain-strict">
                       <Show when={activeTab() === "preview"}>
-                        <SessionPreviewPanel src={preview.previewSrc()} bridge={preview.bridge} />
+                        <SessionPreviewPanel
+                          src={preview.previewSrc()}
+                          bridge={preview.bridge}
+                          onRetry={preview.restart}
+                          retrying={preview.restarting()}
+                        />
                       </Show>
                     </Tabs.Content>
                   </Show>

@@ -23,6 +23,7 @@ import { McpRoutes } from "./routes/mcp"
 import { FileRoutes } from "./routes/file"
 import { ConfigRoutes } from "./routes/config"
 import { EnvRoutes } from "./routes/env"
+import { DevServerRoutes } from "./routes/dev-server"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProjectSummaryRoutes } from "./routes/project-summary"
 import { ProviderRoutes } from "./routes/provider"
@@ -46,6 +47,7 @@ export const InstanceRoutes = (app?: Hono) =>
     .route("/pty", PtyRoutes())
     .route("/config", ConfigRoutes())
     .route("/env", EnvRoutes())
+    .route("/dev-server", DevServerRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/project-summary", ProjectSummaryRoutes())
     .route("/session", SessionRoutes().route("/", SessionDocRoutes()))

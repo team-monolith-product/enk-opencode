@@ -1,50 +1,12 @@
 import z from "zod"
-import { spawn } from "node:child_process"
-import { createConnection } from "node:net"
 import { existsSync } from "node:fs"
 import { Tool } from "./tool"
 import DESCRIPTION from "./ensure-dev-server.txt"
 import { Instance } from "../project/instance"
-import { Log } from "../util/log"
+import * as DevServer from "./dev-server"
 
-const log = Log.create({ service: "ensure-dev-server" })
-
-/**
- * 지정 포트가 LISTEN 중인지 빠르게 확인한다.
- * lsof/ss/netstat 없이 TCP connect 시도만으로 판별 — `(echo > /dev/tcp/...)` 의 Node 버전.
- */
-export function probePort(port: number, host = "127.0.0.1", timeoutMs = 250): Promise<boolean> {
-  return new Promise((resolve) => {
-    const sock = createConnection({ host, port })
-    const done = (ok: boolean) => {
-      sock.removeAllListeners()
-      sock.destroy()
-      resolve(ok)
-    }
-    sock.once("connect", () => done(true))
-    sock.once("error", () => done(false))
-    sock.setTimeout(timeoutMs, () => done(false))
-  })
-}
-
-async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (abort.aborted) return false
-    if (await probePort(port)) return true
-    await new Promise((r) => setTimeout(r, 300))
-  }
-  return false
-}
-
-export function serveUrl(port: number): string {
-  // 학생에게 안내할 외부 접근 주소. JUPYTERHUB_USER/OPENCODE_SERVE_DOMAIN 환경변수가 있으면 외부 URL,
-  // 없으면 로컬 URL 로 폴백.
-  const user = process.env["JUPYTERHUB_USER"]
-  const domain = process.env["OPENCODE_SERVE_DOMAIN"]
-  if (user && domain) return `https://${user}.${domain}/`
-  return `http://localhost:${port}/`
-}
+// 기존 import 경로 호환(테스트 등)을 위해 공유 모듈의 헬퍼를 재노출한다.
+export { probePort, serveUrl } from "./dev-server"
 
 export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => ({
   description: DESCRIPTION,
@@ -64,16 +26,9 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
   async execute(params, ctx) {
     const startedAt = Date.now()
     const cwd = params.cwd ?? Instance.directory
+    const port = params.port
 
-    type Payload = {
-      status: "already_running" | "started" | "failed"
-      url?: string
-      port: number
-      ms: number
-      reason?: string
-    }
-
-    const result = (title: string, payload: Payload) => ({
+    const result = (title: string, payload: DevServer.DevServerResult) => ({
       title,
       output: JSON.stringify(payload),
       metadata: payload,
@@ -82,17 +37,23 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     if (!existsSync(cwd)) {
       return result("ensure_dev_server: failed", {
         status: "failed",
-        port: params.port,
+        port,
         ms: Date.now() - startedAt,
         reason: `cwd 가 존재하지 않습니다: ${cwd}`,
       })
     }
 
-    if (await probePort(params.port)) {
-      return result(`ensure_dev_server: already_running (:${params.port})`, {
+    // UI(다시 시도 버튼)에서 재시작할 수 있도록 마지막 cmd/cwd/port 를 기억해둔다. 이미 떠 있어도 기억한다.
+    const s = DevServer.state()
+    s.cmd = params.cmd
+    s.cwd = cwd
+    s.port = port
+
+    if (await DevServer.probePort(port)) {
+      return result(`ensure_dev_server: already_running (:${port})`, {
         status: "already_running",
-        url: serveUrl(params.port),
-        port: params.port,
+        url: DevServer.serveUrl(port),
+        port,
         ms: Date.now() - startedAt,
       })
     }
@@ -101,38 +62,24 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     await ctx.ask({
       permission: "bash",
       patterns: [params.cmd],
-      always: [`ensure_dev_server :${params.port}`],
+      always: [`ensure_dev_server :${port}`],
       metadata: {},
     })
 
-    // 백그라운드 launch. detached + stdio:ignore + unref 로 OpenCode 프로세스가 stdout 파이프를 잡지 않게 한다.
-    // 이게 빠지면 도구 호출이 반환되지 않고 응답 턴이 hang 된다.
-    const child = spawn("/bin/sh", ["-lc", params.cmd], {
+    const r = await DevServer.launch({
+      cmd: params.cmd,
       cwd,
-      detached: true,
-      stdio: "ignore",
-      env: process.env,
+      port,
+      timeoutMs: params.ready_timeout_ms,
+      abort: ctx.abort,
     })
-    child.unref()
-    log.info("spawned dev server", { pid: child.pid, port: params.port, cwd })
 
-    const ready = await waitForPort(params.port, params.ready_timeout_ms, ctx.abort)
-    const ms = Date.now() - startedAt
-
-    if (!ready) {
-      return result("ensure_dev_server: failed", {
-        status: "failed",
-        port: params.port,
-        ms,
-        reason: `포트 ${params.port} 가 ${params.ready_timeout_ms}ms 안에 LISTEN 되지 않았습니다. 명령어를 확인하세요: ${params.cmd}`,
-      })
-    }
-
-    return result(`ensure_dev_server: started (:${params.port}, ${ms}ms)`, {
-      status: "started",
-      url: serveUrl(params.port),
-      port: params.port,
-      ms,
-    })
+    const title =
+      r.status === "started"
+        ? `ensure_dev_server: started (:${port}, ${r.ms}ms)`
+        : r.status === "already_starting"
+          ? `ensure_dev_server: already_starting (:${port})`
+          : "ensure_dev_server: failed"
+    return result(title, r)
   },
 }))
