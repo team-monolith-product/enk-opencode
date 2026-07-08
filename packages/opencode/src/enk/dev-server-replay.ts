@@ -57,11 +57,16 @@ export namespace DevServerReplay {
    * 백그라운드 launch. detached + stdio:ignore + unref 로 OpenCode 프로세스가 stdout 파이프를
    * 잡지 않게 한다. 이게 빠지면 도구 호출이 반환되지 않고 응답 턴이 hang 된다.
    *
+   * nice -n 19 로 최저 우선순위로 띄운다 — 부팅 직후 재실행/폴백이 첫 IDE 로드와 CPU 를
+   * 경합해 인스턴스 부트스트랩을 기아 상태(504)로 만들지 않도록, 서버가 IDE 에 CPU 를
+   * 양보하게 한다. install 이 포함된 커맨드도 이 우선순위 아래에서 돈다. nice 는 coreutils
+   * 표준이라 이미지에 항상 있고, exec 로 셸을 대체해 불필요한 래퍼 프로세스를 남기지 않는다.
+   *
    * 'error' 리스너가 없으면 비동기 spawn 실패(ENOENT/EAGAIN 등)가 uncaught 예외가 되는데,
    * 부팅 경로에서 fire-and-forget 로 돌아 프로세스를 죽이므로 반드시 처리한다.
    */
   export function launch(cmd: string, cwd: string) {
-    const child = spawn("/bin/sh", ["-lc", cmd], {
+    const child = spawn("/bin/sh", ["-lc", `exec nice -n 19 /bin/sh -lc ${quote(cmd)}`], {
       cwd,
       detached: true,
       stdio: "ignore",
@@ -70,6 +75,11 @@ export namespace DevServerReplay {
     child.on("error", (err) => log.warn("dev server spawn failed", { cwd, err: String(err) }))
     child.unref()
     return child
+  }
+
+  /** POSIX 셸 단일 인용 — 내부 작은따옴표만 이스케이프하면 나머지는 리터럴로 안전하다. */
+  function quote(s: string): string {
+    return `'${s.replace(/'/g, "'\\''")}'`
   }
 
   /** 성공한 dev 서버 커맨드를 기록한다. 실패해도 도구 호출을 막지 않는다(로그만). */
@@ -85,28 +95,11 @@ export namespace DevServerReplay {
     }
   }
 
-  // `설치 && 서브` 형태 커맨드의 선행 설치 단계. yarn 은 bare 호출도 설치라 별도 처리.
-  const INSTALL_STEP =
-    /^\s*(?:(?:npm\s+(?:install|ci)|pnpm\s+(?:install|i)|bun\s+install|yarn\s+install)(?:\s|$)|yarn\s*$)/
-
   /**
-   * 기록된 커맨드에서 선행 설치 단계(npm install && ...)를 제거하고 서브 커맨드만 남긴다.
-   * EFS 에서는 no-op 설치도 stat 폭풍으로 분 단위 CPU 를 점유해, 부팅마다 재실행되면
-   * 인스턴스 부트스트랩이 기아 상태에 빠져 IDE API 가 504 로 죽는다. 설치가 전부라
-   * 서브 커맨드가 남지 않으면 빈 문자열을 반환한다.
-   */
-  export function stripInstallSteps(cmd: string): string {
-    const parts = cmd.split("&&")
-    let start = 0
-    while (start < parts.length && INSTALL_STEP.test(parts[start])) start++
-    return parts.slice(start).join("&&").trim()
-  }
-
-  /**
-   * 타깃에 재실행 가능한 기록이 있으면 반환한다 — "유효한 기록" 판정의 단일 진실.
-   * 파싱 실패, cwd 소멸, cwd 가 다른 타깃 소속(규약 이전 레거시 기록), 설치 단계만
-   * 남은 커맨드면 undefined 를 반환하고, 호출부(DevServerBoot)가 폴백으로 처리한다.
-   * 반환되는 cmd 는 설치 단계가 제거된 재실행용 커맨드다.
+   * 타깃에 재실행 가능한 기록이 있으면 그대로 반환한다 — "유효한 기록" 판정의 단일 진실.
+   * 파싱 실패, cwd 소멸, cwd 가 다른 타깃 소속(규약 이전 레거시 기록)이면 undefined 를
+   * 반환하고, 호출부(DevServerBoot)가 AI 폴백으로 재구축한다. 기록된 cmd 는 AI 가 판단해
+   * 남긴 것이므로 손대지 않는다(부팅 부하는 launch 의 nice 로 흡수한다).
    */
   export async function loadRecord(target: ServeTargets.Target): Promise<State | undefined> {
     const file = resolve(target.dir, FILE)
@@ -124,14 +117,6 @@ export namespace DevServerReplay {
       log.warn("recorded cwd no longer exists, falling back", { cwd: state.cwd })
       return undefined
     }
-    const cmd = stripInstallSteps(state.cmd)
-    if (!cmd) {
-      log.warn("recorded cmd has no serve step after stripping installs, falling back", { file, cmd: state.cmd })
-      return undefined
-    }
-    if (cmd !== state.cmd) {
-      log.info("stripped install steps from recorded cmd", { file, cmd })
-    }
-    return { ...state, cmd }
+    return state
   }
 }

@@ -1,5 +1,4 @@
 import { Log } from "@/util/log"
-import { Flag } from "@/flag/flag"
 import { ServeTargets } from "./serve-targets"
 import { DevServerReplay, probePort } from "./dev-server-replay"
 import { DevServerAgent } from "./dev-server-agent"
@@ -39,16 +38,7 @@ export namespace DevServerBoot {
     }
 
     // 2단계: AI 폴백은 무거우므로(LLM 실행) 타깃당 직렬로 돌아 pod 를 압박하지 않는다.
-    // LLM 턴·의존성 설치가 부팅 직후 첫 IDE 로드와 CPU 를 경합해 API 504 를 유발할 수
-    // 있어 opt-in(ENK_DEV_SERVER_AGENT) — 꺼져 있으면 기록 없는 타깃은 그대로 둔다.
-    if (!Flag.ENK_DEV_SERVER_AGENT) {
-      if (fallbacks.length > 0) {
-        log.info("dev-server agent disabled, leaving targets without records", {
-          dirs: fallbacks.map((t) => t.dir),
-        })
-      }
-      return
-    }
+    // 실행되는 dev 서버는 launch 의 nice 로 IDE 에 CPU 를 양보한다.
     for (const target of fallbacks) {
       try {
         await DevServerAgent.fallback(target)

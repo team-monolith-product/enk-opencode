@@ -108,41 +108,14 @@ describe("DevServerReplay", () => {
       expect(await DevServerReplay.loadRecord({ kind: "project", dir: project, port: 3000 })).toBeUndefined()
     })
 
-    test("strips leading install steps from the recorded cmd", async () => {
+    test("returns the recorded cmd verbatim (no install stripping)", async () => {
       const { project } = await tempWorkspace()
-      await writeState(project, {
-        cmd: "npm install && npm run dev -- --host 0.0.0.0 --port 3000 --strictPort",
-        cwd: project,
-        port: 3000,
-      })
+      const cmd = "npm install && npm run dev -- --host 0.0.0.0 --port 3000 --strictPort"
+      await writeState(project, { cmd, cwd: project, port: 3000 })
 
       process.env["ENK_PROJECT_DIRECTORY"] = project
       const loaded = await DevServerReplay.loadRecord({ kind: "project", dir: project, port: 3000 })
-      expect(loaded?.cmd).toBe("npm run dev -- --host 0.0.0.0 --port 3000 --strictPort")
-    })
-
-    test("returns undefined when the recorded cmd is install steps only", async () => {
-      const { project } = await tempWorkspace()
-      await writeState(project, { cmd: "npm ci && npm install", cwd: project, port: 3000 })
-
-      process.env["ENK_PROJECT_DIRECTORY"] = project
-      expect(await DevServerReplay.loadRecord({ kind: "project", dir: project, port: 3000 })).toBeUndefined()
-    })
-  })
-
-  describe("stripInstallSteps", () => {
-    test.each([
-      ["npm install && npm run dev", "npm run dev"],
-      ["npm ci --no-audit && node server.js", "node server.js"],
-      ["pnpm i && pnpm dev", "pnpm dev"],
-      ["yarn && yarn dev", "yarn dev"],
-      ["bun install && bun run dev", "bun run dev"],
-      ["npm run dev -- --port 3000", "npm run dev -- --port 3000"],
-      ["yarn dev", "yarn dev"],
-      ["npx --yes serve -l 3000 .", "npx --yes serve -l 3000 ."],
-      ["npm install", ""],
-    ])("%s -> %s", (input, expected) => {
-      expect(DevServerReplay.stripInstallSteps(input)).toBe(expected)
+      expect(loaded?.cmd).toBe(cmd)
     })
   })
 })
