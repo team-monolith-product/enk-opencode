@@ -43,6 +43,12 @@ let connecting = false
 // 보고했고, 합성 popstate 까지 "pop" 으로 보고하면 동일 href 가 스택에 중복돼 부모 커서가 어긋난다).
 let suppressPopReport = false
 
+// penpal 핸드셰이크가 끝나기 전(remoteParent 미설정)에 발생한 console/error 를 버퍼링했다가 연결되면 flush.
+// 초기 로드에서 앱이 바로 터지면(예: 모듈 top-level ReferenceError) 에러가 연결 전에 발생하는데,
+// 버퍼가 없으면 그대로 유실돼 부모가 첫 에러를 못 받는다(흰 화면인데 오버레이 안 뜸). 폭주 방지로 상한을 둔다.
+const PENDING_MAX = 50
+let pending: Array<() => unknown> = []
+
 const childMethods: ChildMethods = {
   ping: () => "pong",
   navigate: (url: string) => {
@@ -96,6 +102,10 @@ function setupConnection() {
       remoteParent = parent
       connected = true
       connecting = false
+      // 연결 전에 버퍼된 console/error 를 순서대로 흘려보낸다(초기 로드 에러 유실 방지).
+      const queued = pending
+      pending = []
+      for (const call of queued) emit(call)
       // 연결 직후 현재 위치 1회 보고. 전체 페이지 이동(MPA·location.assign·뒤로/앞으로)은 문서가 새로 로드돼
       // popstate 가 아닌 재연결로만 감지되므로, 이 로드가 어떤 종류였는지 Navigation Timing 으로 판별해
       // 부모 미러가 push/replace/pop 을 구분하게 한다(재연결마다 와도 부모가 href 로 멱등 처리).
@@ -127,7 +137,11 @@ function boot() {
  * 한 번 실패하면 remoteParent 를 비워 이후 호출을 즉시 단락(추가 postMessage 시도 자체를 멈춤) → 재연결 타이머가 복구.
  */
 function emit(call: () => unknown) {
-  if (!remoteParent) return
+  if (!remoteParent) {
+    // 아직 연결 전 — 버려지 말고 버퍼링해 두었다가 연결되면 flushPending() 이 순서대로 흘려보낸다.
+    if (pending.length < PENDING_MAX) pending.push(call)
+    return
+  }
   try {
     const r = call() as { catch?: (cb: () => void) => void } | undefined
     r?.catch?.(() => {
