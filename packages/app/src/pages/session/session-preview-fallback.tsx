@@ -154,6 +154,22 @@ export function SessionPreviewFallback(props: {
     }
   }
 
+  // startable·errored 에서 AI 에게 보낼 수정 요청 문장 — 칩 클릭 또는 복사 버튼으로 클립보드 복사.
+  const promptText = () =>
+    state() === "errored"
+      ? language.t("session.preview.errored.prompt")
+      : language.t("session.preview.startable.prompt")
+
+  const [copied, setCopied] = createSignal(false)
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
+  const copyPrompt = () => {
+    void navigator.clipboard?.writeText(promptText())
+    setCopied(true)
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => setCopied(false), 1500)
+  }
+  onCleanup(() => copyTimer && clearTimeout(copyTimer))
+
   const [pickaxeMode, setPickaxeMode] = createSignal(false)
   const [pointer, setPointer] = createSignal({ x: -200, y: -200 })
   const [striking, setStriking] = createSignal(false)
@@ -250,6 +266,34 @@ export function SessionPreviewFallback(props: {
             <Icon name="refresh" size="small" classList={{ "animate-spin": props.retrying }} />
             {language.t("session.preview.retry.button")}
           </button>
+        </Show>
+
+        {/* 또는 AI 에게 수정 요청 — 문장 칩을 누르면 복사, 옆 버튼도 복사. */}
+        <Show when={showRetry()}>
+          <div class="mt-1 flex w-full max-w-100 flex-col items-center gap-1">
+            <span style={{ "font-size": "11.5px", color: "var(--app-muted)" }}>
+              {language.t("session.preview.askAi.label")}
+            </span>
+            <div class="flex w-full items-stretch gap-1">
+              <button
+                type="button"
+                onClick={copyPrompt}
+                title={promptText()}
+                class="min-w-0 flex-1 truncate rounded-md border border-border-weak-base bg-background-stronger px-2.5 py-1.5 text-left text-12-regular text-text-base cursor-pointer hover:bg-surface-raised-base-hover transition-colors"
+              >
+                {promptText()}
+              </button>
+              <button
+                type="button"
+                onClick={copyPrompt}
+                aria-label={language.t("session.preview.askAi.copy")}
+                classList={{ "text-icon-success-base": copied() }}
+                class="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border-weak-base text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+              >
+                <Icon name={copied() ? "check-small" : "copy"} size="small" />
+              </button>
+            </div>
+          </div>
         </Show>
       </div>
 
