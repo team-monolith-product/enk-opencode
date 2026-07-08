@@ -49,9 +49,22 @@ async function freePort(): Promise<number> {
 }
 
 describe("DevServerAgent.shouldAttempt", () => {
-  test("package.json 이 없으면 skip", async () => {
+  test("빈 디렉토리면 skip", async () => {
     const dir = await tempProjectDir()
     expect(await DevServerAgent.shouldAttempt(dir, await freePort())).toBe(false)
+  })
+
+  test("숨김 항목(.opencode 마커)만 있으면 skip", async () => {
+    const dir = await tempProjectDir()
+    await mkdir(join(dir, ".opencode"), { recursive: true })
+    await writeFile(join(dir, ".opencode/dev-server-agent.json"), JSON.stringify({ attemptedAt: 0 }))
+    expect(await DevServerAgent.shouldAttempt(dir, await freePort())).toBe(false)
+  })
+
+  test("정적 결과물(index.html)만 있어도 시도한다", async () => {
+    const dir = await tempProjectDir()
+    await writeFile(join(dir, "index.html"), "<html></html>")
+    expect(await DevServerAgent.shouldAttempt(dir, await freePort())).toBe(true)
   })
 
   test("포트가 이미 LISTEN 중이면 skip", async () => {
