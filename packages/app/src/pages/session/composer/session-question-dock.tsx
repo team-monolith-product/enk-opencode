@@ -480,6 +480,13 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               .catch(() => showToast({ title: "전송 동의 취소 실패", description: language.t("common.requestFailed") }))
           }}
           close={closeApproval}
+          onExpire={() => {
+            // Server terminal cast never arrived — drive the same "expired" transition locally so the
+            // dialog resolves instead of freezing at 0초. Routed through showApproval so finalizedID is
+            // set: a late server cast for this submit is then ignored rather than re-opening the dialog.
+            const current = approval()
+            if (current?.status === "pending") showApproval({ ...current, status: "expired" })
+          }}
         />
       ),
       () => {

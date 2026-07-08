@@ -3,6 +3,7 @@ import { UI } from "../ui"
 import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
+import { DevServerBoot } from "../../enk/dev-server-boot"
 import open from "open"
 import { networkInterfaces } from "os"
 
@@ -37,6 +38,7 @@ export const WebCommand = cmd({
       UI.println(UI.Style.TEXT_WARNING_BOLD + "!  " + "OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
     const opts = await resolveNetworkOptions(args)
+    void DevServerBoot.boot().catch(() => {})
     const server = Server.listen(opts)
     const suffix = opts.basePath && opts.basePath !== "/" ? opts.basePath : ""
     UI.empty()

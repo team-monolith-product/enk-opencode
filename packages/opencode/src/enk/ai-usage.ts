@@ -4,14 +4,28 @@ import { SentryReporter } from "@/util/sentry"
 import type { MessageV2 } from "@/session/message-v2"
 
 /**
- * Report AI token usage to enk-hackathon-rails `ai_usages/do_many`, one record per completed
- * assistant turn.
+ * Report AI token usage to enk-hackathon-rails `ai_usages/do_many`.
  *
- * `report()` only enqueues — the POST runs off a single serial drain loop, so it is never
- * awaited by the projector / AI turn and cannot affect opencode's responsiveness. Two bounds
- * keep a dead endpoint from piling up: the drain is serial (at most ONE request in flight), and
- * the pending queue is capped (`MAX_PENDING`) so memory can't grow without limit — overflow is
+ * Two reporting granularities share one queue/drain/retry pipeline:
+ *   - `report()`      — one record per COMPLETED assistant turn (`phase:"final"`). This is the
+ *                        authoritative turn total and the reconciliation backstop: if any
+ *                        incremental step POST is permanently dropped, the final still lands.
+ *   - `reportStep()`  — one record per model step (`phase:"step"`), emitted at `finish-step`.
+ *                        Carries authoritative per-step token/cost counts so the hub sees usage
+ *                        stream in real time within a turn (tool loops produce many steps).
+ *   - `reportProgress()` — optional lightweight liveness ping (`phase:"start"`, no token counts),
+ *                        throttled per session. Opt-in via ENK_AI_USAGE_REALTIME=progress.
+ *
+ * Everything only enqueues — the POST runs off a single serial drain loop, so it is never awaited
+ * by the projector / stream loop and cannot affect opencode's responsiveness. Three bounds keep a
+ * dead endpoint from piling up: the drain is serial (at most ONE request in flight), records are
+ * batched per POST (`BATCH_MAX`) with a small flush window so step bursts coalesce, and the
+ * pending queue is capped (`MAX_PENDING`) so memory can't grow without limit — overflow is
  * dropped with a log.
+ *
+ * Idempotency: each record carries an idempotency key `(message_id, step_index, phase)`; the
+ * client dedupes via a Set so retries/re-renders don't double-enqueue, and rails should upsert on
+ * the same key so backoff retries don't double-count.
  *
  * Disabled (no-op) unless both ENK_HACKATHON_RAILS_URL and ENK_AI_USAGE_TOKEN are set, so
  * local/non-hackathon runs are unaffected. ENK_HACKATHON_RAILS_URL is host-only; we append the
@@ -22,20 +36,45 @@ export namespace AiUsage {
 
   const MAX_ATTEMPTS = 5
   const MAX_PENDING = 1000
+  const BATCH_MAX = 50 // max records per POST (do_many accepts an array)
+  const FLUSH_WINDOW_MS = 250 // coalesce bursts of step reports into one request
+  const PROGRESS_THROTTLE_MS = 1500 // min gap between progress pings per session
   const API_PATH = "/api/v1/ai_usages/do_many"
 
+  export type Phase = "start" | "step" | "final"
+
   // Per-record attributes expected by rails. owner_type/owner_id are derived server-side from
-  // `mount_path` (first two segments), so we don't send them.
+  // `mount_path` (first two segments), so we don't send them. New realtime fields (message_id,
+  // step_index, phase, input/output/reasoning/cache_*) let rails distinguish incremental vs final
+  // and key incremental records by (mount_path, message_id, step_index).
   type Attributes = {
     mount_path: string
     model_id: string
+    message_id: string
+    step_index: number
+    phase: Phase
     tokens: number
+    input: number
+    output: number
+    reasoning: number
+    cache_read: number
+    cache_write: number
     cost: number
     used_at: string
   }
 
+  /** Authoritative per-step usage as computed by Session.getUsage. */
+  export type StepUsage = {
+    index: number
+    tokens: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
+    cost: number
+    at?: number
+  }
+
   const pending: Attributes[] = [] // bounded FIFO queue
-  const sent = new Set<string>() // messageIDs already enqueued — dedupes repeated updates
+  const sent = new Set<string>() // idempotency keys already enqueued — dedupes repeated updates
+  const lastProgressAt = new Map<string, number>() // sessionID -> last progress ping timestamp
+  const excluded = new Set<string>() // sessionIDs whose usage must not be reported (internal runs)
   let draining = false // serial-drain guard: at most one request in flight
   let dropped = 0 // records discarded due to MAX_PENDING overflow
   let warnedDisabled = false // suppress repeated "not configured" warnings
@@ -44,33 +83,79 @@ export namespace AiUsage {
     return Boolean(Flag.ENK_HACKATHON_RAILS_URL && Flag.ENK_AI_USAGE_TOKEN)
   }
 
+  function warnDisabledOnce() {
+    if (warnedDisabled) return
+    warnedDisabled = true
+    log.warn("ai usage reporting disabled: ENK_HACKATHON_RAILS_URL or ENK_AI_USAGE_TOKEN not set")
+  }
+
+  function idempotencyKey(messageID: string, stepIndex: number, phase: Phase) {
+    return `${messageID}:${stepIndex}:${phase}`
+  }
+
+  /** Build the final-turn record (cumulative turn totals). */
   export function buildAttributes(info: MessageV2.Assistant): Attributes {
     const t = info.tokens
+    const input = t.input ?? 0
+    const output = t.output ?? 0
+    const reasoning = t.reasoning ?? 0
+    const cacheRead = t.cache?.read ?? 0
+    const cacheWrite = t.cache?.write ?? 0
     return {
       // The session working directory, sent verbatim — rails parses owner from it.
       mount_path: info.path.cwd,
       model_id: info.modelID,
-      tokens: (t.input ?? 0) + (t.output ?? 0) + (t.reasoning ?? 0) + (t.cache?.read ?? 0) + (t.cache?.write ?? 0),
+      message_id: info.id,
+      // -1 marks the turn-level final record (not tied to any single step).
+      step_index: -1,
+      phase: "final",
+      tokens: input + output + reasoning + cacheRead + cacheWrite,
+      input,
+      output,
+      reasoning,
+      cache_read: cacheRead,
+      cache_write: cacheWrite,
       cost: info.cost,
       used_at: new Date(info.time.completed!).toISOString(),
     }
   }
 
-  /** Enqueue one completed assistant turn's usage. Non-blocking; never throws into the caller. */
-  export function report(info: MessageV2.Info) {
-    if (!enabled()) {
-      if (!warnedDisabled) {
-        warnedDisabled = true
-        log.warn("ai usage reporting disabled: ENK_HACKATHON_RAILS_URL or ENK_AI_USAGE_TOKEN not set")
-      }
-      return
+  /** Build an incremental per-step record. */
+  export function buildStepAttributes(info: MessageV2.Assistant, step: StepUsage): Attributes {
+    const input = step.tokens.input ?? 0
+    const output = step.tokens.output ?? 0
+    const reasoning = step.tokens.reasoning ?? 0
+    const cacheRead = step.tokens.cache?.read ?? 0
+    const cacheWrite = step.tokens.cache?.write ?? 0
+    return {
+      mount_path: info.path.cwd,
+      model_id: info.modelID,
+      message_id: info.id,
+      step_index: step.index,
+      phase: "step",
+      tokens: input + output + reasoning + cacheRead + cacheWrite,
+      input,
+      output,
+      reasoning,
+      cache_read: cacheRead,
+      cache_write: cacheWrite,
+      cost: step.cost,
+      used_at: new Date(step.at ?? Date.now()).toISOString(),
     }
-    if (info.role !== "assistant") return
-    if (!info.time.completed) return // only finished turns
-    if (sent.has(info.id)) return // already enqueued
-    if (!info.path?.cwd) return // no mount_path → rails can't resolve owner
+  }
 
-    sent.add(info.id)
+  /**
+   * 내부(숨김) 세션의 사용량을 집계에서 제외한다 — 참가자 토큰 결산이 시스템 실행
+   * (예: DevServerAgent 부팅 폴백)으로 오염되지 않게 한다.
+   */
+  export function exclude(sessionID: string) {
+    excluded.add(sessionID)
+  }
+
+  function enqueue(record: Attributes) {
+    const key = idempotencyKey(record.message_id, record.step_index, record.phase)
+    if (sent.has(key)) return // already enqueued — dedupe retries / re-renders
+    sent.add(key)
     if (pending.length >= MAX_PENDING) {
       dropped++
       if (dropped % 100 === 1) {
@@ -79,8 +164,75 @@ export namespace AiUsage {
       }
       return
     }
-    pending.push(buildAttributes(info))
+    pending.push(record)
     void drain()
+  }
+
+  /** Enqueue one completed assistant turn's usage (phase:"final"). Non-blocking; never throws. */
+  export function report(info: MessageV2.Info) {
+    if (!enabled()) {
+      warnDisabledOnce()
+      return
+    }
+    if (info.role !== "assistant") return
+    if (excluded.has(info.sessionID)) return // internal runs are not billed to participants
+    if (!info.time.completed) return // only finished turns
+    if (!info.path?.cwd) return // no mount_path → rails can't resolve owner
+    enqueue(buildAttributes(info))
+  }
+
+  /** Enqueue authoritative per-step usage (phase:"step"). Non-blocking; never throws. */
+  export function reportStep(info: MessageV2.Assistant, step: StepUsage) {
+    if (!enabled()) {
+      warnDisabledOnce()
+      return
+    }
+    if (Flag.ENK_AI_USAGE_REALTIME === "off") return // realtime disabled → final-only
+    if (info.role !== "assistant") return
+    if (excluded.has(info.sessionID)) return // internal runs are not billed to participants
+    if (!info.path?.cwd) return
+    enqueue(buildStepAttributes(info, step))
+  }
+
+  /**
+   * Enqueue a lightweight liveness ping (phase:"start", no token counts). Opt-in via
+   * ENK_AI_USAGE_REALTIME=progress and throttled to ≤1 per PROGRESS_THROTTLE_MS per session.
+   * Non-blocking; never throws.
+   */
+  export function reportProgress(info: MessageV2.Assistant, kind: "start" = "start") {
+    if (!enabled()) {
+      warnDisabledOnce()
+      return
+    }
+    if (Flag.ENK_AI_USAGE_REALTIME !== "progress") return
+    if (info.role !== "assistant") return
+    if (excluded.has(info.sessionID)) return // internal runs are not billed to participants
+    if (!info.path?.cwd) return
+
+    const now = Date.now()
+    const last = lastProgressAt.get(info.sessionID) ?? 0
+    if (now - last < PROGRESS_THROTTLE_MS) return // throttle: coalesce — only latest state matters
+    lastProgressAt.set(info.sessionID, now)
+
+    // Progress pings carry no authoritative token counts (deltas have none). They are a pure
+    // "answer happening now" signal. Dedupe by (message_id, now) so each ping is distinct.
+    const record: Attributes = {
+      mount_path: info.path.cwd,
+      model_id: info.modelID,
+      message_id: info.id,
+      step_index: now, // use timestamp so successive progress pings don't collide in the sent Set
+      phase: "start",
+      tokens: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache_read: 0,
+      cache_write: 0,
+      cost: 0,
+      used_at: new Date(now).toISOString(),
+    }
+    void kind
+    enqueue(record)
   }
 
   async function drain() {
@@ -88,8 +240,12 @@ export namespace AiUsage {
     draining = true
     try {
       while (pending.length) {
-        const record = pending.shift()!
-        await postWithRetry([record]) // one in flight at a time
+        // Small flush window: let a burst of step reports accumulate so they coalesce into one
+        // POST instead of one request per step.
+        if (pending.length < BATCH_MAX) await delay(FLUSH_WINDOW_MS)
+        const batch = pending.splice(0, BATCH_MAX) // up to BATCH_MAX records per request
+        if (!batch.length) continue
+        await postWithRetry(batch) // one batch in flight at a time
       }
     } finally {
       draining = false
@@ -105,7 +261,7 @@ export namespace AiUsage {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         // Transmission log: address + method + time (no payload).
-        log.info("sending", { method: "POST", url, at: new Date().toISOString(), attempt })
+        log.info("sending", { method: "POST", url, at: new Date().toISOString(), attempt, count: records.length })
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `token ${token}` },

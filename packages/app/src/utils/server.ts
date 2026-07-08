@@ -25,7 +25,7 @@ export function createSdkForServer({
 export type DevServerRestartResult = {
   status: "already_running" | "started" | "failed" | "no_command" | "already_starting"
   url?: string
-  port: number
+  port?: number
   ms: number
   reason?: string
 }

@@ -41,6 +41,8 @@ import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Flag } from "./flag/flag"
 
+// Note: Sentry 의 onUncaughtExceptionIntegration/onUnhandledRejectionIntegration 가
+// 기본 활성화되어 있어 process-level 예외는 자동 보고된다. 여기서는 로그만 남긴다.
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
     e: errorMessage(e),

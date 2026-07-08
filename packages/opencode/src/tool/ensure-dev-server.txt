@@ -12,13 +12,13 @@
 
 - `cmd`: 실제 dev 서버 명령. 아래 예시 참고. `nohup` · `&` · `>` 같은 백그라운드 처리는 도구가 알아서 한다.
 - `cwd`: 프로젝트 디렉토리. 생략하면 현재 instance 디렉토리.
-- `port`: 생략하면 3000. OpenCode 환경에서는 3000 고정.
+- `port`: 본행사(project-directory) 3000 / 튜토리얼(tutorial-directory) 3001. cwd 기준으로 도구가 강제하므로 `cmd` 의 포트 숫자를 여기에 맞춘다. 어긋나면 `failed` 의 `reason` 에 요구 포트가 안내된다.
 - `ready_timeout_ms`: LISTEN 시작까지의 최대 대기 시간. 생략하면 15000.
 
-## 명령 예시 (`cmd` 인자 값)
+## 명령 예시 (`cmd` 인자 값 — 포트 숫자는 위 규칙에 맞게)
 
 - 정적 HTML/CSS/JS: `npx --yes serve -l 3000 .`
-- Vite / CRA: `npm run dev -- --host 0.0.0.0 --port 3000`
+- Vite / CRA: `npm run dev -- --host 0.0.0.0 --port 3000 --strictPort` (vite 는 포트 점유 시 조용히 다음 포트로 옮기므로 `--strictPort` 필수)
 - Next.js: `npm run dev -- --hostname 0.0.0.0 --port 3000`
 
 `browser-sync` 는 사용하지 않는다. 미리보기 리로드는 앱이 파일 변경을 감지해 자체 처리한다.
