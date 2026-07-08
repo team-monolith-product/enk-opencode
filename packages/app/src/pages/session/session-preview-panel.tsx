@@ -25,6 +25,21 @@ const RETRY_COOLDOWN_MS = 1500
 // 상태가 starting(기동 중)일 때 자동 재폴링 간격 — ready/errored 로 전이되면 자동 종료된다.
 const STARTING_POLL_MS = 2000
 
+// previewUrl 에 실제로 닿는지 — "iframe 을 띄울지"의 진짜 기준.
+// 서버측 probePort(127.0.0.1:PORT)/self-probe 는 배포 환경에서 CHP 라우팅과 어긋날 수 있어(서버는
+// 못 잡는데 클라는 CHP 경유로 닿음), 서버가 "안 뜸"이라 해도 클라가 닿으면 띄운다.
+// cross-origin 이라 CORS 로 막히면(throw) 낙관적으로 true — iframe 은 CORS 없이 로드되니 일단 띄우고
+// 브릿지 연결/에러(A 오버레이)로 뒤에서 판단한다. 확실한 다운(503)만 false.
+async function previewReachable(url: string | undefined): Promise<boolean> {
+  if (!url) return false
+  try {
+    const res = await fetch(url, { cache: "no-store", mode: "cors" })
+    return res.status !== 503
+  } catch {
+    return true
+  }
+}
+
 export function createSessionPreview() {
   const sdk = useSDK()
   const sync = useSync()
@@ -78,17 +93,30 @@ export function createSessionPreview() {
     let pollTimer: ReturnType<typeof setTimeout> | undefined
     const poll = async () => {
       if (disposed) return
+      let server: DevServerStatusResult | undefined
       try {
-        const s = await getDevServerStatus({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
-        if (disposed) return
-        setPreviewStatus(s)
-        // 기동 중이면 곧 전이되므로 짧게 재폴링(ready/errored 로 바뀌면 자동 종료).
-        if (s.state === "starting") {
-          if (pollTimer) clearTimeout(pollTimer)
-          pollTimer = setTimeout(() => void poll(), STARTING_POLL_MS)
-        }
+        server = await getDevServerStatus({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
       } catch {
         /* 네트워크 실패는 무시 — 다음 트리거(session.idle 등)에서 재시도 */
+      }
+      if (disposed) return
+
+      let next: DevServerStatusResult
+      if (!server || server.state === "starting" || server.state === "ready") {
+        // 서버 판정이 확실하거나(ready/starting) status 호출이 실패한 경우는 그대로 둔다.
+        next = server ?? { state: "starting" }
+      } else {
+        // 서버는 안 뜬 걸로 보지만(none/startable/errored) probePort/self-probe 가 CHP 라우팅과 어긋날 수 있다.
+        // 클라가 previewUrl 에 실제로 닿으면 iframe 을 띄워 브릿지 연결·에러(A 오버레이)로 판단하게 한다.
+        next = (await previewReachable(previewUrl())) ? { state: "ready", port: server.port } : server
+        if (disposed) return
+      }
+
+      setPreviewStatus(next)
+      // 기동 중이면 곧 전이되므로 짧게 재폴링(ready/errored 로 바뀌면 자동 종료).
+      if (next.state === "starting") {
+        if (pollTimer) clearTimeout(pollTimer)
+        pollTimer = setTimeout(() => void poll(), STARTING_POLL_MS)
       }
     }
     recheck = () => void poll()
