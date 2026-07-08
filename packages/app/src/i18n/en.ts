@@ -317,7 +317,7 @@ export const dict = {
   "prompt.toast.docEmpty.title": "Nothing to send",
   "prompt.toast.docEmpty.description": "Add text to the document before sending.",
   "prompt.toast.docTooLong.title": "Prompt too long",
-  "prompt.toast.docTooLong.description": "Keep the document under {max} characters before sending.",
+  "prompt.toast.docTooLong.description": "Keep the document under {{max}} characters before sending.",
   "prompt.toast.docRotated.title": "New collaboration document",
   "prompt.toast.docRotated.description": "Prompt sent. Open doc mode to edit {docID}.",
   "prompt.toast.docAdvanceFailed.title": "Could not start new document",
