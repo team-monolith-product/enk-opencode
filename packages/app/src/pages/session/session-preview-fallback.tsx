@@ -7,6 +7,9 @@ import { SessionPreviewMascot } from "./session-preview-mascot"
 
 const round = Math.round
 
+// 보조 안내 문구(hint)와 "또는 AI에게 요청" 라벨이 정확히 같은 폰트·크기·색을 쓰도록 공유한다.
+const HINT_TEXT_STYLE = { "font-size": "11.5px", color: "var(--app-muted)" } as const
+
 // ── 곡괭이 포인터 기하 ──
 // 마스코트 곡괭이 SVG(viewBox 84x200, 머리 위·자루 아래)를 grip(손잡이) 기준으로 기울여,
 // 머리의 뾰족한 끝(TIP)이 마우스 지점에 오도록 배치한다. 스윙은 grip을 축으로 회전.
@@ -252,7 +255,7 @@ export function SessionPreviewFallback(props: {
         </span>
         <div class="flex flex-col items-center gap-[5px] min-w-0 break-words">
           <span style={{ "font-size": "13.5px", "font-weight": "600", color: "var(--app-ink)" }}>{title()}</span>
-          <span style={{ "font-size": "11.5px", color: "var(--app-muted)" }}>{hint()}</span>
+          <span style={HINT_TEXT_STYLE}>{hint()}</span>
         </div>
         {/* 수동 재시도 — startable·errored 에서만 노출(starting/none 은 소용없어 숨김).
             연타는 상위 restart() 의 in-flight 잠금+쿨다운이 막는다. */}
@@ -271,9 +274,7 @@ export function SessionPreviewFallback(props: {
         {/* 또는 AI 에게 수정 요청 — 문장 칩을 누르면 복사, 옆 버튼도 복사. */}
         <Show when={showRetry()}>
           <div class="mt-1 flex w-full max-w-100 flex-col items-center gap-1">
-            <span style={{ "font-size": "11.5px", color: "var(--app-muted)" }}>
-              {language.t("session.preview.askAi.label")}
-            </span>
+            <span style={HINT_TEXT_STYLE}>{language.t("session.preview.askAi.label")}</span>
             <div class="flex w-full items-stretch gap-1">
               <button
                 type="button"
