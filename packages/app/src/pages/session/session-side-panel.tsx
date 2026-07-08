@@ -286,6 +286,9 @@ export function SessionSidePanel(props: {
               tabs().setActive("preview")
               preview.goHome()
             }}
+            showErrorButton={preview.showErrorButton()}
+            errorCount={preview.errorCount()}
+            onReopenError={preview.reopenError}
           />
           <div class="flex-1 min-h-0 flex">
             <div
@@ -399,6 +402,11 @@ export function SessionSidePanel(props: {
                             httpStatus={preview.previewStatus().httpStatus}
                             onRetry={preview.restart}
                             retrying={preview.restarting()}
+                            showError={preview.showErrorOverlay()}
+                            errorMessage={preview.latestError()?.message}
+                            errorCount={preview.errorCount()}
+                            onErrorReload={preview.hardReload}
+                            onErrorDismiss={preview.dismissError}
                           />
                         </Show>
                       </Tabs.Content>

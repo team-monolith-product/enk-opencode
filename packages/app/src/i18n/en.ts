@@ -579,6 +579,9 @@ export const dict = {
   "session.preview.startable.prompt": "The preview isn't running. Please find out why and fix it so it runs.",
   "session.preview.errored.prompt":
     "The preview is throwing an error. Please find out why and fix it so it runs correctly.",
+  "session.preview.clientError.title": "The preview hit a runtime error",
+  "session.preview.clientError.dismiss": "Dismiss",
+  "session.preview.clientError.reopen": "Show preview error",
   "session.panel.reviewAndFiles": "Review and files",
   "session.review.filesChanged": "{{count}} Files Changed",
   "session.review.change.one": "Change",

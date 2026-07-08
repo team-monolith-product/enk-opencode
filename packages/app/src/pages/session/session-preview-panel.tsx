@@ -189,6 +189,34 @@ export function createSessionPreview() {
   // 미리보기 결과물(iframe)과 penpal 로 연결되는 부모측 브릿지. previewUrl 을 오리진으로 사용.
   const bridge = createPreviewBridge({ origin: previewUrl })
 
+  // ── 클라이언트 런타임 에러 오버레이 ──
+  // 브릿지가 iframe 안의 window.error/unhandledrejection 을 onError 로 받아 errors() 에 쌓는다.
+  // HTTP 는 정상(ready)인데 JS 가 터져 백지가 되는 케이스 — self-probe 로는 못 잡고 이 신호로만 안다.
+  // ready 상태에서 에러가 있으면 iframe 위에 배너를 띄우고, × 로 내리면 헤더 버튼만 남긴다.
+  const [errorDismissed, setErrorDismissed] = createSignal(false)
+  const errorCount = () => bridge.errors().length
+  const latestError = () => bridge.errors().at(-1)
+  const hasClientError = () => previewReady() && errorCount() > 0
+  const showErrorOverlay = () => hasClientError() && !errorDismissed()
+  const showErrorButton = () => hasClientError() && errorDismissed()
+  const dismissError = () => setErrorDismissed(true)
+  const reopenError = () => setErrorDismissed(false)
+  // 페이지가 새로 로드/이동되면 이전 에러는 무의미 — 지우고 dismiss 도 리셋해 새 페이지는 깨끗하게 시작.
+  const clearClientErrors = () => {
+    bridge.clearLogs()
+    setErrorDismissed(false)
+  }
+  // reloadCount 가 바뀌면(새로고침 버튼·session.idle 리로드·재시작) iframe 이 새로 로드되므로 에러를 비운다.
+  let skipFirstErrorClear = true
+  createEffect(() => {
+    reloadCount()
+    if (skipFirstErrorClear) {
+      skipFirstErrorClear = false
+      return
+    }
+    clearClientErrors()
+  })
+
   // 자식 라우팅 미러 — 뒤로/앞으로 버튼 활성 판단용 논리 history 스택.
   // 자식 history 가 진실원이고(back/forward 는 자식이 실행), 이 스택은 거울일 뿐이다.
   // location() 만 반응형으로 읽고 스택/커서는 일반 변수로 둬 자기참조 재실행을 피한다.
@@ -244,12 +272,14 @@ export function createSessionPreview() {
   const goForward = () => void bridge.child()?.forward()
   // 홈 — 리로드 없이 "/" 로 소프트 라우팅. 미연결이면 src 재로드(루트)로 폴백.
   const goHome = () => {
+    clearClientErrors()
     const child = bridge.child()
     if (child) void child.routeTo("/")
     else reload()
   }
   // 새로고침 — iframe 컨텐츠에 진짜 리로드 명령. 미연결이면 src 재탐색으로 폴백.
   const hardReload = () => {
+    clearClientErrors()
     const child = bridge.child()
     if (child) void child.reload()
     else reload()
@@ -258,6 +288,7 @@ export function createSessionPreview() {
   const navigatePath = (p: string) => {
     const base = previewUrl()
     if (!base) return
+    clearClientErrors()
     try {
       void bridge.child()?.navigate(resolveNavigatePath(base, p))
     } catch {
@@ -284,6 +315,12 @@ export function createSessionPreview() {
     goBack,
     goForward,
     navigatePath,
+    showErrorOverlay,
+    showErrorButton,
+    errorCount,
+    latestError,
+    dismissError,
+    reopenError,
   }
 }
 
@@ -294,9 +331,15 @@ export function SessionPreviewPanel(props: {
   retrying?: boolean
   state?: DevServerStatusResult["state"]
   httpStatus?: number
+  showError?: boolean
+  errorMessage?: string
+  errorCount?: number
+  onErrorReload?: () => void
+  onErrorDismiss?: () => void
 }) {
+  const language = useLanguage()
   return (
-    <div data-component="codle-preview-panel" class="size-full min-w-0 overflow-hidden rounded-none">
+    <div data-component="codle-preview-panel" class="relative size-full min-w-0 overflow-hidden rounded-none">
       <Show
         when={props.src}
         fallback={
@@ -316,6 +359,36 @@ export function SessionPreviewPanel(props: {
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         )}
+      </Show>
+
+      {/* 클라이언트 런타임 에러 배너 — iframe 위 상단. 렌더된 화면은 그대로 두고 알림만 덧씌운다.
+          × 로 내리면 헤더의 경고 버튼으로 옮겨가고, 그 버튼을 누르면 다시 이 배너가 뜬다. */}
+      <Show when={props.showError}>
+        <div class="absolute inset-x-0 top-0 z-10 flex items-center gap-2 px-3 py-2 bg-background-base border-b border-border-weak-base shadow-sm">
+          <Icon name="warning" size="small" class="shrink-0 text-text-danger-base" />
+          <span class="min-w-0 flex-1 truncate text-12-regular text-text-base">
+            {props.errorMessage || language.t("session.preview.clientError.title")}
+          </span>
+          <Show when={(props.errorCount ?? 0) > 1}>
+            <span class="shrink-0 text-12-regular text-text-weak">×{props.errorCount}</span>
+          </Show>
+          <button
+            type="button"
+            onClick={() => props.onErrorReload?.()}
+            class="shrink-0 inline-flex items-center gap-1 h-6 px-2 rounded-md text-12-medium text-text-base bg-surface-raised-base-hover hover:bg-surface-base-active transition-colors"
+          >
+            <Icon name="refresh" size="small" />
+            {language.t("session.preview.retry.button")}
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onErrorDismiss?.()}
+            aria-label={language.t("session.preview.clientError.dismiss")}
+            class="shrink-0 inline-flex size-6 items-center justify-center rounded-md text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+          >
+            <Icon name="close-small" size="small" />
+          </button>
+        </div>
       </Show>
     </div>
   )
@@ -339,6 +412,10 @@ export function SessionBrowserChrome(props: {
   onReload: () => void
   onHome?: () => void
   previewReady?: boolean
+  /** 클라이언트 에러 오버레이를 내렸을 때만 노출 — 누르면 오버레이를 다시 띄운다. */
+  showErrorButton?: boolean
+  errorCount?: number
+  onReopenError?: () => void
 }) {
   const layout = useLayout()
   const language = useLanguage()
@@ -524,8 +601,21 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 우 그룹 — 새 탭에서 열기 + 주소 복사 */}
+      {/* 우 그룹 — (에러 시)오류 재표시 + 새 탭에서 열기 + 주소 복사 */}
       <div class="flex shrink-0 items-center justify-end gap-1">
+        <Show when={props.showErrorButton}>
+          <button
+            type="button"
+            aria-label={language.t("session.preview.clientError.reopen")}
+            onClick={() => props.onReopenError?.()}
+            class="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-text-danger-base hover:bg-surface-raised-base-hover transition-colors"
+          >
+            <Icon name="warning" size="small" />
+            <Show when={(props.errorCount ?? 0) > 1}>
+              <span class="text-12-regular">{props.errorCount}</span>
+            </Show>
+          </button>
+        </Show>
         <button
           type="button"
           class={ghostBtn}
