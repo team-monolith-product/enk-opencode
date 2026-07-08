@@ -293,7 +293,7 @@ export function SessionBrowserChrome(props: {
   return (
     <div
       data-component="codle-browser-chrome"
-      class="flex items-center gap-2.5 px-3 h-9 shrink-0 border-b border-border-weaker-base bg-background-base"
+      class="@container flex items-center gap-2.5 px-3 h-9 shrink-0 border-b border-border-weaker-base bg-background-base"
     >
       {/* 좌 그룹 — 트래픽 라이트 + 파일 탐색기 토글 + 뒤로/앞으로 */}
       <div class="flex shrink-0 items-center gap-2.5">
@@ -339,9 +339,11 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 중앙 — 주소 pill (홈 · 주소 · 새로고침), 360px 고정·좁은 크롬에서는 max-w-full 로 축소 */}
+      {/* 중앙 — 주소 pill (홈 · 주소 · 새로고침), 360px 고정·좁은 크롬에서는 max-w-full 로 축소.
+          크롬 폭이 임계치(400px) 아래로 좁아지면 pill 이 뭉개져 보이므로 아예 렌더링을 내린다.
+          flex-1 래퍼는 남겨 좌/우 버튼 그룹의 양끝 정렬을 유지한다(@container 는 루트 크롬). */}
       <div class="flex flex-1 min-w-0 items-center justify-center">
-        <div class="flex h-6 w-[360px] max-w-full min-w-0 items-center gap-1 px-1 rounded-md border border-border-weak-base bg-background-stronger">
+        <div class="@max-[400px]:hidden flex h-6 w-[360px] max-w-full min-w-0 items-center gap-1 px-1 rounded-md border border-border-weak-base bg-background-stronger">
           <button
             type="button"
             class={ghostBtn + " !size-5"}
