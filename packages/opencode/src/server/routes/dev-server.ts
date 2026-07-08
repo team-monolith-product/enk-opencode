@@ -3,7 +3,7 @@ import { describeRoute, resolver } from "hono-openapi"
 import z from "zod"
 import { lazy } from "../../util/lazy"
 import { Instance } from "../../project/instance"
-import { DevServerReplay } from "../../enk/dev-server-replay"
+import { DevServerReplay, probePort } from "../../enk/dev-server-replay"
 import { serveUrl } from "../../tool/ensure-dev-server"
 
 const RESTART_READY_TIMEOUT_MS = 15000
@@ -12,7 +12,7 @@ async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal):
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (abort.aborted) return false
-    if (await DevServerReplay.probePort(port)) return true
+    if (await probePort(port)) return true
     await new Promise((r) => setTimeout(r, 300))
   }
   return false
@@ -45,7 +45,7 @@ async function restart(abort: AbortSignal): Promise<RestartResult> {
   if (guard.launching) return { status: "already_starting", port: record.port, ms: ms() }
   guard.launching = true
   try {
-    if (await DevServerReplay.probePort(record.port)) {
+    if (await probePort(record.port)) {
       return { status: "already_running", url: serveUrl(record.port), port: record.port, ms: ms() }
     }
     DevServerReplay.launch(record.cmd, record.cwd)
