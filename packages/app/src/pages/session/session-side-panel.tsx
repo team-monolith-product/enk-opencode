@@ -286,6 +286,7 @@ export function SessionSidePanel(props: {
               tabs().setActive("preview")
               preview.goHome()
             }}
+            hasError={preview.hasClientError()}
             showErrorButton={preview.showErrorButton()}
             errorCount={preview.errorCount()}
             onReopenError={preview.reopenError}

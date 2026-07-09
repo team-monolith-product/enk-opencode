@@ -344,6 +344,7 @@ export function createSessionPreview() {
     goBack,
     goForward,
     navigatePath,
+    hasClientError,
     showErrorOverlay,
     showErrorButton,
     errorCount,
@@ -416,14 +417,19 @@ export function SessionPreviewPanel(props: {
       {/* 클라이언트 런타임 에러 카드 — iframe(흰 화면일 수 있음) 위 가운데. 렌더된 화면은 그대로 두고 덧씌운다.
           × 로 내리면 헤더의 경고 버튼으로 옮겨가고, 그 버튼을 누르면 다시 이 카드가 뜬다. */}
       <Show when={props.showError}>
+        {/* 스크림 클릭 = 카드 닫기(미리보기 안에서만). 카드 내부 클릭은 stopPropagation 으로 유지. */}
         <div
           class="absolute inset-0 z-10 flex items-center justify-center p-5"
           style={{ background: "rgba(0,0,0,0.38)" }}
+          onClick={() => props.onErrorDismiss?.()}
         >
-          <div class="flex w-full max-w-[470px] max-h-[330px] flex-col overflow-hidden rounded-xl border border-border-weak-base bg-background-base shadow-lg">
-            {/* 헤더 — 오류 개수 + 다시 시도(리로드) + 닫기 */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            class="flex w-full max-w-[470px] max-h-[330px] flex-col overflow-hidden rounded-xl border border-critical-base bg-background-base shadow-lg"
+          >
+            {/* 헤더 — 오류 개수 + 새로고침(리로드) + 닫기 */}
             <div class="flex shrink-0 items-center gap-2 px-3.5 py-2.5 border-b border-border-weak-base">
-              <Icon name="warning" size="small" class="shrink-0 text-text-danger-base" />
+              <Icon name="warning" size="small" class="shrink-0 text-icon-critical-base" />
               <span class="text-12-medium text-text-base">
                 {language.t("session.preview.clientError.title", { count: props.errorCount ?? 0 })}
               </span>
@@ -431,7 +437,7 @@ export function SessionPreviewPanel(props: {
               <button
                 type="button"
                 onClick={() => props.onErrorReload?.()}
-                class="inline-flex items-center gap-1 h-6 px-2.5 rounded-md text-12-medium text-text-base bg-surface-raised-base-hover hover:bg-surface-base-active transition-colors"
+                class="inline-flex items-center gap-1 h-6 px-2.5 rounded-md border border-border-weak-base text-12-medium text-text-base hover:bg-surface-raised-base-hover transition-colors"
               >
                 <Icon name="refresh" size="small" />
                 {language.t("session.preview.clientError.reload")}
@@ -440,23 +446,23 @@ export function SessionPreviewPanel(props: {
                 type="button"
                 onClick={() => props.onErrorDismiss?.()}
                 aria-label={language.t("session.preview.clientError.dismiss")}
-                class="inline-flex size-6 items-center justify-center rounded-md text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+                class="inline-flex size-6 items-center justify-center rounded-md border border-border-weak-base text-icon-base hover:bg-surface-raised-base-hover transition-colors"
               >
                 <Icon name="close-small" size="small" />
               </button>
             </div>
 
-            {/* 오류 목록(스크롤) — 각 항목: 메시지 + source:line:col + 스택 */}
+            {/* 오류 목록(스크롤) — 각 항목: 메시지(최대 3줄) + source:line:col(줄바꿈) + 스택 */}
             <div class="min-h-0 flex-1 overflow-y-auto">
               <For each={props.errors}>
                 {(e) => (
                   <div class="px-3.5 py-2.5 border-b border-border-weak-base last:border-b-0">
-                    <div class="text-12-medium text-text-danger-base" style={{ "line-height": "1.4" }}>
+                    <div class="text-12-medium text-icon-critical-base line-clamp-3" style={{ "line-height": "1.4" }}>
                       {e.message}
                     </div>
                     <Show when={e.source}>
                       <div
-                        class="mt-0.5 text-text-weak"
+                        class="mt-0.5 break-all text-text-weak"
                         style={{ "font-family": "var(--font-family-mono)", "font-size": "11.5px" }}
                       >
                         {e.source}
@@ -491,8 +497,8 @@ export function SessionPreviewPanel(props: {
                 value={askText()}
                 onInput={(e) => setAskText(e.currentTarget.value)}
                 placeholder={language.t("session.preview.clientError.placeholder")}
-                class="min-w-0 flex-1 h-7 px-2.5 rounded-md text-12-regular text-text-base bg-background-stronger outline-none"
-                style={{ border: "1px solid var(--border-weak-base)" }}
+                class="min-w-0 flex-1 h-7 rounded-md text-12-regular text-text-base bg-background-stronger outline-none"
+                style={{ border: "1px solid var(--border-weak-base)", padding: "0 10px" }}
               />
               <button
                 type="button"
@@ -529,6 +535,8 @@ export function SessionBrowserChrome(props: {
   onReload: () => void
   onHome?: () => void
   previewReady?: boolean
+  /** 클라 에러가 있으면(카드 열림/내림 무관) 헤더를 빨간(critical) 톤으로 강조. */
+  hasError?: boolean
   /** 클라이언트 에러 오버레이를 내렸을 때만 노출 — 누르면 오버레이를 다시 띄운다. */
   showErrorButton?: boolean
   errorCount?: number
@@ -592,7 +600,11 @@ export function SessionBrowserChrome(props: {
   return (
     <div
       data-component="codle-browser-chrome"
-      class="flex items-center gap-2.5 px-3 h-9 shrink-0 border-b border-border-weaker-base bg-background-base"
+      class="flex items-center gap-2.5 px-3 h-9 shrink-0 border-b transition-colors"
+      classList={{
+        "border-border-weaker-base bg-background-base": !props.hasError,
+        "border-critical-base bg-surface-critical-base": props.hasError,
+      }}
     >
       {/* 좌 그룹 — 트래픽 라이트 + 파일 탐색기 토글 + 뒤로/앞으로 */}
       <div class="flex shrink-0 items-center gap-2.5">
@@ -725,7 +737,7 @@ export function SessionBrowserChrome(props: {
             type="button"
             aria-label={language.t("session.preview.clientError.reopen")}
             onClick={() => props.onReopenError?.()}
-            class="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-text-danger-base hover:bg-surface-raised-base-hover transition-colors"
+            class="inline-flex h-6 items-center gap-1 rounded-md border border-critical-base bg-surface-critical-base px-1.5 text-icon-critical-base transition-colors"
           >
             <Icon name="warning" size="small" />
             <Show when={(props.errorCount ?? 0) > 1}>
