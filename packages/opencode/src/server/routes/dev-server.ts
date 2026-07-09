@@ -18,9 +18,43 @@ async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal):
   return false
 }
 
-// 연타/멀티탭 대비 in-flight 가드(디렉토리별). read→set 사이에 await 가 없어 동시 요청 둘째는
-// 반드시 already_starting 으로 빠진다(Node 단일 스레드라 이 구간은 원자적).
-const getGuard = Instance.state<{ launching: boolean }>(() => ({ launching: false }))
+// 연타/멀티탭/자동기동 대비 상태(디렉토리별). launching read→set 사이에 await 가 없어 동시 요청 둘째는
+// 반드시 무시된다(Node 단일 스레드라 이 구간은 원자적). cooldownUntil 은 기동 실패 후 자동 재기동 스톰을 막는다.
+const getGuard = Instance.state<{ launching: boolean; cooldownUntil: number }>(() => ({
+  launching: false,
+  cooldownUntil: 0,
+}))
+
+// 기동 시도(성공/실패) 후 이 시간 동안 자동 재기동을 멈춘다. 수동 restart 는 이 쿨다운을 무시하고 즉시 가능.
+const AUTO_LAUNCH_COOLDOWN_MS = 60000
+// 자동 기동은 이를 촉발한 status 요청보다 오래 살아야 하므로, 요청 abort 대신 절대 취소되지 않는 시그널을 쓴다.
+const NEVER_ABORT = new AbortController().signal
+
+// launching 을 내리고 쿨다운을 건다 — 수동/자동 기동 공통 뒷정리.
+function finishLaunch() {
+  const g = getGuard()
+  g.launching = false
+  g.cooldownUntil = Date.now() + AUTO_LAUNCH_COOLDOWN_MS
+}
+
+// 기록은 있는데 dev 서버가 죽어 있으면 서버가 스스로 1회 기동한다(fire-and-forget).
+// 원자적 가드: launching 체크→세팅 사이에 await 가 없어, 동시에 들어온 여러 status 요청 중 하나만 spawn 한다.
+// 연속 실패는 cooldownUntil 로 막는다(안 그러면 죽은 채로 waitForPort 타임아웃마다 무한 재spawn).
+function autoLaunch(record: DevServerReplay.State) {
+  const g = getGuard()
+  if (g.launching || Date.now() < g.cooldownUntil) return
+  g.launching = true
+  void (async () => {
+    try {
+      DevServerReplay.launch(record.cmd, record.cwd)
+      await waitForPort(record.port, RESTART_READY_TIMEOUT_MS, NEVER_ABORT)
+    } catch {
+      /* spawn 실패 등은 무시 — finally 의 쿨다운이 재시도를 막는다 */
+    } finally {
+      finishLaunch()
+    }
+  })()
+}
 
 type RestartResult = {
   status: "already_running" | "started" | "failed" | "no_command" | "already_starting"
@@ -60,7 +94,7 @@ async function restart(abort: AbortSignal): Promise<RestartResult> {
     }
     return { status: "started", url: serveUrl(record.port), port: record.port, ms: ms() }
   } finally {
-    getGuard().launching = false
+    finishLaunch()
   }
 }
 
@@ -88,7 +122,11 @@ async function status(): Promise<StatusResult> {
   const port = record?.port ?? 3000
   if (getGuard().launching) return { state: "starting", port }
   if (!(await probePort(port))) {
-    return record ? { state: "startable", port } : { state: "none" }
+    if (!record) return { state: "none" }
+    // 기록 있는데 죽음 → 서버가 스스로 기동(동시/중복은 가드로 무시, 실패 스톰은 쿨다운으로 방지).
+    autoLaunch(record)
+    // 방금 기동을 시작했으면 starting, 쿨다운 중이라 안 띄웠으면 startable(수동 재시도 유도).
+    return { state: getGuard().launching ? "starting" : "startable", port }
   }
   const httpStatus = await selfProbeHttp(port)
   if (httpStatus === undefined) return { state: "starting", port }
