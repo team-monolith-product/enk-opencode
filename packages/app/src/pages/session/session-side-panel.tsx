@@ -289,7 +289,12 @@ export function SessionSidePanel(props: {
             showErrorButton={preview.showErrorButton()}
             errorCount={preview.errorCount()}
             errorOpen={preview.showErrorOverlay()}
-            onToggleError={preview.toggleError}
+            onToggleError={() => {
+              // 미리보기 탭이 아니면(다른 파일 보는 중) 오버레이는 렌더링조차 안 되므로 클릭을 무효화한다.
+              // 버튼 렌더링은 그대로 두고 동작만 막는다.
+              if (activeTab() !== "preview") return
+              preview.toggleError()
+            }}
           />
           <div class="flex-1 min-h-0 flex">
             <div
