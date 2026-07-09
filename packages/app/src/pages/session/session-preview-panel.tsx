@@ -454,8 +454,9 @@ export function SessionPreviewPanel(props: {
               </button>
             </div>
 
-            {/* 오류 목록(스크롤) — 각 항목: 메시지(최대 3줄) + source:line:col(줄바꿈) + 스택 */}
-            <div class="min-h-0 flex-1 overflow-y-auto">
+            {/* 오류 목록(스크롤) — 각 항목: 메시지(최대 3줄) + source:line:col(줄바꿈) + 스택.
+                본문 배경은 채팅창(background-stronger)과 동일하게 — 헤더/푸터(background-base)와 대비. */}
+            <div class="min-h-0 flex-1 overflow-y-auto bg-background-stronger">
               <For each={props.errors}>
                 {(e) => (
                   <div class="px-3.5 py-2.5 border-b border-border-weak-base last:border-b-0">
@@ -474,7 +475,7 @@ export function SessionPreviewPanel(props: {
                     </Show>
                     <Show when={e.stack}>
                       <pre
-                        class="mt-1.5 overflow-x-auto rounded-md bg-background-stronger px-2 py-1.5 text-text-weak"
+                        class="mt-1.5 overflow-x-auto rounded-md bg-background-base px-2 py-1.5 text-text-weak"
                         style={{
                           "font-family": "var(--font-family-mono)",
                           "font-size": "11.5px",
