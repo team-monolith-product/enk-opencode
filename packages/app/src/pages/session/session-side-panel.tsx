@@ -288,7 +288,8 @@ export function SessionSidePanel(props: {
             }}
             showErrorButton={preview.showErrorButton()}
             errorCount={preview.errorCount()}
-            onReopenError={preview.reopenError}
+            errorOpen={preview.showErrorOverlay()}
+            onToggleError={preview.toggleError}
           />
           <div class="flex-1 min-h-0 flex">
             <div

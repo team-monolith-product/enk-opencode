@@ -227,9 +227,11 @@ export function createSessionPreview() {
   const latestError = () => bridge.errors().at(-1)
   const hasClientError = () => previewReady() && errorCount() > 0
   const showErrorOverlay = () => hasClientError() && !errorDismissed()
-  const showErrorButton = () => hasClientError() && errorDismissed()
+  // 에러가 있으면 헤더 버튼은 항상 노출(카드 열림/닫힘 무관) — 클릭하면 카드를 토글한다.
+  const showErrorButton = () => hasClientError()
   const dismissError = () => setErrorDismissed(true)
   const reopenError = () => setErrorDismissed(false)
+  const toggleError = () => setErrorDismissed((d) => !d)
   // 페이지가 새로 로드/이동되면 이전 에러는 무의미 — 지우고 dismiss 도 리셋해 새 페이지는 깨끗하게 시작.
   const clearClientErrors = () => {
     bridge.clearLogs()
@@ -351,6 +353,7 @@ export function createSessionPreview() {
     latestError,
     dismissError,
     reopenError,
+    toggleError,
   }
 }
 
@@ -534,10 +537,12 @@ export function SessionBrowserChrome(props: {
   onReload: () => void
   onHome?: () => void
   previewReady?: boolean
-  /** 클라이언트 에러 오버레이를 내렸을 때만 노출 — 누르면 오버레이를 다시 띄운다. */
+  /** 클라 에러가 있으면 항상 노출되는 경고 버튼 — 누르면 에러 카드를 토글한다. */
   showErrorButton?: boolean
   errorCount?: number
-  onReopenError?: () => void
+  /** 에러 카드가 현재 열려 있는지(버튼 active 표시·aria-expanded 용). */
+  errorOpen?: boolean
+  onToggleError?: () => void
 }) {
   const layout = useLayout()
   const language = useLanguage()
@@ -729,8 +734,13 @@ export function SessionBrowserChrome(props: {
           <button
             type="button"
             aria-label={language.t("session.preview.clientError.reopen")}
-            onClick={() => props.onReopenError?.()}
-            class="inline-flex h-6 items-center gap-1 rounded-md border border-critical-base bg-surface-critical-base px-1.5 text-icon-critical-base transition-colors"
+            aria-expanded={props.errorOpen}
+            onClick={() => props.onToggleError?.()}
+            class="inline-flex h-6 items-center gap-1 rounded-md border border-critical-base px-1.5 text-icon-critical-base transition-colors"
+            classList={{
+              "bg-surface-critical-base": props.errorOpen,
+              "hover:bg-surface-critical-base": !props.errorOpen,
+            }}
           >
             <Icon name="warning" size="small" />
             <Show when={(props.errorCount ?? 0) > 1}>
