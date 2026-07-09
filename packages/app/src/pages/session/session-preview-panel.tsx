@@ -344,7 +344,6 @@ export function createSessionPreview() {
     goBack,
     goForward,
     navigatePath,
-    hasClientError,
     showErrorOverlay,
     showErrorButton,
     errorCount,
@@ -535,8 +534,6 @@ export function SessionBrowserChrome(props: {
   onReload: () => void
   onHome?: () => void
   previewReady?: boolean
-  /** 클라 에러가 있으면(카드 열림/내림 무관) 헤더를 빨간(critical) 톤으로 강조. */
-  hasError?: boolean
   /** 클라이언트 에러 오버레이를 내렸을 때만 노출 — 누르면 오버레이를 다시 띄운다. */
   showErrorButton?: boolean
   errorCount?: number
@@ -600,11 +597,7 @@ export function SessionBrowserChrome(props: {
   return (
     <div
       data-component="codle-browser-chrome"
-      class="flex items-center gap-2.5 px-3 h-9 shrink-0 border-b transition-colors"
-      classList={{
-        "border-border-weaker-base bg-background-base": !props.hasError,
-        "border-critical-base bg-surface-critical-base": props.hasError,
-      }}
+      class="flex items-center gap-2.5 px-3 h-9 shrink-0 border-b border-border-weaker-base bg-background-base"
     >
       {/* 좌 그룹 — 트래픽 라이트 + 파일 탐색기 토글 + 뒤로/앞으로 */}
       <div class="flex shrink-0 items-center gap-2.5">
