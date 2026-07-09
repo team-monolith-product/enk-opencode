@@ -584,6 +584,7 @@ export const dict = {
   "session.preview.clientError.title": "{{count}} error(s) in the preview",
   "session.preview.clientError.dismiss": "Dismiss",
   "session.preview.clientError.reopen": "Show preview error",
+  "session.preview.clientError.reload": "Refresh",
   "session.preview.clientError.askAi": "Ask the AI",
   "session.preview.clientError.placeholder": "Find and fix the error",
   "session.preview.clientError.copy": "Copy with errors",

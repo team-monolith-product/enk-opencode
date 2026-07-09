@@ -510,6 +510,7 @@ export const dict = {
   "session.preview.clientError.title": "미리보기에서 오류 {{count}}개",
   "session.preview.clientError.dismiss": "닫기",
   "session.preview.clientError.reopen": "미리보기 오류 보기",
+  "session.preview.clientError.reload": "새로고침",
   "session.preview.clientError.askAi": "AI에게 요청",
   "session.preview.clientError.placeholder": "오류를 확인하고 고쳐 주세요",
   "session.preview.clientError.copy": "에러와 함께 복사",

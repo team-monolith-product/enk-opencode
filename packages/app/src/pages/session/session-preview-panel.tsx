@@ -434,7 +434,7 @@ export function SessionPreviewPanel(props: {
                 class="inline-flex items-center gap-1 h-6 px-2.5 rounded-md text-12-medium text-text-base bg-surface-raised-base-hover hover:bg-surface-base-active transition-colors"
               >
                 <Icon name="refresh" size="small" />
-                {language.t("session.preview.retry.button")}
+                {language.t("session.preview.clientError.reload")}
               </button>
               <button
                 type="button"
