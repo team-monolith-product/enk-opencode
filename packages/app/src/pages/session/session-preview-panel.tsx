@@ -491,7 +491,8 @@ export function SessionPreviewPanel(props: {
                 value={askText()}
                 onInput={(e) => setAskText(e.currentTarget.value)}
                 placeholder={language.t("session.preview.clientError.placeholder")}
-                class="min-w-0 flex-1 h-7 px-2.5 rounded-md text-12-regular text-text-base bg-background-stronger border border-border-weak-base outline-none"
+                class="min-w-0 flex-1 h-7 px-2.5 rounded-md text-12-regular text-text-base bg-background-stronger outline-none"
+                style={{ border: "1px solid var(--border-weak-base)" }}
               />
               <button
                 type="button"
