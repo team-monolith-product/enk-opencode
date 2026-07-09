@@ -25,6 +25,3 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
-
-# OpenCode runtime state (dev server replay 등, EFS 절대경로가 담기므로 커밋 제외)
-.opencode/
