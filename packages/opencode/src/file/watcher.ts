@@ -23,10 +23,6 @@ declare const OPENCODE_LIBC: string | undefined
 export namespace FileWatcher {
   const log = Log.create({ service: "file.watcher" })
   const SUBSCRIBE_TIMEOUT_MS = 10_000
-  // 대량 변경(브랜치 체크아웃, install, 빌드 등) 시 parcel 이벤트가 수백~수천 개
-  // 쏟아질 수 있으므로 짧은 창 안에서 file+event 를 합쳐(coalesce) 한 번에 발행한다.
-  const DEBOUNCE_MS = 150
-  const DEBOUNCE_MAX_BUFFER = 5_000
 
   export const Event = {
     Updated: BusEvent.define(
@@ -95,55 +91,17 @@ export namespace FileWatcher {
             log.info("watcher backend", { directory: Instance.directory, platform: process.platform, backend })
 
             const subs: ParcelWatcher.AsyncSubscription[] = []
-
-            // file+event 기준으로 디바운스 창 안의 중복 이벤트를 합친다. Map 은 삽입
-            // 순서를 보존하므로 flush 시 발생 순서대로 발행된다. 같은 file 이 create
-            // 뒤 delete 되면(임시파일 등) 마지막 상태만 남기도록 file 단위로 최신 event 를
-            // 덮어쓴다.
-            const pendingEvents = new Map<string, "add" | "change" | "unlink">()
-            let flushTimer: ReturnType<typeof setTimeout> | undefined
-
-            const flush = Instance.bind(() => {
-              flushTimer = undefined
-              if (pendingEvents.size === 0) return
-              const batch = [...pendingEvents.entries()]
-              pendingEvents.clear()
-              for (const [file, event] of batch) {
-                Bus.publish(Event.Updated, { file, event })
-              }
-            })
-
-            const scheduleFlush = () => {
-              if (flushTimer) return
-              flushTimer = setTimeout(flush, DEBOUNCE_MS)
-            }
-
             yield* Effect.addFinalizer(() =>
-              Effect.sync(() => {
-                if (flushTimer) {
-                  clearTimeout(flushTimer)
-                  flushTimer = undefined
-                }
-                pendingEvents.clear()
-              }).pipe(Effect.andThen(Effect.promise(() => Promise.allSettled(subs.map((sub) => sub.unsubscribe()))))),
+              Effect.promise(() => Promise.allSettled(subs.map((sub) => sub.unsubscribe()))),
             )
 
             const cb: ParcelWatcher.SubscribeCallback = Instance.bind((err, evts) => {
               if (err) return
               for (const evt of evts) {
-                const event = evt.type === "create" ? "add" : evt.type === "delete" ? "unlink" : "change"
-                pendingEvents.set(evt.path, event)
+                if (evt.type === "create") Bus.publish(Event.Updated, { file: evt.path, event: "add" })
+                if (evt.type === "update") Bus.publish(Event.Updated, { file: evt.path, event: "change" })
+                if (evt.type === "delete") Bus.publish(Event.Updated, { file: evt.path, event: "unlink" })
               }
-              // 버퍼가 비정상적으로 커지면(폭주) 즉시 flush 해 메모리 누적을 방지한다.
-              if (pendingEvents.size >= DEBOUNCE_MAX_BUFFER) {
-                if (flushTimer) {
-                  clearTimeout(flushTimer)
-                  flushTimer = undefined
-                }
-                flush()
-                return
-              }
-              scheduleFlush()
             })
 
             const subscribe = (dir: string, ignore: string[]) => {
@@ -164,15 +122,13 @@ export namespace FileWatcher {
             const cfg = yield* config.get()
             const cfgIgnores = cfg.watcher?.ignore ?? []
 
-            // 네이티브 디렉터리 워처는 기본 활성. 툴을 거치지 않은 파일 변경(bash
-            // touch/mkdir/mv/rm, git checkout, 빌드 산출물, 외부 에디터 등)도
-            // file.watcher.updated 이벤트로 흘러 트리가 자동 갱신된다.
-            // OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER 로 끌 수 있다(위 가드 참조).
-            yield* subscribe(Instance.directory, [
-              ...FileIgnore.PATTERNS,
-              ...cfgIgnores,
-              ...protecteds(Instance.directory),
-            ])
+            if (yield* Flag.OPENCODE_EXPERIMENTAL_FILEWATCHER) {
+              yield* subscribe(Instance.directory, [
+                ...FileIgnore.PATTERNS,
+                ...cfgIgnores,
+                ...protecteds(Instance.directory),
+              ])
+            }
 
             if (Instance.project.vcs === "git") {
               const result = yield* Effect.promise(() =>
