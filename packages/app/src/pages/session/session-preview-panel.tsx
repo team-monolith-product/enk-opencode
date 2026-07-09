@@ -738,7 +738,7 @@ export function SessionBrowserChrome(props: {
             onClick={() => props.onToggleError?.()}
             class="inline-flex h-6 items-center gap-1 rounded-md border border-critical-base bg-surface-critical-base px-1.5 text-icon-critical-base transition-colors hover:border-critical-hover"
           >
-            <Icon name="warning" size="small" />
+            <Icon name="warning" size="small" class="text-icon-critical-base" />
             <Show when={(props.errorCount ?? 0) > 1}>
               <span class="text-12-regular">{props.errorCount}</span>
             </Show>
