@@ -1,4 +1,5 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import type { ErrorEntry } from "@/lib/preview-bridge-protocol"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
@@ -346,6 +347,7 @@ export function createSessionPreview() {
     showErrorOverlay,
     showErrorButton,
     errorCount,
+    errors: bridge.errors,
     latestError,
     dismissError,
     reopenError,
@@ -360,12 +362,34 @@ export function SessionPreviewPanel(props: {
   state?: DevServerStatusResult["state"]
   httpStatus?: number
   showError?: boolean
-  errorMessage?: string
+  errors?: ErrorEntry[]
   errorCount?: number
   onErrorReload?: () => void
   onErrorDismiss?: () => void
 }) {
   const language = useLanguage()
+
+  // "AI에게 요청" 입력 — 비어 있으면 플레이스홀더 문구가 기본값. 복사 시 (이 문구 + 에러 목록)이 클립보드로.
+  const [askText, setAskText] = createSignal("")
+  const [copied, setCopied] = createSignal(false)
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => copyTimer && clearTimeout(copyTimer))
+  const formatError = (e: ErrorEntry) => {
+    const loc =
+      e.source != null
+        ? ` (${e.source}${e.line != null ? `:${e.line}${e.column != null ? `:${e.column}` : ""}` : ""})`
+        : ""
+    return `- ${e.message}${loc}`
+  }
+  const copyForAi = () => {
+    const ask = askText().trim() || language.t("session.preview.clientError.placeholder")
+    const list = (props.errors ?? []).map(formatError).join("\n")
+    void navigator.clipboard?.writeText(list ? `${ask}\n\n${list}` : ask)
+    setCopied(true)
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => setCopied(false), 1500)
+  }
+
   return (
     <div data-component="codle-preview-panel" class="relative size-full min-w-0 overflow-hidden rounded-none">
       <Show
@@ -389,33 +413,97 @@ export function SessionPreviewPanel(props: {
         )}
       </Show>
 
-      {/* 클라이언트 런타임 에러 배너 — iframe 위 상단. 렌더된 화면은 그대로 두고 알림만 덧씌운다.
-          × 로 내리면 헤더의 경고 버튼으로 옮겨가고, 그 버튼을 누르면 다시 이 배너가 뜬다. */}
+      {/* 클라이언트 런타임 에러 카드 — iframe(흰 화면일 수 있음) 위 가운데. 렌더된 화면은 그대로 두고 덧씌운다.
+          × 로 내리면 헤더의 경고 버튼으로 옮겨가고, 그 버튼을 누르면 다시 이 카드가 뜬다. */}
       <Show when={props.showError}>
-        <div class="absolute inset-x-0 top-0 z-10 flex items-center gap-2 px-3 py-2 bg-background-base border-b border-border-weak-base shadow-sm">
-          <Icon name="warning" size="small" class="shrink-0 text-text-danger-base" />
-          <span class="min-w-0 flex-1 truncate text-12-regular text-text-base">
-            {props.errorMessage || language.t("session.preview.clientError.title")}
-          </span>
-          <Show when={(props.errorCount ?? 0) > 1}>
-            <span class="shrink-0 text-12-regular text-text-weak">×{props.errorCount}</span>
-          </Show>
-          <button
-            type="button"
-            onClick={() => props.onErrorReload?.()}
-            class="shrink-0 inline-flex items-center gap-1 h-6 px-2 rounded-md text-12-medium text-text-base bg-surface-raised-base-hover hover:bg-surface-base-active transition-colors"
-          >
-            <Icon name="refresh" size="small" />
-            {language.t("session.preview.retry.button")}
-          </button>
-          <button
-            type="button"
-            onClick={() => props.onErrorDismiss?.()}
-            aria-label={language.t("session.preview.clientError.dismiss")}
-            class="shrink-0 inline-flex size-6 items-center justify-center rounded-md text-icon-base hover:bg-surface-raised-base-hover transition-colors"
-          >
-            <Icon name="close-small" size="small" />
-          </button>
+        <div
+          class="absolute inset-0 z-10 flex items-center justify-center p-5"
+          style={{ background: "rgba(0,0,0,0.38)" }}
+        >
+          <div class="flex w-full max-w-[470px] max-h-[330px] flex-col overflow-hidden rounded-xl border border-border-weak-base bg-background-base shadow-lg">
+            {/* 헤더 — 오류 개수 + 다시 시도(리로드) + 닫기 */}
+            <div class="flex shrink-0 items-center gap-2 px-3.5 py-2.5 border-b border-border-weak-base">
+              <Icon name="warning" size="small" class="shrink-0 text-text-danger-base" />
+              <span class="text-12-medium text-text-base">
+                {language.t("session.preview.clientError.title", { count: props.errorCount ?? 0 })}
+              </span>
+              <span class="flex-1" />
+              <button
+                type="button"
+                onClick={() => props.onErrorReload?.()}
+                class="inline-flex items-center gap-1 h-6 px-2.5 rounded-md text-12-medium text-text-base bg-surface-raised-base-hover hover:bg-surface-base-active transition-colors"
+              >
+                <Icon name="refresh" size="small" />
+                {language.t("session.preview.retry.button")}
+              </button>
+              <button
+                type="button"
+                onClick={() => props.onErrorDismiss?.()}
+                aria-label={language.t("session.preview.clientError.dismiss")}
+                class="inline-flex size-6 items-center justify-center rounded-md text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+              >
+                <Icon name="close-small" size="small" />
+              </button>
+            </div>
+
+            {/* 오류 목록(스크롤) — 각 항목: 메시지 + source:line:col + 스택 */}
+            <div class="min-h-0 flex-1 overflow-y-auto">
+              <For each={props.errors}>
+                {(e) => (
+                  <div class="px-3.5 py-2.5 border-b border-border-weak-base last:border-b-0">
+                    <div class="text-12-medium text-text-danger-base" style={{ "line-height": "1.4" }}>
+                      {e.message}
+                    </div>
+                    <Show when={e.source}>
+                      <div
+                        class="mt-0.5 text-text-weak"
+                        style={{ "font-family": "var(--font-family-mono)", "font-size": "11.5px" }}
+                      >
+                        {e.source}
+                        {e.line != null ? `:${e.line}` : ""}
+                        {e.column != null ? `:${e.column}` : ""}
+                      </div>
+                    </Show>
+                    <Show when={e.stack}>
+                      <pre
+                        class="mt-1.5 overflow-x-auto rounded-md bg-background-stronger px-2 py-1.5 text-text-weak"
+                        style={{
+                          "font-family": "var(--font-family-mono)",
+                          "font-size": "11.5px",
+                          "white-space": "pre",
+                        }}
+                      >
+                        {e.stack}
+                      </pre>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </div>
+
+            {/* AI에게 요청 — 입력(플레이스홀더 기본값) + 에러와 함께 복사 */}
+            <div class="flex shrink-0 items-center gap-2 px-3.5 py-2 border-t border-border-weak-base">
+              <span class="shrink-0 text-12-regular text-text-weak">
+                {language.t("session.preview.clientError.askAi")}
+              </span>
+              <input
+                type="text"
+                value={askText()}
+                onInput={(e) => setAskText(e.currentTarget.value)}
+                placeholder={language.t("session.preview.clientError.placeholder")}
+                class="min-w-0 flex-1 h-7 px-2.5 rounded-md text-12-regular text-text-base bg-background-stronger border border-border-weak-base outline-none"
+              />
+              <button
+                type="button"
+                onClick={copyForAi}
+                aria-label={language.t("session.preview.clientError.copy")}
+                classList={{ "text-icon-success-base": copied() }}
+                class="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border-weak-base text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+              >
+                <Icon name={copied() ? "check-small" : "copy"} size="small" />
+              </button>
+            </div>
+          </div>
         </div>
       </Show>
     </div>
