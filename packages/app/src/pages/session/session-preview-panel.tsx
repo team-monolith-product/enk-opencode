@@ -736,11 +736,7 @@ export function SessionBrowserChrome(props: {
             aria-label={language.t("session.preview.clientError.reopen")}
             aria-expanded={props.errorOpen}
             onClick={() => props.onToggleError?.()}
-            class="inline-flex h-6 items-center gap-1 rounded-md border border-critical-base px-1.5 text-icon-critical-base transition-colors"
-            classList={{
-              "bg-surface-critical-base": props.errorOpen,
-              "hover:bg-surface-critical-base": !props.errorOpen,
-            }}
+            class="inline-flex h-6 items-center gap-1 rounded-md border border-critical-base bg-surface-critical-base px-1.5 text-icon-critical-base transition-colors hover:border-critical-hover"
           >
             <Icon name="warning" size="small" />
             <Show when={(props.errorCount ?? 0) > 1}>
