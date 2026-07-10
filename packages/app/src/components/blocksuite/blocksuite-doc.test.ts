@@ -30,6 +30,17 @@ describe("createPage plain props", () => {
     host.remove()
   })
 
+  test("leaves the linked doc widget without a typing trigger", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const next = await page({ theme: "light" })
+    await next.attach(host)
+    const widget = next.editor.querySelector("affine-linked-doc-widget") as { config: { triggerKeys: string[] } } | null
+    expect(widget).not.toBeNull()
+    expect(widget?.config.triggerKeys).not.toContain("@")
+    host.remove()
+  })
+
   test("calls onSubmit on matching keydown", async () => {
     const host = document.createElement("div")
     document.body.append(host)

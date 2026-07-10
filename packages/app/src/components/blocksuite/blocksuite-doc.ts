@@ -18,6 +18,7 @@ import { actor, label, type DocActor } from "./actor"
 import { matchKeybind, parseKeybind } from "@/context/command"
 import { patchSlashMenu } from "./slash-menu-patch"
 import { patchFormatBar } from "./format-bar-patch"
+import { LinkedDocConfig } from "./linked-doc-patch"
 import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
 
 export type { DocActor } from "./actor"
@@ -189,6 +190,7 @@ export async function createPage(input: DocMountInput) {
       setPrimaryMode: () => {},
       togglePrimaryMode: () => "page",
     }),
+    LinkedDocConfig,
     ...FileReferenceBlockSpec,
     ...LineReferenceBlockSpec,
   ]
