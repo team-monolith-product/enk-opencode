@@ -5,6 +5,7 @@ import { ModelID, ProviderID } from "../provider/schema"
 import { generateObject, streamObject, type ModelMessage } from "ai"
 import { Instance } from "../project/instance"
 import { Truncate } from "../tool/truncate"
+import { ATTACHMENT_GLOB } from "../session/attachment-dir"
 import { Auth } from "../auth"
 import { ProviderTransform } from "../provider/transform"
 
@@ -80,7 +81,7 @@ export namespace Agent {
         Effect.fn("Agent.state")(function* (ctx) {
           const cfg = yield* config.get()
           const skillDirs = yield* skill.dirs()
-          const whitelistedDirs = [Truncate.GLOB, ...skillDirs.map((dir) => path.join(dir, "*"))]
+          const whitelistedDirs = [Truncate.GLOB, ATTACHMENT_GLOB, ...skillDirs.map((dir) => path.join(dir, "*"))]
 
           const defaults = Permission.fromConfig({
             "*": "allow",
@@ -261,20 +262,22 @@ export namespace Agent {
             item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
           }
 
-          // Ensure Truncate.GLOB is allowed unless explicitly configured
-          for (const name in agents) {
-            const agent = agents[name]
-            const explicit = agent.permission.some((r) => {
-              if (r.permission !== "external_directory") return false
-              if (r.action !== "deny") return false
-              return r.pattern === Truncate.GLOB
-            })
-            if (explicit) continue
+          // Ensure the globs below are allowed unless explicitly configured
+          for (const glob of [Truncate.GLOB, ATTACHMENT_GLOB]) {
+            for (const name in agents) {
+              const agent = agents[name]
+              const explicit = agent.permission.some((r) => {
+                if (r.permission !== "external_directory") return false
+                if (r.action !== "deny") return false
+                return r.pattern === glob
+              })
+              if (explicit) continue
 
-            agents[name].permission = Permission.merge(
-              agents[name].permission,
-              Permission.fromConfig({ external_directory: { [Truncate.GLOB]: "allow" } }),
-            )
+              agents[name].permission = Permission.merge(
+                agents[name].permission,
+                Permission.fromConfig({ external_directory: { [glob]: "allow" } }),
+              )
+            }
           }
 
           const get = Effect.fnUntraced(function* (agent: string) {

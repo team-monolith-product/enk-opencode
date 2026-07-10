@@ -44,6 +44,7 @@ import { LLM } from "./llm"
 import { Shell } from "@/shell/shell"
 import { AppFileSystem } from "@/filesystem"
 import { Truncate } from "@/tool/truncate"
+import { Attachment } from "./attachment"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
@@ -102,6 +103,7 @@ export namespace SessionPrompt {
       const filetime = yield* FileTime.Service
       const registry = yield* ToolRegistry.Service
       const truncate = yield* Truncate.Service
+      const attachment = yield* Attachment.Service
       const scope = yield* Scope.Scope
 
       const cache = yield* InstanceState.make(
@@ -1130,7 +1132,24 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     { ...part, messageID: info.id, sessionID: input.sessionID },
                   ]
                 }
-                break
+                {
+                  const saved = yield* attachment.save({
+                    url: part.url,
+                    mime: part.mime,
+                    filename: part.filename,
+                  })
+                  if (!saved) break
+                  return [
+                    { ...part, messageID: info.id, sessionID: input.sessionID },
+                    {
+                      messageID: info.id,
+                      sessionID: input.sessionID,
+                      type: "text",
+                      synthetic: true,
+                      text: `The attached file ${part.filename ?? part.mime} is saved on disk at ${saved}. Use that path when you need the original file itself, for example to copy it somewhere as an asset.`,
+                    },
+                  ]
+                }
               case "file:": {
                 log.info("file", { mime: part.mime })
                 const filepath = fileURLToPath(part.url)
@@ -1776,6 +1795,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         Layer.provide(FileTime.defaultLayer),
         Layer.provide(ToolRegistry.defaultLayer),
         Layer.provide(Truncate.layer),
+        Layer.provide(Attachment.layer),
         Layer.provide(AppFileSystem.defaultLayer),
         Layer.provide(Plugin.defaultLayer),
         Layer.provide(Session.defaultLayer),
