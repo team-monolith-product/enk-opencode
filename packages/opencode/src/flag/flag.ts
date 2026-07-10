@@ -65,6 +65,15 @@ export namespace Flag {
   })()
   export declare const ENK_AI_MODEL: string | undefined
   export declare const ENK_AI_MODEL_VARIANT: string | undefined
+  // Model fallback. See src/enk/model-fallback.ts.
+  // JSON array of "provider/model" strings or { model, variant } objects. "[]" disables fallback.
+  export declare const ENK_AI_FALLBACK_MODELS: string | undefined
+  // Retries allowed per model before moving to the next one, so a model gets 1 + N stream attempts.
+  export declare const ENK_AI_FALLBACK_RETRIES: number
+  // Once a session has fallen back this many times it stops granting the primary model any
+  // retries: the primary still gets one attempt per turn, so a recovered provider is picked
+  // back up automatically, but a dead one costs a single failed round trip instead of N.
+  export declare const ENK_AI_FALLBACK_STICKY_AFTER: number
 
   // Serve proxy (subdomain routing)
   export const OPENCODE_SERVE_DOMAIN = process.env["OPENCODE_SERVE_DOMAIN"]
@@ -122,6 +131,14 @@ export namespace Flag {
     if (!value) return undefined
     const parsed = Number(value)
     return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
+  }
+
+  // Unlike number(), accepts 0 — a retry budget of zero is meaningful. Which is also why the digits
+  // are matched rather than coerced: Number(" ") is 0, and a stray space must not read as "no retries".
+  export function nonNegativeNumber(key: string) {
+    const value = process.env[key]
+    if (!value || !/^\d+$/.test(value)) return undefined
+    return Number(value)
   }
 }
 
@@ -202,6 +219,30 @@ Object.defineProperty(Flag, "ENK_AI_MODEL", {
 Object.defineProperty(Flag, "ENK_AI_MODEL_VARIANT", {
   get() {
     return process.env["ENK_AI_MODEL_VARIANT"]
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_AI_FALLBACK_MODELS", {
+  get() {
+    return process.env["ENK_AI_FALLBACK_MODELS"]
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_AI_FALLBACK_RETRIES", {
+  get() {
+    return Flag.nonNegativeNumber("ENK_AI_FALLBACK_RETRIES") ?? 3
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_AI_FALLBACK_STICKY_AFTER", {
+  get() {
+    return Flag.nonNegativeNumber("ENK_AI_FALLBACK_STICKY_AFTER") ?? 3
   },
   enumerable: true,
   configurable: false,

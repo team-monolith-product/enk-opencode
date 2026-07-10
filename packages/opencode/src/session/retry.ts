@@ -88,9 +88,12 @@ export namespace SessionRetry {
   export function policy(opts: {
     parse: (error: unknown) => Err
     set: (input: { attempt: number; message: string; next: number }) => Effect.Effect<void>
+    /** Give up after this many retries. Omit to retry as long as the error stays retryable. */
+    retries?: number
   }) {
     return Schedule.fromStepWithMetadata(
       Effect.succeed((meta: Schedule.InputMetadata<unknown>) => {
+        if (opts.retries !== undefined && meta.attempt > opts.retries) return Cause.done(meta.attempt)
         const error = opts.parse(meta.input)
         const message = retryable(error)
         if (!message) return Cause.done(meta.attempt)

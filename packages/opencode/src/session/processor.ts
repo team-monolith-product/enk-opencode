@@ -24,7 +24,7 @@ export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
   const log = Log.create({ service: "session.processor" })
 
-  export type Result = "compact" | "stop" | "continue"
+  export type Result = "compact" | "stop" | "continue" | "fallback"
 
   export type Event = LLM.Event
 
@@ -39,6 +39,10 @@ export namespace SessionProcessor {
     assistantMessage: MessageV2.Assistant
     sessionID: SessionID
     model: Provider.Model
+    /** Retries allowed before giving up on this model. Omit to retry while the error stays retryable. */
+    retries?: number
+    /** Whether another model is available to take over. When false a terminal error halts the turn. */
+    canFallback?: boolean
   }
 
   export interface Interface {
@@ -51,6 +55,7 @@ export namespace SessionProcessor {
     snapshot: string | undefined
     blocked: boolean
     needsCompaction: boolean
+    shouldFallback: boolean
     currentText: MessageV2.TextPart | undefined
     reasoningMap: Record<string, MessageV2.ReasoningPart>
     // Monotonic per-turn model-step counter, used as the step_index for realtime usage reports
@@ -92,11 +97,14 @@ export namespace SessionProcessor {
           assistantMessage: input.assistantMessage,
           sessionID: input.sessionID,
           model: input.model,
+          retries: input.retries,
+          canFallback: input.canFallback,
           toolcalls: {},
           shouldBreak: false,
           snapshot: undefined,
           blocked: false,
           needsCompaction: false,
+          shouldFallback: false,
           currentText: undefined,
           reasoningMap: {},
           stepIndex: 0,
@@ -105,7 +113,7 @@ export namespace SessionProcessor {
 
         const parse = (e: unknown) =>
           MessageV2.fromError(e, {
-            providerID: input.model.providerID,
+            providerID: ctx.model.providerID,
             aborted,
           })
 
@@ -463,6 +471,26 @@ export namespace SessionProcessor {
           yield* status.set(ctx.sessionID, { type: "idle" })
         })
 
+        // A stream error is terminal for this model, but not necessarily for the turn: when another
+        // model is queued behind this one we hand the turn back to the caller instead of failing it.
+        // Context overflow wants compaction on the same model, and an abort is the user's own doing,
+        // so neither falls back.
+        const terminal = Effect.fn("SessionProcessor.terminal")(function* (e: unknown) {
+          const error = parse(e)
+          if (aborted || !ctx.canFallback || MessageV2.ContextOverflowError.isInstance(error)) {
+            yield* halt(e)
+            return
+          }
+          log.warn("model failed, falling back", {
+            model: `${ctx.model.providerID}/${ctx.model.id}`,
+            error: error.name,
+          })
+          // The turn did not finish, whatever a completed step may have recorded. Leaving a finish
+          // reason behind would let the caller's loop mistake this abandoned message for the answer.
+          ctx.assistantMessage.finish = undefined
+          ctx.shouldFallback = true
+        })
+
         const abort = Effect.fn("SessionProcessor.abort")(() =>
           Effect.gen(function* () {
             if (!ctx.assistantMessage.error) {
@@ -479,6 +507,7 @@ export namespace SessionProcessor {
         const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
           log.info("process")
           ctx.needsCompaction = false
+          ctx.shouldFallback = false
           ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 
           return yield* Effect.gen(function* () {
@@ -501,6 +530,7 @@ export namespace SessionProcessor {
               Effect.retry(
                 SessionRetry.policy({
                   parse,
+                  retries: ctx.retries,
                   set: (info) =>
                     status.set(ctx.sessionID, {
                       type: "retry",
@@ -510,7 +540,7 @@ export namespace SessionProcessor {
                     }),
                 }),
               ),
-              Effect.catch(halt),
+              Effect.catch(terminal),
               Effect.ensuring(cleanup()),
             )
 
@@ -518,6 +548,7 @@ export namespace SessionProcessor {
               yield* abort()
             }
             if (ctx.needsCompaction) return "compact"
+            if (ctx.shouldFallback) return "fallback"
             if (ctx.blocked || ctx.assistantMessage.error || aborted) return "stop"
             return "continue"
           }).pipe(Effect.onInterrupt(() => abort().pipe(Effect.asVoid)))

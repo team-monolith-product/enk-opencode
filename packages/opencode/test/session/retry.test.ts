@@ -118,6 +118,51 @@ describe("session.retry.delay", () => {
   })
 })
 
+describe("session.retry.policy retries budget", () => {
+  // Counts how many times the wrapped effect actually ran under the policy.
+  async function attempts(retries: number | undefined, error: MessageV2.APIError) {
+    let calls = 0
+    await Effect.runPromise(
+      Effect.suspend(() => {
+        calls++
+        return Effect.fail(error)
+      }).pipe(
+        Effect.retry(
+          SessionRetry.policy({
+            parse: (err) => err as MessageV2.APIError,
+            set: () => Effect.void,
+            retries,
+          }),
+        ),
+        Effect.catch(() => Effect.void),
+      ),
+    )
+    return calls
+  }
+
+  const retryable = apiError({ "retry-after-ms": "0" })
+
+  test("spends the budget then gives up", async () => {
+    expect(await attempts(2, retryable)).toBe(3) // one initial attempt plus two retries
+  })
+
+  test("a budget of zero means a single attempt", async () => {
+    expect(await attempts(0, retryable)).toBe(1)
+  })
+
+  test("an omitted budget keeps retrying while the error stays retryable", async () => {
+    // A non-retryable error is the only thing that stops an unbounded policy, so that is what we
+    // assert on: without it this call would never return.
+    const nonRetryable = new MessageV2.APIError({ message: "nope", isRetryable: false }).toObject()
+    expect(await attempts(undefined, nonRetryable as MessageV2.APIError)).toBe(1)
+  })
+
+  test("a non-retryable error gives up before the budget is spent", async () => {
+    const nonRetryable = new MessageV2.APIError({ message: "nope", isRetryable: false }).toObject()
+    expect(await attempts(5, nonRetryable as MessageV2.APIError)).toBe(1)
+  })
+})
+
 describe("session.retry.retryable", () => {
   test("maps too_many_requests json messages", () => {
     const error = wrap(JSON.stringify({ type: "error", error: { type: "too_many_requests" } }))

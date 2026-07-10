@@ -244,6 +244,8 @@ When constructing the summary, try to stick to this template:
           assistantMessage: msg,
           sessionID: input.sessionID,
           model,
+          // Compacting is about fitting this model's context window, so another model is no answer.
+          canFallback: false,
         })
         const result = yield* processor
           .process({
@@ -333,6 +335,7 @@ When constructing the summary, try to stick to this template:
           }
         }
 
+        if (result === "fallback") return "stop" // unreachable: canFallback is false above
         if (processor.message.error) return "stop"
         if (result === "continue") yield* bus.publish(Event.Compacted, { sessionID: input.sessionID })
         return result
