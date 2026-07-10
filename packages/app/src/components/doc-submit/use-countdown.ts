@@ -10,15 +10,22 @@ const RECONNECT_MS = 500
 const EXPIRE_GRACE_MS = RECONNECT_MS + 250
 
 export function useCountdown(expiresAt: Accessor<number | undefined>, onExpire?: () => void) {
-  const [remaining, setRemaining] = createSignal(0)
+  const left = (expires: number) => Math.max(0, (expires - Date.now()) / 1000)
+  const start = expiresAt()
+  // Seed from the deadline rather than 0: a consumer that maps `remaining` to a width would otherwise
+  // paint an empty bar, then jump to full on the first RAF tick — a CSS transition renders that jump as
+  // a sweep from left to right before the countdown proper begins.
+  const [remaining, setRemaining] = createSignal(start ? left(start) : 0)
 
   createEffect(() => {
     const expires = expiresAt()
     if (!expires) return
+    // Same reason, for a deadline that arrives (or is replaced by a new vote) after mount.
+    setRemaining(left(expires))
 
     let raf: number | undefined
     const tick = () => {
-      setRemaining(Math.max(0, (expires - Date.now()) / 1000))
+      setRemaining(left(expires))
       if (expires - Date.now() > 0) raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
