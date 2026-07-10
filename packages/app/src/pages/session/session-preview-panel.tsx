@@ -1,12 +1,17 @@
-import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import type { ErrorEntry } from "@/lib/preview-bridge-protocol"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
+import { showToast } from "@opencode-ai/ui/toast"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
+import { useServer } from "@/context/server"
+import { usePlatform } from "@/context/platform"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
+import { getDevServerStatus, restartDevServer, type DevServerStatusResult } from "@/utils/server"
 import { SessionPreviewFallback } from "./session-preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
 import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./session-preview-address"
@@ -15,9 +20,33 @@ import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./sessi
 // 이 시간 뒤에도 dirty 면 heal 쓰기가 들어온 것으로 보고 1회 더 리로드한다.
 const HEAL_RELOAD_GRACE_MS = 1500
 
+// "다시 시도" 연타 방어용 쿨다운 — 재시작 왕복이 끝난 뒤 이 시간 동안 재클릭을 무시한다.
+const RETRY_COOLDOWN_MS = 1500
+
+// 상태가 starting(기동 중)일 때 자동 재폴링 간격 — ready/errored 로 전이되면 자동 종료된다.
+const STARTING_POLL_MS = 2000
+
+// previewUrl 에 실제로 닿는지 — "iframe 을 띄울지"의 진짜 기준.
+// 서버측 probePort(127.0.0.1:PORT)/self-probe 는 배포 환경에서 CHP 라우팅과 어긋날 수 있어(서버는
+// 못 잡는데 클라는 CHP 경유로 닿음), 서버가 "안 뜸"이라 해도 클라가 닿으면 띄운다.
+// cross-origin 이라 CORS 로 막히면(throw) 낙관적으로 true — iframe 은 CORS 없이 로드되니 일단 띄우고
+// 브릿지 연결/에러(A 오버레이)로 뒤에서 판단한다. 확실한 다운(503)만 false.
+async function previewReachable(url: string | undefined): Promise<boolean> {
+  if (!url) return false
+  try {
+    const res = await fetch(url, { cache: "no-store", mode: "cors" })
+    return res.status !== 503
+  } catch {
+    return true
+  }
+}
+
 export function createSessionPreview() {
   const sdk = useSDK()
   const sync = useSync()
+  const server = useServer()
+  const platform = usePlatform()
+  const language = useLanguage()
 
   // 미리보기 URL 임시 오버라이드 — .env 의 VITE_PREVIEW_URL 로 지정(개발/레이아웃 확인용).
   // 비어 있으면 평소처럼 sync.data.env(serveDomain·jupyterhubUser) 기반 URL을 쓴다.
@@ -36,22 +65,64 @@ export function createSessionPreview() {
     return `https://${user}.${domain}`
   })
 
-  const [previewReady, setPreviewReady] = createSignal(false)
+  // 미리보기 상태 5분기 — 서버 /dev-server/status 판정을 그대로 담는다.
+  // none | starting | startable | ready | errored. ready 일 때만 iframe 을 띄운다.
+  const [previewStatus, setPreviewStatus] = createSignal<DevServerStatusResult>({ state: "starting" })
+  const previewReady = () => previewStatus().state === "ready"
   const [dirty, setDirty] = createSignal(false)
   const [reloadCount, setReloadCount] = createSignal(0)
 
+  // 상태 폴링 핸들 — restart() 등 외부에서 수동 재확인을 트리거하기 위해 밖으로 끌어올린다.
+  // 서버 연결이 없거나 언마운트되면 no-op 으로 되돌린다.
+  let recheck: () => void = () => {}
+
   createEffect(() => {
-    const url = previewUrl()
-    if (!url) return setPreviewReady(false)
+    // dev override(VITE_PREVIEW_URL): 상태 판정 없이 항상 미리보기 표시.
+    if (previewOverride) {
+      setPreviewStatus({ state: "ready" })
+      recheck = () => {}
+      return
+    }
 
-    const ctrl = new AbortController()
-    const check = () =>
-      fetch(url, { cache: "no-store", mode: "cors", signal: ctrl.signal })
-        // Hide only on 503 (service unavailable); show preview for any other status.
-        .then((res) => setPreviewReady(res.status !== 503))
-        .catch(() => setPreviewReady(true))
+    const conn = server.current
+    if (!conn) {
+      recheck = () => {}
+      return
+    }
 
-    void check()
+    let disposed = false
+    let pollTimer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
+      if (disposed) return
+      let server: DevServerStatusResult | undefined
+      try {
+        server = await getDevServerStatus({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
+      } catch {
+        /* 네트워크 실패는 무시 — 다음 트리거(session.idle 등)에서 재시도 */
+      }
+      if (disposed) return
+
+      let next: DevServerStatusResult
+      if (!server || server.state === "starting" || server.state === "ready") {
+        // 서버 판정이 확실하거나(ready/starting) status 호출이 실패한 경우는 그대로 둔다.
+        next = server ?? { state: "starting" }
+      } else {
+        // 서버는 안 뜬 걸로 보지만(none/startable/errored) probePort/self-probe 가 CHP 라우팅과 어긋날 수 있다.
+        // 클라가 previewUrl 에 실제로 닿으면 iframe 을 띄워 브릿지 연결·에러(A 오버레이)로 판단하게 한다.
+        next = (await previewReachable(previewUrl())) ? { state: "ready", port: server.port } : server
+        if (disposed) return
+      }
+
+      setPreviewStatus(next)
+      // 기동 중이면 곧 전이되므로 짧게 재폴링(ready/errored 로 바뀌면 자동 종료).
+      if (next.state === "starting") {
+        if (pollTimer) clearTimeout(pollTimer)
+        pollTimer = setTimeout(() => void poll(), STARTING_POLL_MS)
+      }
+    }
+    recheck = () => void poll()
+
+    void poll()
     // 브릿지 자가치유는 session.idle 때 서버 플러그인이 결과물 HTML 에 <script> 를 주입하고 번들을 복사하는데,
     // 그 파일 쓰기 이벤트(file.watcher.updated)는 아래 idle 리로드 '직후' 도착한다. 그래서 첫 미리보기는
     // 브릿지가 없는 페이지를 로드하고(→ penpal 미연결 → 캡처 등 불가), 다음 턴에야 브릿지가 실린다.
@@ -65,7 +136,7 @@ export function createSessionPreview() {
       }
     }
     const unsubIdle = sdk.event.on("session.idle", () => {
-      void check()
+      void poll()
       reloadIfDirty()
       if (healReloadTimer) clearTimeout(healReloadTimer)
       healReloadTimer = setTimeout(reloadIfDirty, HEAL_RELOAD_GRACE_MS)
@@ -77,7 +148,9 @@ export function createSessionPreview() {
     })
 
     onCleanup(() => {
-      ctrl.abort()
+      disposed = true
+      if (pollTimer) clearTimeout(pollTimer)
+      recheck = () => {}
       unsubIdle()
       unsubFile()
       if (healReloadTimer) clearTimeout(healReloadTimer)
@@ -101,8 +174,79 @@ export function createSessionPreview() {
   // 새로고침 버튼 — reloadCount 를 올려 iframe src 를 바꿔 재탐색(DOM remount 없음).
   const reload = () => setReloadCount((n) => n + 1)
 
+  // "다시 시도" — fallback(미리보기 안 뜸) 상태에서 서버에 dev 서버 재시작을 요청한다.
+  // 연타 방어: in-flight 잠금(진행 중이면 기존 프라미스 반환) + 완료 후 쿨다운. 서버가 실제로 떠 있을 때만
+  // (started/already_running) recheck + reload 해서, 아직 뜰 게 없는데 iframe 재탐색이 폭주하는 걸 막는다.
+  const [restarting, setRestarting] = createSignal(false)
+  let restartCooldownUntil = 0
+  let restartInflight: Promise<void> | undefined
+  const restart = () => {
+    if (restartInflight) return restartInflight
+    if (Date.now() < restartCooldownUntil) return Promise.resolve()
+    const conn = server.current
+    if (!conn) return Promise.resolve()
+    setRestarting(true)
+    restartInflight = restartDevServer({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
+      .then((res) => {
+        if (res.status === "started" || res.status === "already_running") {
+          recheck()
+          setReloadCount((n) => n + 1)
+        } else if (res.status === "already_starting") {
+          // 이미 뜨는 중 — 조용히 상태만 재확인하고 쿨다운 뒤 재시도할 수 있게 둔다.
+          recheck()
+        } else if (res.status === "no_command") {
+          showToast({ variant: "error", title: language.t("session.preview.retry.noServer") })
+        } else {
+          showToast({
+            variant: "error",
+            title: language.t("session.preview.retry.failed"),
+            description: res.reason,
+          })
+        }
+      })
+      .catch(() => {
+        showToast({ variant: "error", title: language.t("session.preview.retry.failed") })
+      })
+      .finally(() => {
+        restartInflight = undefined
+        restartCooldownUntil = Date.now() + RETRY_COOLDOWN_MS
+        setRestarting(false)
+      })
+    return restartInflight
+  }
+
   // 미리보기 결과물(iframe)과 penpal 로 연결되는 부모측 브릿지. previewUrl 을 오리진으로 사용.
   const bridge = createPreviewBridge({ origin: previewUrl })
+
+  // ── 클라이언트 런타임 에러 오버레이 ──
+  // 브릿지가 iframe 안의 window.error/unhandledrejection 을 onError 로 받아 errors() 에 쌓는다.
+  // HTTP 는 정상(ready)인데 JS 가 터져 백지가 되는 케이스 — self-probe 로는 못 잡고 이 신호로만 안다.
+  // ready 상태에서 에러가 있으면 iframe 위에 배너를 띄우고, × 로 내리면 헤더 버튼만 남긴다.
+  const [errorDismissed, setErrorDismissed] = createSignal(false)
+  const errorCount = () => bridge.errors().length
+  const latestError = () => bridge.errors().at(-1)
+  const hasClientError = () => previewReady() && errorCount() > 0
+  const showErrorOverlay = () => hasClientError() && !errorDismissed()
+  // 에러가 있으면 헤더 버튼은 항상 노출(카드 열림/닫힘 무관) — 클릭하면 카드를 토글한다.
+  const showErrorButton = () => hasClientError()
+  const dismissError = () => setErrorDismissed(true)
+  const reopenError = () => setErrorDismissed(false)
+  const toggleError = () => setErrorDismissed((d) => !d)
+  // 페이지가 새로 로드/이동되면 이전 에러는 무의미 — 지우고 dismiss 도 리셋해 새 페이지는 깨끗하게 시작.
+  const clearClientErrors = () => {
+    bridge.clearLogs()
+    setErrorDismissed(false)
+  }
+  // reloadCount 가 바뀌면(새로고침 버튼·session.idle 리로드·재시작) iframe 이 새로 로드되므로 에러를 비운다.
+  let skipFirstErrorClear = true
+  createEffect(() => {
+    reloadCount()
+    if (skipFirstErrorClear) {
+      skipFirstErrorClear = false
+      return
+    }
+    clearClientErrors()
+  })
 
   // 자식 라우팅 미러 — 뒤로/앞으로 버튼 활성 판단용 논리 history 스택.
   // 자식 history 가 진실원이고(back/forward 는 자식이 실행), 이 스택은 거울일 뿐이다.
@@ -159,12 +303,14 @@ export function createSessionPreview() {
   const goForward = () => void bridge.child()?.forward()
   // 홈 — 리로드 없이 "/" 로 소프트 라우팅. 미연결이면 src 재로드(루트)로 폴백.
   const goHome = () => {
+    clearClientErrors()
     const child = bridge.child()
     if (child) void child.routeTo("/")
     else reload()
   }
   // 새로고침 — iframe 컨텐츠에 진짜 리로드 명령. 미연결이면 src 재탐색으로 폴백.
   const hardReload = () => {
+    clearClientErrors()
     const child = bridge.child()
     if (child) void child.reload()
     else reload()
@@ -173,6 +319,7 @@ export function createSessionPreview() {
   const navigatePath = (p: string) => {
     const base = previewUrl()
     if (!base) return
+    clearClientErrors()
     try {
       void bridge.child()?.navigate(resolveNavigatePath(base, p))
     } catch {
@@ -183,8 +330,11 @@ export function createSessionPreview() {
   return {
     previewUrl,
     previewReady,
+    previewStatus,
     previewSrc,
     reload,
+    restart,
+    restarting,
     goHome,
     hardReload,
     bridge,
@@ -196,13 +346,66 @@ export function createSessionPreview() {
     goBack,
     goForward,
     navigatePath,
+    showErrorOverlay,
+    showErrorButton,
+    errorCount,
+    errors: bridge.errors,
+    latestError,
+    dismissError,
+    reopenError,
+    toggleError,
   }
 }
 
-export function SessionPreviewPanel(props: { src?: string; bridge?: PreviewBridge }) {
+export function SessionPreviewPanel(props: {
+  src?: string
+  bridge?: PreviewBridge
+  onRetry?: () => void
+  retrying?: boolean
+  state?: DevServerStatusResult["state"]
+  httpStatus?: number
+  showError?: boolean
+  errors?: ErrorEntry[]
+  errorCount?: number
+  onErrorReload?: () => void
+  onErrorDismiss?: () => void
+}) {
+  const language = useLanguage()
+
+  // "AI에게 요청" 입력 — 비어 있으면 플레이스홀더 문구가 기본값. 복사 시 (이 문구 + 에러 목록)이 클립보드로.
+  const [askText, setAskText] = createSignal("")
+  const [copied, setCopied] = createSignal(false)
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => copyTimer && clearTimeout(copyTimer))
+  const formatError = (e: ErrorEntry) => {
+    const loc =
+      e.source != null
+        ? ` (${e.source}${e.line != null ? `:${e.line}${e.column != null ? `:${e.column}` : ""}` : ""})`
+        : ""
+    return `- ${e.message}${loc}`
+  }
+  const copyForAi = () => {
+    const ask = askText().trim() || language.t("session.preview.clientError.placeholder")
+    const list = (props.errors ?? []).map(formatError).join("\n")
+    void navigator.clipboard?.writeText(list ? `${ask}\n\n${list}` : ask)
+    setCopied(true)
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => setCopied(false), 1500)
+  }
+
   return (
-    <div data-component="codle-preview-panel" class="size-full min-w-0 overflow-hidden rounded-none">
-      <Show when={props.src} fallback={<SessionPreviewFallback />}>
+    <div data-component="codle-preview-panel" class="relative size-full min-w-0 overflow-hidden rounded-none">
+      <Show
+        when={props.src}
+        fallback={
+          <SessionPreviewFallback
+            state={props.state}
+            httpStatus={props.httpStatus}
+            onRetry={props.onRetry}
+            retrying={props.retrying}
+          />
+        }
+      >
         {(src) => (
           <iframe
             ref={(el) => props.bridge?.attach(el)}
@@ -211,6 +414,107 @@ export function SessionPreviewPanel(props: { src?: string; bridge?: PreviewBridg
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         )}
+      </Show>
+
+      {/* 클라이언트 런타임 에러 카드 — iframe(흰 화면일 수 있음) 위 가운데. 렌더된 화면은 그대로 두고 덧씌운다.
+          × 로 내리면 헤더의 경고 버튼으로 옮겨가고, 그 버튼을 누르면 다시 이 카드가 뜬다. */}
+      <Show when={props.showError}>
+        {/* 스크림 클릭 = 카드 닫기(미리보기 안에서만). 카드 내부 클릭은 stopPropagation 으로 유지. */}
+        <div
+          class="absolute inset-0 z-10 flex items-center justify-center p-5"
+          style={{ background: "rgba(0,0,0,0.38)" }}
+          onClick={() => props.onErrorDismiss?.()}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            class="flex w-full max-w-[470px] max-h-[330px] flex-col overflow-hidden rounded-xl border border-critical-base bg-background-base shadow-lg"
+          >
+            {/* 헤더 — 오류 개수 + 새로고침(리로드) + 닫기 */}
+            <div class="flex shrink-0 items-center gap-2 px-3.5 py-2.5 border-b border-border-weak-base">
+              <Icon name="warning" size="small" class="shrink-0 text-icon-critical-base" />
+              <span class="text-12-medium text-text-base">
+                {language.t("session.preview.clientError.title", { count: props.errorCount ?? 0 })}
+              </span>
+              <span class="flex-1" />
+              <button
+                type="button"
+                onClick={() => props.onErrorReload?.()}
+                class="inline-flex items-center gap-1 h-6 px-2.5 rounded-md border border-border-weak-base text-12-medium text-text-base hover:bg-surface-raised-base-hover transition-colors"
+              >
+                <Icon name="refresh" size="small" />
+                {language.t("session.preview.clientError.reload")}
+              </button>
+              <button
+                type="button"
+                onClick={() => props.onErrorDismiss?.()}
+                aria-label={language.t("session.preview.clientError.dismiss")}
+                class="inline-flex size-6 items-center justify-center rounded-md border border-border-weak-base text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+              >
+                <Icon name="close-small" size="small" />
+              </button>
+            </div>
+
+            {/* 오류 목록(스크롤) — 각 항목: 메시지(최대 3줄) + source:line:col(줄바꿈) + 스택.
+                본문 배경은 채팅창(background-stronger)과 동일하게 — 헤더/푸터(background-base)와 대비. */}
+            <div class="min-h-0 flex-1 overflow-y-auto bg-background-stronger">
+              <For each={props.errors}>
+                {(e) => (
+                  <div class="px-3.5 py-2.5 border-b border-border-weak-base last:border-b-0">
+                    <div class="text-12-medium text-icon-critical-base line-clamp-3" style={{ "line-height": "1.4" }}>
+                      {e.message}
+                    </div>
+                    <Show when={e.source}>
+                      <div
+                        class="mt-0.5 break-all text-text-weak"
+                        style={{ "font-family": "var(--font-family-mono)", "font-size": "11.5px" }}
+                      >
+                        {e.source}
+                        {e.line != null ? `:${e.line}` : ""}
+                        {e.column != null ? `:${e.column}` : ""}
+                      </div>
+                    </Show>
+                    <Show when={e.stack}>
+                      <pre
+                        class="mt-1.5 overflow-x-auto rounded-md bg-background-base px-2 py-1.5 text-text-weak"
+                        style={{
+                          "font-family": "var(--font-family-mono)",
+                          "font-size": "11.5px",
+                          "white-space": "pre",
+                        }}
+                      >
+                        {e.stack}
+                      </pre>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </div>
+
+            {/* AI에게 요청 — 입력(플레이스홀더 기본값) + 에러와 함께 복사 */}
+            <div class="flex shrink-0 items-center gap-2 px-3.5 py-2 border-t border-border-weak-base">
+              <span class="shrink-0 text-12-regular text-text-weak">
+                {language.t("session.preview.clientError.askAi")}
+              </span>
+              <input
+                type="text"
+                value={askText()}
+                onInput={(e) => setAskText(e.currentTarget.value)}
+                placeholder={language.t("session.preview.clientError.placeholder")}
+                class="min-w-0 flex-1 h-7 rounded-md text-12-regular text-text-base bg-background-stronger outline-none"
+                style={{ border: "1px solid var(--border-weak-base)", padding: "0 10px" }}
+              />
+              <button
+                type="button"
+                onClick={copyForAi}
+                aria-label={language.t("session.preview.clientError.copy")}
+                classList={{ "text-icon-success-base": copied() }}
+                class="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border-weak-base text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+              >
+                <Icon name={copied() ? "check-small" : "copy"} size="small" />
+              </button>
+            </div>
+          </div>
+        </div>
       </Show>
     </div>
   )
@@ -234,6 +538,12 @@ export function SessionBrowserChrome(props: {
   onReload: () => void
   onHome?: () => void
   previewReady?: boolean
+  /** 클라 에러가 있으면 항상 노출되는 경고 버튼 — 누르면 에러 카드를 토글한다. */
+  showErrorButton?: boolean
+  errorCount?: number
+  /** 에러 카드가 현재 열려 있는지(버튼 active 표시·aria-expanded 용). */
+  errorOpen?: boolean
+  onToggleError?: () => void
 }) {
   const layout = useLayout()
   const language = useLanguage()
@@ -293,7 +603,7 @@ export function SessionBrowserChrome(props: {
   return (
     <div
       data-component="codle-browser-chrome"
-      class="@container flex items-center gap-2.5 px-3 h-9 shrink-0 border-b border-border-weaker-base bg-background-base"
+      class="flex items-center gap-2.5 px-3 h-9 shrink-0 border-b border-border-weaker-base bg-background-base"
     >
       {/* 좌 그룹 — 트래픽 라이트 + 파일 탐색기 토글 + 뒤로/앞으로 */}
       <div class="flex shrink-0 items-center gap-2.5">
@@ -341,11 +651,9 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 중앙 — 주소 pill (홈 · 주소 · 새로고침), 360px 고정·좁은 크롬에서는 max-w-full 로 축소.
-          크롬 폭이 임계치(400px) 아래로 좁아지면 pill 이 뭉개져 보이므로 아예 렌더링을 내린다.
-          flex-1 래퍼는 남겨 좌/우 버튼 그룹의 양끝 정렬을 유지한다(@container 는 루트 크롬). */}
+      {/* 중앙 — 주소 pill (홈 · 주소 · 새로고침), 360px 고정·좁은 크롬에서는 max-w-full 로 축소 */}
       <div class="flex flex-1 min-w-0 items-center justify-center">
-        <div class="@max-[400px]:hidden flex h-6 w-[360px] max-w-full min-w-0 items-center gap-1 px-1 rounded-md border border-border-weak-base bg-background-stronger">
+        <div class="flex h-6 w-[360px] max-w-full min-w-0 items-center gap-1 px-1 rounded-md border border-border-weak-base bg-background-stronger">
           <button
             type="button"
             class={ghostBtn + " !size-5"}
@@ -423,8 +731,22 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 우 그룹 — 새 탭에서 열기 + 주소 복사 */}
+      {/* 우 그룹 — (에러 시)오류 재표시 + 새 탭에서 열기 + 주소 복사 */}
       <div class="flex shrink-0 items-center justify-end gap-1">
+        <Show when={props.showErrorButton}>
+          <button
+            type="button"
+            aria-label={language.t("session.preview.clientError.reopen")}
+            aria-expanded={props.errorOpen}
+            onClick={() => props.onToggleError?.()}
+            class="inline-flex h-6 items-center gap-1 rounded-md border border-critical-base bg-surface-critical-base px-1.5 text-icon-critical-base transition-colors hover:border-critical-hover"
+          >
+            <Icon name="warning" size="small" class="text-icon-critical-base" />
+            <Show when={(props.errorCount ?? 0) > 1}>
+              <span class="text-12-regular">{props.errorCount}</span>
+            </Show>
+          </button>
+        </Show>
         <button
           type="button"
           class={ghostBtn}

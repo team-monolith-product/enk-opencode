@@ -43,7 +43,60 @@ let connecting = false
 // 보고했고, 합성 popstate 까지 "pop" 으로 보고하면 동일 href 가 스택에 중복돼 부모 커서가 어긋난다).
 let suppressPopReport = false
 
-const childMethods: ChildMethods = {
+// penpal 핸드셰이크가 끝나기 전(remoteParent 미설정)에 발생한 console/error 를 버퍼링했다가 연결되면 flush.
+// 초기 로드에서 앱이 바로 터지면(예: 모듈 top-level ReferenceError) 에러가 연결 전에 발생하는데,
+// 버퍼가 없으면 그대로 유실돼 부모가 첫 에러를 못 받는다(흰 화면인데 오버레이 안 뜸). 폭주 방지로 상한을 둔다.
+const PENDING_MAX = 50
+let pending: Array<() => unknown> = []
+
+// ── 디버깅 로깅 ──
+// 브릿지 버전 — 부팅 시 콘솔에 남겨 배포된 번들을 식별한다. 브릿지 변경 시 올린다.
+const BRIDGE_VERSION = "1.0.0"
+// installConsoleForwarding 가 console.* 를 오버라이드해 부모로 포워딩하므로, 브릿지 내부 디버그 로깅은
+// 원본 console 을 캡처해 쓴다(안 그러면 console.debug → onConsole 전송 → 또 console.debug 로 무한 재귀).
+const rawConsole = {
+  debug: console.debug?.bind(console) ?? console.log?.bind(console),
+  info: console.info?.bind(console) ?? console.log?.bind(console),
+}
+// localStorage.devMode === "true" 면 브릿지가 부모와 주고받는 모든 메시지를 콘솔에 남긴다(호출 시점 재확인).
+function isDevMode(): boolean {
+  try {
+    return localStorage.getItem("devMode") === "true"
+  } catch {
+    return false
+  }
+}
+// 부모로 보내는 메서드 호출 — devMode 면 로깅하고, emit 으로 감싸(연결 전이면 버퍼링) 전송한다.
+function send<K extends keyof ParentMethods>(name: K, arg: Parameters<ParentMethods[K]>[0]) {
+  if (isDevMode()) {
+    try {
+      rawConsole.debug(`[preview-bridge] → ${name}`, arg)
+    } catch {
+      /* noop */
+    }
+  }
+  emit(() => (remoteParent?.[name] as ((a: unknown) => unknown) | undefined)?.(arg))
+}
+// 부모가 호출하는 자식 메서드에 수신 로깅을 덧입힌다(devMode 면 호출 시점에 로깅).
+function withReceiveLog(methods: ChildMethods): ChildMethods {
+  const out: Record<string, (...a: unknown[]) => unknown> = {}
+  for (const name of Object.keys(methods) as (keyof ChildMethods)[]) {
+    const fn = methods[name] as (...a: unknown[]) => unknown
+    out[name] = (...args: unknown[]) => {
+      if (isDevMode()) {
+        try {
+          rawConsole.debug(`[preview-bridge] ← ${name}`, ...args)
+        } catch {
+          /* noop */
+        }
+      }
+      return fn(...args)
+    }
+  }
+  return out as ChildMethods
+}
+
+const childMethods: ChildMethods = withReceiveLog({
   ping: () => "pong",
   navigate: (url: string) => {
     window.location.assign(url)
@@ -77,7 +130,7 @@ const childMethods: ChildMethods = {
   setPickMode: (on: boolean) => setPickMode(on),
   queryDom: (query?: DomQuery) => snapshotDom(query),
   capture: (options?: CaptureOptions) => capture(options),
-}
+})
 
 function setupConnection() {
   if (connecting) return
@@ -96,10 +149,14 @@ function setupConnection() {
       remoteParent = parent
       connected = true
       connecting = false
+      // 연결 전에 버퍼된 console/error 를 순서대로 흘려보낸다(초기 로드 에러 유실 방지).
+      const queued = pending
+      pending = []
+      for (const call of queued) emit(call)
       // 연결 직후 현재 위치 1회 보고. 전체 페이지 이동(MPA·location.assign·뒤로/앞으로)은 문서가 새로 로드돼
       // popstate 가 아닌 재연결로만 감지되므로, 이 로드가 어떤 종류였는지 Navigation Timing 으로 판별해
       // 부모 미러가 push/replace/pop 을 구분하게 한다(재연결마다 와도 부모가 href 로 멱등 처리).
-      emit(() => remoteParent?.onLocationChange(readLocation(navigationType())))
+      send("onLocationChange", readLocation(navigationType()))
     })
     .catch(() => {
       // 핸드셰이크 실패/타임아웃 — 재연결 타이머가 다시 시도한다.
@@ -110,6 +167,12 @@ function setupConnection() {
 }
 
 function boot() {
+  // 부팅 시 브릿지 버전을 콘솔에 남겨, 배포된 번들이 최신인지 눈으로 확인할 수 있게 한다.
+  try {
+    rawConsole.info(`[preview-bridge] v${BRIDGE_VERSION}`)
+  } catch {
+    /* noop */
+  }
   // console/error/location 후킹은 1회만 설치하고, 내부에서 항상 최신 remoteParent 를 참조한다.
   installConsoleForwarding()
   installErrorForwarding()
@@ -127,7 +190,11 @@ function boot() {
  * 한 번 실패하면 remoteParent 를 비워 이후 호출을 즉시 단락(추가 postMessage 시도 자체를 멈춤) → 재연결 타이머가 복구.
  */
 function emit(call: () => unknown) {
-  if (!remoteParent) return
+  if (!remoteParent) {
+    // 아직 연결 전 — 버려지 말고 버퍼링해 두었다가 연결되면 flushPending() 이 순서대로 흘려보낸다.
+    if (pending.length < PENDING_MAX) pending.push(call)
+    return
+  }
   try {
     const r = call() as { catch?: (cb: () => void) => void } | undefined
     r?.catch?.(() => {
@@ -162,7 +229,7 @@ function installConsoleForwarding() {
     const original = console[level]?.bind(console)
     console[level] = (...args: unknown[]) => {
       original?.(...args)
-      emit(() => remoteParent?.onConsole({ level, args: args.map(safeStringify), timestamp: Date.now() }))
+      send("onConsole", { level, args: args.map(safeStringify), timestamp: Date.now() })
     }
   }
 }
@@ -177,17 +244,15 @@ function installErrorForwarding() {
       column: e.colno,
       timestamp: Date.now(),
     }
-    emit(() => remoteParent?.onError(entry))
+    send("onError", entry)
   })
   window.addEventListener("unhandledrejection", (e) => {
     const reason = e.reason
-    emit(() =>
-      remoteParent?.onError({
-        message: reason?.message ?? safeStringify(reason),
-        stack: reason?.stack,
-        timestamp: Date.now(),
-      }),
-    )
+    send("onError", {
+      message: reason?.message ?? safeStringify(reason),
+      stack: reason?.stack,
+      timestamp: Date.now(),
+    })
   })
 }
 
@@ -227,7 +292,7 @@ function readLocation(type: LocationInfo["type"]): LocationInfo {
 
 function installLocationForwarding() {
   let justPopped = false
-  const report = (type: LocationInfo["type"]) => emit(() => remoteParent?.onLocationChange(readLocation(type)))
+  const report = (type: LocationInfo["type"]) => send("onLocationChange", readLocation(type))
 
   const wrap = (key: "pushState" | "replaceState", type: "push" | "replace") => {
     const original = history[key].bind(history)
@@ -371,7 +436,7 @@ function onPickClick(e: MouseEvent) {
   e.stopPropagation()
   const target = e.target as HTMLElement | null
   if (!target) return
-  emit(() => remoteParent?.onElementPicked(describeElement(target)))
+  send("onElementPicked", describeElement(target))
   setPickMode(false)
 }
 
