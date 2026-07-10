@@ -3,6 +3,7 @@ import { Cause, Effect, Layer, Scope, ServiceMap } from "effect"
 import { createWrapper } from "@parcel/watcher/wrapper"
 import type ParcelWatcher from "@parcel/watcher"
 import { readdir } from "fs/promises"
+import os from "os"
 import path from "path"
 import z from "zod"
 import { Bus } from "@/bus"
@@ -63,6 +64,15 @@ export namespace FileWatcher {
     })
   }
 
+  // 파일시스템 루트("/")나 홈 디렉토리는 워치 대상이 아니다. directory 지정이 없는 요청이
+  // process.cwd()(컨테이너에선 "/")로 폴백해 들어오면 루트 전체 재귀 크롤이 발생하는데,
+  // 아래 subscribe 의 타임아웃은 로그만 남길 뿐 네이티브 크롤을 취소하지 못해 cold EFS 를
+  // 크롤이 끝날 때까지 계속 긁게 된다.
+  function unwatchable(dir: string) {
+    const resolved = path.resolve(dir)
+    return resolved === path.parse(resolved).root || resolved === os.homedir()
+  }
+
   export const hasNativeBinding = () => !!watcher()
 
   export interface Interface {
@@ -80,6 +90,11 @@ export namespace FileWatcher {
         Effect.fn("FileWatcher.state")(
           function* () {
             if (yield* Flag.OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER) return
+
+            if (unwatchable(Instance.directory)) {
+              log.warn("refusing to watch filesystem root or home", { directory: Instance.directory })
+              return
+            }
 
             log.info("init", { directory: Instance.directory })
 
@@ -168,26 +183,49 @@ export namespace FileWatcher {
             // touch/mkdir/mv/rm, git checkout, 빌드 산출물, 외부 에디터 등)도
             // file.watcher.updated 이벤트로 흘러 트리가 자동 갱신된다.
             // OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER 로 끌 수 있다(위 가드 참조).
-            yield* subscribe(Instance.directory, [
-              ...FileIgnore.PATTERNS,
-              ...cfgIgnores,
-              ...protecteds(Instance.directory),
-            ])
+            //
+            // 구독의 초기 재귀 크롤(inotify 워치 설치)은 cold EFS 에서 부트스트랩·첫 요청이
+            // await 하는 git/LSP/세션 I/O 와 같은 파일시스템을 놓고 경쟁해 첫 응답을 게이트웨이
+            // 타임아웃(504) 너머로 밀 수 있다. 그래서 구독은 OPENCODE_FILEWATCHER_DEFER_MS 뒤
+            // 백그라운드 파이버에서 건다 — 이 창에서 놓치는 변경은 툴(Edit/Write)이 직접 발행하는
+            // 이벤트가 덮는다. dispose 시 파이버가 인터럽트되고, 걸린 구독은 위 finalizer 가 해제한다.
+            // 0 이면 예전처럼 init 안에서 동기로 구독한다(테스트가 구독 완료를 확정적으로 기다리는 용도).
+            const deferMs = yield* Flag.OPENCODE_FILEWATCHER_DEFER_MS
+            const subscribeAll = Effect.gen(function* () {
+              yield* subscribe(Instance.directory, [
+                ...FileIgnore.PATTERNS,
+                ...cfgIgnores,
+                ...protecteds(Instance.directory),
+              ])
 
-            if (Instance.project.vcs === "git") {
-              const result = yield* Effect.promise(() =>
-                git(["rev-parse", "--git-dir"], {
-                  cwd: Instance.project.worktree,
-                }),
-              )
-              const vcsDir =
-                result.exitCode === 0 ? path.resolve(Instance.project.worktree, result.text().trim()) : undefined
-              if (vcsDir && !cfgIgnores.includes(".git") && !cfgIgnores.includes(vcsDir)) {
-                const ignore = (yield* Effect.promise(() => readdir(vcsDir).catch(() => []))).filter(
-                  (entry) => entry !== "HEAD",
+              if (Instance.project.vcs === "git") {
+                const result = yield* Effect.promise(() =>
+                  git(["rev-parse", "--git-dir"], {
+                    cwd: Instance.project.worktree,
+                  }),
                 )
-                yield* subscribe(vcsDir, ignore)
+                const vcsDir =
+                  result.exitCode === 0 ? path.resolve(Instance.project.worktree, result.text().trim()) : undefined
+                if (vcsDir && !cfgIgnores.includes(".git") && !cfgIgnores.includes(vcsDir)) {
+                  const ignore = (yield* Effect.promise(() => readdir(vcsDir).catch(() => []))).filter(
+                    (entry) => entry !== "HEAD",
+                  )
+                  yield* subscribe(vcsDir, ignore)
+                }
               }
+            })
+
+            if (deferMs > 0) {
+              yield* Effect.sleep(deferMs).pipe(
+                Effect.andThen(subscribeAll),
+                Effect.catchCause((cause) => {
+                  log.error("failed to subscribe watchers", { cause: Cause.pretty(cause) })
+                  return Effect.void
+                }),
+                Effect.forkScoped,
+              )
+            } else {
+              yield* subscribeAll
             }
           },
           Effect.catchCause((cause) => {
