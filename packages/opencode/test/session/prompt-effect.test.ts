@@ -1,4 +1,5 @@
 import { NodeFileSystem } from "@effect/platform-node"
+import { APICallError } from "ai"
 import { expect, spyOn } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer, ServiceMap } from "effect"
 import * as Stream from "effect/Stream"
@@ -24,6 +25,7 @@ import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
+import { SessionFallback } from "../../src/session/fallback"
 import { Shell } from "../../src/shell/shell"
 import { Snapshot } from "../../src/snapshot"
 import { TaskTool } from "../../src/tool/task"
@@ -315,6 +317,7 @@ const deps = Layer.mergeAll(
   mcp,
   AppFileSystem.defaultLayer,
   status,
+  SessionFallback.layer,
   llm,
 ).pipe(Layer.provideMerge(infra))
 const registry = ToolRegistry.layer.pipe(Layer.provideMerge(deps))
@@ -1258,4 +1261,569 @@ unix(
       ),
     ),
   30_000,
+)
+
+// Model fallback
+
+// A second model on the same test provider, so the fallback pool resolves without a second SDK.
+const cfgFallback = {
+  provider: {
+    test: {
+      ...cfg.provider.test,
+      models: {
+        ...cfg.provider.test.models,
+        "test-fallback": { ...cfg.provider.test.models["test-model"], id: "test-fallback", name: "Test Fallback" },
+      },
+    },
+  },
+}
+
+// The flags are read off process.env on every access, so a test can retune them in place.
+function withFallbackEnv<A, E, R>(env: Record<string, string | undefined>, fx: () => Effect.Effect<A, E, R>) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const prev: Record<string, string | undefined> = {}
+      for (const [key, value] of Object.entries(env)) {
+        prev[key] = process.env[key]
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+      return prev
+    }),
+    () => fx(),
+    (prev) =>
+      Effect.sync(() => {
+        for (const [key, value] of Object.entries(prev)) {
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+        }
+      }),
+  )
+}
+
+function apiFailure(isRetryable: boolean) {
+  return Stream.fail(
+    new APICallError({
+      message: "provider exploded",
+      url: "http://localhost:1/v1/chat/completions",
+      requestBodyValues: {},
+      statusCode: isRetryable ? 429 : 401,
+      responseHeaders: { "retry-after-ms": "0" },
+      isRetryable,
+    }),
+  ) as Stream.Stream<LLM.Event, unknown>
+}
+
+const POOL = { ENK_AI_FALLBACK_MODELS: '["test/test-fallback"]' }
+
+it.effect("falls back to the next model once the primary exhausts its retries", () =>
+  withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "1" }, () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { test, prompt, chat } = yield* boot()
+          yield* test.push(apiFailure(true))
+          yield* test.push(apiFailure(true))
+          yield* test.reply(...replyStop("recovered"))
+          yield* user(chat.id, "hello")
+
+          const result = yield* prompt.loop({ sessionID: chat.id })
+
+          // one initial attempt plus one retry on the primary, then a single attempt on the fallback
+          expect(yield* test.calls).toBe(3)
+          const models = (yield* test.inputs).map((input) => input.model.id as string)
+          expect(models).toEqual(["test-model", "test-model", "test-fallback"])
+
+          expect(result.info.role).toBe("assistant")
+          if (result.info.role === "assistant") {
+            expect(result.info.modelID as string).toBe("test-fallback")
+            expect(result.info.error).toBeUndefined()
+          }
+          expect(result.parts.some((part) => part.type === "text" && part.text === "recovered")).toBe(true)
+        }),
+      { git: true, config: cfgFallback },
+    ),
+  ),
+)
+
+it.effect("falls back immediately on an error retrying cannot fix", () =>
+  withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "5" }, () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { test, prompt, chat } = yield* boot()
+          yield* test.push(apiFailure(false))
+          yield* test.reply(...replyStop("recovered"))
+          yield* user(chat.id, "hello")
+
+          yield* prompt.loop({ sessionID: chat.id })
+
+          // the retry budget is never spent: a different model is the only thing that can help
+          expect(yield* test.calls).toBe(2)
+          expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual(["test-model", "test-fallback"])
+        }),
+      { git: true, config: cfgFallback },
+    ),
+  ),
+)
+
+it.effect("discards the empty message left behind by a model that never emitted anything", () =>
+  withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { test, prompt, sessions, chat } = yield* boot()
+          yield* test.push(apiFailure(false))
+          yield* test.reply(...replyStop("recovered"))
+          yield* user(chat.id, "hello")
+
+          yield* prompt.loop({ sessionID: chat.id })
+
+          const assistants = (yield* sessions.messages({ sessionID: chat.id })).filter(
+            (msg) => msg.info.role === "assistant",
+          )
+          expect(assistants.length).toBe(1)
+          expect(assistants[0].info.role === "assistant" && (assistants[0].info.modelID as string)).toBe(
+            "test-fallback",
+          )
+        }),
+      { git: true, config: cfgFallback },
+    ),
+  ),
+)
+
+it.effect("keeps the partial output of a model that failed mid-stream", () =>
+  withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { test, prompt, sessions, chat } = yield* boot()
+          yield* test.push(
+            stream(start(), textStart("t"), textDelta("t", "half a sen")).pipe(Stream.concat(apiFailure(false))),
+          )
+          yield* test.reply(...replyStop("recovered"))
+          yield* user(chat.id, "hello")
+
+          yield* prompt.loop({ sessionID: chat.id })
+
+          const assistants = (yield* sessions.messages({ sessionID: chat.id })).filter(
+            (msg) => msg.info.role === "assistant",
+          )
+          expect(assistants.length).toBe(2)
+          expect(assistants[0].parts.some((part) => part.type === "text" && part.text === "half a sen")).toBe(true)
+          // the abandoned message must not look like a completed answer, or the loop would stop there
+          expect(assistants[0].info.role === "assistant" && assistants[0].info.finish).toBeUndefined()
+          expect(assistants[1].parts.some((part) => part.type === "text" && part.text === "recovered")).toBe(true)
+        }),
+      { git: true, config: cfgFallback },
+    ),
+  ),
+)
+
+it.effect("surfaces the error when the pool is exhausted", () =>
+  withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { test, prompt, chat } = yield* boot()
+          yield* test.push(apiFailure(false))
+          yield* test.push(apiFailure(false))
+          yield* user(chat.id, "hello")
+
+          const result = yield* prompt.loop({ sessionID: chat.id })
+
+          expect(yield* test.calls).toBe(2)
+          expect(result.info.role === "assistant" && result.info.error).toBeDefined()
+        }),
+      { git: true, config: cfgFallback },
+    ),
+  ),
+)
+
+it.effect("an empty pool disables fallback entirely", () =>
+  withFallbackEnv({ ENK_AI_FALLBACK_MODELS: "[]", ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { test, prompt, chat } = yield* boot()
+          yield* test.push(apiFailure(false))
+          yield* user(chat.id, "hello")
+
+          const result = yield* prompt.loop({ sessionID: chat.id })
+
+          expect(yield* test.calls).toBe(1)
+          expect(result.info.role === "assistant" && result.info.error).toBeDefined()
+        }),
+      { git: true, config: cfgFallback },
+    ),
+  ),
+)
+
+it.effect(
+  "a degraded session still gives the primary one attempt per turn",
+  () =>
+    withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "3", ENK_AI_FALLBACK_STICKY_AFTER: "1" }, () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            // turn one: the primary burns its retry budget, then the fallback answers
+            yield* test.push(apiFailure(true))
+            yield* test.push(apiFailure(true))
+            yield* test.push(apiFailure(true))
+            yield* test.push(apiFailure(true))
+            yield* test.reply(...replyStop("first"))
+            yield* user(chat.id, "hello")
+            yield* prompt.loop({ sessionID: chat.id })
+            expect(yield* test.calls).toBe(5)
+
+            // turn two: the session is degraded, so the primary gets a single attempt and no retries
+            yield* test.push(apiFailure(true))
+            yield* test.reply(...replyStop("second"))
+            yield* user(chat.id, "again")
+            yield* prompt.loop({ sessionID: chat.id })
+
+            expect(yield* test.calls).toBe(7)
+            expect((yield* test.inputs).slice(5).map((input) => input.model.id as string)).toEqual([
+              "test-model",
+              "test-fallback",
+            ])
+          }),
+        { git: true, config: cfgFallback },
+      ),
+    ),
+  30_000,
+)
+
+it.effect(
+  "a recovered primary clears degraded mode",
+  () =>
+    withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "1", ENK_AI_FALLBACK_STICKY_AFTER: "1" }, () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            // turn one: the primary spends its one retry, falls back, and degrades the session
+            yield* test.push(apiFailure(true))
+            yield* test.push(apiFailure(true))
+            yield* test.reply(...replyStop("first"))
+            yield* user(chat.id, "hello")
+            yield* prompt.loop({ sessionID: chat.id })
+
+            // turn two: degraded, so the primary gets a single attempt — and it answers, clearing the mode
+            yield* test.reply(...replyStop("second"))
+            yield* user(chat.id, "again")
+            yield* prompt.loop({ sessionID: chat.id })
+
+            // turn three proves the mode is gone: the primary gets its retry back rather than one shot
+            yield* test.push(apiFailure(true))
+            yield* test.reply(...replyStop("third"))
+            yield* user(chat.id, "once more")
+            const result = yield* prompt.loop({ sessionID: chat.id })
+
+            expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual([
+              "test-model",
+              "test-model",
+              "test-fallback",
+              "test-model",
+              "test-model",
+              "test-model",
+            ])
+            expect(result.info.role === "assistant" && (result.info.modelID as string)).toBe("test-model")
+            expect(result.parts.some((part) => part.type === "text" && part.text === "third")).toBe(true)
+          }),
+        { git: true, config: cfgFallback },
+      ),
+    ),
+  30_000,
+)
+
+it.effect(
+  "context overflow compacts instead of falling back",
+  () =>
+    withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            // 413 is how the provider says "your input is too big" — another model is not the answer,
+            // compacting this one's history is.
+            yield* test.push(
+              Stream.fail(
+                new APICallError({
+                  message: "input too long",
+                  url: "http://localhost:1/v1/chat/completions",
+                  requestBodyValues: {},
+                  statusCode: 413,
+                  isRetryable: false,
+                }),
+              ) as Stream.Stream<LLM.Event, unknown>,
+            )
+            yield* test.reply(...replyStop("summary"))
+            yield* test.reply(...replyStop("after compaction"))
+            yield* user(chat.id, "hello")
+
+            yield* prompt.loop({ sessionID: chat.id })
+
+            const models = yield* test.inputs
+            expect(models.every((input) => (input.model.id as string) === "test-model")).toBe(true)
+            expect(models.length).toBeGreaterThan(1)
+          }),
+        { git: true, config: cfgFallback },
+      ),
+    ),
+  30_000,
+)
+
+// The primary offers "high"; the fallback only offers "adaptive", mirroring anthropic -> minimax.
+const cfgVariants = {
+  provider: {
+    test: {
+      ...cfg.provider.test,
+      models: {
+        "test-model": { ...cfg.provider.test.models["test-model"], variants: { high: { reasoningEffort: "high" } } },
+        "test-fallback": {
+          ...cfg.provider.test.models["test-model"],
+          id: "test-fallback",
+          name: "Test Fallback",
+          variants: { adaptive: { thinking: { type: "adaptive" } } },
+        },
+      },
+    },
+  },
+}
+
+const userWithVariant = Effect.fn("test.userWithVariant")(function* (sessionID: SessionID, variant: string) {
+  const session = yield* Session.Service
+  const msg = yield* session.updateMessage({
+    id: MessageID.ascending(),
+    role: "user",
+    sessionID,
+    agent: "build",
+    model: ref,
+    variant,
+    time: { created: Date.now() },
+  })
+  yield* session.updatePart({ id: PartID.ascending(), messageID: msg.id, sessionID, type: "text", text: "hello" })
+  return msg
+})
+
+it.effect("drops a variant the fallback model does not offer", () =>
+  withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { test, prompt, chat } = yield* boot()
+          yield* test.push(apiFailure(false))
+          yield* test.reply(...replyStop("recovered"))
+          yield* userWithVariant(chat.id, "high")
+
+          const result = yield* prompt.loop({ sessionID: chat.id })
+
+          const inputs = yield* test.inputs
+          expect(inputs[0].user.variant).toBe("high")
+          // "high" is meaningless to the fallback model, so it must not be forwarded
+          expect(inputs[1].user.variant).toBeUndefined()
+          expect(result.info.role === "assistant" && result.info.variant).toBeUndefined()
+        }),
+      { git: true, config: cfgVariants },
+    ),
+  ),
+)
+
+it.effect("skips the pool entry that duplicates the primary, wherever it sits", () =>
+  // The primary is the pool's *second* entry here: it must not be tried twice, and the entry
+  // ahead of it in the pool must not jump the queue.
+  withFallbackEnv(
+    { ENK_AI_FALLBACK_MODELS: '["test/test-fallback", "test/test-model"]', ENK_AI_FALLBACK_RETRIES: "0" },
+    () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            yield* test.push(apiFailure(false))
+            yield* test.push(apiFailure(false))
+            yield* user(chat.id, "hello")
+
+            const result = yield* prompt.loop({ sessionID: chat.id })
+
+            // primary, then the one remaining pool entry — then the pool is exhausted
+            expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual([
+              "test-model",
+              "test-fallback",
+            ])
+            expect(result.info.role === "assistant" && result.info.error).toBeDefined()
+          }),
+        { git: true, config: cfgFallback },
+      ),
+  ),
+)
+
+it.effect("skips a pool entry this deployment cannot resolve", () =>
+  withFallbackEnv(
+    {
+      ENK_AI_FALLBACK_MODELS: '["test/does-not-exist", "nosuch/provider", "test/test-fallback"]',
+      ENK_AI_FALLBACK_RETRIES: "0",
+    },
+    () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            yield* test.push(apiFailure(false))
+            yield* test.reply(...replyStop("recovered"))
+            yield* user(chat.id, "hello")
+
+            yield* prompt.loop({ sessionID: chat.id })
+
+            // the two unresolvable entries never become an attempt
+            expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual([
+              "test-model",
+              "test-fallback",
+            ])
+          }),
+        { git: true, config: cfgFallback },
+      ),
+  ),
+)
+
+it.effect(
+  "the fallback model gets its own retry budget",
+  () =>
+    withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "1" }, () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            yield* test.push(apiFailure(true)) // primary: attempt
+            yield* test.push(apiFailure(true)) // primary: retry
+            yield* test.push(apiFailure(true)) // fallback: attempt
+            yield* test.reply(...replyStop("recovered")) // fallback: retry succeeds
+            yield* user(chat.id, "hello")
+
+            const result = yield* prompt.loop({ sessionID: chat.id })
+
+            expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual([
+              "test-model",
+              "test-model",
+              "test-fallback",
+              "test-fallback",
+            ])
+            expect(result.parts.some((part) => part.type === "text" && part.text === "recovered")).toBe(true)
+          }),
+        { git: true, config: cfgFallback },
+      ),
+    ),
+  30_000,
+)
+
+it.effect(
+  "a degraded session still gives the fallback model its full retry budget",
+  () =>
+    withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "1", ENK_AI_FALLBACK_STICKY_AFTER: "1" }, () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            // turn one degrades the session
+            yield* test.push(apiFailure(true))
+            yield* test.push(apiFailure(true))
+            yield* test.reply(...replyStop("first"))
+            yield* user(chat.id, "hello")
+            yield* prompt.loop({ sessionID: chat.id })
+
+            // turn two: the primary is docked its retry, but the fallback is not
+            yield* test.push(apiFailure(true)) // primary: its one and only attempt
+            yield* test.push(apiFailure(true)) // fallback: attempt
+            yield* test.reply(...replyStop("second")) // fallback: retry succeeds
+            yield* user(chat.id, "again")
+            yield* prompt.loop({ sessionID: chat.id })
+
+            expect((yield* test.inputs).slice(3).map((input) => input.model.id as string)).toEqual([
+              "test-model",
+              "test-fallback",
+              "test-fallback",
+            ])
+          }),
+        { git: true, config: cfgFallback },
+      ),
+    ),
+  30_000,
+)
+
+it.effect(
+  "an aborted turn does not fall back",
+  () =>
+    withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            yield* test.push((input) => hang(input, start()))
+            yield* test.reply(...replyStop("must not run"))
+            yield* user(chat.id, "hello")
+
+            const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+            yield* Effect.sleep(200)
+            yield* prompt.cancel(chat.id)
+            yield* Fiber.await(fiber)
+
+            // the user stopped the turn; handing it to another model would be the opposite of that
+            expect(yield* test.calls).toBe(1)
+            expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual(["test-model"])
+          }),
+        { git: true, config: cfgFallback },
+      ),
+    ),
+  30_000,
+)
+
+it.effect("applies the variant declared on the pool entry", () =>
+  withFallbackEnv(
+    {
+      ENK_AI_FALLBACK_MODELS: '[{"model": "test/test-fallback", "variant": "adaptive"}]',
+      ENK_AI_FALLBACK_RETRIES: "0",
+    },
+    () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            yield* test.push(apiFailure(false))
+            yield* test.reply(...replyStop("recovered"))
+            yield* userWithVariant(chat.id, "high")
+
+            const result = yield* prompt.loop({ sessionID: chat.id })
+
+            const inputs = yield* test.inputs
+            expect(inputs[0].user.variant).toBe("high")
+            // the pool entry's own variant wins over whatever the user message carried
+            expect(inputs[1].user.variant).toBe("adaptive")
+            expect(result.info.role === "assistant" && result.info.variant).toBe("adaptive")
+          }),
+        { git: true, config: cfgVariants },
+      ),
+  ),
+)
+
+it.effect("switching models does not spend the agent's step budget", () =>
+  withFallbackEnv({ ...POOL, ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { test, prompt, chat } = yield* boot()
+          yield* test.push(apiFailure(false))
+          yield* test.reply(...replyStop("recovered"))
+          yield* user(chat.id, "hello")
+
+          yield* prompt.loop({ sessionID: chat.id })
+
+          // With a 2-step budget, a fallback that counted as a step would make the retry the *last*
+          // step, and the loop appends a synthetic assistant "you are out of steps" message then.
+          const inputs = yield* test.inputs
+          expect(inputs[1].messages.at(-1)?.role).toBe("user")
+        }),
+      { git: true, config: { ...cfgFallback, agent: { build: { steps: 2 } } } },
+    ),
+  ),
 )

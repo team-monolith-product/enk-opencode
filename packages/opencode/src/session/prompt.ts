@@ -28,6 +28,8 @@ import { ReadTool } from "../tool/read"
 import { FileTime } from "../file/time"
 import { Flag } from "../flag/flag"
 import { ModelPolicy } from "../enk/model-policy"
+import { ModelFallback } from "../enk/model-fallback"
+import { SessionFallback } from "./fallback"
 import { ulid } from "ulid"
 import { spawn } from "child_process"
 import { Command } from "../command"
@@ -92,6 +94,7 @@ export namespace SessionPrompt {
       const sessions = yield* Session.Service
       const agents = yield* Agent.Service
       const processor = yield* SessionProcessor.Service
+      const fallbackState = yield* SessionFallback.Service
       const compaction = yield* SessionCompaction.Service
       const plugin = yield* Plugin.Service
       const commands = yield* Command.Service
@@ -1009,6 +1012,37 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }),
         )
 
+      // Every step rebuilds the chain, so only announce a missing fallback model the first time.
+      const warnedMissing = new Set<string>()
+
+      // The primary model followed by every fallback model that actually resolves. Entries naming a
+      // provider or model this deployment does not have are dropped rather than failing the turn,
+      // so a pool shared across environments stays usable.
+      const resolveChain = (primary: { providerID: ProviderID; modelID: ModelID }, sessionID: SessionID) =>
+        Effect.gen(function* () {
+          const head = yield* getModel(primary.providerID, primary.modelID, sessionID)
+          const chain: { model: Provider.Model; variant?: string }[] = [{ model: head }]
+          const seen = new Set([`${primary.providerID}/${primary.modelID}`])
+
+          for (const entry of ModelFallback.parsePool(Flag.ENK_AI_FALLBACK_MODELS)) {
+            const key = `${entry.providerID}/${entry.modelID}`
+            if (seen.has(key)) continue
+            seen.add(key)
+            const model = yield* Effect.promise(() =>
+              Provider.getModel(ProviderID.make(entry.providerID), ModelID.make(entry.modelID)).catch(() => undefined),
+            )
+            if (!model) {
+              if (!warnedMissing.has(key)) {
+                warnedMissing.add(key)
+                log.warn("fallback model unavailable, skipping", { model: key })
+              }
+              continue
+            }
+            chain.push({ model, variant: ModelPolicy.validVariant(model.variants, entry.variant) })
+          }
+          return chain
+        })
+
       const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
         const agentName = input.agent || (yield* agents.defaultAgent())
         const ag = yield* agents.get(agentName)
@@ -1400,6 +1434,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         function* (sessionID: SessionID) {
           let structured: unknown | undefined
           let step = 0
+          // Position in the model chain. Turn-scoped: every turn starts back at the primary model.
+          let modelIndex = 0
           const session = yield* sessions.get(sessionID)
 
           while (true) {
@@ -1441,7 +1477,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 history: msgs,
               }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-            const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+            const chain = yield* resolveChain(lastUser.model, sessionID)
+            const active = chain[Math.min(modelIndex, chain.length - 1)]
+            const model = active.model
+            // The user's variant was validated against the primary model, so a fallback model has to
+            // re-validate it: "high" means nothing to a model that only offers "adaptive".
+            const inherited =
+              modelIndex === 0 ? lastUser.variant : ModelPolicy.validVariant(model.variants, lastUser.variant)
+            const variant = active.variant ?? inherited
+            // A degraded session still tries the primary once per turn — that is how a recovered
+            // provider gets picked back up — but spends no retries waiting on a dead one.
+            const retries =
+              modelIndex === 0 && (yield* fallbackState.degraded(sessionID)) ? 0 : Flag.ENK_AI_FALLBACK_RETRIES
+            const canFallback = modelIndex < chain.length - 1
             const task = tasks.pop()
 
             if (task?.type === "subtask") {
@@ -1488,7 +1536,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               role: "assistant",
               mode: agent.name,
               agent: agent.name,
-              variant: lastUser.variant,
+              variant,
               path: { cwd: Instance.directory, root: Instance.worktree },
               cost: 0,
               tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -1502,9 +1550,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               assistantMessage: msg,
               sessionID,
               model,
+              retries,
+              canFallback,
             })
 
-            const outcome: "break" | "continue" = yield* Effect.onExit(
+            const outcome: "break" | "continue" | "fallback" = yield* Effect.onExit(
               Effect.gen(function* () {
                 const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
                 const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
@@ -1562,7 +1612,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 const format = lastUser.format ?? { type: "text" as const }
                 if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
                 const result = yield* handle.process({
-                  user: lastUser,
+                  // llm.ts reads the variant off the user message, so a fallback model that wants a
+                  // different one has to override it here.
+                  user: variant === lastUser.variant ? lastUser : { ...lastUser, variant },
                   agent,
                   permission: session.permission,
                   sessionID,
@@ -1572,6 +1624,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   model,
                   toolChoice: format.type === "json_schema" ? "required" : undefined,
                 })
+
+                if (result === "fallback") return "fallback" as const
 
                 if (structured !== undefined) {
                   handle.message.structured = structured
@@ -1609,6 +1663,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 InstructionPrompt.clear(handle.message.id)
               }),
             )
+            if (outcome === "fallback") {
+              // A model that died before emitting anything leaves an empty bubble behind; drop it.
+              // Partial output is kept — the user should see what the failed model did say.
+              const parts = yield* Effect.promise(() => MessageV2.parts(msg.id))
+              if (parts.length === 0) yield* sessions.removeMessage({ sessionID, messageID: msg.id })
+              yield* fallbackState.increment(sessionID)
+              modelIndex++
+              step-- // switching models is not progress through the agent's step budget
+              continue
+            }
+            // The primary answered, so whatever outage put this session in degraded mode is over.
+            if (modelIndex === 0 && !handle.message.error) yield* fallbackState.reset(sessionID)
             if (outcome === "break") break
             continue
           }
@@ -1767,6 +1833,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     Effect.sync(() =>
       layer.pipe(
         Layer.provide(SessionStatus.layer),
+        Layer.provide(SessionFallback.layer),
         Layer.provide(SessionCompaction.defaultLayer),
         Layer.provide(SessionProcessor.defaultLayer),
         Layer.provide(Command.defaultLayer),
