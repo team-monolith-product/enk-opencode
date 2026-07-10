@@ -263,6 +263,7 @@ export const dict = {
   "prompt.action.attachFile": "파일 첨부",
   "prompt.action.attachImage": "이미지 첨부",
   "prompt.action.captureTab": "탭 캡처",
+  "prompt.action.captureTab.disabledHint": "미리보기 패널을 열어야 캡처할 수 있어요",
   "prompt.capture.editTitle": "캡처 편집",
   "prompt.capture.add": "추가",
   "prompt.capture.close": "닫기",
