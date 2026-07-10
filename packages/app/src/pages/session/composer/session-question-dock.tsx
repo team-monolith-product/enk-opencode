@@ -326,12 +326,6 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     customUpdate(input(), next)
   }
 
-  const customOpen = () => {
-    if (busy()) return
-    setEditing(true)
-    customUpdate(input(), true)
-  }
-
   const commitCustom = () => {
     customUpdate(localText())
     setEditing(false)
@@ -340,7 +334,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const selectOption = (optIndex: number) => {
     if (busy()) return
     if (optIndex === options().length) {
-      customOpen()
+      customToggle()
       return
     }
     const opt = options()[optIndex]
@@ -844,7 +838,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               role={multi() ? "checkbox" : "radio"}
               aria-checked={on()}
               disabled={busy()}
-              onClick={customOpen}
+              onClick={customToggle}
             >
               <Mark multi={multi()} picked={on()} soft={othersCustom()} onClick={toggleCustomMark} />
               <span data-slot="question-option-main">
@@ -868,8 +862,16 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
                 return
               }
               if (e.target instanceof HTMLTextAreaElement) return
+              // Clicking the card body (not the field) toggles the choice, so keep focus off the textarea.
+              e.preventDefault()
+              if (multi()) return
               const field = e.currentTarget.querySelector('[data-slot="question-custom-input"]')
               if (field instanceof HTMLTextAreaElement) field.focus()
+            }}
+            onClick={(e) => {
+              if (e.target instanceof HTMLTextAreaElement) return
+              if (!multi()) return
+              customToggle()
             }}
             onSubmit={(e) => {
               e.preventDefault()
