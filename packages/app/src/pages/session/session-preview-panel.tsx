@@ -327,6 +327,8 @@ export function SessionBrowserChrome(props: {
           >
             <Icon name="chevron-left" size="small" />
           </button>
+          {/* 구분선 — 뒤로/앞으로 버튼 사이 세퍼레이터(디자인 시안: 1×13, 여백 없음) */}
+          <span aria-hidden="true" class="h-[13px] w-px shrink-0 bg-border-weak-base" />
           <button
             type="button"
             class={ghostBtn}
