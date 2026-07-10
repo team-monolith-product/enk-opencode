@@ -1,4 +1,4 @@
-import { Component, createSignal, JSX, Show } from "solid-js"
+import { Component, createEffect, createSignal, JSX, on, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import type { IconProps } from "@opencode-ai/ui/icon"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -19,6 +19,12 @@ type ShellProps = {
   submitIcon: IconProps["name"]
   submitLabel: string
   submitDisabled?: boolean
+  /** Current prompt length in characters (code points). */
+  length: number
+  /** Upper bound; the counter fades in as it is approached and turns red when exceeded. */
+  maxLength: number
+  /** Nonce — bump it to replay the over-limit shake (e.g. when submit is blocked). */
+  shake: number
   tip: JSX.Element
   onExit: () => void | Promise<void>
   modes?: JSX.Element
@@ -46,6 +52,35 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
   const [copied, setCopied] = createSignal(false)
   const [attachOpen, setAttachOpen] = createSignal(false)
   const [attachPos, setAttachPos] = createSignal<{ left: number; bottom: number } | null>(null)
+  let countRef: HTMLSpanElement | undefined
+
+  const ratio = () => (props.maxLength > 0 ? props.length / props.maxLength : 0)
+  const over = () => props.length > props.maxLength
+  // 어느 정도 차면(상한의 80%) 그냥 나타난다 — 글자 수에 따라 서서히 진해지는 램프는 쓰지 않는다.
+  const SHOW_AT = 0.8
+
+  // 전송이 막힐 때(props.shake 증가) 초과 글자수를 좌우로 흔들어 시선을 끈다. Web Animations API라
+  // 별도 CSS 키프레임 없이 매번 깔끔하게 재생된다.
+  createEffect(
+    on(
+      () => props.shake,
+      (v, prev) => {
+        if (!v || v === prev) return
+        countRef?.animate(
+          [
+            { transform: "translateX(0)" },
+            { transform: "translateX(-3px)" },
+            { transform: "translateX(3px)" },
+            { transform: "translateX(-2px)" },
+            { transform: "translateX(2px)" },
+            { transform: "translateX(0)" },
+          ],
+          { duration: 360, easing: "ease-in-out" },
+        )
+      },
+      { defer: true },
+    ),
+  )
 
   const openAttach = () => {
     if (!attachBtnRef) return
@@ -296,21 +331,37 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
             </Tooltip>
           </Show>
         </div>
-        <Tooltip
-          placement="top"
-          inactive={props.submitIcon === "arrow-up-bold" && !props.submitDisabled}
-          value={props.tip}
-        >
-          <IconButton
-            data-action="prompt-submit"
-            type="submit"
-            icon={props.submitIcon}
-            variant="primary"
-            class="size-7.5"
-            disabled={props.submitDisabled}
-            aria-label={props.submitLabel}
-          />
-        </Tooltip>
+        <div class="flex items-center gap-2">
+          {/* 글자 수 카운터 — 상한 80%에 닿는 순간 그냥 나타난다. 초과 시 현재 글자수만 빨간색으로 전환 */}
+          <Show when={!props.readonly && ratio() >= SHOW_AT}>
+            <span
+              data-component="prompt-doc-count"
+              class="shrink-0 select-none tabular-nums text-11-regular text-text-weaker"
+              aria-live="polite"
+            >
+              <span ref={(el) => (countRef = el)} class="inline-block" classList={{ "text-icon-critical-base": over() }}>
+                {props.length.toLocaleString()}
+              </span>
+              {" / "}
+              {props.maxLength.toLocaleString()}
+            </span>
+          </Show>
+          <Tooltip
+            placement="top"
+            inactive={props.submitIcon === "arrow-up-bold" && !props.submitDisabled}
+            value={props.tip}
+          >
+            <IconButton
+              data-action="prompt-submit"
+              type="submit"
+              icon={props.submitIcon}
+              variant="primary"
+              class="size-7.5"
+              disabled={props.submitDisabled}
+              aria-label={props.submitLabel}
+            />
+          </Tooltip>
+        </div>
       </div>
     </div>
   )

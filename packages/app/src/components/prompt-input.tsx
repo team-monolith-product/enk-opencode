@@ -80,6 +80,7 @@ import { promptPlaceholder } from "./prompt-input/placeholder"
 import { promptFromDocMarkdown } from "@/components/prompt-input/prompt-plain"
 import { PromptDocShell } from "./prompt-input/doc-shell"
 import { createPromptDoc, type PromptDocConfig } from "./prompt-input/doc"
+import { MAX_PROMPT_DOC_CHARS } from "@/constants/prompt"
 import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
@@ -632,6 +633,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   })
 
+  // Bumped each time an over-limit submit is blocked, so the doc counter can replay its shake.
+  const [countShake, setCountShake] = createSignal(0)
+
   const hasDraft = createMemo(() => {
     if (store.mode === "doc") return doc.filled()
     if (imageAttachments().length > 0 || commentCount() > 0) return true
@@ -783,6 +787,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               )
           }}
           close={closeApproval}
+          onExpire={() => {
+            // Server terminal cast never arrived — drive the same "expired" transition locally so the
+            // dialog resolves instead of freezing at 0초. Routed through showApproval so finalizedID is
+            // set: a late server cast for this submit is then ignored rather than re-opening the dialog.
+            const current = approval()
+            if (current?.status === "pending") showApproval({ ...current, status: "expired" })
+          }}
         />
       ),
       () => {
@@ -1912,6 +1923,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     }
 
     if (store.mode === "doc") {
+      // Over the limit: the submit button stays enabled so a press gives feedback — shake the red
+      // count and toast, but do not send. Covers both the button and the submit-key path.
+      if (doc.length() > MAX_PROMPT_DOC_CHARS) {
+        setCountShake((n) => n + 1)
+        showToast({
+          title: language.t("prompt.toast.docTooLong.title"),
+          description: language.t("prompt.toast.docTooLong.description", {
+            max: MAX_PROMPT_DOC_CHARS.toLocaleString(),
+          }),
+        })
+        return
+      }
       const next = await doc.commitMarkdown()
       const text = next?.text
       if (!text) {
@@ -2319,6 +2342,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               readonly={readonly}
               submitIcon={submitIcon()}
               submitLabel={submitLabel()}
+              length={doc.length()}
+              maxLength={MAX_PROMPT_DOC_CHARS}
+              shake={countShake()}
               submitDisabled={readonly || (submitAction() === "send" && !hasDraft())}
               tip={tip()}
               onExit={exitDoc}

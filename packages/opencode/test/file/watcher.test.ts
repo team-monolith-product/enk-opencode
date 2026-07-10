@@ -20,6 +20,8 @@ const watcherConfigLayer = ConfigProvider.layer(
   ConfigProvider.fromUnknown({
     OPENCODE_EXPERIMENTAL_FILEWATCHER: "true",
     OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: "false",
+    // 프로덕션에선 구독을 부팅 창 밖으로 미루지만(cold EFS 경쟁 회피) 테스트는 즉시 건다.
+    OPENCODE_FILEWATCHER_DEFER_MS: "0",
   }),
 )
 

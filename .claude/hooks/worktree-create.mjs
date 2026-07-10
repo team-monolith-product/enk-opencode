@@ -18,6 +18,8 @@
  *   1) 메인 저장소에는 있지만 gitignore 되어 체크아웃에 따라오지 않는
  *      `.env*` 파일들을 복사한다(대상에 이미 있으면 skip).
  *   2) 이 프로젝트 전용 git 사용자 정보(name/email)를 로컬 config 로 설정한다.
+ *   3) `bun install` 로 의존성을 설치한다. node_modules 는 gitignore 라
+ *      `git worktree add` 로 따라오지 않으므로 워크트리마다 새로 깔아야 한다.
  */
 import {execFileSync} from 'node:child_process'
 import {existsSync, mkdirSync, copyFileSync, readdirSync} from 'node:fs'
@@ -151,6 +153,24 @@ function copyEnvFiles(mainRepo, worktree) {
   log(copied > 0 ? `완료 — ${copied}개 .env 파일 복사됨` : '복사할 .env 파일 없음')
 }
 
+/**
+ * 워크트리에 의존성을 설치한다. node_modules 는 gitignore 라 워크트리에
+ * 따라오지 않으므로(bun 워크스페이스 모노레포 → 루트+패키지별 node_modules),
+ * 워크트리마다 `bun install` 이 필요하다.
+ * 실패해도 워크트리 자체는 유효하므로 로그만 남기고 삼킨다.
+ */
+function installDeps(worktree) {
+  try {
+    execFileSync('bun', ['install', '--frozen-lockfile'], {
+      cwd: worktree,
+      stdio: ['ignore', 'ignore', 'inherit'],
+    })
+    log('bun install 완료')
+  } catch (err) {
+    log('bun install 실패(무시):', err && err.message)
+  }
+}
+
 function main() {
   const input = readStdin()
   const mainRepo = resolveMainRepo(input)
@@ -177,6 +197,7 @@ function main() {
   // 2) 부가 작업 — 실패해도 워크트리 자체는 유효하므로 삼킨다.
   setGitIdentity(worktreePath)
   copyEnvFiles(mainRepo, worktreePath)
+  installDeps(worktreePath)
 
   return worktreePath
 }

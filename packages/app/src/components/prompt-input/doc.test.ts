@@ -24,6 +24,7 @@ const handle = {
   canUndo: () => false,
   canRedo: () => false,
   empty: () => true,
+  plain: () => "",
   actors: () => [],
   markdown: async () => ({ text: "", assets: [] }),
   collection: { id: "doc_1" },

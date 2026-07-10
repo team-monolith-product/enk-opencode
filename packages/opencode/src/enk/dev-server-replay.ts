@@ -44,11 +44,6 @@ export namespace DevServerReplay {
 
   const FILE = ".opencode/dev-server.json"
 
-  /** 기록 파일 존재 여부 — 폴백(DevServerAgent)이 replay 담당 여부를 판단하는 규약. */
-  export function hasRecord(dir: string): boolean {
-    return existsSync(resolve(dir, FILE))
-  }
-
   const State = z.object({
     cmd: z.string(),
     cwd: z.string(),
@@ -117,5 +112,16 @@ export namespace DevServerReplay {
 
     const child = launch(state.cmd, state.cwd)
     log.info("replayed dev server", { pid: child.pid, port: state.port, cwd: state.cwd })
+  }
+
+  /** 기록된 dev 서버 커맨드를 반환한다. 없거나 파싱 실패면 undefined. UI 재시작 등에서 재사용. */
+  export async function loadRecord(fallback?: string): Promise<State | undefined> {
+    const dir = stateDir(fallback)
+    if (!dir) return undefined
+    try {
+      return State.parse(await Bun.file(resolve(dir, FILE)).json())
+    } catch {
+      return undefined
+    }
   }
 }

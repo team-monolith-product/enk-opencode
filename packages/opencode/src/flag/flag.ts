@@ -54,6 +54,15 @@ export namespace Flag {
   // enk-hackathon-rails AI usage reporting (ai_usages API)
   export const ENK_HACKATHON_RAILS_URL = process.env["ENK_HACKATHON_RAILS_URL"]
   export const ENK_AI_USAGE_TOKEN = process.env["ENK_AI_USAGE_TOKEN"]
+  // Realtime usage reporting mode: "off" | "step" | "progress" (default "step").
+  // - "off"      : legacy behavior, one POST per completed turn (phase:"final") only.
+  // - "step"     : per-step (finish-step) authoritative usage + final reconciliation.
+  // - "progress" : "step" plus throttled liveness pings off streaming deltas / turn start.
+  export const ENK_AI_USAGE_REALTIME = ((): "off" | "step" | "progress" => {
+    const value = process.env["ENK_AI_USAGE_REALTIME"]?.toLowerCase()
+    if (value === "off" || value === "step" || value === "progress") return value
+    return "step"
+  })()
   export declare const ENK_AI_MODEL: string | undefined
   export declare const ENK_AI_MODEL_VARIANT: string | undefined
 
@@ -73,6 +82,11 @@ export namespace Flag {
   export const OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER = Config.boolean(
     "OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER",
   ).pipe(Config.withDefault(false))
+  // 워처 구독(초기 재귀 크롤)을 부팅 창 밖으로 미루는 지연(ms). cold EFS 에서 크롤이
+  // 부트스트랩 I/O 와 경쟁해 첫 응답을 밀어내는 것을 막는다. 테스트는 0 으로 끈다.
+  export const OPENCODE_FILEWATCHER_DEFER_MS = Config.number("OPENCODE_FILEWATCHER_DEFER_MS").pipe(
+    Config.withDefault(5_000),
+  )
   export const OPENCODE_EXPERIMENTAL_ICON_DISCOVERY =
     OPENCODE_EXPERIMENTAL || truthy("OPENCODE_EXPERIMENTAL_ICON_DISCOVERY")
 
