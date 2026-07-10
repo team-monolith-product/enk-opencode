@@ -513,9 +513,12 @@ function ConsentFrame(props: {
 }) {
   const remaining = useCountdown(() => props.state.expiresAt, props.onExpire)
   const total = () => props.state.timeoutMs / 1000
-  // round → the chip reaches "0" in the final half-second instead of clinging to "1" (which read as
-  // "0초 남았는데 1초로 표기"). The strip's CSS `transition: width 1s linear` smooths the 1s steps.
-  const sec = () => Math.max(0, Math.round(remaining()))
+  // ceil, not round: the chip reads "앞으로 N초", so each number must span the whole second it names —
+  // "5초" while 5.0s..4.0s remain, "1초" while 1.0s..0.0s remain, "0초" only once the deadline has
+  // actually passed (the frame lingers EXPIRE_GRACE_MS waiting on the server's terminal cast). round put
+  // the boundaries on half-seconds: it showed "0초" with 0.5s still on the clock and fired `urgent` at
+  // 5.5s. The strip's CSS `transition: width 1s linear` smooths the 1s steps.
+  const sec = () => Math.max(0, Math.ceil(remaining()))
   const pct = () => {
     const t = total()
     return t > 0 ? Math.max(0, Math.min(100, (sec() / t) * 100)) : 0
