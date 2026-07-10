@@ -29,6 +29,7 @@ import { Snapshot } from "../../src/snapshot"
 import { TaskTool } from "../../src/tool/task"
 import { ToolRegistry } from "../../src/tool/registry"
 import { Truncate } from "../../src/tool/truncate"
+import { Attachment } from "../../src/session/attachment"
 import { Log } from "../../src/util/log"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -319,6 +320,7 @@ const deps = Layer.mergeAll(
 ).pipe(Layer.provideMerge(infra))
 const registry = ToolRegistry.layer.pipe(Layer.provideMerge(deps))
 const trunc = Truncate.layer.pipe(Layer.provideMerge(deps))
+const attach = Attachment.layer.pipe(Layer.provideMerge(deps))
 const proc = SessionProcessor.layer.pipe(Layer.provideMerge(deps))
 const compact = SessionCompaction.layer.pipe(Layer.provideMerge(proc), Layer.provideMerge(deps))
 const env = SessionPrompt.layer.pipe(
@@ -326,6 +328,7 @@ const env = SessionPrompt.layer.pipe(
   Layer.provideMerge(proc),
   Layer.provideMerge(registry),
   Layer.provideMerge(trunc),
+  Layer.provideMerge(attach),
   Layer.provideMerge(deps),
 )
 
