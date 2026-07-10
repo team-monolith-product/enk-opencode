@@ -34,14 +34,16 @@ type Editor = HTMLElement & {
   }
 }
 
-function widgets(editor: HTMLElement) {
-  return Array.from(editor.querySelectorAll<HTMLElement>("affine-doc-remote-selection-widget")).filter(
+export const CURSOR_WIDGET_SELECTOR = "affine-doc-remote-selection-widget"
+
+function widgets(editor: HTMLElement, selector: string) {
+  return Array.from(editor.querySelectorAll<HTMLElement>(selector)).filter(
     (node): node is Widget => node instanceof HTMLElement,
   )
 }
 
-function cursorLabels(editor: HTMLElement) {
-  return widgets(editor).flatMap((widget) => {
+function cursorLabels(editor: HTMLElement, selector: string) {
+  return widgets(editor, selector).flatMap((widget) => {
     const root = widget.shadowRoot
     if (!root) return []
     return Array.from(root.querySelectorAll("div"))
@@ -79,9 +81,9 @@ function installCursorLabelStyle(root: ShadowRoot) {
   root.adoptedStyleSheets = [...root.adoptedStyleSheets, labelSheet]
 }
 
-function flipCursorLabels(editor: HTMLElement) {
+function flipCursorLabels(editor: HTMLElement, selector: string) {
   const edge = editor.getBoundingClientRect().right - 8
-  cursorLabels(editor).forEach((label) => {
+  cursorLabels(editor, selector).forEach((label) => {
     label.style.transform = ""
     label.style.transformOrigin = ""
     label.style.maxWidth = "160px"
@@ -122,12 +124,12 @@ function pulse(fn: () => void) {
   }
 }
 
-export function watchCursorLabels(editor: HTMLElement, host: HTMLElement) {
+export function watchCursorLabels(editor: HTMLElement, host: HTMLElement, selector = CURSOR_WIDGET_SELECTOR) {
   const page = editor as Editor
   const seen = new WeakSet<ShadowRoot>()
-  const task = raf(() => flipCursorLabels(editor))
+  const task = raf(() => flipCursorLabels(editor, selector))
   const refresh = pulse(() => {
-    widgets(editor).forEach((widget) => {
+    widgets(editor, selector).forEach((widget) => {
       widget.requestUpdate?.()
       void widget.updateComplete?.then(() => task.run())
     })
@@ -146,7 +148,7 @@ export function watchCursorLabels(editor: HTMLElement, host: HTMLElement) {
     task.run()
   })
   const bind = () => {
-    widgets(editor).forEach((widget) => {
+    widgets(editor, selector).forEach((widget) => {
       if (!widget.shadowRoot) return
       installCursorLabelStyle(widget.shadowRoot)
       if (seen.has(widget.shadowRoot)) return
