@@ -1148,7 +1148,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             switch (url.protocol) {
               case "data:":
                 if (part.mime === "text/plain") {
-                  return [
+                  // Text-based attachments (html, csv, json, source…) arrive as text/plain, so their
+                  // contents get inlined here. Persist them too so the agent has a real path to the
+                  // original file, matching the binary-attachment branch below.
+                  const saved = yield* attachment.save({
+                    url: part.url,
+                    mime: part.mime,
+                    filename: part.filename,
+                  })
+                  const pieces: Draft<MessageV2.Part>[] = [
                     {
                       messageID: info.id,
                       sessionID: input.sessionID,
@@ -1163,8 +1171,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       synthetic: true,
                       text: decodeDataUrl(part.url),
                     },
-                    { ...part, messageID: info.id, sessionID: input.sessionID },
                   ]
+                  if (saved) {
+                    pieces.push({
+                      messageID: info.id,
+                      sessionID: input.sessionID,
+                      type: "text",
+                      synthetic: true,
+                      text: `The attached file ${part.filename ?? part.mime} is saved on disk at ${saved}. Use that path when you need the original file itself, for example to copy it somewhere as an asset.`,
+                    })
+                  }
+                  pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
+                  return pieces
                 }
                 {
                   const saved = yield* attachment.save({
