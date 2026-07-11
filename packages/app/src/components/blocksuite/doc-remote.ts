@@ -28,10 +28,25 @@ export async function load(source: OpencodeDocSource, id: string, doc: YDoc) {
   if (next?.data.length) DocCollection.Y.applyUpdate(doc, next.data, source.name)
 }
 
-export async function link(source: OpencodeDocSource, root: YDoc, page: YDoc) {
+// `hold`가 true인 동안(로컬 IME 조합 중) 원격 업데이트 적용을 버퍼링한다. BlockSuite inline
+// editor는 원격 yText 변경에 무조건 즉시 re-render해서, 상대가 타이핑하는 동안 내 한글 조합이
+// 매번 취소된다(영어만 입력되는 증상). Y 업데이트는 순서 무관 병합이 가능하므로 조합이 끝난 뒤
+// flush()로 몰아서 적용해도 수렴이 깨지지 않는다.
+export async function link(source: OpencodeDocSource, root: YDoc, page: YDoc, hold?: () => boolean) {
+  let pending: Uint8Array[] = []
   const apply = (id: string, data: Uint8Array) => {
     if (id !== page.guid) return
+    if (hold?.()) {
+      pending.push(data)
+      return
+    }
     DocCollection.Y.applyUpdate(page, data, source.name)
+  }
+  const flush = () => {
+    if (!pending.length) return
+    const batch = DocCollection.Y.mergeUpdates(pending)
+    pending = []
+    DocCollection.Y.applyUpdate(page, batch, source.name)
   }
   const stop = await source.subscribe(apply, () => undefined)
   await load(source, root.guid, root)
@@ -43,11 +58,12 @@ export async function link(source: OpencodeDocSource, root: YDoc, page: YDoc) {
     void source.push(doc.guid, data)
   }
   page.on("update", push)
-  return () => {
+  const unlink = () => {
     page.off("update", push)
     stop()
     source.close()
   }
+  return { unlink, flush }
 }
 
 export async function remote(

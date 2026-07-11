@@ -110,7 +110,7 @@ export async function createPage(input: DocMountInput) {
   let draft: Doc | undefined
   let collection: DocCollection
   let direct: OpencodeDocSource | undefined
-  let unlink: (() => void) | undefined
+  let channel: Awaited<ReturnType<typeof link>> | undefined
   let awareness: OpencodeAwarenessSource | undefined
   let aware = false
 
@@ -232,12 +232,40 @@ export async function createPage(input: DocMountInput) {
     })
   }
 
+  // IME 조합(한글 등) 중에는 문서 교체(rebind)/원격 업데이트 적용/포커스 재설정이 조합을 취소시켜
+  // 입력이 유실된다. 두 경로가 있다:
+  //  1) 최초 다중 접속 시 desynced가 true인 동안 rebind가 매 프레임 돌며 조합을 끊는다.
+  //  2) 상대가 타이핑하면 원격 yText 변경이 inline editor를 즉시 re-render해 조합을 끊는다.
+  // 조합 상태를 추적해, 조합 중에는 rebind를 미루고(recheck) 원격 업데이트는 link()가 버퍼링한다.
+  // compositionend 시점에 버퍼를 flush하고 probe를 다시 무장해 desync 화해를 이어간다.
+  let composing = false
+  let recheck = false
+  const onCompositionStart = () => {
+    composing = true
+  }
+  const onCompositionEnd = () => {
+    composing = false
+    channel?.flush()
+    if (!recheck) return
+    recheck = false
+    probe()
+  }
+  let offComposition: (() => void) | undefined
+  if (!input.readonly) {
+    editor.addEventListener("compositionstart", onCompositionStart, true)
+    editor.addEventListener("compositionend", onCompositionEnd, true)
+    offComposition = () => {
+      editor.removeEventListener("compositionstart", onCompositionStart, true)
+      editor.removeEventListener("compositionend", onCompositionEnd, true)
+    }
+  }
+
   // A message BUBBLE / snapshot (preview) is a frozen one-time render — it loads its state once and
   // must NOT open a live sync socket (one per bubble would pile up). The editable composer and the
   // readonly prompt VIEWER both link(): the viewer needs remote→local live edits, and its push side is
   // a no-op because the Preview editor never mutates the doc.
   if (input.sync && !input.preview) {
-    unlink = await link(direct!, collection.doc, doc.spaceDoc)
+    channel = await link(direct!, collection.doc, doc.spaceDoc, () => composing)
     if (!input.readonly) {
       const onY = () => notifyDraft()
       doc.spaceDoc.on("update", onY)
@@ -248,6 +276,12 @@ export async function createPage(input: DocMountInput) {
   const rebind = () => {
     const current = editor.std?.doc ?? doc
     if (!desynced(current)) return
+    // 조합 중이면 문서를 갈아끼우지 않는다 — 조합이 끊기며 입력이 유실된다. 조합이 끝나면
+    // onCompositionEnd가 probe()를 다시 돌려 화해를 마저 처리한다.
+    if (composing) {
+      recheck = true
+      return
+    }
     const active = document.activeElement
     const restore = active instanceof Element && editor.contains(active)
     current.blockCollection.clearQuery(query, input.readonly)
@@ -622,6 +656,8 @@ export async function createPage(input: DocMountInput) {
     dispose: async () => {
       reload?.()
       reload = undefined
+      offComposition?.()
+      offComposition = undefined
       if (draftFrame) cancelAnimationFrame(draftFrame)
       draftFrame = undefined
       offY?.()
@@ -638,7 +674,7 @@ export async function createPage(input: DocMountInput) {
       unload = undefined
       detach()
       if (input.sync) {
-        unlink?.()
+        channel?.unlink()
         direct?.close()
         if (aware) collection.awarenessSync.disconnect()
         collection.dispose()
