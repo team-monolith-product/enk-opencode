@@ -54,15 +54,6 @@ export namespace Flag {
   // enk-hackathon-rails AI usage reporting (ai_usages API)
   export const ENK_HACKATHON_RAILS_URL = process.env["ENK_HACKATHON_RAILS_URL"]
   export const ENK_AI_USAGE_TOKEN = process.env["ENK_AI_USAGE_TOKEN"]
-  // Realtime usage reporting mode: "off" | "step" | "progress" (default "step").
-  // - "off"      : legacy behavior, one POST per completed turn (phase:"final") only.
-  // - "step"     : per-step (finish-step) authoritative usage + final reconciliation.
-  // - "progress" : "step" plus throttled liveness pings off streaming deltas / turn start.
-  export const ENK_AI_USAGE_REALTIME = ((): "off" | "step" | "progress" => {
-    const value = process.env["ENK_AI_USAGE_REALTIME"]?.toLowerCase()
-    if (value === "off" || value === "step" || value === "progress") return value
-    return "step"
-  })()
   export declare const ENK_AI_MODEL: string | undefined
   export declare const ENK_AI_MODEL_VARIANT: string | undefined
   // Model fallback. See src/enk/model-fallback.ts.

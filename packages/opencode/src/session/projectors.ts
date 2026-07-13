@@ -109,11 +109,11 @@ export default [
       log.warn("cycle record failed", { messageID: id, sessionID, err: String(err) })
     }
 
-    // Report the completed-turn total to enk-hackathon-rails as the phase:"final" record. This
-    // is the reconciliation backstop: realtime per-step reports fire from the processor's
-    // finish-step hook, but if any of those were permanently dropped, this authoritative turn
-    // total still lands. No-op unless ENK_* env is set. Enqueue only; the actual POST runs in a
-    // background queue so it never blocks this projector.
+    // Send the phase:"final" turn-end marker to enk-hackathon-rails ("answer ended", fires for
+    // user aborts too since time.completed is set on abort paths). Zero counts — the turn's
+    // tokens/fee already went out on the per-step records from the processor's finish-step hook.
+    // No-op unless ENK_* env is set. Enqueue only; the actual POST runs in a background queue so
+    // it never blocks this projector.
     try {
       AiUsage.report(data.info)
     } catch (err) {

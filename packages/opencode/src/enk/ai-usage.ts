@@ -6,15 +6,17 @@ import type { MessageV2 } from "@/session/message-v2"
 /**
  * Report AI token usage to enk-hackathon-rails `ai_usages/do_many`.
  *
- * Two reporting granularities share one queue/drain/retry pipeline:
- *   - `report()`      — one record per COMPLETED assistant turn (`phase:"final"`). This is the
- *                        authoritative turn total and the reconciliation backstop: if any
- *                        incremental step POST is permanently dropped, the final still lands.
+ * Three record phases share one queue/drain/retry pipeline. Rails is expected to SUM the
+ * cost/token columns across records (deduped by the idempotency key), so counts and fee ride
+ * ONLY on the step records:
+ *   - `reportStart()` — one zero-count record per assistant turn (`phase:"start"`,
+ *                        step_index -1) marking "answer started".
  *   - `reportStep()`  — one record per model step (`phase:"step"`), emitted at `finish-step`.
- *                        Carries authoritative per-step token/cost counts so the hub sees usage
- *                        stream in real time within a turn (tool loops produce many steps).
- *   - `reportProgress()` — optional lightweight liveness ping (`phase:"start"`, no token counts),
- *                        throttled per session. Opt-in via ENK_AI_USAGE_REALTIME=progress.
+ *                        Carries that call's authoritative token counts AND its fee; summing a
+ *                        turn's step records yields the exact turn total ((input × n) + output).
+ *   - `report()`      — one zero-count record when the turn ends (`phase:"final"`,
+ *                        step_index -1), fired for normal completion AND user aborts — marks
+ *                        "answer ended". Carries no fee/tokens so summing cannot double-bill.
  *
  * Everything only enqueues — the POST runs off a single serial drain loop, so it is never awaited
  * by the projector / stream loop and cannot affect opencode's responsiveness. Three bounds keep a
@@ -38,15 +40,14 @@ export namespace AiUsage {
   const MAX_PENDING = 1000
   const BATCH_MAX = 50 // max records per POST (do_many accepts an array)
   const FLUSH_WINDOW_MS = 250 // coalesce bursts of step reports into one request
-  const PROGRESS_THROTTLE_MS = 1500 // min gap between progress pings per session
   const API_PATH = "/api/v1/ai_usages/do_many"
 
   export type Phase = "start" | "step" | "final"
 
   // Per-record attributes expected by rails. owner_type/owner_id are derived server-side from
-  // `mount_path` (first two segments), so we don't send them. New realtime fields (message_id,
-  // step_index, phase, input/output/reasoning/cache_*) let rails distinguish incremental vs final
-  // and key incremental records by (mount_path, message_id, step_index).
+  // `mount_path` (first two segments), so we don't send them. The realtime fields (message_id,
+  // step_index, phase, input/output/reasoning/cache_*) key each record by
+  // (message_id, step_index, phase) so rails can upsert/dedupe before summing.
   type Attributes = {
     mount_path: string
     model_id: string
@@ -63,7 +64,7 @@ export namespace AiUsage {
     used_at: string
   }
 
-  /** Authoritative per-step usage as computed by Session.getUsage. */
+  /** Authoritative per-step usage as computed by Session.getUsage for one model call. */
   export type StepUsage = {
     index: number
     tokens: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
@@ -73,7 +74,6 @@ export namespace AiUsage {
 
   const pending: Attributes[] = [] // bounded FIFO queue
   const sent = new Set<string>() // idempotency keys already enqueued — dedupes repeated updates
-  const lastProgressAt = new Map<string, number>() // sessionID -> last progress ping timestamp
   let draining = false // serial-drain guard: at most one request in flight
   let dropped = 0 // records discarded due to MAX_PENDING overflow
   let warnedDisabled = false // suppress repeated "not configured" warnings
@@ -92,34 +92,40 @@ export namespace AiUsage {
     return `${messageID}:${stepIndex}:${phase}`
   }
 
-  /** Build the final-turn record (cumulative turn totals). */
-  export function buildAttributes(info: MessageV2.Assistant): Attributes {
-    const t = info.tokens
-    const input = t.input ?? 0
-    const output = t.output ?? 0
-    const reasoning = t.reasoning ?? 0
-    const cacheRead = t.cache?.read ?? 0
-    const cacheWrite = t.cache?.write ?? 0
+  /** All-zero counts shared by the start/final marker records. */
+  function markerAttributes(info: MessageV2.Assistant, phase: Phase, usedAt: number): Attributes {
     return {
       // The session working directory, sent verbatim — rails parses owner from it.
       mount_path: info.path.cwd,
       model_id: info.modelID,
       message_id: info.id,
-      // -1 marks the turn-level final record (not tied to any single step).
+      // -1 marks a turn-level record (not tied to any single step).
       step_index: -1,
-      phase: "final",
-      tokens: input + output + reasoning + cacheRead + cacheWrite,
-      input,
-      output,
-      reasoning,
-      cache_read: cacheRead,
-      cache_write: cacheWrite,
-      cost: info.cost,
-      used_at: new Date(info.time.completed!).toISOString(),
+      phase,
+      // Markers carry no counts and no fee: rails sums cost/token columns across records, and
+      // the turn's usage already went out on the step records — anything here would double-bill.
+      tokens: 0,
+      input: 0,
+      output: 0,
+      reasoning: 0,
+      cache_read: 0,
+      cache_write: 0,
+      cost: 0,
+      used_at: new Date(usedAt).toISOString(),
     }
   }
 
-  /** Build an incremental per-step record. */
+  /** Build the turn-start marker record ("answer started"). */
+  export function buildStartAttributes(info: MessageV2.Assistant): Attributes {
+    return markerAttributes(info, "start", info.time.created)
+  }
+
+  /** Build the turn-end marker record ("answer ended", including user aborts). */
+  export function buildAttributes(info: MessageV2.Assistant): Attributes {
+    return markerAttributes(info, "final", info.time.completed!)
+  }
+
+  /** Build a per-step record: that model call's authoritative token counts and fee. */
   export function buildStepAttributes(info: MessageV2.Assistant, step: StepUsage): Attributes {
     const input = step.tokens.input ?? 0
     const output = step.tokens.output ?? 0
@@ -159,7 +165,7 @@ export namespace AiUsage {
     void drain()
   }
 
-  /** Enqueue one completed assistant turn's usage (phase:"final"). Non-blocking; never throws. */
+  /** Enqueue the turn-end marker (phase:"final"). Non-blocking; never throws. */
   export function report(info: MessageV2.Info) {
     if (!enabled()) {
       warnDisabledOnce()
@@ -171,56 +177,30 @@ export namespace AiUsage {
     enqueue(buildAttributes(info))
   }
 
-  /** Enqueue authoritative per-step usage (phase:"step"). Non-blocking; never throws. */
+  /** Enqueue authoritative per-step usage + fee (phase:"step"). Non-blocking; never throws. */
   export function reportStep(info: MessageV2.Assistant, step: StepUsage) {
     if (!enabled()) {
       warnDisabledOnce()
       return
     }
-    if (Flag.ENK_AI_USAGE_REALTIME === "off") return // realtime disabled → final-only
     if (info.role !== "assistant") return
     if (!info.path?.cwd) return
     enqueue(buildStepAttributes(info, step))
   }
 
   /**
-   * Enqueue a lightweight liveness ping (phase:"start", no token counts). Opt-in via
-   * ENK_AI_USAGE_REALTIME=progress and throttled to ≤1 per PROGRESS_THROTTLE_MS per session.
+   * Enqueue the turn-start marker (phase:"start"). Exactly one per assistant message — the
+   * idempotency key dedupes the repeated stream "start" events that fallback retries produce.
    * Non-blocking; never throws.
    */
-  export function reportProgress(info: MessageV2.Assistant, kind: "start" = "start") {
+  export function reportStart(info: MessageV2.Assistant) {
     if (!enabled()) {
       warnDisabledOnce()
       return
     }
-    if (Flag.ENK_AI_USAGE_REALTIME !== "progress") return
     if (info.role !== "assistant") return
     if (!info.path?.cwd) return
-
-    const now = Date.now()
-    const last = lastProgressAt.get(info.sessionID) ?? 0
-    if (now - last < PROGRESS_THROTTLE_MS) return // throttle: coalesce — only latest state matters
-    lastProgressAt.set(info.sessionID, now)
-
-    // Progress pings carry no authoritative token counts (deltas have none). They are a pure
-    // "answer happening now" signal. Dedupe by (message_id, now) so each ping is distinct.
-    const record: Attributes = {
-      mount_path: info.path.cwd,
-      model_id: info.modelID,
-      message_id: info.id,
-      step_index: now, // use timestamp so successive progress pings don't collide in the sent Set
-      phase: "start",
-      tokens: 0,
-      input: 0,
-      output: 0,
-      reasoning: 0,
-      cache_read: 0,
-      cache_write: 0,
-      cost: 0,
-      used_at: new Date(now).toISOString(),
-    }
-    void kind
-    enqueue(record)
+    enqueue(buildStartAttributes(info))
   }
 
   async function drain() {
