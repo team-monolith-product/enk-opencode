@@ -31,6 +31,10 @@ import {dirname, join, relative, basename} from 'node:path'
 const GIT_USER_NAME = 'bichikim'
 const GIT_USER_EMAIL = 'kbc@team-mono.com'
 
+// 새 워크트리는 항상 이 브랜치의 "원격 최신" 기준으로 시작한다.
+const MAIN_REMOTE = 'origin'
+const MAIN_BRANCH = 'main'
+
 const log = (...a) => process.stderr.write(`[worktree-create] ${a.join(' ')}\n`)
 
 function readStdin() {
@@ -79,6 +83,41 @@ function resolveMainRepo(input) {
   return dirname(commonDir)
 }
 
+/** ref 가 존재하는지(브랜치/원격추적 등 무엇이든) 확인. */
+function refExists(repo, ref) {
+  try {
+    git(repo, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 원격 main 을 최신화하고, 새 워크트리의 시작 지점을 결정한다.
+ * 우선순위: origin/main(fetch 성공) → 로컬 main → HEAD.
+ * fetch 는 네트워크가 없거나 실패해도 워크트리 생성은 계속되도록 삼킨다.
+ */
+function resolveStartPoint(mainRepo) {
+  const remoteRef = `${MAIN_REMOTE}/${MAIN_BRANCH}`
+  try {
+    git(mainRepo, ['fetch', MAIN_REMOTE, MAIN_BRANCH])
+    log(`fetch 완료: ${remoteRef}`)
+  } catch (err) {
+    log(`fetch 실패(무시): ${err && err.message}`)
+  }
+  if (refExists(mainRepo, remoteRef)) {
+    log(`시작 지점: ${remoteRef} (원격 최신)`)
+    return remoteRef
+  }
+  if (refExists(mainRepo, MAIN_BRANCH)) {
+    log(`시작 지점: ${MAIN_BRANCH} (로컬 — 원격추적 없음)`)
+    return MAIN_BRANCH
+  }
+  log('시작 지점: HEAD (main 없음)')
+  return 'HEAD'
+}
+
 /** 실제로 워크트리를 만든다. 이미 존재하면 그대로 재사용한다. */
 export function createWorktree(mainRepo, worktreePath, worktreeName) {
   if (isRegisteredWorktree(mainRepo, worktreePath)) {
@@ -95,9 +134,11 @@ export function createWorktree(mainRepo, worktreePath, worktreeName) {
     branch = `${branchBase}-${n++}`
   }
 
+  const startPoint = resolveStartPoint(mainRepo)
+
   mkdirSync(dirname(worktreePath), {recursive: true})
-  git(mainRepo, ['worktree', 'add', '-b', branch, worktreePath, 'HEAD'])
-  log(`워크트리 생성: ${worktreePath} (브랜치 ${branch})`)
+  git(mainRepo, ['worktree', 'add', '-b', branch, worktreePath, startPoint])
+  log(`워크트리 생성: ${worktreePath} (브랜치 ${branch}, 기준 ${startPoint})`)
 }
 
 /** 워크트리에 프로젝트 전용 git 사용자 정보를 로컬 config 로 설정한다. */
