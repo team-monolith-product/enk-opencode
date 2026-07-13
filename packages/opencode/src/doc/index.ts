@@ -477,7 +477,9 @@ export namespace Doc {
     },
   )
 
-  const DEFAULT = 15_000
+  // Membership is dynamic (joiners are added, leavers removed — see join()/leave()), so the timeout
+  // only guards against a human never answering; it no longer needs to race socket churn.
+  const DEFAULT = 60_000
   const MIN = 10_000
   const MAX = 600_000
   const MAX_NAME = 64
@@ -546,7 +548,9 @@ export namespace Doc {
     sessionID: SessionID.zod,
     docID: DocID.zod,
     actorID: ActorID.zod,
-    actorIDs: ActorID.zod.array(),
+    // Deprecated wire field: membership now comes from connected submit peers (dynamic via
+    // join()/leave()), so the requester's awareness snapshot is accepted but ignored.
+    actorIDs: ActorID.zod.array().optional(),
     names: z.record(z.string(), z.string()).optional(),
     prompt: SubmitPrompt,
     timeoutMs: z.number().optional(),
@@ -556,7 +560,8 @@ export namespace Doc {
     sessionID: SessionID.zod,
     requestID: z.string(),
     actorID: ActorID.zod,
-    actorIDs: ActorID.zod.array(),
+    // Deprecated wire field — see SubmitCreateInput.actorIDs.
+    actorIDs: ActorID.zod.array().optional(),
     names: z.record(z.string(), z.string()).optional(),
     payload: QuestionPayload,
     timeoutMs: z.number().optional(),
@@ -875,16 +880,13 @@ export namespace Doc {
     })
   }
 
-  function targets(targetID: string, actorID: ActorID, allow?: ActorID[]) {
-    // Connected submit peers are the reachability source of truth (same set as cast()/leave()), so a
-    // vote never targets someone we cannot reach. When the requester provides `allow` — the
-    // collaborators it actually sees via awareness/presence — we intersect with it so STALE peers
-    // (e.g. a half-open socket from a refreshed/HMR'd tab that lingers in the map but is no longer a
-    // real participant) cannot join the vote and block consensus by never responding. The requester
-    // is always included, even if its own socket has not finished connecting yet.
-    const online = new Set(Array.from(peers.get(targetID) ?? []).map((peer) => peer.actorID))
-    const ids = allow && allow.length ? allow.filter((id) => online.has(id)) : Array.from(online)
-    const result = new Set(ids)
+  function targets(targetID: string, actorID: ActorID) {
+    // Connected submit peers are the single source of truth for the initial member set (same set as
+    // cast()/leave()). Membership is dynamic from here on — join() adds anyone who connects during a
+    // pending vote and leave() removes anyone who drops — so a stale/zombie peer captured here can
+    // no longer block consensus: the heartbeat reaps it and leave() drops it from the vote. The
+    // requester is always included, even if its own socket has not finished connecting yet.
+    const result = new Set(Array.from(peers.get(targetID) ?? []).map((peer) => peer.actorID))
     result.add(actorID)
     return Array.from(result)
   }
@@ -897,7 +899,6 @@ export namespace Doc {
     targetID: string
     docID: DocID | null
     actorID: ActorID
-    actorIDs: ActorID[]
     names?: Record<string, string>
     promptBlob: string
     timeoutMs?: number
@@ -905,7 +906,7 @@ export namespace Doc {
     const found = active(input.sessionID, input.targetID, undefined, input.targetKind)
     if (found) return found
 
-    const ids = targets(input.targetID, input.actorID, input.actorIDs)
+    const ids = targets(input.targetID, input.actorID)
     const timeout = clamp(input.timeoutMs)
     const now = Date.now()
     const build = () =>
@@ -972,7 +973,6 @@ export namespace Doc {
       targetID: input.docID,
       docID: input.docID,
       actorID: input.actorID,
-      actorIDs: input.actorIDs,
       names: input.names,
       promptBlob: JSON.stringify(input.prompt),
       timeoutMs: input.timeoutMs,
@@ -985,7 +985,8 @@ export namespace Doc {
     sessionID: SessionID.zod,
     docID: DocID.zod,
     actorID: ActorID.zod,
-    actorIDs: ActorID.zod.array(),
+    // Deprecated wire field — see SubmitCreateInput.actorIDs.
+    actorIDs: ActorID.zod.array().optional(),
     names: z.record(z.string(), z.string()).optional(),
     timeoutMs: z.number().optional(),
   })
@@ -999,7 +1000,6 @@ export namespace Doc {
       targetID: input.docID,
       docID: input.docID,
       actorID: input.actorID,
-      actorIDs: input.actorIDs,
       names: input.names,
       promptBlob: "{}",
       timeoutMs: input.timeoutMs,
@@ -1014,7 +1014,6 @@ export namespace Doc {
       targetID: input.requestID,
       docID: null,
       actorID: input.actorID,
-      actorIDs: input.actorIDs,
       names: input.names,
       promptBlob: JSON.stringify(input.payload),
       timeoutMs: input.timeoutMs,
@@ -1074,21 +1073,29 @@ export namespace Doc {
       return state
     }
 
+    const finished = finalize(next)
+    if (!finished) throw new NotFoundError({ message: "Doc submit not found" })
+    return finished
+  })
+
+  // Mark a pending submit as sent and fire its action. Shared by the last-approval path in
+  // submitRespond and by leave() when the last non-approved member drops out of the vote.
+  function finalize(row: SubmitRow) {
     const sent = Database.use((db) =>
       db
         .update(DocSubmitTable)
         .set({ status: "sent", time_updated: Date.now() })
-        .where(eq(DocSubmitTable.id, input.submitID))
+        .where(eq(DocSubmitTable.id, row.id))
         .returning()
         .get(),
     )
-    if (!sent) throw new NotFoundError({ message: "Doc submit not found" })
-    done(input.submitID)
+    if (!sent) return
+    done(row.id)
     const finished = read(sent)
     cast("sent", finished)
     send(sent)
     return finished
-  })
+  }
 
   function leave(targetID: string, actorID: ActorID) {
     const rows = Database.use((db) =>
@@ -1103,18 +1110,84 @@ export namespace Doc {
       if (next.status !== "pending") continue
       const state = read(next)
       if (!state.actors.some((item) => item.actorID === actorID)) continue
-      const item = Database.use((db) =>
+      // The requester walking away abandons the vote — nobody is left to own the send.
+      if (next.actor_id === actorID) {
+        const item = Database.use((db) =>
+          db
+            .update(DocSubmitTable)
+            .set({ status: "left", cancelled_by: actorID, time_updated: Date.now() })
+            .where(eq(DocSubmitTable.id, next.id))
+            .returning()
+            .get(),
+        )
+        if (!item) continue
+        done(next.id)
+        cast("left", read(item))
+        continue
+      }
+      // Anyone else just drops out of the member set — consensus is "everyone still here agrees",
+      // so one participant's disconnect no longer kills the vote for everyone. If the leaver was
+      // the last holdout, the remaining members already agreed: send now.
+      Database.use((db) =>
         db
-          .update(DocSubmitTable)
-          .set({ status: "left", cancelled_by: actorID, time_updated: Date.now() })
-          .where(eq(DocSubmitTable.id, next.id))
-          .returning()
-          .get(),
+          .delete(DocSubmitActorTable)
+          .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
+          .run(),
       )
-      if (!item) continue
-      done(next.id)
-      cast("left", read(item))
+      const updated = read(next)
+      if (updated.actors.length && updated.actors.every((item) => item.status === "approved")) {
+        finalize(next)
+        continue
+      }
+      cast("updated", updated)
     }
+  }
+
+  // Dynamic membership, join side: a peer connecting while a vote is pending becomes a pending
+  // member of it. This covers late joiners AND clients whose socket happened to be down (reconnect
+  // gap, reaped zombie, frozen tab) at create() time — they were the ones who previously never saw
+  // the dialog at all. Members reconnecting just get the current state back. Returns the first
+  // pending state so connect() can replay it to the joining peer.
+  function join(sessionID: SessionID, targetID: string, actorID: ActorID) {
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(DocSubmitTable)
+        .where(
+          and(
+            eq(DocSubmitTable.session_id, sessionID),
+            eq(DocSubmitTable.target_id, targetID),
+            eq(DocSubmitTable.status, "pending"),
+          ),
+        )
+        .all(),
+    )
+    let first: SubmitState | undefined
+    for (const row of rows) {
+      const next = expire(row)
+      if (next.status !== "pending") continue
+      if (!timers.has(next.id)) schedule(next)
+      let state = read(next)
+      if (!state.actors.some((actor) => actor.actorID === actorID)) {
+        Database.use((db) =>
+          db
+            .insert(DocSubmitActorTable)
+            .values({
+              submit_id: next.id,
+              actor_id: actorID,
+              name: actorNames(sessionID, [actorID])[0]!.name,
+              status: "pending",
+              time_responded: null,
+            })
+            .onConflictDoNothing()
+            .run(),
+        )
+        state = read(next)
+        cast("updated", state)
+      }
+      first ??= state
+    }
+    return first
   }
 
   function leaveKey(targetID: string, actorID: ActorID) {
@@ -1200,7 +1273,10 @@ export namespace Doc {
     peers.set(input.targetID, set)
     heartbeatStart()
     cancelLeave(input.targetID, input.actorID)
-    const state = active(input.sessionID, input.targetID, input.actorID)
+    // Unconditional replay: whatever vote is pending right now is sent to every connecting peer,
+    // and a peer that isn't a member yet is joined to it (dynamic membership). No membership gate —
+    // that gate was how a client that blipped at create() time ended up never seeing the dialog.
+    const state = join(input.sessionID, input.targetID, input.actorID)
     if (state) {
       peer.send(JSON.stringify({ type: "created", state } satisfies SubmitEvent))
     } else {

@@ -717,8 +717,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const showApproval = (state: DocSubmitState) => {
     const actorID = approvalActor()
     if (!actorID) return
-    // A readonly spectator isn't in state.actors but should still see the dialog (spectator mode).
-    if (!readonly && !state.actors.some((item) => item.actorID === actorID)) return
+    // No membership gate here: the server casts only to connected peers and joins any connected
+    // non-member to a pending vote (dynamic membership), so every state we receive is ours to
+    // render. The old gate silently dropped casts when membership drifted — the "dialog never
+    // appeared" bug.
     // Terminal states are handled exactly once per submit: a server replay on reconnect (or a
     // duplicate cast) for an already-resolved submit must not re-clear context or re-open a dialog.
     if (state.status !== "pending") {
@@ -1828,6 +1830,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       const docID = doc.docID()
       const actorID = doc.actorID()
       if (!docID || !actorID) return false
+      // Awareness only decides the solo fast path (no vote when I'm visibly alone) and supplies
+      // display names — vote membership itself is decided server-side from connected submit peers.
       const list = doc.actors()
       const ids = Array.from(new Set([actorID, ...list.map((item) => item.actorID)]))
       if (ids.length <= 1) return false
@@ -1843,7 +1847,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           sessionID: input.sessionID,
           docID,
           actorID,
-          actorIDs: ids,
           names,
           prompt: {
             messageID: input.messageID,
@@ -1904,7 +1907,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         sessionID,
         docID,
         actorID,
-        actorIDs: ids,
         names,
       })
       approvalSession = sessionID
