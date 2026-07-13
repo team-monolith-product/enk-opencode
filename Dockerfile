@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1-labs
 FROM oven/bun:1.3.11 AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -5,8 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY . .
+COPY package.json bun.lock bunfig.toml ./
+COPY patches ./patches
+COPY --parents packages/*/package.json packages/console/*/package.json packages/sdk/js/package.json ./
 RUN bun install --frozen-lockfile --ignore-scripts
+COPY . .
 
 ARG OPENCODE_ASSET_BASE
 ENV OPENCODE_CHANNEL=latest OPENCODE_VERSION=0.0.0-enk OPENCODE_ASSET_BASE=${OPENCODE_ASSET_BASE}
