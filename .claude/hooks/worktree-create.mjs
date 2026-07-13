@@ -17,8 +17,10 @@
  * 워크트리를 만든 뒤 부가 작업:
  *   1) 메인 저장소에는 있지만 gitignore 되어 체크아웃에 따라오지 않는
  *      `.env*` 파일들을 복사한다(대상에 이미 있으면 skip).
- *   2) 이 프로젝트 전용 git 사용자 정보(name/email)를 로컬 config 로 설정한다.
- *   3) `bun install` 로 의존성을 설치한다. node_modules 는 gitignore 라
+ *   2) 같은 이유로 gitignore 되는 `.claude` 로컬 설정(CLAUDE.md 등)을 복사한다.
+ *      (settings.json·hooks 는 tracked 라 이미 있으므로 skip, worktrees 는 제외)
+ *   3) 이 프로젝트 전용 git 사용자 정보(name/email)를 로컬 config 로 설정한다.
+ *   4) `bun install` 로 의존성을 설치한다. node_modules 는 gitignore 라
  *      `git worktree add` 로 따라오지 않으므로 워크트리마다 새로 깔아야 한다.
  */
 import {execFileSync} from 'node:child_process'
@@ -154,6 +156,49 @@ function copyEnvFiles(mainRepo, worktree) {
 }
 
 /**
+ * 메인 저장소의 `.claude` 로컬 설정을 워크트리로 복사한다.
+ * `.claude/**` 는 (settings.json·hooks 를 빼고) gitignore 라 워크트리 체크아웃에
+ * 따라오지 않으므로, CLAUDE.md 같은 로컬 설정을 직접 복사해야 한다.
+ * - `worktrees` 디렉터리는 다른 워크트리들이라 건너뛴다(순환/과다 복사 방지).
+ * - 대상에 이미 있는 파일(tracked settings.json·hooks 등)은 건너뛴다.
+ */
+function copyClaudeFiles(mainRepo, worktree) {
+  const root = join(mainRepo, '.claude')
+  if (!existsSync(root)) return
+  let copied = 0
+  const walk = (dir) => {
+    let entries
+    try {
+      entries = readdirSync(dir, {withFileTypes: true})
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const full = join(dir, e.name)
+      if (e.isDirectory()) {
+        if (e.name === 'worktrees') continue
+        walk(full)
+        continue
+      }
+      if (!e.isFile()) continue
+      const rel = relative(mainRepo, full)
+      const dest = join(worktree, rel)
+      if (existsSync(dest)) continue
+      try {
+        mkdirSync(dirname(dest), {recursive: true})
+        copyFileSync(full, dest)
+        copied++
+        log(`복사: ${rel}`)
+      } catch (err) {
+        log(`복사 실패(${rel}):`, err.message)
+      }
+    }
+  }
+  walk(root)
+  log(copied > 0 ? `완료 — ${copied}개 .claude 파일 복사됨` : '복사할 .claude 파일 없음')
+}
+
+/**
  * 워크트리에 의존성을 설치한다. node_modules 는 gitignore 라 워크트리에
  * 따라오지 않으므로(bun 워크스페이스 모노레포 → 루트+패키지별 node_modules),
  * 워크트리마다 `bun install` 이 필요하다.
@@ -197,6 +242,7 @@ function main() {
   // 2) 부가 작업 — 실패해도 워크트리 자체는 유효하므로 삼킨다.
   setGitIdentity(worktreePath)
   copyEnvFiles(mainRepo, worktreePath)
+  copyClaudeFiles(mainRepo, worktreePath)
   installDeps(worktreePath)
 
   return worktreePath
