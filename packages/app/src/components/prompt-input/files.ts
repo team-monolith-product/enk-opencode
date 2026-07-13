@@ -32,7 +32,7 @@ function ext(name: string) {
   return name.slice(idx + 1).toLowerCase()
 }
 
-function textMime(type: string) {
+export function textMime(type: string) {
   if (!type) return false
   if (type.startsWith("text/")) return true
   if (TEXT_MIMES.has(type)) return true
@@ -40,7 +40,7 @@ function textMime(type: string) {
   return type.endsWith("+xml")
 }
 
-function textBytes(bytes: Uint8Array) {
+export function textBytes(bytes: Uint8Array) {
   if (bytes.length === 0) return true
   let count = 0
   for (const byte of bytes) {

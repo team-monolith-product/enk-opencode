@@ -275,6 +275,70 @@ describe("docMarkdown", () => {
     expect(docPlain(ctx.doc)).toContain("project.sb3")
   })
 
+  test("exports text attachments served as octet-stream with text/plain mime", async () => {
+    const ctx = page()
+
+    add(
+      ctx.doc,
+      "affine:attachment",
+      {
+        sourceId: "doc_asset_1",
+        name: "notes.md",
+        type: "text/markdown",
+        size: 14,
+      },
+      ctx.note,
+    )
+
+    const body = "# Hello\n\n안녕"
+    const out = await docMarkdown(
+      ctx.doc,
+      opts(async () =>
+        new Response(new TextEncoder().encode(body), {
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+      ),
+    )
+
+    expect(out.text).toContain("[notes.md](attachment://doc_asset_1)")
+    expect(out.assets).toHaveLength(1)
+    expect(out.assets[0]).toMatchObject({
+      id: "doc_asset_1",
+      mime: "text/plain",
+      filename: "notes.md",
+    })
+    const b64 = out.assets[0]!.dataUrl.split(",")[1] ?? ""
+    expect(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))).toBe(body)
+  })
+
+  test("keeps binary attachments served as octet-stream out of assets", async () => {
+    const ctx = page()
+
+    add(
+      ctx.doc,
+      "affine:attachment",
+      {
+        sourceId: "zip_2",
+        name: "bundle.zip",
+        type: "application/zip",
+        size: 4,
+      },
+      ctx.note,
+    )
+
+    const out = await docMarkdown(
+      ctx.doc,
+      opts(async () =>
+        new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), {
+          headers: { "Content-Type": "application/octet-stream" },
+        }),
+      ),
+    )
+
+    expect(out.text).toContain("[bundle.zip](attachment://zip_2)")
+    expect(out.assets).toHaveLength(0)
+  })
+
   test("serializes rich BlockSuite blocks into markdown", async () => {
     const ctx = page()
 

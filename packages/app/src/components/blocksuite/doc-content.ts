@@ -2,6 +2,7 @@ import type { BlockModel, Doc } from "@blocksuite/store"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { formatCommentNote, formatFolderReferenceNote, formatReferenceNote } from "@/utils/comment-note"
 import type { FileSelection } from "@/context/file/types"
+import { textBytes, textMime } from "@/components/prompt-input/files"
 import { lineRangeLabel, lineRefSegments, lineRefSegmentsLabel } from "./line-reference-url"
 
 export type DocExportAsset = {
@@ -196,11 +197,18 @@ function media(bytes: Uint8Array, mime: string) {
   if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return "image/gif"
   if (text.startsWith("RIFF") && text.slice(8, 12) === "WEBP") return "image/webp"
   if (text.startsWith("%PDF")) return "application/pdf"
-  return mime.startsWith("image/") || mime === "application/pdf" ? "application/octet-stream" : mime
+  if (mime.startsWith("image/") || mime === "application/pdf") return "application/octet-stream"
+  // The asset route whitelists image/pdf mimes and serves everything else as
+  // application/octet-stream, so a text attachment's original mime is gone by the
+  // time it comes back. Sniff the bytes and normalize every text-like asset to
+  // text/plain — the same mime the composer attachment path sends — so the server
+  // inlines its content for the model.
+  if (textMime(mime) || textBytes(bytes.subarray(0, 4096))) return "text/plain"
+  return mime
 }
 
 function exportable(mime: string) {
-  return mime.startsWith("image/") || mime === "application/pdf"
+  return mime.startsWith("image/") || mime === "application/pdf" || mime === "text/plain"
 }
 
 function embed(model: BlockModel, name: string) {
