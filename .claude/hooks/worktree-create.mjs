@@ -50,7 +50,7 @@ function git(cwd, args) {
     .trim()
 }
 
-function branchExists(repo, name) {
+export function branchExists(repo, name) {
   try {
     git(repo, ['show-ref', '--verify', '--quiet', `refs/heads/${name}`])
     return true
@@ -80,7 +80,7 @@ function resolveMainRepo(input) {
 }
 
 /** 실제로 워크트리를 만든다. 이미 존재하면 그대로 재사용한다. */
-function createWorktree(mainRepo, worktreePath, worktreeName) {
+export function createWorktree(mainRepo, worktreePath, worktreeName) {
   if (isRegisteredWorktree(mainRepo, worktreePath)) {
     log(`이미 등록된 워크트리 재사용: ${worktreePath}`)
     return
@@ -112,7 +112,7 @@ function setGitIdentity(worktree) {
 }
 
 /** 메인 저장소에서 복사 후보 .env* 파일을 수집한다(node_modules 등 제외). */
-function collectEnvFiles(root) {
+export function collectEnvFiles(root) {
   const SKIP_DIRS = new Set(['node_modules', '.git', '.claude', 'dist', 'build', '.next', '.turbo', 'coverage'])
   const out = []
   const walk = (dir) => {
@@ -136,7 +136,7 @@ function collectEnvFiles(root) {
   return out
 }
 
-function copyEnvFiles(mainRepo, worktree) {
+export function copyEnvFiles(mainRepo, worktree) {
   const envFiles = collectEnvFiles(mainRepo)
   let copied = 0
   for (const src of envFiles) {
@@ -162,7 +162,7 @@ function copyEnvFiles(mainRepo, worktree) {
  * - `worktrees` 디렉터리는 다른 워크트리들이라 건너뛴다(순환/과다 복사 방지).
  * - 대상에 이미 있는 파일(tracked settings.json·hooks 등)은 건너뛴다.
  */
-function copyClaudeFiles(mainRepo, worktree) {
+export function copyClaudeFiles(mainRepo, worktree) {
   const root = join(mainRepo, '.claude')
   if (!existsSync(root)) return
   let copied = 0
@@ -248,15 +248,18 @@ function main() {
   return worktreePath
 }
 
-try {
-  const worktreePath = main()
-  if (worktreePath) {
-    process.stdout.write(`${worktreePath}\n`)
-    process.exit(0)
+// 훅으로 직접 실행될 때만 동작한다. 테스트에서 import 하면 실행되지 않는다.
+if (import.meta.main) {
+  try {
+    const worktreePath = main()
+    if (worktreePath) {
+      process.stdout.write(`${worktreePath}\n`)
+      process.exit(0)
+    }
+    // 경로를 못 만들었으면 생성 중단.
+    process.exit(1)
+  } catch (err) {
+    log('워크트리 생성 실패:', err && err.message)
+    process.exit(1)
   }
-  // 경로를 못 만들었으면 생성 중단.
-  process.exit(1)
-} catch (err) {
-  log('워크트리 생성 실패:', err && err.message)
-  process.exit(1)
 }
