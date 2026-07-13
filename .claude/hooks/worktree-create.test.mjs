@@ -148,3 +148,62 @@ describe('createWorktree', () => {
     expect(branches).toContain('worktree-bar-1')
   })
 })
+
+describe('createWorktree — 시작 지점(origin/main 최신)', () => {
+  const g = (cwd, ...args) => execFileSync('git', args, {cwd, stdio: 'ignore'})
+
+  function configUser(repo) {
+    g(repo, 'config', 'user.name', 'test')
+    g(repo, 'config', 'user.email', 'test@example.com')
+  }
+
+  test('origin/main 이 로컬보다 앞서면 fetch 한 origin/main 기준으로 만든다', () => {
+    // 1) bare 원격
+    mkdirSync(join(base, 'remote.git'), {recursive: true})
+    const remote = realpathSync(join(base, 'remote.git'))
+    g(remote, 'init', '--bare', '-b', 'main')
+
+    // 2) 로컬 repo: C1 커밋 후 push → origin/main = C1
+    mkdirSync(join(base, 'repo'), {recursive: true})
+    const repo = realpathSync(join(base, 'repo'))
+    g(repo, 'init', '-b', 'main')
+    configUser(repo)
+    g(repo, 'remote', 'add', 'origin', remote)
+    writeFileSync(join(repo, 'file.txt'), 'v1')
+    g(repo, 'add', '.')
+    g(repo, 'commit', '-m', 'c1')
+    g(repo, 'push', '-u', 'origin', 'main')
+
+    // 3) 다른 클론에서 C2 push → 원격은 앞서지만 repo 의 로컬/추적 ref 는 C1 에 머무름
+    mkdirSync(join(base, 'clone2'), {recursive: true})
+    const clone2 = realpathSync(join(base, 'clone2'))
+    execFileSync('git', ['clone', remote, clone2], {stdio: 'ignore'})
+    configUser(clone2)
+    writeFileSync(join(clone2, 'file.txt'), 'v2')
+    g(clone2, 'add', '.')
+    g(clone2, 'commit', '-m', 'c2')
+    g(clone2, 'push', 'origin', 'main')
+
+    // 4) 워크트리 생성 → 훅이 fetch 후 origin/main(C2) 기준으로 만들어야 한다
+    const wt = join(repo, '.claude/worktrees/foo')
+    createWorktree(repo, wt, 'foo')
+
+    // 워크트리는 최신 원격(v2), 메인 저장소 체크아웃은 여전히 C1(v1)
+    expect(read('repo/file.txt')).toBe('v1')
+    expect(readFileSync(join(wt, 'file.txt'), 'utf8')).toBe('v2')
+  })
+
+  test('origin 이 없으면 로컬 main(HEAD) 기준으로 폴백한다', () => {
+    mkdirSync(join(base, 'repo'), {recursive: true})
+    const repo = realpathSync(join(base, 'repo'))
+    g(repo, 'init', '-b', 'main')
+    configUser(repo)
+    writeFileSync(join(repo, 'file.txt'), 'local')
+    g(repo, 'add', '.')
+    g(repo, 'commit', '-m', 'c1')
+
+    const wt = join(repo, '.claude/worktrees/foo')
+    expect(() => createWorktree(repo, wt, 'foo')).not.toThrow()
+    expect(readFileSync(join(wt, 'file.txt'), 'utf8')).toBe('local')
+  })
+})
