@@ -386,7 +386,12 @@ async function block(model: BlockModel, opts: ExportOpts, assets: DocExportAsset
     if (!id) return [`[${label(name)}]`, ...meta, ...nested]
     const asset = await dataUrl(opts, id)
     if (asset && exportable(asset.mime)) assets.push({ id, mime: asset.mime, filename: name, dataUrl: asset.dataUrl })
-    return [`[${label(name)}](attachment://${encodeURIComponent(id)})`, ...meta, ...nested]
+    // The chat view hides an exported file part's standalone chip only when the markdown
+    // references it by the part's filename. Images export filename=id so they key the link
+    // by id; attachments must keep their real filename (the server names the on-disk copy
+    // after it), so the link is keyed by name instead — otherwise the doc bubble and the
+    // chip would both show the same attachment.
+    return [`[${label(name)}](attachment://${encodeURIComponent(name)})`, ...meta, ...nested]
   }
 
   if (model.flavour.startsWith("affine:embed-") || model.flavour === "affine:bookmark") {

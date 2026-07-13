@@ -235,7 +235,7 @@ describe("docMarkdown", () => {
       ),
     )
 
-    expect(out.text).toContain("[brief.pdf](attachment://file_1)")
+    expect(out.text).toContain("[brief.pdf](attachment://brief.pdf)")
     expect(out.text).toContain("- Type: application/pdf")
     expect(out.text).toContain("- Size: 3")
     expect(out.assets).toHaveLength(1)
@@ -269,7 +269,7 @@ describe("docMarkdown", () => {
       ),
     )
 
-    expect(out.text).toContain("[project.sb3](attachment://zip_1)")
+    expect(out.text).toContain("[project.sb3](attachment://project.sb3)")
     expect(out.text).toContain("- Type: image/png")
     expect(out.assets).toHaveLength(0)
     expect(docPlain(ctx.doc)).toContain("project.sb3")
@@ -300,7 +300,7 @@ describe("docMarkdown", () => {
       ),
     )
 
-    expect(out.text).toContain("[notes.md](attachment://doc_asset_1)")
+    expect(out.text).toContain("[notes.md](attachment://notes.md)")
     expect(out.assets).toHaveLength(1)
     expect(out.assets[0]).toMatchObject({
       id: "doc_asset_1",
@@ -335,7 +335,7 @@ describe("docMarkdown", () => {
       ),
     )
 
-    expect(out.text).toContain("[bundle.zip](attachment://zip_2)")
+    expect(out.text).toContain("[bundle.zip](attachment://bundle.zip)")
     expect(out.assets).toHaveLength(0)
   })
 
