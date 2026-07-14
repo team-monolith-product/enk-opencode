@@ -32,6 +32,9 @@ type Props = {
   spectator?: boolean
   approve: () => void
   cancel: () => void
+  // Requester-only: send now without the members who left mid-vote (their rows show 나감). Offered
+  // when the departed are the sole holdouts — a departure itself never sends.
+  exclude?: () => void
   close: () => void
   // Fired when the local countdown passes the deadline (+grace) without a server terminal cast — the
   // parent synthesizes an "expired" state so a finished vote never lingers on screen. Optional so a
@@ -60,6 +63,13 @@ function approveLabel(kind: DocSubmitKind | undefined) {
   if (kind === "question-back") return "수락하고 돌아가기"
   if (kind === "stop") return "수락하고 멈추기"
   return "수락하고 보내기"
+}
+
+function excludeLabel(kind: DocSubmitKind | undefined) {
+  if (kind === "question-dismiss") return "나간 인원 제외하고 닫기"
+  if (kind === "question-back") return "나간 인원 제외하고 돌아가기"
+  if (kind === "stop") return "나간 인원 제외하고 멈추기"
+  return "나간 인원 제외하고 보내기"
 }
 
 // Verb used in the live "동의 현황" status line ("…전송돼요" / "…진행돼요").
@@ -291,7 +301,10 @@ function VotingBody(props: {
 }) {
   const requester = () => props.state.actors.find((item) => item.actorID === props.state.actorID)
   const nonReq = createMemo(() => props.state.actors.filter((item) => item.actorID !== props.state.actorID))
-  const remaining = createMemo(() => nonReq().filter((item) => item.status !== "approved"))
+  // 나감 members don't count toward "N명이 더 동의하면" — they can't answer; whether to proceed
+  // without them is the requester's call (exclude action in the waiting view).
+  const remaining = createMemo(() => nonReq().filter((item) => item.status === "pending"))
+  const departed = createMemo(() => nonReq().filter((item) => item.status === "left"))
   const onlyMe = () => {
     const left = remaining()
     return left.length === 1 && left[0]?.actorID === props.actorID
@@ -329,9 +342,18 @@ function VotingBody(props: {
           <Show
             when={remaining().length > 0}
             fallback={
-              <span>
-                <strong class="ds-ok">모두 동의했어요</strong> · 곧 {proceedVerb(props.kind)}
-              </span>
+              <Show
+                when={departed().length > 0}
+                fallback={
+                  <span>
+                    <strong class="ds-ok">모두 동의했어요</strong> · 곧 {proceedVerb(props.kind)}
+                  </span>
+                }
+              >
+                <span>
+                  <strong>{departed().length}명</strong>이 나갔어요 · 요청자가 진행을 정해요
+                </span>
+              </Show>
             }
           >
             <Show
@@ -390,9 +412,10 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
     if (props.actor.actorID === props.requesterID) out += " · 요청자"
     return out
   }
+  const gone = () => props.actor.status === "left"
   return (
-    <div class="ds-status-row" classList={{ "jt-consent-row-flash": flash() }}>
-      <ConsentAvatar name={props.actor.name} color={props.actor.color} size={28} on={ok()} check={ok()} />
+    <div class="ds-status-row" classList={{ "jt-consent-row-flash": flash(), "ds-status-row--gone": gone() }}>
+      <ConsentAvatar name={props.actor.name} color={props.actor.color} size={28} on={ok()} check={ok()} dashed={gone()} />
       <span class="ds-status-row__name" classList={{ "ds-status-row__name--ok": ok() }}>
         {props.actor.name}
         {suffix()}
@@ -400,9 +423,18 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
       <Show
         when={ok()}
         fallback={
-          <span class="ds-status-row__wait">
-            대기 중 <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
-          </span>
+          <Show
+            when={gone()}
+            fallback={
+              <span class="ds-status-row__wait">
+                대기 중 <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
+              </span>
+            }
+          >
+            <span class="ds-status-row__wait">
+              {ICON.user(12)} 나감
+            </span>
+          </Show>
         }
       >
         <span class="jt-pill jt-pill-started ds-status-row__pill">동의함</span>
@@ -417,9 +449,18 @@ function WaitingBody(props: {
   actorID: string
   sec: number
   cancel: () => void
+  exclude?: () => void
   spectator?: boolean
 }) {
   const allOk = createMemo(() => props.state.actors.every((item) => item.status === "approved"))
+  // The departed are the sole holdouts: the requester (and only the requester) may proceed without
+  // them — a departure by itself never sends.
+  const excludable = createMemo(
+    () =>
+      props.state.actorID === props.actorID &&
+      props.state.actors.some((item) => item.status === "left") &&
+      !props.state.actors.some((item) => item.status === "pending"),
+  )
   const sub = () => {
     if (props.kind === "stop") return "모두 동의하면 AI 응답을 멈춰요"
     if (props.kind === "question-dismiss") return "모두 동의하면 질문을 닫아요"
@@ -433,10 +474,15 @@ function WaitingBody(props: {
       <SessionPreviewMascot size={52} />
       <div class="ds-waiting-head">
         <h2 class="ds-headline ds-headline--center">
-          {allOk() ? "모두 동의했어요. 진행할게요" : "동의했어요. 팀원을 기다려요"}
+          {excludable()
+            ? "나간 팀원만 응답하지 않았어요"
+            : allOk()
+              ? "모두 동의했어요. 진행할게요"
+              : "동의했어요. 팀원을 기다려요"}
         </h2>
         <p class="ds-waiting-sub">
-          {sub()} · <span class="ds-nowrap">자동 거절까지 {props.sec}초</span>
+          {excludable() ? "제외하고 보내거나, 돌아올 때까지 기다릴 수 있어요" : sub()} ·{" "}
+          <span class="ds-nowrap">자동 거절까지 {props.sec}초</span>
         </p>
       </div>
       <div class="jt-snap-scroll ds-status-list">
@@ -445,9 +491,17 @@ function WaitingBody(props: {
         </For>
       </div>
       <Show when={!props.spectator}>
-        <button type="button" class="jt-btn jt-btn-secondary" onClick={props.cancel}>
-          동의 취소 <span class="ds-kbd">Esc</span>
-        </button>
+        <div class="ds-waiting-actions">
+          <button type="button" class="jt-btn jt-btn-secondary" onClick={props.cancel}>
+            동의 취소 <span class="ds-kbd">Esc</span>
+          </button>
+          <Show when={excludable() && props.exclude}>
+            <button type="button" class="jt-btn jt-btn-critical ds-btn-approve" onClick={props.exclude}>
+              {ICON.send(14)}
+              {excludeLabel(props.kind)}
+            </button>
+          </Show>
+        </div>
       </Show>
     </div>
   )
@@ -509,6 +563,7 @@ function ConsentFrame(props: {
   spectator?: boolean
   approve: () => void
   cancel: () => void
+  exclude?: () => void
   onExpire?: () => void
 }) {
   const remaining = useCountdown(() => props.state.expiresAt, props.onExpire)
@@ -557,6 +612,7 @@ function ConsentFrame(props: {
             actorID={props.actorID}
             sec={sec()}
             cancel={props.cancel}
+            exclude={props.exclude}
             spectator={props.spectator}
           />
         </Show>
@@ -624,6 +680,7 @@ export function DialogDocSubmit(props: Props) {
               spectator={props.spectator}
               approve={props.approve}
               cancel={props.cancel}
+              exclude={props.exclude}
               onExpire={props.onExpire}
             />
           </Show>

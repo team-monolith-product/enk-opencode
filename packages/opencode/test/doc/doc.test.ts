@@ -770,7 +770,90 @@ describe("doc", () => {
     })
   })
 
-  test("submit approval fails when a participant disconnects past the grace period", async () => {
+  test("a leaver is marked 나감 on the roster; only the requester leaving fails the vote", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const carol = Doc.actorUpsert({ sessionID: session.id, name: "Carol" })
+
+        const carolEvents: Doc.SubmitEvent[] = []
+        const stopAlice = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: () => undefined },
+        })
+        let stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+        const stopCarol = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: carol.actorID,
+          peer: { send: (data) => carolEvents.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+
+        const state = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          prompt,
+        })
+        expect(state.status).toBe("pending")
+        expect(state.actors.length).toBe(3)
+
+        // Bob drops but reconnects inside the 2s grace window — membership unchanged.
+        stopBob()
+        stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+        await new Promise((resolve) => setTimeout(resolve, 2_200))
+        const held = Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })
+        expect(held?.status).toBe("pending")
+        expect(held?.actors.length).toBe(3)
+
+        // Bob drops and stays gone past the grace window — he is MARKED 나감 (kept on the roster),
+        // and the vote survives.
+        stopBob()
+        await new Promise((resolve) => setTimeout(resolve, 2_200))
+
+        const updated = carolEvents.findLast((event) => event.type === "updated")
+        expect(updated?.state.actors.find((actor) => actor.actorID === bob.actorID)?.status).toBe("left")
+        const survived = Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })
+        expect(survived?.status).toBe("pending")
+        expect(survived?.actors.length).toBe(3)
+
+        // The requester walking away is the one departure that fails the vote — nobody owns the send.
+        stopAlice()
+        await new Promise((resolve) => setTimeout(resolve, 2_200))
+
+        const left = carolEvents.find((event) => event.type === "left")
+        expect(left).toBeDefined()
+        expect(left?.state.status).toBe("left")
+        expect(left?.state.cancelledBy?.actorID).toBe(alice.actorID)
+        expect(left?.state.cancelledBy?.name).toBe("Alice")
+        expect(Doc.submitActive({ sessionID: session.id, docID, actorID: carol.actorID })).toBeUndefined()
+
+        stopCarol()
+      },
+    })
+  }, 15_000)
+
+  test("a departure never sends by itself — the requester's exclude action does", async () => {
+    spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -789,6 +872,128 @@ describe("doc", () => {
           actorID: alice.actorID,
           peer: { send: (data) => aliceEvents.push(JSON.parse(data) as Doc.SubmitEvent) },
         })
+        const stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+
+        const state = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          prompt,
+        })
+        expect(state.status).toBe("pending")
+
+        // Bob (the only pending member) drops past the grace window: he is marked 나감 and the vote
+        // stays pending — his departure must NOT act as his consent.
+        stopBob()
+        await new Promise((resolve) => setTimeout(resolve, 2_200))
+
+        expect(aliceEvents.some((event) => event.type === "sent")).toBe(false)
+        const held = Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })
+        expect(held?.status).toBe("pending")
+        expect(held?.actors.find((actor) => actor.actorID === bob.actorID)?.status).toBe("left")
+
+        // A non-requester cannot exclude...
+        expect(() =>
+          Doc.submitRespond({ sessionID: session.id, submitID: state.submitID, actorID: bob.actorID, action: "exclude" }),
+        ).toThrow()
+
+        // ...the requester can: the departed member is dropped and the prompt sends.
+        const sent = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: alice.actorID,
+          action: "exclude",
+        })
+        expect(sent.status).toBe("sent")
+        expect(sent.actors.map((actor) => actor.actorID)).toEqual([alice.actorID])
+        expect(Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })).toBeUndefined()
+
+        stopAlice()
+      },
+    })
+  })
+
+  test("exclude is a no-op while a present member is still deciding", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const carol = Doc.actorUpsert({ sessionID: session.id, name: "Carol" })
+
+        const stopAlice = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: () => undefined },
+        })
+        const stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+        const stopCarol = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: carol.actorID,
+          peer: { send: () => undefined },
+        })
+
+        const state = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          prompt,
+        })
+
+        // Bob drops past grace (marked 나감) while carol is still deciding: exclude must not fire.
+        stopBob()
+        await new Promise((resolve) => setTimeout(resolve, 2_200))
+        const held = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: alice.actorID,
+          action: "exclude",
+        })
+        expect(held.status).toBe("pending")
+        expect(held.actors.length).toBe(3)
+
+        stopCarol()
+        stopAlice()
+      },
+    })
+  })
+
+  test("a 나감 member who reconnects becomes pending again and can complete the vote", async () => {
+    spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+
+        const stopAlice = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: () => undefined },
+        })
         let stopBob = Doc.submitConnect({
           sessionID: session.id,
           docID,
@@ -800,38 +1005,187 @@ describe("doc", () => {
           sessionID: session.id,
           docID,
           actorID: alice.actorID,
-          actorIDs: [alice.actorID, bob.actorID],
           prompt,
         })
-        expect(state.status).toBe("pending")
 
-        // Bob drops but reconnects inside the 2s grace window — no failure.
         stopBob()
-        expect(aliceEvents.some((event) => event.type === "left")).toBe(false)
+        await new Promise((resolve) => setTimeout(resolve, 2_200))
+        expect(
+          Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })?.actors.find(
+            (actor) => actor.actorID === bob.actorID,
+          )?.status,
+        ).toBe("left")
+
+        // Bob comes back: his replay shows him votable again, and his approval completes the vote.
+        const bobEvents: Doc.SubmitEvent[] = []
         stopBob = Doc.submitConnect({
           sessionID: session.id,
           docID,
           actorID: bob.actorID,
+          peer: { send: (data) => bobEvents.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        const replay = bobEvents.find((event) => event.type === "created")
+        expect(replay?.state.actors.find((actor) => actor.actorID === bob.actorID)?.status).toBe("pending")
+
+        const sent = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: bob.actorID,
+          action: "approve",
+        })
+        expect(sent.status).toBe("sent")
+
+        stopBob()
+        stopAlice()
+      },
+    })
+  }, 15_000)
+
+  test("membership changes top the countdown up by 3s, capped at one full window", async () => {
+    await using tmp = await tmpdir()
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        init: InstanceBootstrap,
+        fn: async () => {
+          await Project.fromDirectory(tmp.path)
+          const session = await Session.create({})
+          const { docID } = Doc.prompt(session.id)
+          const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+          const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+          const carol = Doc.actorUpsert({ sessionID: session.id, name: "Carol" })
+          const dave = Doc.actorUpsert({ sessionID: session.id, name: "Dave" })
+
+          const t0 = 1_000_000
+          setSystemTime(t0)
+          const stopAlice = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            peer: { send: () => undefined },
+          })
+          const stopBob = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: bob.actorID,
+            peer: { send: () => undefined },
+          })
+
+          const state = Doc.submitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            prompt,
+            timeoutMs: 10_000,
+          })
+          expect(state.expiresAt).toBe(t0 + 10_000)
+
+          // Joining right after creation: the countdown is already at a full window — the cap holds.
+          const stopCarol = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: carol.actorID,
+            peer: { send: () => undefined },
+          })
+          expect(Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })?.expiresAt).toBe(t0 + 10_000)
+
+          // 5s in, another join tops the deadline up by the full 3s.
+          setSystemTime(t0 + 5_000)
+          const stopDave = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: dave.actorID,
+            peer: { send: () => undefined },
+          })
+          expect(Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })?.expiresAt).toBe(t0 + 13_000)
+
+          stopDave()
+          stopCarol()
+          stopBob()
+          stopAlice()
+        },
+      })
+    } finally {
+      setSystemTime()
+    }
+  })
+
+  test("a late joiner is added to the pending vote and can complete it", async () => {
+    spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        // Carol was NOT connected when the vote was created — the exact client that previously
+        // never saw the dialog (reconnect gap / reaped zombie / frozen tab at create() time).
+        const carol = Doc.actorUpsert({ sessionID: session.id, name: "Carol" })
+
+        const bobEvents: Doc.SubmitEvent[] = []
+        const stopAlice = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
           peer: { send: () => undefined },
         })
-        await new Promise((resolve) => setTimeout(resolve, 2_200))
-        expect(aliceEvents.some((event) => event.type === "left")).toBe(false)
-        expect(Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })?.status).toBe("pending")
+        const stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: (data) => bobEvents.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
 
-        // Bob drops and stays gone past the grace window — submit fails as "left".
+        const state = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          prompt,
+        })
+        expect(state.status).toBe("pending")
+        expect(state.actors.map((actor) => actor.actorID).sort()).toEqual([alice.actorID, bob.actorID].sort())
+
+        // Carol connects while the vote is pending: she joins it and gets the state replayed.
+        const carolEvents: Doc.SubmitEvent[] = []
+        const stopCarol = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: carol.actorID,
+          peer: { send: (data) => carolEvents.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+
+        const replay = carolEvents.find((event) => event.type === "created")
+        expect(replay?.state.submitID).toBe(state.submitID)
+        expect(replay?.state.actors.map((actor) => actor.actorID)).toContain(carol.actorID)
+        expect(replay?.state.actors.find((actor) => actor.actorID === carol.actorID)?.status).toBe("pending")
+        expect(replay?.state.actors.find((actor) => actor.actorID === carol.actorID)?.name).toBe("Carol")
+        // The existing members see the membership grow.
+        const grew = bobEvents.findLast((event) => event.type === "updated")
+        expect(grew?.state.actors.map((actor) => actor.actorID)).toContain(carol.actorID)
+
+        // Consensus now requires carol too: bob alone is not enough...
+        const partial = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: bob.actorID,
+          action: "approve",
+        })
+        expect(partial.status).toBe("pending")
+        // ...and carol's approval completes the vote.
+        const sent = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: carol.actorID,
+          action: "approve",
+        })
+        expect(sent.status).toBe("sent")
+
+        stopCarol()
         stopBob()
-        await new Promise((resolve) => setTimeout(resolve, 2_200))
-
-        const left = aliceEvents.find((event) => event.type === "left")
-        expect(left).toBeDefined()
-        expect(left?.state.status).toBe("left")
-        expect(left?.state.cancelledBy?.actorID).toBe(bob.actorID)
-        expect(left?.state.cancelledBy?.name).toBe("Bob")
-
-        // The submit is no longer active, so it can never be sent.
-        const active = Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })
-        expect(active).toBeUndefined()
-
         stopAlice()
       },
     })
@@ -897,7 +1251,7 @@ describe("doc", () => {
           actorIDs: [alice.actorID, bob.actorID],
           prompt,
         })
-        expect(base.timeoutMs).toBe(15_000)
+        expect(base.timeoutMs).toBe(30_000)
         stop()
       },
     })
@@ -1125,14 +1479,14 @@ describe("doc", () => {
           peer: { send: () => {}, close: () => stopGhost() },
         })
 
-        // 5s in: everyone still within the timeout. Alice & Bob answer the ping; Ghost goes silent.
-        setSystemTime(t0 + 5_000)
+        // 3s in: everyone still within the timeout. Alice & Bob answer the ping; Ghost goes silent.
+        setSystemTime(t0 + 3_000)
         Doc.heartbeatSweep()
         stopAlice.pong()
         stopBob.pong()
 
-        // 11s in: Ghost has been silent for 11s (> PING_TIMEOUT), Alice/Bob ponged 6s ago.
-        setSystemTime(t0 + 11_000)
+        // 6s in: Ghost has been silent for 6s (> PING_TIMEOUT), Alice/Bob ponged 3s ago.
+        setSystemTime(t0 + 6_000)
         Doc.heartbeatSweep()
 
         // A new vote whose snapshot still lists Ghost must exclude it — the heartbeat already pruned
@@ -1738,44 +2092,100 @@ describe("doc", () => {
     })
   })
 
-  test("submit excludes stale connected peers not in the requester's actorIDs so consensus completes", async () => {
+  test("a stale zombie peer joins the vote but is reaped and removed, so consensus still completes", async () => {
+    spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
     await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      init: InstanceBootstrap,
-      fn: async () => {
-        await Project.fromDirectory(tmp.path)
-        const session = await Session.create({})
-        const { docID } = Doc.prompt(session.id)
-        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
-        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
-        const ghost = Doc.actorUpsert({ sessionID: session.id, name: "Ghost" })
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        init: InstanceBootstrap,
+        fn: async () => {
+          await Project.fromDirectory(tmp.path)
+          const session = await Session.create({})
+          const { docID } = Doc.prompt(session.id)
+          const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+          const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+          const ghost = Doc.actorUpsert({ sessionID: session.id, name: "Ghost" })
 
-        // All three have live submit sockets, but `ghost` is a stale tab the requester no longer
-        // sees in its awareness list.
-        const stopA = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
-        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
-        const stopG = Doc.submitConnect({ sessionID: session.id, docID, actorID: ghost.actorID, peer: { send: () => {} } })
+          const t0 = 1_000_000
+          setSystemTime(t0)
+          // All three have live submit sockets, but `ghost` is a half-open zombie tab that will
+          // never answer a heartbeat ping (and thus never respond to the vote either).
+          const aliceEvents: Doc.SubmitEvent[] = []
+          let stopA!: ReturnType<typeof Doc.submitConnect>
+          let stopB!: ReturnType<typeof Doc.submitConnect>
+          let stopG!: ReturnType<typeof Doc.submitConnect>
+          stopA = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            peer: { send: (data) => aliceEvents.push(JSON.parse(data) as Doc.SubmitEvent), close: () => stopA() },
+          })
+          stopB = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: bob.actorID,
+            peer: { send: () => {}, close: () => stopB() },
+          })
+          stopG = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: ghost.actorID,
+            peer: { send: () => {}, close: () => stopG() },
+          })
 
-        const state = Doc.submitCreate({
-          sessionID: session.id,
-          docID,
-          actorID: alice.actorID,
-          actorIDs: [alice.actorID, bob.actorID], // ghost intentionally omitted
-          prompt,
-        })
-        // The ghost is not a vote target — only the two real participants are.
-        expect(state.actors.map((a) => a.actorID).sort()).toEqual([alice.actorID, bob.actorID].sort())
+          // The zombie is still in the connected-peer set, so it DOES join the vote (dynamic
+          // membership no longer cross-checks the requester's awareness snapshot)...
+          const state = Doc.submitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            prompt,
+          })
+          expect(state.actors.map((a) => a.actorID).sort()).toEqual(
+            [alice.actorID, bob.actorID, ghost.actorID].sort(),
+          )
 
-        const sent = Doc.submitRespond({ sessionID: session.id, submitID: state.submitID, actorID: bob.actorID, action: "approve" })
-        expect(sent.status).toBe("sent")
+          // ...and bob's approval alone cannot complete it while the ghost is a member.
+          const partial = Doc.submitRespond({
+            sessionID: session.id,
+            submitID: state.submitID,
+            actorID: bob.actorID,
+            action: "approve",
+          })
+          expect(partial.status).toBe("pending")
 
-        stopA()
-        stopB()
-        stopG()
-      },
-    })
-  })
+          // Heartbeat reaps the silent zombie (alice/bob pong, ghost doesn't)...
+          setSystemTime(t0 + 3_000)
+          Doc.heartbeatSweep()
+          stopA.pong()
+          stopB.pong()
+          setSystemTime(t0 + 6_000)
+          Doc.heartbeatSweep()
+
+          // ...its leave-grace passes and it is marked 나감 — the vote stays pending (a departure
+          // never sends by itself) until the requester explicitly excludes the departed member.
+          await new Promise((resolve) => setTimeout(resolve, 2_200))
+          const marked = aliceEvents.findLast((event) => event.type === "updated")
+          expect(marked?.state.actors.find((a) => a.actorID === ghost.actorID)?.status).toBe("left")
+
+          const sent = Doc.submitRespond({
+            sessionID: session.id,
+            submitID: state.submitID,
+            actorID: alice.actorID,
+            action: "exclude",
+          })
+          expect(sent.status).toBe("sent")
+          expect(sent.actors.map((a) => a.actorID)).not.toContain(ghost.actorID)
+
+          stopA()
+          stopB()
+        },
+      })
+    } finally {
+      setSystemTime()
+    }
+  }, 15_000)
 
   test("question draft relays shared answers: single is LWW, multi toggles are commutative", async () => {
     await using tmp = await tmpdir()

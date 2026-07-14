@@ -413,8 +413,8 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const showApproval = (state: DocSubmitState) => {
     const a = actor()
     if (!a) return
-    // A readonly spectator isn't in state.actors but should still see the dialog (spectator mode).
-    if (!readonly && !state.actors.some((item) => item.actorID === a.actorID)) return
+    // No membership gate: the server casts only to connected peers and joins any connected
+    // non-member to a pending vote (dynamic membership), so every state we receive is ours to render.
     // Show the right copy even for participants who did not start the vote.
     if (state.questionAction)
       setVoteKind(
@@ -473,6 +473,20 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               .then(setApproval)
               .catch(() => showToast({ title: "전송 동의 취소 실패", description: language.t("common.requestFailed") }))
           }}
+          exclude={() => {
+            const current = approval()
+            if (!current) return
+            void respondQuestionSubmit({
+              baseUrl: sdk.url,
+              directory: sdk.directory,
+              sessionID,
+              submitID: current.submitID,
+              actorID: a.actorID,
+              action: "exclude",
+            })
+              .then(setApproval)
+              .catch(() => showToast({ title: "전송 실패", description: language.t("common.requestFailed") }))
+          }}
           close={closeApproval}
           onExpire={() => {
             // Server terminal cast never arrived — drive the same "expired" transition locally so the
@@ -499,19 +513,15 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     )
   }
 
+  // Display names only — vote membership is decided server-side from connected submit peers.
   const roster = () => {
     const a = actor()
     const names: Record<string, string> = {}
-    const ids = new Set<string>()
-    if (a) {
-      ids.add(a.actorID)
-      if (a.name && a.name !== a.actorID) names[a.actorID] = a.name
-    }
+    if (a && a.name && a.name !== a.actorID) names[a.actorID] = a.name
     for (const item of presence()) {
-      ids.add(item.actorID)
       if (item.name && item.name !== item.actorID) names[item.actorID] = item.name
     }
-    return { actorIDs: Array.from(ids), names }
+    return { names }
   }
 
   const startVote = async (kind: DocSubmitKind, payload: { answers?: string[][]; reject?: boolean; step?: number }) => {
@@ -520,14 +530,13 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     setVoteKind(kind)
     setPendingSend(true)
     try {
-      const { actorIDs, names } = roster()
+      const { names } = roster()
       const state = await startQuestionSubmit({
         baseUrl: sdk.url,
         directory: sdk.directory,
         sessionID,
         requestID,
         actorID: a.actorID,
-        actorIDs,
         names,
         payload: { requestID, ...payload },
       })

@@ -5,7 +5,9 @@ export type DocSubmitActor = {
   actorID: string
   name: string
   color: string
-  status: "pending" | "approved"
+  // "left" = dropped out mid-vote (shown as 나감). Blocks auto-send; the requester decides via the
+  // "exclude" respond action whether to send without them. Flips back to "pending" on reconnect.
+  status: "pending" | "approved" | "left"
 }
 
 export type DocSubmitState = {
@@ -30,13 +32,15 @@ export type DocSubmitEvent = {
   state: DocSubmitState
 }
 
+// Vote membership is decided server-side from the connected submit peers (and kept dynamic as
+// participants join/leave), so create calls no longer pass an actorIDs snapshot — only display
+// names for the members the server picks.
 type StartInput = {
   baseUrl: string
   directory: string
   sessionID: string
   docID: string
   actorID: string
-  actorIDs: string[]
   names?: Record<string, string>
   prompt: Pick<PromptApprovalInput, "messageID" | "agent" | "model" | "variant" | "parts">
   timeoutMs?: number
@@ -48,7 +52,7 @@ type RespondInput = {
   sessionID: string
   submitID: string
   actorID: string
-  action: "approve" | "cancel"
+  action: "approve" | "cancel" | "exclude"
 }
 
 type SocketInput = {
@@ -92,7 +96,6 @@ export async function startSubmit(input: StartInput) {
   return json(path(input, `/session/${input.sessionID}/prompt-doc/submit`), {
     docID: input.docID,
     actorID: input.actorID,
-    actorIDs: input.actorIDs,
     names: input.names,
     prompt: input.prompt,
     timeoutMs: input.timeoutMs,
@@ -105,7 +108,6 @@ type StopInput = {
   sessionID: string
   docID: string
   actorID: string
-  actorIDs: string[]
   names?: Record<string, string>
   timeoutMs?: number
 }
@@ -116,7 +118,6 @@ export async function startStopSubmit(input: StopInput) {
   return json(path(input, `/session/${input.sessionID}/prompt-doc/stop`), {
     docID: input.docID,
     actorID: input.actorID,
-    actorIDs: input.actorIDs,
     names: input.names,
     timeoutMs: input.timeoutMs,
   })
@@ -177,7 +178,6 @@ type QuestionStartInput = {
   sessionID: string
   requestID: string
   actorID: string
-  actorIDs: string[]
   names?: Record<string, string>
   payload: QuestionSubmitPayload
   timeoutMs?: number
@@ -187,7 +187,6 @@ export async function startQuestionSubmit(input: QuestionStartInput) {
   return json(path(input, `/session/${input.sessionID}/question/submit`), {
     requestID: input.requestID,
     actorID: input.actorID,
-    actorIDs: input.actorIDs,
     names: input.names,
     payload: input.payload,
     timeoutMs: input.timeoutMs,
