@@ -13,6 +13,7 @@ import { useClientEnv } from "@/context/client-env"
 import { label } from "@/components/blocksuite/actor"
 import { loadActor, saveActor } from "@/components/prompt-input/doc-actor"
 import { DialogDocSubmit, type DocSubmitKind } from "@/components/doc-submit/dialog-doc-submit"
+import { notifyConsentWhenHidden } from "@/components/doc-submit/consent-notification"
 import {
   connectQuestionDraft,
   connectQuestionSubmit,
@@ -413,6 +414,8 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const showApproval = (state: DocSubmitState) => {
     const a = actor()
     if (!a) return
+    // Surface the vote at OS level when the tab is hidden — see consent-notification.ts.
+    if (!readonly) notifyConsentWhenHidden(state, a.actorID)
     // No membership gate: the server casts only to connected peers and joins any connected
     // non-member to a pending vote (dynamic membership), so every state we receive is ours to render.
     // Show the right copy even for participants who did not start the vote.
