@@ -589,9 +589,11 @@ export namespace Doc {
   // Heartbeat: a half-open socket (laptop sleep, wifi switch, backgrounded tab) never fires WS
   // onClose and `send` does not error, so a dead peer lingers in `peers` for minutes and pollutes
   // every vote's target set. We ping each peer and reap any that stops ponging, keeping `peers`
-  // (and thus targets()/cast()/presence) honest within ~PING_TIMEOUT.
-  const PING_INTERVAL = 4_000
-  const PING_TIMEOUT = 9_000
+  // (and thus targets()/cast()/presence) honest within ~PING_TIMEOUT. The timeout is the tolerance
+  // for a live tab whose main thread stalls (huge paste, GC, breakpoint) — a falsely reaped client
+  // reconnects within its 500ms retry and the LEAVE_GRACE window, so membership survives the blip.
+  const PING_INTERVAL = 2_000
+  const PING_TIMEOUT = 4_500
   // Keyed by targetID (doc id or question request id) — the single routing key for a vote's peers.
   const peers = new Map<string, Set<SubmitPeer>>()
   // Read-only spectators (?readonly=true viewers). They receive every cast for a targetID but are

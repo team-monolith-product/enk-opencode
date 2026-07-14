@@ -1270,14 +1270,14 @@ describe("doc", () => {
           peer: { send: () => {}, close: () => stopGhost() },
         })
 
-        // 5s in: everyone still within the timeout. Alice & Bob answer the ping; Ghost goes silent.
-        setSystemTime(t0 + 5_000)
+        // 3s in: everyone still within the timeout. Alice & Bob answer the ping; Ghost goes silent.
+        setSystemTime(t0 + 3_000)
         Doc.heartbeatSweep()
         stopAlice.pong()
         stopBob.pong()
 
-        // 11s in: Ghost has been silent for 11s (> PING_TIMEOUT), Alice/Bob ponged 6s ago.
-        setSystemTime(t0 + 11_000)
+        // 6s in: Ghost has been silent for 6s (> PING_TIMEOUT), Alice/Bob ponged 3s ago.
+        setSystemTime(t0 + 6_000)
         Doc.heartbeatSweep()
 
         // A new vote whose snapshot still lists Ghost must exclude it — the heartbeat already pruned
@@ -1947,11 +1947,11 @@ describe("doc", () => {
           expect(partial.status).toBe("pending")
 
           // Heartbeat reaps the silent zombie (alice/bob pong, ghost doesn't)...
-          setSystemTime(t0 + 5_000)
+          setSystemTime(t0 + 3_000)
           Doc.heartbeatSweep()
           stopA.pong()
           stopB.pong()
-          setSystemTime(t0 + 11_000)
+          setSystemTime(t0 + 6_000)
           Doc.heartbeatSweep()
 
           // ...its leave-grace passes, it is dropped from the vote, and — everyone remaining having
