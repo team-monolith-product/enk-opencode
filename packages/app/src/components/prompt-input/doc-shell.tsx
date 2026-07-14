@@ -346,11 +346,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               {props.maxLength.toLocaleString()}
             </span>
           </Show>
-          <Tooltip
-            placement="top"
-            inactive={props.submitIcon === "arrow-up-bold" && !props.submitDisabled}
-            value={props.tip}
-          >
+          <Tooltip placement="top" value={props.tip}>
             <IconButton
               data-action="prompt-submit"
               type="submit"
