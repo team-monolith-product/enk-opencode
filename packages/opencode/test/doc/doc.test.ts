@@ -1042,7 +1042,7 @@ describe("doc", () => {
           actorIDs: [alice.actorID, bob.actorID],
           prompt,
         })
-        expect(base.timeoutMs).toBe(15_000)
+        expect(base.timeoutMs).toBe(30_000)
         stop()
       },
     })

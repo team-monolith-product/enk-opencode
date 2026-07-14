@@ -478,8 +478,8 @@ export namespace Doc {
   )
 
   // Membership is dynamic (joiners are added, leavers removed — see join()/leave()), so the timeout
-  // only guards against a human never answering — 15s is the product-spec decision window.
-  const DEFAULT = 15_000
+  // only guards against a human never answering — 30s is the product-spec decision window.
+  const DEFAULT = 30_000
   const MIN = 10_000
   const MAX = 600_000
   const MAX_NAME = 64
