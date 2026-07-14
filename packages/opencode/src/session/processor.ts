@@ -121,10 +121,10 @@ export namespace SessionProcessor {
           switch (value.type) {
             case "start":
               yield* status.set(ctx.sessionID, { type: "busy" })
-              // Optional realtime liveness ping ("answer started"). No-op unless ENK usage
-              // reporting is enabled with ENK_AI_USAGE_REALTIME=progress. Fire-and-forget.
+              // Turn-start marker ("answer started"). Deduped per message inside AiUsage, so
+              // fallback retries that restart the stream don't emit twice. Fire-and-forget.
               try {
-                AiUsage.reportProgress(ctx.assistantMessage, "start")
+                AiUsage.reportStart(ctx.assistantMessage)
               } catch {}
               return
 
@@ -301,9 +301,10 @@ export namespace SessionProcessor {
               ctx.assistantMessage.finish = value.finishReason
               ctx.assistantMessage.cost += usage.cost
               ctx.assistantMessage.tokens = usage.tokens
-              // Realtime per-step usage report (authoritative token/cost for THIS step). No-op
-              // unless ENK usage reporting is enabled and ENK_AI_USAGE_REALTIME !== "off".
-              // Fire-and-forget through the AiUsage queue; never awaited in the stream loop.
+              // Realtime per-step usage report: THIS model call's authoritative token counts and
+              // fee. Rails sums step records for the turn total — the final record is a zero-count
+              // end marker. No-op unless ENK usage reporting is enabled. Fire-and-forget through
+              // the AiUsage queue; never awaited in the stream loop.
               try {
                 AiUsage.reportStep(ctx.assistantMessage, {
                   index: ctx.stepIndex,
