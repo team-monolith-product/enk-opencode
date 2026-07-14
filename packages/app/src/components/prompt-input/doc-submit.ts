@@ -5,7 +5,9 @@ export type DocSubmitActor = {
   actorID: string
   name: string
   color: string
-  status: "pending" | "approved"
+  // "left" = dropped out mid-vote (shown as 나감). Blocks auto-send; the requester decides via the
+  // "exclude" respond action whether to send without them. Flips back to "pending" on reconnect.
+  status: "pending" | "approved" | "left"
 }
 
 export type DocSubmitState = {
@@ -50,7 +52,7 @@ type RespondInput = {
   sessionID: string
   submitID: string
   actorID: string
-  action: "approve" | "cancel"
+  action: "approve" | "cancel" | "exclude"
 }
 
 type SocketInput = {

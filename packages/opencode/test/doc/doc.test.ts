@@ -770,7 +770,7 @@ describe("doc", () => {
     })
   })
 
-  test("a leaver is removed from the vote; only the requester leaving fails it", async () => {
+  test("a leaver is marked 나감 on the roster; only the requester leaving fails the vote", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -825,15 +825,16 @@ describe("doc", () => {
         expect(held?.status).toBe("pending")
         expect(held?.actors.length).toBe(3)
 
-        // Bob drops and stays gone past the grace window — he is removed, the vote survives.
+        // Bob drops and stays gone past the grace window — he is MARKED 나감 (kept on the roster),
+        // and the vote survives.
         stopBob()
         await new Promise((resolve) => setTimeout(resolve, 2_200))
 
         const updated = carolEvents.findLast((event) => event.type === "updated")
-        expect(updated?.state.actors.map((actor) => actor.actorID)).not.toContain(bob.actorID)
+        expect(updated?.state.actors.find((actor) => actor.actorID === bob.actorID)?.status).toBe("left")
         const survived = Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })
         expect(survived?.status).toBe("pending")
-        expect(survived?.actors.length).toBe(2)
+        expect(survived?.actors.length).toBe(3)
 
         // The requester walking away is the one departure that fails the vote — nobody owns the send.
         stopAlice()
@@ -851,7 +852,7 @@ describe("doc", () => {
     })
   }, 15_000)
 
-  test("the last holdout leaving sends the vote — everyone remaining already agreed", async () => {
+  test("a departure never sends by itself — the requester's exclude action does", async () => {
     spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
     await using tmp = await tmpdir()
     await Instance.provide({
@@ -886,19 +887,227 @@ describe("doc", () => {
         })
         expect(state.status).toBe("pending")
 
-        // Bob (the only pending member) drops past the grace window: alice already approved as the
-        // requester, so consensus among everyone still present is reached and the prompt sends.
+        // Bob (the only pending member) drops past the grace window: he is marked 나감 and the vote
+        // stays pending — his departure must NOT act as his consent.
         stopBob()
         await new Promise((resolve) => setTimeout(resolve, 2_200))
 
-        const sent = aliceEvents.find((event) => event.type === "sent")
-        expect(sent).toBeDefined()
-        expect(sent?.state.status).toBe("sent")
+        expect(aliceEvents.some((event) => event.type === "sent")).toBe(false)
+        const held = Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })
+        expect(held?.status).toBe("pending")
+        expect(held?.actors.find((actor) => actor.actorID === bob.actorID)?.status).toBe("left")
+
+        // A non-requester cannot exclude...
+        expect(() =>
+          Doc.submitRespond({ sessionID: session.id, submitID: state.submitID, actorID: bob.actorID, action: "exclude" }),
+        ).toThrow()
+
+        // ...the requester can: the departed member is dropped and the prompt sends.
+        const sent = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: alice.actorID,
+          action: "exclude",
+        })
+        expect(sent.status).toBe("sent")
+        expect(sent.actors.map((actor) => actor.actorID)).toEqual([alice.actorID])
         expect(Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })).toBeUndefined()
 
         stopAlice()
       },
     })
+  })
+
+  test("exclude is a no-op while a present member is still deciding", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const carol = Doc.actorUpsert({ sessionID: session.id, name: "Carol" })
+
+        const stopAlice = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: () => undefined },
+        })
+        const stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+        const stopCarol = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: carol.actorID,
+          peer: { send: () => undefined },
+        })
+
+        const state = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          prompt,
+        })
+
+        // Bob drops past grace (marked 나감) while carol is still deciding: exclude must not fire.
+        stopBob()
+        await new Promise((resolve) => setTimeout(resolve, 2_200))
+        const held = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: alice.actorID,
+          action: "exclude",
+        })
+        expect(held.status).toBe("pending")
+        expect(held.actors.length).toBe(3)
+
+        stopCarol()
+        stopAlice()
+      },
+    })
+  })
+
+  test("a 나감 member who reconnects becomes pending again and can complete the vote", async () => {
+    spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+
+        const stopAlice = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: () => undefined },
+        })
+        let stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+
+        const state = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          prompt,
+        })
+
+        stopBob()
+        await new Promise((resolve) => setTimeout(resolve, 2_200))
+        expect(
+          Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })?.actors.find(
+            (actor) => actor.actorID === bob.actorID,
+          )?.status,
+        ).toBe("left")
+
+        // Bob comes back: his replay shows him votable again, and his approval completes the vote.
+        const bobEvents: Doc.SubmitEvent[] = []
+        stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: (data) => bobEvents.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        const replay = bobEvents.find((event) => event.type === "created")
+        expect(replay?.state.actors.find((actor) => actor.actorID === bob.actorID)?.status).toBe("pending")
+
+        const sent = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: bob.actorID,
+          action: "approve",
+        })
+        expect(sent.status).toBe("sent")
+
+        stopBob()
+        stopAlice()
+      },
+    })
+  }, 15_000)
+
+  test("membership changes top the countdown up by 3s, capped at one full window", async () => {
+    await using tmp = await tmpdir()
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        init: InstanceBootstrap,
+        fn: async () => {
+          await Project.fromDirectory(tmp.path)
+          const session = await Session.create({})
+          const { docID } = Doc.prompt(session.id)
+          const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+          const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+          const carol = Doc.actorUpsert({ sessionID: session.id, name: "Carol" })
+          const dave = Doc.actorUpsert({ sessionID: session.id, name: "Dave" })
+
+          const t0 = 1_000_000
+          setSystemTime(t0)
+          const stopAlice = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            peer: { send: () => undefined },
+          })
+          const stopBob = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: bob.actorID,
+            peer: { send: () => undefined },
+          })
+
+          const state = Doc.submitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            prompt,
+            timeoutMs: 10_000,
+          })
+          expect(state.expiresAt).toBe(t0 + 10_000)
+
+          // Joining right after creation: the countdown is already at a full window — the cap holds.
+          const stopCarol = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: carol.actorID,
+            peer: { send: () => undefined },
+          })
+          expect(Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })?.expiresAt).toBe(t0 + 10_000)
+
+          // 5s in, another join tops the deadline up by the full 3s.
+          setSystemTime(t0 + 5_000)
+          const stopDave = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: dave.actorID,
+            peer: { send: () => undefined },
+          })
+          expect(Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })?.expiresAt).toBe(t0 + 13_000)
+
+          stopDave()
+          stopCarol()
+          stopBob()
+          stopAlice()
+        },
+      })
+    } finally {
+      setSystemTime()
+    }
   })
 
   test("a late joiner is added to the pending vote and can complete it", async () => {
@@ -1954,12 +2163,20 @@ describe("doc", () => {
           setSystemTime(t0 + 6_000)
           Doc.heartbeatSweep()
 
-          // ...its leave-grace passes, it is dropped from the vote, and — everyone remaining having
-          // approved — the vote self-heals to sent instead of dangling until the timeout.
+          // ...its leave-grace passes and it is marked 나감 — the vote stays pending (a departure
+          // never sends by itself) until the requester explicitly excludes the departed member.
           await new Promise((resolve) => setTimeout(resolve, 2_200))
-          const sent = aliceEvents.find((event) => event.type === "sent")
-          expect(sent).toBeDefined()
-          expect(sent?.state.actors.map((a) => a.actorID)).not.toContain(ghost.actorID)
+          const marked = aliceEvents.findLast((event) => event.type === "updated")
+          expect(marked?.state.actors.find((a) => a.actorID === ghost.actorID)?.status).toBe("left")
+
+          const sent = Doc.submitRespond({
+            sessionID: session.id,
+            submitID: state.submitID,
+            actorID: alice.actorID,
+            action: "exclude",
+          })
+          expect(sent.status).toBe("sent")
+          expect(sent.actors.map((a) => a.actorID)).not.toContain(ghost.actorID)
 
           stopA()
           stopB()

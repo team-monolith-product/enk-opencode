@@ -473,6 +473,20 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               .then(setApproval)
               .catch(() => showToast({ title: "전송 동의 취소 실패", description: language.t("common.requestFailed") }))
           }}
+          exclude={() => {
+            const current = approval()
+            if (!current) return
+            void respondQuestionSubmit({
+              baseUrl: sdk.url,
+              directory: sdk.directory,
+              sessionID,
+              submitID: current.submitID,
+              actorID: a.actorID,
+              action: "exclude",
+            })
+              .then(setApproval)
+              .catch(() => showToast({ title: "전송 실패", description: language.t("common.requestFailed") }))
+          }}
           close={closeApproval}
           onExpire={() => {
             // Server terminal cast never arrived — drive the same "expired" transition locally so the

@@ -477,17 +477,23 @@ export namespace Doc {
     },
   )
 
-  // Membership is dynamic (joiners are added, leavers removed — see join()/leave()), so the timeout
+  // Membership is dynamic (joiners are added, leavers marked — see join()/leave()), so the timeout
   // only guards against a human never answering — 30s is the product-spec decision window.
   const DEFAULT = 30_000
   const MIN = 10_000
   const MAX = 600_000
+  // Each membership change (new joiner, comeback, departure) tops the countdown up by EXTEND so the
+  // group has time to react — capped at one full timeout window so churn can't keep a vote alive
+  // indefinitely past what a fresh vote would get.
+  const EXTEND = 3_000
   const MAX_NAME = 64
   // How long after a submit resolves we still replay its terminal state to a (re)connecting
   // participant, so a client that blipped offline exactly at the transition can catch up.
   const REPLAY_WINDOW = 15_000
   const SubmitPrompt = SessionPrompt.PromptInput.omit({ sessionID: true })
-  const SubmitActorStatus = z.enum(["pending", "approved"])
+  // "left" = the member dropped out mid-vote. They are kept on the roster (shown as 나감) and block
+  // auto-send; the requester decides via the "exclude" respond action whether to send without them.
+  const SubmitActorStatus = z.enum(["pending", "approved", "left"])
   export const SubmitStatus = z.enum(["pending", "sent", "cancelled", "expired", "left"]).meta({ ref: "DocSubmitStatus" })
   export type SubmitStatus = z.infer<typeof SubmitStatus>
 
@@ -571,7 +577,9 @@ export namespace Doc {
     sessionID: SessionID.zod,
     submitID: SubmitID.zod,
     actorID: ActorID.zod,
-    action: z.enum(["approve", "cancel"]),
+    // "exclude" — requester-only: send now without the members who left mid-vote. Valid only when
+    // the departed are the sole holdouts (every present member already approved).
+    action: z.enum(["approve", "cancel", "exclude"]),
   })
 
   type SubmitRow = typeof DocSubmitTable.$inferSelect
@@ -834,6 +842,25 @@ export namespace Doc {
     return
   }
 
+  // Top up a pending vote's deadline after a membership change, capped at one full timeout window
+  // from now. Reschedules the expiry timer when the deadline actually moved.
+  function extend(row: SubmitRow, now = Date.now()) {
+    if (row.status !== "pending") return row
+    const deadline = Math.min(row.expires_at + EXTEND, now + row.timeout_ms)
+    if (deadline <= row.expires_at) return row
+    const next = Database.use((db) =>
+      db
+        .update(DocSubmitTable)
+        .set({ expires_at: deadline, time_updated: now })
+        .where(eq(DocSubmitTable.id, row.id))
+        .returning()
+        .get(),
+    )
+    if (!next) return row
+    schedule(next)
+    return next
+  }
+
   function schedule(row: SubmitRow) {
     done(row.id)
     if (row.status !== "pending") return
@@ -1059,6 +1086,25 @@ export namespace Doc {
       return state
     }
 
+    if (input.action === "exclude") {
+      // Requester-only: send now without the members who left mid-vote. A departure never triggers
+      // a send by itself — this explicit click is the only path. No-ops (returning current state)
+      // when the conditions aren't met, so a stale click after someone rejoins is harmless.
+      if (next.actor_id !== input.actorID) throw new NotFoundError({ message: "Only the requester can exclude" })
+      const state = read(next)
+      if (!state.actors.some((item) => item.status === "left")) return state
+      if (state.actors.some((item) => item.status === "pending")) return state
+      Database.use((db) =>
+        db
+          .delete(DocSubmitActorTable)
+          .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.status, "left")))
+          .run(),
+      )
+      const finished = finalize(next)
+      if (!finished) throw new NotFoundError({ message: "Doc submit not found" })
+      return finished
+    }
+
     if (actor.status !== "approved") {
       Database.use((db) =>
         db
@@ -1111,7 +1157,8 @@ export namespace Doc {
       const next = expire(row)
       if (next.status !== "pending") continue
       const state = read(next)
-      if (!state.actors.some((item) => item.actorID === actorID)) continue
+      const member = state.actors.find((item) => item.actorID === actorID)
+      if (!member) continue
       // The requester walking away abandons the vote — nobody is left to own the send.
       if (next.actor_id === actorID) {
         const item = Database.use((db) =>
@@ -1127,21 +1174,19 @@ export namespace Doc {
         cast("left", read(item))
         continue
       }
-      // Anyone else just drops out of the member set — consensus is "everyone still here agrees",
-      // so one participant's disconnect no longer kills the vote for everyone. If the leaver was
-      // the last holdout, the remaining members already agreed: send now.
+      // An approved member's consent was given explicitly — their departure changes nothing.
+      if (member.status === "approved") continue
+      // A pending member is marked "left" (kept on the roster, shown as 나감) rather than removed:
+      // a departure must never trigger a send NOR kill the vote. Whether to proceed without them
+      // is the requester's call — the "exclude" respond action. The top-up buys time to decide.
       Database.use((db) =>
         db
-          .delete(DocSubmitActorTable)
+          .update(DocSubmitActorTable)
+          .set({ status: "left" })
           .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
           .run(),
       )
-      const updated = read(next)
-      if (updated.actors.length && updated.actors.every((item) => item.status === "approved")) {
-        finalize(next)
-        continue
-      }
-      cast("updated", updated)
+      cast("updated", read(extend(next)))
     }
   }
 
@@ -1170,7 +1215,8 @@ export namespace Doc {
       if (next.status !== "pending") continue
       if (!timers.has(next.id)) schedule(next)
       let state = read(next)
-      if (!state.actors.some((actor) => actor.actorID === actorID)) {
+      const existing = state.actors.find((actor) => actor.actorID === actorID)
+      if (!existing) {
         Database.use((db) =>
           db
             .insert(DocSubmitActorTable)
@@ -1184,7 +1230,18 @@ export namespace Doc {
             .onConflictDoNothing()
             .run(),
         )
-        state = read(next)
+        state = read(extend(next))
+        cast("updated", state)
+      } else if (existing.status === "left") {
+        // A member who dropped out came back: votable again (나감 → 대기중).
+        Database.use((db) =>
+          db
+            .update(DocSubmitActorTable)
+            .set({ status: "pending" })
+            .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
+            .run(),
+        )
+        state = read(extend(next))
         cast("updated", state)
       }
       first ??= state

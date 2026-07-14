@@ -788,6 +788,25 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 }),
               )
           }}
+          exclude={() => {
+            const current = approval()
+            if (!current) return
+            void respondSubmit({
+              baseUrl: sdk.url,
+              directory: sdk.directory,
+              sessionID: current.sessionID,
+              submitID: current.submitID,
+              actorID,
+              action: "exclude",
+            })
+              .then(setApproval)
+              .catch(() =>
+                showToast({
+                  title: "전송 실패",
+                  description: language.t("common.requestFailed"),
+                }),
+              )
+          }}
           close={closeApproval}
           onExpire={() => {
             // Server terminal cast never arrived — drive the same "expired" transition locally so the

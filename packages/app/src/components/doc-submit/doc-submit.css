@@ -574,6 +574,20 @@
   font-size: 11px;
 }
 
+[data-component="doc-submit-overlay"] .ds-status-row--gone .ds-status-row__name {
+  color: var(--c-muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+[data-component="doc-submit-overlay"] .ds-waiting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 [data-component="doc-submit-overlay"] .ds-spin {
   display: inline-flex;
 }
