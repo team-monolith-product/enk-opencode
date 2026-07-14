@@ -1,6 +1,10 @@
 {
   "permission": "allow",
-  "plugin": ["./preview-bridge-plugin.js"],
+  "plugin": [
+    "./preview-bridge-plugin.js",
+    // 이미지 첨부 메시지를 비전 미지원 모델(deepseek 등) 대신 지정 모델로 라우팅.
+    ["./image-model-router-plugin.js", { "model": "minimax/MiniMax-M3", "variant": "adaptive" }],
+  ],
   "provider": {
     "google": {
       "options": {

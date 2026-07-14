@@ -1462,6 +1462,98 @@ it.effect("an empty pool disables fallback entirely", () =>
   ),
 )
 
+// Exclusive groups: the ENK_AI_MODEL × ENK_AI_IMAGE_MODEL pair must not fall back to each other.
+
+const cfgFallbackGroup = {
+  provider: {
+    test: {
+      ...cfg.provider.test,
+      models: {
+        ...cfg.provider.test.models,
+        "test-fallback": { ...cfg.provider.test.models["test-model"], id: "test-fallback", name: "Test Fallback" },
+        "test-fallback2": { ...cfg.provider.test.models["test-model"], id: "test-fallback2", name: "Test Fallback 2" },
+      },
+    },
+  },
+}
+
+const PAIR = { ENK_AI_MODEL: "test/test-model", ENK_AI_IMAGE_MODEL: "test/test-fallback" }
+
+it.effect("skips the primary's group partner in favor of the next pool entry", () =>
+  withFallbackEnv(
+    { ...PAIR, ENK_AI_FALLBACK_MODELS: '["test/test-fallback", "test/test-fallback2"]', ENK_AI_FALLBACK_RETRIES: "0" },
+    () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat } = yield* boot()
+            yield* test.push(apiFailure(false))
+            yield* test.reply(...replyStop("recovered"))
+            yield* user(chat.id, "hello")
+
+            yield* prompt.loop({ sessionID: chat.id })
+
+            // test-fallback is the primary's image partner, so the chain must jump straight
+            // to test-fallback2 rather than bounce within the pair
+            expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual([
+              "test-model",
+              "test-fallback2",
+            ])
+          }),
+        { git: true, config: cfgFallbackGroup },
+      ),
+  ),
+)
+
+it.effect("a pool holding only the primary's group partner leaves no fallback", () =>
+  withFallbackEnv({ ...PAIR, ...POOL, ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const { test, prompt, chat } = yield* boot()
+          yield* test.push(apiFailure(false))
+          yield* user(chat.id, "hello")
+
+          const result = yield* prompt.loop({ sessionID: chat.id })
+
+          expect(yield* test.calls).toBe(1)
+          expect(result.info.role === "assistant" && result.info.error).toBeDefined()
+        }),
+      { git: true, config: cfgFallbackGroup },
+    ),
+  ),
+)
+
+it.effect("the group rule leaves a primary outside the pair alone", () =>
+  // Same pool and pair, but the turn runs on test-fallback2 (outside the pair), so the
+  // partner model stays a legitimate fallback.
+  withFallbackEnv(
+    { ...PAIR, ENK_AI_FALLBACK_MODELS: '["test/test-fallback"]', ENK_AI_FALLBACK_RETRIES: "0" },
+    () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat, sessions } = yield* boot()
+            yield* test.push(apiFailure(false))
+            yield* test.reply(...replyStop("recovered"))
+            const msg = yield* user(chat.id, "hello")
+            yield* sessions.updateMessage({
+              ...msg,
+              model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-fallback2") },
+            })
+
+            yield* prompt.loop({ sessionID: chat.id })
+
+            expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual([
+              "test-fallback2",
+              "test-fallback",
+            ])
+          }),
+        { git: true, config: cfgFallbackGroup },
+      ),
+  ),
+)
+
 it.effect(
   "a degraded session still gives the primary one attempt per turn",
   () =>
