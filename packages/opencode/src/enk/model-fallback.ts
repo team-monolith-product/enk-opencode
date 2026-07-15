@@ -1,4 +1,5 @@
 import { Log } from "@/util/log"
+import { Flag } from "@/flag/flag"
 import { ModelPolicy } from "./model-policy"
 
 /**
@@ -24,6 +25,46 @@ export namespace ModelFallback {
     { providerID: "minimax", modelID: "MiniMax-M3", variant: "adaptive" },
     { providerID: "google", modelID: "gemini-3.5-flash", variant: "high" },
   ]
+
+  /**
+   * Exclusive groups: models in the same group never fall back to each other. A text model
+   * and its vision partner form such a pair — an image turn must not fall back to a model
+   * that cannot see the image, and a failing pair should exit to a third provider rather
+   * than bounce between its members.
+   *
+   * On top of this built-in default, the deployment's ENK_AI_MODEL × ENK_AI_IMAGE_MODEL
+   * pair (when both are set) is derived as a group automatically, so the routing pair and
+   * the fallback exclusion can never drift apart.
+   */
+  export const DEFAULT_GROUPS: readonly (readonly string[])[] = [
+    ["deepseek/deepseek-v4-pro", "minimax/MiniMax-M3"],
+  ]
+
+  const modelKey = (model: { providerID: string; modelID: string }) => `${model.providerID}/${model.modelID}`
+
+  export function groups(): string[][] {
+    const result = DEFAULT_GROUPS.map((group) => [...group])
+    const primary = ModelPolicy.parseModel(Flag.ENK_AI_MODEL)
+    const image = ModelPolicy.parseModel(Flag.ENK_AI_IMAGE_MODEL)
+    if (primary && image) {
+      const pair = [modelKey(primary), modelKey(image)]
+      if (pair[0] !== pair[1]) result.push(pair)
+    }
+    return result
+  }
+
+  /** True when the pool entry shares an exclusive group with the turn's primary model. */
+  export function excluded(
+    primary: { providerID: string; modelID: string },
+    entry: PoolEntry,
+    groupList: readonly (readonly string[])[] = groups(),
+  ): boolean {
+    const primaryKey = modelKey(primary)
+    const entryKey = modelKey(entry)
+    // The same model is deduplication's concern, not the group rule's.
+    if (primaryKey === entryKey) return false
+    return groupList.some((group) => group.includes(primaryKey) && group.includes(entryKey))
+  }
 
   function entry(raw: unknown): PoolEntry | undefined {
     if (typeof raw === "string") {

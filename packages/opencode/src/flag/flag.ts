@@ -56,6 +56,11 @@ export namespace Flag {
   export const ENK_AI_USAGE_TOKEN = process.env["ENK_AI_USAGE_TOKEN"]
   export declare const ENK_AI_MODEL: string | undefined
   export declare const ENK_AI_MODEL_VARIANT: string | undefined
+  // The vision partner of ENK_AI_MODEL ("provider/model"): the model that image-carrying
+  // messages are routed to (docker/image-model-router-plugin.js), and the other half of the
+  // implicit fallback exclusion pair (src/enk/model-fallback.ts).
+  export declare const ENK_AI_IMAGE_MODEL: string | undefined
+  export declare const ENK_AI_IMAGE_MODEL_VARIANT: string | undefined
   // Model fallback. See src/enk/model-fallback.ts.
   // JSON array of "provider/model" strings or { model, variant } objects. "[]" disables fallback.
   export declare const ENK_AI_FALLBACK_MODELS: string | undefined
@@ -210,6 +215,22 @@ Object.defineProperty(Flag, "ENK_AI_MODEL", {
 Object.defineProperty(Flag, "ENK_AI_MODEL_VARIANT", {
   get() {
     return process.env["ENK_AI_MODEL_VARIANT"]
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_AI_IMAGE_MODEL", {
+  get() {
+    return process.env["ENK_AI_IMAGE_MODEL"]
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_AI_IMAGE_MODEL_VARIANT", {
+  get() {
+    return process.env["ENK_AI_IMAGE_MODEL_VARIANT"]
   },
   enumerable: true,
   configurable: false,

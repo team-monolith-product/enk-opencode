@@ -15,6 +15,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { errorMessage } from "@/util/error"
 import { PluginLoader } from "./loader"
+import { HubAuth } from "../server/hub-auth"
 import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
 
 export namespace Plugin {
@@ -112,11 +113,15 @@ export namespace Plugin {
           const client = createOpencodeClient({
             baseUrl: "http://localhost:4096",
             directory: ctx.directory,
-            headers: Flag.OPENCODE_SERVER_PASSWORD
-              ? {
-                  Authorization: `Basic ${Buffer.from(`${Flag.OPENCODE_SERVER_USERNAME ?? "opencode"}:${Flag.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`,
-                }
-              : undefined,
+            headers: {
+              // in-process 호출이 Hub OAuth/Basic 인증에 막히지 않도록 내부 토큰을 항상 싣는다.
+              [HubAuth.INTERNAL_HEADER]: HubAuth.INTERNAL_TOKEN,
+              ...(Flag.OPENCODE_SERVER_PASSWORD
+                ? {
+                    Authorization: `Basic ${Buffer.from(`${Flag.OPENCODE_SERVER_USERNAME ?? "opencode"}:${Flag.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`,
+                  }
+                : {}),
+            },
             fetch: async (...args) => Server.Default().fetch(...args),
           })
           const cfg = yield* config.get()

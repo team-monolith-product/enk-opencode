@@ -44,6 +44,13 @@ export namespace HubAuth {
     return !!(Flag.JUPYTERHUB_API_URL && Flag.JUPYTERHUB_API_TOKEN && Flag.JUPYTERHUB_USER)
   }
 
+  // AIDEV-NOTE: 같은 프로세스에서 도는 내부 클라이언트(플러그인 등)용 우회 토큰.
+  // 플러그인 client 는 Server.Default().fetch 로 네트워크 없이 서버 앱을 직접 호출하는데,
+  // Hub OAuth 모드에서는 쿠키도 Basic 자격도 없어 모든 API 가 OAuth 리다이렉트로 막힌다.
+  // 토큰은 프로세스마다 랜덤 생성되고 in-process 요청 헤더로만 전달되므로 외부에 노출되지 않는다.
+  export const INTERNAL_HEADER = "x-opencode-internal-auth"
+  export const INTERNAL_TOKEN = crypto.randomUUID()
+
   function api(path: string): string {
     return `${Flag.JUPYTERHUB_API_URL!.replace(/\/+$/, "")}${path}`
   }
@@ -199,6 +206,7 @@ export namespace HubAuth {
     return async (c, next) => {
       if (c.req.method === "OPTIONS") return next()
       if (c.req.path === "/oauth_callback") return next()
+      if (c.req.header(INTERNAL_HEADER) === INTERNAL_TOKEN) return next()
 
       const password = Flag.OPENCODE_SERVER_PASSWORD
       const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"

@@ -1014,22 +1014,34 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }),
         )
 
-      // Every step rebuilds the chain, so only announce a missing fallback model the first time.
+      // Every step rebuilds the chain, so only announce a missing/excluded fallback model the first time.
       const warnedMissing = new Set<string>()
+      const warnedExcluded = new Set<string>()
 
       // The primary model followed by every fallback model that actually resolves. Entries naming a
       // provider or model this deployment does not have are dropped rather than failing the turn,
-      // so a pool shared across environments stays usable.
+      // so a pool shared across environments stays usable. Entries sharing an exclusive group with
+      // the primary (e.g. a text model and its vision partner) are dropped as well — see
+      // ModelFallback.groups().
       const resolveChain = (primary: { providerID: ProviderID; modelID: ModelID }, sessionID: SessionID) =>
         Effect.gen(function* () {
           const head = yield* getModel(primary.providerID, primary.modelID, sessionID)
           const chain: { model: Provider.Model; variant?: string }[] = [{ model: head }]
-          const seen = new Set([`${primary.providerID}/${primary.modelID}`])
+          const primaryKey = `${primary.providerID}/${primary.modelID}`
+          const seen = new Set([primaryKey])
+          const groups = ModelFallback.groups()
 
           for (const entry of ModelFallback.parsePool(Flag.ENK_AI_FALLBACK_MODELS)) {
             const key = `${entry.providerID}/${entry.modelID}`
             if (seen.has(key)) continue
             seen.add(key)
+            if (ModelFallback.excluded(primary, entry, groups)) {
+              if (!warnedExcluded.has(`${primaryKey}->${key}`)) {
+                warnedExcluded.add(`${primaryKey}->${key}`)
+                log.info("fallback model excluded by group rule", { primary: primaryKey, model: key })
+              }
+              continue
+            }
             const model = yield* Effect.promise(() =>
               Provider.getModel(ProviderID.make(entry.providerID), ModelID.make(entry.modelID)).catch(() => undefined),
             )
@@ -1041,6 +1053,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               continue
             }
             chain.push({ model, variant: ModelPolicy.validVariant(model.variants, entry.variant) })
+          }
+          // A non-empty pool that leaves the primary alone (every entry excluded, missing, or a
+          // duplicate) is legal but worth a trace: this turn has no fallback at all, which
+          // usually means the pool needs a model from outside the primary's group.
+          if (chain.length === 1 && seen.size > 1 && !warnedExcluded.has(primaryKey)) {
+            warnedExcluded.add(primaryKey)
+            log.warn("no fallback models remain for primary", { primary: primaryKey })
           }
           return chain
         })
