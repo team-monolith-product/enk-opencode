@@ -567,6 +567,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     url: sdk.url,
     directory: sdk.directory,
     submitKey: submitConfig(),
+    stopKey: stopConfig(),
     user: parentParams.user[0],
     readonly,
   })
@@ -576,6 +577,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       url: sdk.url,
       directory: sdk.directory,
       submitKey: submitConfig(),
+      stopKey: stopConfig(),
       user: parentParams.user[0],
       readonly,
     })
@@ -584,6 +586,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     config: docConfig,
     client: sdk.client,
     onSubmit: () => void submit(),
+    // Esc in the doc editor: swallow BlockSuite's native handling always; stop only while a run is
+    // in flight (requestStop drives the shared stop-consent vote in collaborative docs).
+    onStop: () => {
+      if (working()) void requestStop()
+    },
   })
   // detach() keeps the doc handle (sync + undo history) alive across panel unmounts, so the
   // component itself owns the final teardown.

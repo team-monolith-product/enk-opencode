@@ -37,6 +37,11 @@ export type DocMountInput = {
   onSubmit?: () => void
   /** Submit shortcut in parseKeybind format. Defaults to `enter`. */
   submitKey?: string
+  /** Fired when the stop shortcut is pressed; the keypress is always swallowed so BlockSuite's
+   *  native Escape behavior (block-selection toolbar) never fires. */
+  onStop?: () => void
+  /** Stop shortcut in parseKeybind format. Defaults to `escape`. */
+  stopKey?: string
   onDraftChange?: () => void
 }
 
@@ -440,21 +445,41 @@ export async function createPage(input: DocMountInput) {
       cursors = input.readonly ? undefined : watchCursorLabels(editor, el)
       unkeys?.()
       unkeys = undefined
-      const send = input.onSubmit
-      if (!input.readonly && send) {
-        const submitKeys = parseKeybind(input.submitKey?.trim() || "enter")
-        const onKey = (event: KeyboardEvent) => {
-          // IME 조합 중 전송 방지. 전송 키가 아닌 입력(예: 기본값에서 Shift+Enter)은
-          // 가로채지 않고 BlockSuite 네이티브 줄바꿈에 맡긴다.
-          if (event.isComposing) return
-          if (!matchKeybind(submitKeys, event)) return
-          event.preventDefault()
-          event.stopPropagation()
-          if (event.repeat) return
-          send()
+      if (!input.readonly) {
+        const cleanups: Array<() => void> = []
+        const send = input.onSubmit
+        if (send) {
+          const submitKeys = parseKeybind(input.submitKey?.trim() || "enter")
+          const onSubmitKey = (event: KeyboardEvent) => {
+            // IME 조합 중 전송 방지. 전송 키가 아닌 입력(예: 기본값에서 Shift+Enter)은
+            // 가로채지 않고 BlockSuite 네이티브 줄바꿈에 맡긴다.
+            if (event.isComposing) return
+            if (!matchKeybind(submitKeys, event)) return
+            event.preventDefault()
+            event.stopPropagation()
+            if (event.repeat) return
+            send()
+          }
+          editor.addEventListener("keydown", onSubmitKey, true)
+          cleanups.push(() => editor.removeEventListener("keydown", onSubmitKey, true))
         }
-        editor.addEventListener("keydown", onKey, true)
-        unkeys = () => editor.removeEventListener("keydown", onKey, true)
+        // 중지 단축키(기본 Escape): capture 단계에서 항상 가로채 BlockSuite 네이티브 Escape 동작
+        // (블록 선택 툴바)이 뜨지 않게 한다. 실제 중지 여부는 부모(onStop)가 실행 중일 때만 판단.
+        const stop = input.onStop
+        const stopKeys = parseKeybind(input.stopKey?.trim() || "escape")
+        if (stop && stopKeys.length > 0) {
+          const onStopKey = (event: KeyboardEvent) => {
+            if (event.isComposing) return
+            if (!matchKeybind(stopKeys, event)) return
+            event.preventDefault()
+            event.stopPropagation()
+            if (event.repeat) return
+            stop()
+          }
+          editor.addEventListener("keydown", onStopKey, true)
+          cleanups.push(() => editor.removeEventListener("keydown", onStopKey, true))
+        }
+        if (cleanups.length > 0) unkeys = () => cleanups.forEach((fn) => fn())
       }
       if (!attached && ready) await focus(ready)
       if (input.sync && awareness && !aware) {
