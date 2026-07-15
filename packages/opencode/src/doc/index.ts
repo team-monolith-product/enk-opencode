@@ -503,6 +503,10 @@ export namespace Doc {
       name: z.string(),
       color: z.string(),
       status: SubmitActorStatus,
+      // Live (not persisted) flag: every socket this member holds reports a hidden tab. An away
+      // pending member doesn't block the requester's "exclude" — notifications may pull them back,
+      // but the flow must complete without relying on them (users can block notifications).
+      away: z.boolean().optional(),
     })
     .meta({ ref: "DocSubmitActor" })
   export type SubmitActorInfo = z.infer<typeof SubmitActorInfo>
@@ -585,6 +589,8 @@ export namespace Doc {
   type SubmitRow = typeof DocSubmitTable.$inferSelect
   type SubmitPeer = {
     actorID: ActorID
+    // Client-reported tab visibility ({type:"visibility",hidden}) — drives the actors' `away` flag.
+    hidden?: boolean
     send: (data: string) => void
     // Terminate the underlying socket so the WS onClose path runs the normal cleanup. Set by the
     // route handler; absent only for peers created in tests that don't wire a socket.
@@ -674,6 +680,20 @@ export namespace Doc {
         db.select().from(SessionActorTable).where(eq(SessionActorTable.session_id, row.session_id)).all(),
       ).map((actor) => [actor.actor_id, actor.color]),
     )
+    // Away is computed live from the connected peers, never persisted: a member is away when it has
+    // at least one live socket and every one of them reports a hidden tab. (No socket at all means
+    // it is about to be marked left by the leave grace — not away.)
+    const live = peers.get(row.target_id)
+    const away = (actorID: ActorID) => {
+      if (!live) return false
+      let seen = false
+      for (const peer of live) {
+        if (peer.actorID !== actorID) continue
+        if (!peer.hidden) return false
+        seen = true
+      }
+      return seen
+    }
     const actors = Database.use((db) =>
       db.select().from(DocSubmitActorTable).where(eq(DocSubmitActorTable.submit_id, row.id)).all(),
     ).map((item) => ({
@@ -681,6 +701,7 @@ export namespace Doc {
       name: item.name,
       color: colors.get(item.actor_id) ?? color(item.actor_id),
       status: SubmitActorStatus.parse(item.status),
+      away: away(item.actor_id) || undefined,
     }))
     const questionAction: "send" | "dismiss" | "back" | undefined = (() => {
       if (row.target_kind !== "question") return undefined
@@ -1087,17 +1108,30 @@ export namespace Doc {
     }
 
     if (input.action === "exclude") {
-      // Requester-only: send now without the members who left mid-vote. A departure never triggers
-      // a send by itself — this explicit click is the only path. No-ops (returning current state)
-      // when the conditions aren't met, so a stale click after someone rejoins is harmless.
+      // Requester-only: send now without the members who can't answer — those who left mid-vote and
+      // those whose every tab is hidden (자리비움). An absence never triggers a send by itself; this
+      // explicit click is the only path, and it must work WITHOUT notifications (users can block
+      // them). No-ops (returning current state) when the conditions aren't met, so a stale click
+      // after someone comes back is harmless.
       if (next.actor_id !== input.actorID) throw new NotFoundError({ message: "Only the requester can exclude" })
       const state = read(next)
-      if (!state.actors.some((item) => item.status === "left")) return state
-      if (state.actors.some((item) => item.status === "pending")) return state
+      const absent = state.actors.filter(
+        (item) => item.status === "left" || (item.status === "pending" && item.away),
+      )
+      if (absent.length === 0) return state
+      if (state.actors.some((item) => item.status === "pending" && !item.away)) return state
       Database.use((db) =>
         db
           .delete(DocSubmitActorTable)
-          .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.status, "left")))
+          .where(
+            and(
+              eq(DocSubmitActorTable.submit_id, next.id),
+              inArray(
+                DocSubmitActorTable.actor_id,
+                absent.map((item) => item.actorID),
+              ),
+            ),
+          )
           .run(),
       )
       const finished = finalize(next)
@@ -1319,7 +1353,8 @@ export namespace Doc {
         if (set.size === 0) observers.delete(input.targetID)
         heartbeatStop()
       }
-      return Object.assign(stop, { pong: () => { peer.lastSeen = Date.now() } })
+      // Spectators never join votes, so their visibility is irrelevant.
+      return Object.assign(stop, { pong: () => { peer.lastSeen = Date.now() }, visibility: (_hidden: boolean) => {} })
     }
     const peer: SubmitPeer = {
       actorID: input.actorID,
@@ -1344,7 +1379,9 @@ export namespace Doc {
       const last = recent(input.sessionID, input.targetID, input.actorID)
       if (last) peer.send(JSON.stringify({ type: last.status as SubmitEvent["type"], state: last } satisfies SubmitEvent))
     }
-    // Returns the disposer (run on socket close); `.pong` refreshes liveness on a heartbeat reply.
+    // Returns the disposer (run on socket close); `.pong` refreshes liveness on a heartbeat reply;
+    // `.visibility` records the client tab's hidden state and re-casts pending votes so every
+    // dialog's away flags (and the requester's exclude eligibility) stay current.
     const stop = () => {
       set.delete(peer)
       if (!Array.from(set).some((item) => item.actorID === peer.actorID)) scheduleLeave(input.targetID, peer.actorID)
@@ -1354,6 +1391,22 @@ export namespace Doc {
     return Object.assign(stop, {
       pong: () => {
         peer.lastSeen = Date.now()
+      },
+      visibility: (hidden: boolean) => {
+        if (peer.hidden === hidden) return
+        peer.hidden = hidden
+        const rows = Database.use((db) =>
+          db
+            .select()
+            .from(DocSubmitTable)
+            .where(and(eq(DocSubmitTable.target_id, input.targetID), eq(DocSubmitTable.status, "pending")))
+            .all(),
+        )
+        for (const row of rows) {
+          const next = expire(row)
+          if (next.status !== "pending") continue
+          cast("updated", read(next))
+        }
       },
     })
   }
