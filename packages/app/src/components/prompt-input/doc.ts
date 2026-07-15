@@ -16,6 +16,9 @@ export type PromptDocConfig = {
   url: string
   directory: string
   submitKey?: string
+  // Configured stop shortcut (default Escape). Intercepted inside the doc editor so it stops a run
+  // instead of triggering BlockSuite's native Escape behavior (block-selection toolbar).
+  stopKey?: string
   user?: { id: string; name: string; color?: string }
   // A `?readonly=true` viewer is a pure observer: the editor mounts read-only and we never register a
   // server actor, broadcast awareness, or open the submit socket — so this client is excluded from the
@@ -27,6 +30,9 @@ export type PromptDocInput = {
   config: PromptDocConfig
   client: OpencodeClient
   onSubmit: () => void
+  // Fired when the stop shortcut is pressed inside the doc editor. The parent decides whether to
+  // actually stop (only while a run is in flight); the keypress is always swallowed regardless.
+  onStop?: () => void
 }
 
 // Bootstrap requests (actor registration + prompt doc lookup) run before the sync layer exists, so a
@@ -206,6 +212,8 @@ export function createPromptDoc(input: PromptDocInput) {
       readonly: input.config.readonly,
       onSubmit: input.onSubmit,
       submitKey: input.config.submitKey,
+      stopKey: input.config.stopKey,
+      onStop: input.onStop,
       onDraftChange: () => {
         syncContent()
         syncHistory()

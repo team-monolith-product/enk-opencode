@@ -37,6 +37,11 @@ export type DocMountInput = {
   onSubmit?: () => void
   /** Submit shortcut in parseKeybind format. Defaults to `enter`. */
   submitKey?: string
+  /** Fired when the stop shortcut is pressed; the keypress is always swallowed so BlockSuite's
+   *  native Escape behavior (block-selection toolbar) never fires. */
+  onStop?: () => void
+  /** Stop shortcut in parseKeybind format. Defaults to `escape`. */
+  stopKey?: string
   onDraftChange?: () => void
 }
 
@@ -195,6 +200,28 @@ export async function createPage(input: DocMountInput) {
     ...LineReferenceBlockSpec,
   ]
   editor.hasViewport = true
+
+  // 중지 단축키(기본 Escape)는 에디터 생성 시점에 바로 등록한다. attach() 완료 시점에 붙이면
+  // 마운트 직후 첫 Esc가 리스너 등록 전에 BlockSuite로 새어 블록 선택 툴바가 뜨는 레이스가 있어서다.
+  // capture 단계 + editor(page-editor)에서 잡으므로 더 깊은 editor-host의 네이티브 Escape보다 먼저
+  // 가로챈다. 실제 중지 여부는 부모(onStop)가 실행 중일 때만 판단한다.
+  if (!input.readonly && input.onStop) {
+    const stopKeys = parseKeybind(input.stopKey?.trim() || "escape")
+    if (stopKeys.length > 0) {
+      editor.addEventListener(
+        "keydown",
+        (event: KeyboardEvent) => {
+          if (event.isComposing) return
+          if (!matchKeybind(stopKeys, event)) return
+          event.preventDefault()
+          event.stopPropagation()
+          if (event.repeat) return
+          input.onStop?.()
+        },
+        true,
+      )
+    }
+  }
 
   let reload: (() => void) | undefined
   let tick = 0
@@ -440,10 +467,11 @@ export async function createPage(input: DocMountInput) {
       cursors = input.readonly ? undefined : watchCursorLabels(editor, el)
       unkeys?.()
       unkeys = undefined
+      // 중지(Escape) 리스너는 editor 생성 시점에 한 번 등록한다(위 참고). 여기서는 전송 키만 처리.
       const send = input.onSubmit
       if (!input.readonly && send) {
         const submitKeys = parseKeybind(input.submitKey?.trim() || "enter")
-        const onKey = (event: KeyboardEvent) => {
+        const onSubmitKey = (event: KeyboardEvent) => {
           // IME 조합 중 전송 방지. 전송 키가 아닌 입력(예: 기본값에서 Shift+Enter)은
           // 가로채지 않고 BlockSuite 네이티브 줄바꿈에 맡긴다.
           if (event.isComposing) return
@@ -453,8 +481,8 @@ export async function createPage(input: DocMountInput) {
           if (event.repeat) return
           send()
         }
-        editor.addEventListener("keydown", onKey, true)
-        unkeys = () => editor.removeEventListener("keydown", onKey, true)
+        editor.addEventListener("keydown", onSubmitKey, true)
+        unkeys = () => editor.removeEventListener("keydown", onSubmitKey, true)
       }
       if (!attached && ready) await focus(ready)
       if (input.sync && awareness && !aware) {

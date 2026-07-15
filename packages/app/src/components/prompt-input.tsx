@@ -37,6 +37,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ModelSelectorPopover } from "@/components/dialog-select-model"
 import { useProviders } from "@/hooks/use-providers"
 import { matchKeybind, parseKeybind, useCommand } from "@/context/command"
+import { useSettings } from "@/context/settings"
 import { Persist, persisted } from "@/utils/persist"
 import { usePermission } from "@/context/permission"
 import { usePromptDocBridge } from "@/context/prompt-doc-bridge"
@@ -164,7 +165,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const prompt = usePrompt()
   const layout = useLayout()
   const env = useClientEnv()
-  const submitKeys = createMemo(() => parseKeybind(env.promptSubmitKey()))
+  const settings = useSettings()
+  // Send/stop shortcuts are customizable via Settings → Shortcuts (settings.keybinds), falling
+  // back to the build-time env default for submit and Escape for stop. Both are registered as
+  // `prompt.submit` / `prompt.stop` commands further down so they surface in the shortcuts UI.
+  const submitConfig = () => settings.keybinds.get("prompt.submit") ?? env.promptSubmitKey()
+  const stopConfig = () => settings.keybinds.get("prompt.stop") ?? "escape"
+  const submitKeys = createMemo(() => parseKeybind(submitConfig()))
+  const stopKeys = createMemo(() => parseKeybind(stopConfig()))
   const newlineKeys = createMemo(() => parseKeybind(env.promptNewlineKey()))
   const comments = useComments()
   const dialog = useDialog()
@@ -559,7 +567,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     sessionID: params.id,
     url: sdk.url,
     directory: sdk.directory,
-    submitKey: env.promptSubmitKey(),
+    submitKey: submitConfig(),
+    stopKey: stopConfig(),
     user: parentParams.user[0],
     readonly,
   })
@@ -568,7 +577,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       sessionID: params.id,
       url: sdk.url,
       directory: sdk.directory,
-      submitKey: env.promptSubmitKey(),
+      submitKey: submitConfig(),
+      stopKey: stopConfig(),
       user: parentParams.user[0],
       readonly,
     })
@@ -577,6 +587,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     config: docConfig,
     client: sdk.client,
     onSubmit: () => void submit(),
+    // Esc in the doc editor: swallow BlockSuite's native handling always; stop only while a run is
+    // in flight (requestStop drives the shared stop-consent vote in collaborative docs).
+    onStop: () => {
+      if (working()) void requestStop()
+    },
   })
   // detach() keeps the doc handle (sync + undo history) alive across panel unmounts, so the
   // component itself owns the final teardown.
@@ -655,13 +670,20 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     if (action === "stop") return language.t("prompt.action.stop")
     return language.t("prompt.action.send")
   })
+  // The shortcut shown in the tooltip is derived from the live keybind config (env default +
+  // Settings → Shortcuts override) so it always matches what actually fires — including custom keys.
+  const keyLabel = (id: "prompt.submit" | "prompt.stop") => {
+    const label = command.keybind(id)
+    if (!label) return null
+    return <span class="text-icon-base text-12-medium text-[10px]!">{label}</span>
+  }
   const tip = createMemo(() => {
     const action = submitAction()
     if (action === "stop") {
       return (
         <div class="flex items-center gap-2">
           <span>{language.t("prompt.action.stop")}</span>
-          <span class="text-icon-base text-12-medium text-[10px]!">{language.t("common.key.esc")}</span>
+          {keyLabel("prompt.stop")}
         </div>
       )
     }
@@ -670,25 +692,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return (
         <div class="flex items-center gap-2">
           <span>{language.t("prompt.action.queue")}</span>
-          <Icon name="enter" size="small" class="text-icon-base" />
+          {keyLabel("prompt.submit")}
         </div>
       )
     }
 
-    if (store.mode === "doc") {
-      return (
-        <div class="flex items-center gap-2">
-          <span>{language.t("prompt.action.send")}</span>
-          <span class="text-icon-base text-12-medium text-[10px]!">{language.t("common.key.shift")}</span>
-          <Icon name="enter" size="small" class="text-icon-base" />
-        </div>
-      )
-    }
-
+    // Doc mode submits via the same submit keybind (the doc editor is fed submitConfig()), so it
+    // shares the send label rather than a hardcoded Shift+Enter hint.
     return (
       <div class="flex items-center gap-2">
         <span>{language.t("prompt.action.send")}</span>
-        <Icon name="enter" size="small" class="text-icon-base" />
+        {keyLabel("prompt.submit")}
       </div>
     )
   })
@@ -1155,6 +1169,23 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       category: language.t("command.category.session"),
       disabled: store.mode === "doc",
       onSelect: () => setMode("doc"),
+    },
+    // Registered purely so send/stop shortcuts appear in Settings → Shortcuts (Prompt group) and
+    // feed command.keybind() for the tooltip. `disabled` keeps them out of the global keymap — the
+    // composer's own keydown handler is the sole executor, so a custom modified key can't double-fire.
+    {
+      id: "prompt.submit",
+      title: language.t("prompt.action.send"),
+      category: language.t("command.category.session"),
+      keybind: env.promptSubmitKey(),
+      disabled: true,
+    },
+    {
+      id: "prompt.stop",
+      title: language.t("prompt.action.stop"),
+      category: language.t("command.category.session"),
+      keybind: "escape",
+      disabled: true,
     },
   ])
 
@@ -2153,6 +2184,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return
     }
 
+    // Custom stop shortcut (Settings → Shortcuts, default Escape). Escape is already fully handled
+    // by the block above, so this covers any user-remapped stop key while a run is in flight.
+    if (working() && matchKeybind(stopKeys(), event)) {
+      void requestStop()
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       if (event.altKey || event.ctrlKey || event.metaKey) return
       const { collapsed } = getCaretState()
@@ -2420,7 +2460,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               />
 
               <div class="flex items-center gap-1 pointer-events-auto">
-                <Tooltip placement="top" inactive={submitAction() === "send" && !hasDraft()} value={tip()}>
+                <Tooltip placement="top" value={tip()}>
                   <IconButton
                     data-action="prompt-submit"
                     type="submit"
