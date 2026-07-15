@@ -85,6 +85,7 @@ import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
 import { connectSubmit, respondSubmit, startSubmit, startStopSubmit, type DocSubmitState } from "./prompt-input/doc-submit"
+import { startRtcKeepalive } from "@/utils/rtc-keepalive"
 import { DialogDocSubmit } from "./doc-submit/dialog-doc-submit"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 
@@ -844,6 +845,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     const id = params.id
     if (!id) return
     void doc.refresh(id)
+  })
+
+  // Keep this tab's JS alive for the whole collaborative doc session — always on, not toggled by
+  // visibility or participant count (a frozen tab cannot re-enable itself when someone joins later,
+  // and full-window occlusion flips the hidden state without a reliable event on every platform).
+  // This is what lets a backgrounded collaborator keep ponging (stays out of 나감) and keep
+  // receiving vote casts. Readonly spectators don't participate, so they skip it.
+  createEffect(() => {
+    if (store.mode !== "doc" || readonly) return
+    const stop = startRtcKeepalive()
+    onCleanup(stop)
   })
 
   createEffect(() => {
