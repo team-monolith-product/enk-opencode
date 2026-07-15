@@ -719,7 +719,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const showApproval = (state: DocSubmitState) => {
     const actorID = approvalActor()
     if (!actorID) return
-    // Surface the vote at OS level when the tab is hidden (backgrounded collaborator) — the RTC
+    // Surface the vote at OS level when the user is not looking at this tab (unfocused/hidden) — the RTC
     // keepalive guarantees this code still runs there. Terminal casts retire the notification.
     if (!readonly) notifyConsentWhenHidden(state, actorID)
     // No membership gate here: the server casts only to connected peers and joins any connected

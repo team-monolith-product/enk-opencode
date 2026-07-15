@@ -414,7 +414,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const showApproval = (state: DocSubmitState) => {
     const a = actor()
     if (!a) return
-    // Surface the vote at OS level when the tab is hidden — see consent-notification.ts.
+    // Surface the vote at OS level when the user is not looking at this tab — see consent-notification.ts.
     if (!readonly) notifyConsentWhenHidden(state, a.actorID)
     // No membership gate: the server casts only to connected peers and joins any connected
     // non-member to a pending vote (dynamic membership), so every state we receive is ours to render.

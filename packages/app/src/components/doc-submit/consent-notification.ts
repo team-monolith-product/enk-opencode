@@ -1,10 +1,12 @@
 import type { DocSubmitState } from "../prompt-input/doc-submit"
 
-// OS notification for a consent vote reaching a participant whose tab is hidden. Pairs with the
-// loopback RTC keepalive (utils/rtc-keepalive.ts): the keepalive keeps a backgrounded tab's JS
-// alive so the vote cast still arrives, and this surfaces it where the user actually is. Clicking
-// focuses the tab — the dialog is already on screen (state-driven), so nothing else to do.
-// One notification per submit (tag = submitID); resolved votes close theirs.
+// OS notification for a consent vote reaching a participant who isn't looking at this tab
+// (unfocused window or hidden tab). Pairs with the loopback RTC keepalive (utils/rtc-keepalive.ts):
+// the keepalive keeps a backgrounded tab's JS alive so the vote cast still arrives, and this
+// surfaces it where the user actually is. Clicking focuses the tab — the dialog is already on
+// screen (state-driven), so nothing else to do. One notification per submit (tag = submitID);
+// resolved votes close theirs. Strictly SUPPLEMENTARY: users can block notifications, so no part
+// of the consent flow depends on one being seen.
 
 const shown = new Map<string, Notification>()
 
@@ -41,7 +43,10 @@ export function notifyConsentWhenHidden(state: DocSubmitState, myActorID: string
   }
 
   if (Notification.permission !== "granted") return
-  if (!document.hidden) return
+  // Focus, not visibility, is the industry-standard trigger (Slack/Discord do the same): blur fires
+  // reliably on every platform the moment another window takes over, whereas occlusion-driven
+  // visibilitychange does not. Notify unless the user is actively looking at this tab.
+  if (!document.hidden && document.hasFocus()) return
   if (state.actorID === myActorID) return
   if (shown.has(state.submitID)) return
 
