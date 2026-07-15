@@ -8,9 +8,6 @@ export type DocSubmitActor = {
   // "left" = dropped out mid-vote (shown as 나감). Blocks auto-send; the requester decides via the
   // "exclude" respond action whether to send without them. Flips back to "pending" on reconnect.
   status: "pending" | "approved" | "left"
-  // Live flag: every tab this member holds is hidden (자리비움). An away pending member doesn't
-  // block the requester's exclude — the flow must complete even when notifications are blocked.
-  away?: boolean
 }
 
 export type DocSubmitState = {
@@ -226,12 +223,6 @@ export function connectQuestionSubmit(input: QuestionSocketInput) {
   let timer: ReturnType<typeof setTimeout> | undefined
   let ws: WebSocket | undefined
 
-  // See connectSubmit — same 자리비움 report for question votes.
-  const sendVisibility = () => {
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "visibility", hidden: document.hidden }))
-  }
-  document.addEventListener("visibilitychange", sendVisibility)
-
   const retry = () => {
     if (closed || timer) return
     timer = setTimeout(() => {
@@ -244,7 +235,6 @@ export function connectQuestionSubmit(input: QuestionSocketInput) {
     if (closed) return
     const socket = new WebSocket(url)
     ws = socket
-    socket.addEventListener("open", sendVisibility)
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") return
       if (handlePing(socket, event.data)) return
@@ -265,7 +255,6 @@ export function connectQuestionSubmit(input: QuestionSocketInput) {
 
   return () => {
     closed = true
-    document.removeEventListener("visibilitychange", sendVisibility)
     if (timer) clearTimeout(timer)
     if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
   }
@@ -418,13 +407,6 @@ export function connectSubmit(input: SocketInput) {
   let timer: ReturnType<typeof setTimeout> | undefined
   let ws: WebSocket | undefined
 
-  // Report this tab's visibility so the server can mark the member 자리비움 (away) — sent on every
-  // (re)connect and on each change. The RTC keepalive keeps this firing from hidden tabs too.
-  const sendVisibility = () => {
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "visibility", hidden: document.hidden }))
-  }
-  document.addEventListener("visibilitychange", sendVisibility)
-
   const retry = () => {
     if (closed || timer) return
     timer = setTimeout(() => {
@@ -437,7 +419,6 @@ export function connectSubmit(input: SocketInput) {
     if (closed) return
     const socket = new WebSocket(url)
     ws = socket
-    socket.addEventListener("open", sendVisibility)
     socket.addEventListener("message", (event) => {
       if (typeof event.data !== "string") return
       if (handlePing(socket, event.data)) return
@@ -458,7 +439,6 @@ export function connectSubmit(input: SocketInput) {
 
   return () => {
     closed = true
-    document.removeEventListener("visibilitychange", sendVisibility)
     if (timer) clearTimeout(timer)
     if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
   }

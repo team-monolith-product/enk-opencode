@@ -66,10 +66,10 @@ function approveLabel(kind: DocSubmitKind | undefined) {
 }
 
 function excludeLabel(kind: DocSubmitKind | undefined) {
-  if (kind === "question-dismiss") return "응답 없는 인원 제외하고 닫기"
-  if (kind === "question-back") return "응답 없는 인원 제외하고 돌아가기"
-  if (kind === "stop") return "응답 없는 인원 제외하고 멈추기"
-  return "응답 없는 인원 제외하고 보내기"
+  if (kind === "question-dismiss") return "나간 인원 제외하고 닫기"
+  if (kind === "question-back") return "나간 인원 제외하고 돌아가기"
+  if (kind === "stop") return "나간 인원 제외하고 멈추기"
+  return "나간 인원 제외하고 보내기"
 }
 
 // Verb used in the live "동의 현황" status line ("…전송돼요" / "…진행돼요").
@@ -413,10 +413,9 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
     return out
   }
   const gone = () => props.actor.status === "left"
-  const away = () => props.actor.status === "pending" && props.actor.away === true
   return (
     <div class="ds-status-row" classList={{ "jt-consent-row-flash": flash(), "ds-status-row--gone": gone() }}>
-      <ConsentAvatar name={props.actor.name} color={props.actor.color} size={28} on={ok()} check={ok()} dashed={gone() || away()} />
+      <ConsentAvatar name={props.actor.name} color={props.actor.color} size={28} on={ok()} check={ok()} dashed={gone()} />
       <span class="ds-status-row__name" classList={{ "ds-status-row__name--ok": ok() }}>
         {props.actor.name}
         {suffix()}
@@ -425,7 +424,7 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
         when={ok()}
         fallback={
           <Show
-            when={gone() || away()}
+            when={gone()}
             fallback={
               <span class="ds-status-row__wait">
                 대기 중 <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
@@ -433,7 +432,7 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
             }
           >
             <span class="ds-status-row__wait">
-              {gone() ? ICON.user(12) : ICON.clock(12)} {gone() ? "나감" : "자리비움"}
+              {ICON.user(12)} 나감
             </span>
           </Show>
         }
@@ -454,16 +453,14 @@ function WaitingBody(props: {
   spectator?: boolean
 }) {
   const allOk = createMemo(() => props.state.actors.every((item) => item.status === "approved"))
-  // The absent (나감 or 자리비움) are the sole holdouts: the requester (and only the requester) may
-  // proceed without them — an absence by itself never sends, and the flow must complete even when
-  // the absent never see a notification (users can block those).
+  // The departed are the sole holdouts: the requester (and only the requester) may proceed without
+  // them — a departure by itself never sends.
   const excludable = createMemo(
     () =>
       props.state.actorID === props.actorID &&
-      props.state.actors.some((item) => item.status === "left" || (item.status === "pending" && item.away)) &&
-      !props.state.actors.some((item) => item.status === "pending" && !item.away),
+      props.state.actors.some((item) => item.status === "left") &&
+      !props.state.actors.some((item) => item.status === "pending"),
   )
-  const leftOnly = createMemo(() => !props.state.actors.some((item) => item.status === "pending" && item.away))
   const sub = () => {
     if (props.kind === "stop") return "모두 동의하면 AI 응답을 멈춰요"
     if (props.kind === "question-dismiss") return "모두 동의하면 질문을 닫아요"
@@ -478,9 +475,7 @@ function WaitingBody(props: {
       <div class="ds-waiting-head">
         <h2 class="ds-headline ds-headline--center">
           {excludable()
-            ? leftOnly()
-              ? "나간 팀원만 응답하지 않았어요"
-              : "남은 팀원이 모두 자리를 비웠어요"
+            ? "나간 팀원만 응답하지 않았어요"
             : allOk()
               ? "모두 동의했어요. 진행할게요"
               : "동의했어요. 팀원을 기다려요"}

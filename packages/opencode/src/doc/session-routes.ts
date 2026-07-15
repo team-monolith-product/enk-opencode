@@ -8,22 +8,9 @@ import { SessionID } from "@/session/schema"
 import { errors } from "../server/error"
 
 // Client reply to a server heartbeat ping (see Doc heartbeat). Cheap string check avoids JSON.parse
-// on the hot path.
+// on the hot path; the only inbound control message on these channels is the pong.
 function isPong(data: string) {
   return data.includes('"pong"')
-}
-
-// Client tab visibility report ({type:"visibility",hidden:boolean}) — drives the vote actors' away
-// flag. Returns the hidden value, or undefined when the message is something else.
-function parseVisibility(data: string) {
-  if (!data.includes('"visibility"')) return undefined
-  try {
-    const parsed = JSON.parse(data) as { type?: string; hidden?: boolean }
-    if (parsed.type !== "visibility") return undefined
-    return parsed.hidden === true
-  } catch {
-    return undefined
-  }
 }
 
 export const SessionDocRoutes = () =>
@@ -239,7 +226,7 @@ export const SessionDocRoutes = () =>
           return typeof (value as { readyState?: unknown }).readyState === "number"
         }
 
-        let handle: ((() => void) & { pong: () => void; visibility: (hidden: boolean) => void }) | undefined
+        let handle: ((() => void) & { pong: () => void }) | undefined
 
         return {
           onOpen(_event, ws) {
@@ -263,12 +250,7 @@ export const SessionDocRoutes = () =>
           },
           onMessage(event) {
             if (typeof event.data !== "string") return
-            if (isPong(event.data)) {
-              handle?.pong()
-              return
-            }
-            const hidden = parseVisibility(event.data)
-            if (hidden !== undefined) handle?.visibility(hidden)
+            if (isPong(event.data)) handle?.pong()
           },
           onClose() {
             handle?.()
@@ -355,7 +337,7 @@ export const SessionDocRoutes = () =>
           return typeof (value as { readyState?: unknown }).readyState === "number"
         }
 
-        let handle: ((() => void) & { pong: () => void; visibility: (hidden: boolean) => void }) | undefined
+        let handle: ((() => void) & { pong: () => void }) | undefined
         return {
           onOpen(_event, ws) {
             const socket = ws.raw
@@ -373,12 +355,7 @@ export const SessionDocRoutes = () =>
           },
           onMessage(event) {
             if (typeof event.data !== "string") return
-            if (isPong(event.data)) {
-              handle?.pong()
-              return
-            }
-            const hidden = parseVisibility(event.data)
-            if (hidden !== undefined) handle?.visibility(hidden)
+            if (isPong(event.data)) handle?.pong()
           },
           onClose() {
             handle?.()
