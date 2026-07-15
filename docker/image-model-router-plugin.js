@@ -50,7 +50,10 @@ export function resolveTarget(options = {}, env = process.env) {
   for (const [raw, source] of candidates) {
     if (raw === undefined || raw === "") continue
     const parsed = parseModelRef(raw)
-    if (parsed) return parsed
+    if (parsed) {
+      log(`대상 모델 확정(${source}):`, `${parsed.providerID}/${parsed.modelID}`)
+      return parsed
+    }
     log(`잘못된 모델 지정(${source})을 무시합니다:`, raw)
   }
   return undefined
@@ -98,7 +101,14 @@ async function server({ client }, options = {}) {
       try {
         const current = await findModel(model)
         // 모델 정보를 못 찾으면 판단 근거가 없으므로 건드리지 않는다.
-        if (!current || supportsImageInput(current)) return
+        if (!current) {
+          log("현재 모델 정보를 provider 목록에서 찾지 못해 전환하지 않습니다:", `${model.providerID}/${model.modelID}`)
+          return
+        }
+        if (supportsImageInput(current)) {
+          log("현재 모델이 이미지 입력을 지원하므로 전환하지 않습니다:", `${model.providerID}/${model.modelID}`)
+          return
+        }
 
         const targetModel = await findModel(target)
         if (!targetModel) {
