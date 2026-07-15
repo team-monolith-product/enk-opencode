@@ -3,6 +3,7 @@ import type { ErrorEntry } from "@/lib/preview-bridge-protocol"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
+import { writeClipboard } from "@opencode-ai/ui/util/clipboard"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
@@ -387,7 +388,7 @@ export function SessionPreviewPanel(props: {
   const copyForAi = () => {
     const ask = askText().trim() || language.t("session.preview.clientError.placeholder")
     const list = (props.errors ?? []).map(formatError).join("\n")
-    void navigator.clipboard?.writeText(list ? `${ask}\n\n${list}` : ask)
+    void writeClipboard(list ? `${ask}\n\n${list}` : ask)
     setCopied(true)
     if (copyTimer) clearTimeout(copyTimer)
     copyTimer = setTimeout(() => setCopied(false), 1500)
@@ -578,7 +579,7 @@ export function SessionBrowserChrome(props: {
   }
   const copyAddress = () => {
     if (previewBlocked() || !props.url) return
-    void navigator.clipboard?.writeText(props.url)
+    void writeClipboard(props.url)
     setCopied(true)
     if (copyTimer) clearTimeout(copyTimer)
     copyTimer = setTimeout(() => setCopied(false), 1500)

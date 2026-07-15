@@ -3,6 +3,7 @@ import { Portal } from "solid-js/web"
 import type { IconProps } from "@opencode-ai/ui/icon"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { writeClipboard } from "@opencode-ai/ui/util/clipboard"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useClientEnv } from "@/context/client-env"
@@ -109,7 +110,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
   const copy = async () => {
     const id = props.doc.docID()
     if (!id) return
-    await navigator.clipboard.writeText(id)
+    if (!(await writeClipboard(id))) return
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

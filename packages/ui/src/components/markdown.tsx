@@ -2,6 +2,7 @@ import { useMarked } from "../context/marked"
 import { useI18n } from "../context/i18n"
 import morphdom from "morphdom"
 import { sanitize } from "./markdown-sanitize"
+import { writeClipboard } from "../util/clipboard"
 import { checksum } from "@opencode-ai/util/encode"
 import { ComponentProps, createEffect, createResource, createSignal, onCleanup, splitProps } from "solid-js"
 import { isServer } from "solid-js/web"
@@ -174,9 +175,7 @@ function setupCodeCopy(root: HTMLDivElement, getLabels: () => CopyLabels) {
     const code = button.closest('[data-component="markdown-code"]')?.querySelector("code")
     const content = code?.textContent ?? ""
     if (!content) return
-    const clipboard = navigator?.clipboard
-    if (!clipboard) return
-    await clipboard.writeText(content)
+    if (!(await writeClipboard(content))) return
     const labels = getLabels()
     setCopyState(button, labels, true)
     const existing = timeouts.get(button)
