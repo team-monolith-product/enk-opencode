@@ -85,7 +85,6 @@ import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
 import { connectSubmit, respondSubmit, startSubmit, startStopSubmit, type DocSubmitState } from "./prompt-input/doc-submit"
-import { notifyConsentWhenHidden, requestConsentNotificationPermission } from "./doc-submit/consent-notification"
 import { startRtcKeepalive } from "@/utils/rtc-keepalive"
 import { DialogDocSubmit } from "./doc-submit/dialog-doc-submit"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
@@ -719,9 +718,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const showApproval = (state: DocSubmitState) => {
     const actorID = approvalActor()
     if (!actorID) return
-    // Surface the vote at OS level when the user is not looking at this tab (unfocused/hidden) — the RTC
-    // keepalive guarantees this code still runs there. Terminal casts retire the notification.
-    if (!readonly) notifyConsentWhenHidden(state, actorID)
     // No membership gate here: the server casts only to connected peers and joins any connected
     // non-member to a pending vote (dynamic membership), so every state we receive is ours to
     // render. The old gate silently dropped casts when membership drifted — the "dialog never
@@ -854,11 +850,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // Keep this tab's JS alive for the whole collaborative doc session — always on, not toggled by
   // visibility or participant count (a frozen tab cannot re-enable itself when someone joins later,
   // and full-window occlusion flips the hidden state without a reliable event on every platform).
-  // This is what lets a backgrounded collaborator keep ponging (stays out of 나감) and receive the
-  // consent notification above. Readonly spectators don't participate, so they skip it.
+  // This is what lets a backgrounded collaborator keep ponging (stays out of 나감) and keep
+  // receiving vote casts. Readonly spectators don't participate, so they skip it.
   createEffect(() => {
     if (store.mode !== "doc" || readonly) return
-    requestConsentNotificationPermission()
     const stop = startRtcKeepalive()
     onCleanup(stop)
   })
