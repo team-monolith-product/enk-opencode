@@ -36,6 +36,7 @@ import { type UiI18n, useI18n } from "../context/i18n"
 import { BasicTool, GenericTool } from "./basic-tool"
 import { countPartialStringLines, editPendingDiff, parsePartialToolInput } from "./tool-input"
 import { edge } from "../paper-edge"
+import { writeClipboard } from "../util/clipboard"
 import { Accordion } from "./accordion"
 import { StickyAccordionHeader } from "./sticky-accordion-header"
 import { Card } from "./card"
@@ -1075,7 +1076,7 @@ export function UserMessageDisplay(props: {
   const handleCopy = async () => {
     const content = text()
     if (!content) return
-    await navigator.clipboard.writeText(content)
+    if (!(await writeClipboard(content))) return
     setState("copied", true)
     setTimeout(() => setState("copied", false), 2000)
   }
@@ -1208,7 +1209,7 @@ export function UserMessageDisplay(props: {
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation()
-                  handleCopy()
+                  void handleCopy()
                 }}
                 aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyMessage")}
               />
@@ -1543,7 +1544,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
   const handleCopy = async () => {
     const content = displayText()
     if (!content) return
-    await navigator.clipboard.writeText(content)
+    if (!(await writeClipboard(content))) return
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -1566,7 +1567,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
                 size="normal"
                 variant="ghost"
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={handleCopy}
+                onClick={() => void handleCopy()}
                 aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyResponse")}
               />
             </Tooltip>
@@ -1903,7 +1904,7 @@ ToolRegistry.register({
     const handleCopy = async () => {
       const content = text()
       if (!content) return
-      await navigator.clipboard.writeText(content)
+      if (!(await writeClipboard(content))) return
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     }
@@ -1948,7 +1949,7 @@ ToolRegistry.register({
                 size="small"
                 variant="secondary"
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={handleCopy}
+                onClick={() => void handleCopy()}
                 aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copy")}
               />
             </Tooltip>

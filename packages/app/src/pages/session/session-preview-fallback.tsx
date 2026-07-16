@@ -2,6 +2,7 @@ import { useLanguage } from "@/context/language"
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import { Portal } from "solid-js/web"
 import { Icon } from "@opencode-ai/ui/icon"
+import { writeClipboard } from "@opencode-ai/ui/util/clipboard"
 import type { DevServerState } from "@/utils/server"
 import { SessionPreviewMascot } from "./session-preview-mascot"
 
@@ -166,7 +167,7 @@ export function SessionPreviewFallback(props: {
   const [copied, setCopied] = createSignal(false)
   let copyTimer: ReturnType<typeof setTimeout> | undefined
   const copyPrompt = () => {
-    void navigator.clipboard?.writeText(promptText())
+    void writeClipboard(promptText())
     setCopied(true)
     if (copyTimer) clearTimeout(copyTimer)
     copyTimer = setTimeout(() => setCopied(false), 1500)
