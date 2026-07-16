@@ -108,7 +108,7 @@ export function SessionComposerRegion(props: {
   })
 
   const [store, setStore] = createStore({
-    ready: false,
+    ready: props.ready || props.state.dock(),
     height: 320,
     body: undefined as HTMLDivElement | undefined,
     expanded: false,
@@ -140,11 +140,15 @@ export function SessionComposerRegion(props: {
   createEffect(() => {
     route.sessionKey()
     const ready = props.ready
+    const dock = props.state.dock()
     const delay = 140
 
     clear()
-    setStore("ready", false)
-    if (!ready) return
+    if (store.ready || (!ready && !dock)) return
+    if (dock) {
+      setStore("ready", true)
+      return
+    }
 
     frame = requestAnimationFrame(() => {
       frame = undefined
@@ -158,7 +162,11 @@ export function SessionComposerRegion(props: {
   onCleanup(clear)
 
   const open = createMemo(() => store.ready && props.state.dock() && !props.state.closing())
-  const progress = useSpring(() => (open() ? 1 : 0), { visualDuration: 0.3, bounce: 0 })
+  const progress = useSpring(
+    () => (open() ? 1 : 0),
+    { visualDuration: 0.3, bounce: 0 },
+    () => `${route.sessionKey()}\0${store.ready}`,
+  )
   const value = createMemo(() => Math.max(0, Math.min(1, progress())))
   const dock = createMemo(() => (store.ready && props.state.dock()) || value() > 0.001)
   const rolled = createMemo(() => (props.revert?.items.length ? props.revert : undefined))
