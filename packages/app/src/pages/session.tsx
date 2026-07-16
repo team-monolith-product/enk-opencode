@@ -362,6 +362,13 @@ export default function Page() {
 
   const composer = createSessionComposerState()
 
+  // Session trimming is unaware of the active route, so keep the viewed session's caches alive.
+  createEffect(() => {
+    const id = params.id
+    if (!id) return
+    onCleanup(globalSync.session.pin(id))
+  })
+
   const workspaceKey = createMemo(() => params.dir ?? "")
   const workspaceTabs = createMemo(() => layout.tabs(workspaceKey))
 
