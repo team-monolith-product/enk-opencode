@@ -49,7 +49,7 @@ export function SessionTodoDock(props: {
   const language = useLanguage()
   const [store, setStore] = createStore({
     collapsed: false,
-    height: 320,
+    height: 78,
   })
 
   const toggle = () => setStore("collapsed", (value) => !value)
@@ -81,14 +81,16 @@ export function SessionTodoDock(props: {
   const turn = createMemo(() => Math.max(0, Math.min(1, value())))
   const full = createMemo(() => Math.max(78, store.height))
   const e2e = composerEnabled()
-  const probe = composerProbe(props.sessionID)
+  let probed: string | undefined
   let contentRef: HTMLDivElement | undefined
 
   createEffect(() => {
     const el = contentRef
     if (!el) return
+    // The dock survives session changes, so measure intrinsic content and never let a mid-animation
+    // clipped reading shrink the tray below what the content needs.
     const update = () => {
-      setStore("height", el.getBoundingClientRect().height)
+      setStore("height", (height) => Math.max(height, el.scrollHeight))
     }
     update()
     const observer = new ResizeObserver(update)
@@ -96,10 +98,16 @@ export function SessionTodoDock(props: {
     onCleanup(() => observer.disconnect())
   })
 
+  // The dock is not remounted per session, so the collapsed state would otherwise carry over.
+  createEffect(on(() => props.sessionID, () => setStore("collapsed", false), { defer: true }))
+
   createEffect(() => {
     if (!e2e) return
 
-    probe.set({
+    const id = props.sessionID
+    if (probed && probed !== id) composerProbe(probed).drop()
+    probed = id
+    composerProbe(id).set({
       mounted: true,
       collapsed: store.collapsed,
       hidden: store.collapsed || off(),
@@ -110,7 +118,7 @@ export function SessionTodoDock(props: {
 
   onCleanup(() => {
     if (!e2e) return
-    probe.drop()
+    composerProbe(probed).drop()
   })
 
   return (
