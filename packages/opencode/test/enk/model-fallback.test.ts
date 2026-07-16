@@ -57,7 +57,7 @@ describe("ModelFallback.parsePool", () => {
   })
 })
 
-describe("ModelFallback exclusive groups", () => {
+describe("ModelFallback exclusion pairs", () => {
   const ENV_KEYS = ["ENK_AI_MODEL", "ENK_AI_IMAGE_MODEL"]
   let saved: Record<string, string | undefined>
 
@@ -76,43 +76,47 @@ describe("ModelFallback exclusive groups", () => {
   const minimax = { providerID: "minimax", modelID: "MiniMax-M3" }
   const gemini = { providerID: "google", modelID: "gemini-3.5-flash" }
 
-  test("the built-in deepseek × minimax pair excludes each other, both directions", () => {
-    expect(ModelFallback.excluded(deepseek, minimax)).toBe(true)
+  test("the built-in pair blocks only the vision → text direction", () => {
+    // deepseek (text) falling back to minimax (vision) is allowed: minimax handles text too,
+    // and is the deployment's intended first fallback.
+    expect(ModelFallback.excluded(deepseek, minimax)).toBe(false)
+    // minimax (vision) falling back to deepseek would drop an image turn on a blind model.
     expect(ModelFallback.excluded(minimax, deepseek)).toBe(true)
   })
 
-  test("a primary outside the group is unaffected", () => {
+  test("a primary outside every pair is unaffected", () => {
     expect(ModelFallback.excluded(gemini, minimax)).toBe(false)
     expect(ModelFallback.excluded(gemini, deepseek)).toBe(false)
     expect(ModelFallback.excluded(deepseek, gemini)).toBe(false)
+    expect(ModelFallback.excluded(minimax, gemini)).toBe(false)
   })
 
-  test("the same model is not the group rule's concern", () => {
-    expect(ModelFallback.excluded(deepseek, { ...deepseek })).toBe(false)
+  test("the same model is not the pair rule's concern", () => {
+    expect(ModelFallback.excluded(minimax, { ...minimax })).toBe(false)
   })
 
-  test("the ENK_AI_MODEL × ENK_AI_IMAGE_MODEL pair is derived as a group", () => {
+  test("the ENK_AI_MODEL × ENK_AI_IMAGE_MODEL pair is derived, vision → text only", () => {
     process.env.ENK_AI_MODEL = "acme/text-model"
     process.env.ENK_AI_IMAGE_MODEL = "acme/vision-model"
     const text = { providerID: "acme", modelID: "text-model" }
     const vision = { providerID: "acme", modelID: "vision-model" }
-    expect(ModelFallback.excluded(text, vision)).toBe(true)
     expect(ModelFallback.excluded(vision, text)).toBe(true)
-    // the derived pair is additive: the built-in group still applies
-    expect(ModelFallback.excluded(deepseek, minimax)).toBe(true)
+    expect(ModelFallback.excluded(text, vision)).toBe(false)
+    // the derived pair is additive: the built-in pair still applies
+    expect(ModelFallback.excluded(minimax, deepseek)).toBe(true)
   })
 
   test("no pair is derived when either env is missing or malformed", () => {
     process.env.ENK_AI_MODEL = "acme/text-model"
-    expect(ModelFallback.groups()).toEqual(ModelFallback.DEFAULT_GROUPS.map((group) => [...group]))
+    expect(ModelFallback.pairs()).toEqual([...ModelFallback.DEFAULT_PAIRS])
 
     process.env.ENK_AI_IMAGE_MODEL = "not-a-model"
-    expect(ModelFallback.groups()).toEqual(ModelFallback.DEFAULT_GROUPS.map((group) => [...group]))
+    expect(ModelFallback.pairs()).toEqual([...ModelFallback.DEFAULT_PAIRS])
   })
 
   test("an env pair naming the same model twice is ignored", () => {
     process.env.ENK_AI_MODEL = "acme/text-model"
     process.env.ENK_AI_IMAGE_MODEL = "acme/text-model"
-    expect(ModelFallback.groups()).toEqual(ModelFallback.DEFAULT_GROUPS.map((group) => [...group]))
+    expect(ModelFallback.pairs()).toEqual([...ModelFallback.DEFAULT_PAIRS])
   })
 })
