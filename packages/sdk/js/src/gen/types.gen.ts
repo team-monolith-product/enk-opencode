@@ -506,10 +506,6 @@ export type Todo = {
    * Priority level of the task: high, medium, low
    */
   priority: string
-  /**
-   * Unique identifier for the todo item
-   */
-  id: string
 }
 
 export type EventTodoUpdated = {
