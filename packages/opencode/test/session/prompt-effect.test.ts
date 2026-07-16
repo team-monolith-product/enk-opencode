@@ -1462,7 +1462,8 @@ it.effect("an empty pool disables fallback entirely", () =>
   ),
 )
 
-// Exclusive groups: the ENK_AI_MODEL × ENK_AI_IMAGE_MODEL pair must not fall back to each other.
+// Exclusion pairs: the ENK_AI_IMAGE_MODEL vision model must not fall back to ENK_AI_MODEL,
+// while the text model falling back to its vision partner is allowed (and preferred).
 
 const cfgFallbackGroup = {
   provider: {
@@ -1479,7 +1480,7 @@ const cfgFallbackGroup = {
 
 const PAIR = { ENK_AI_MODEL: "test/test-model", ENK_AI_IMAGE_MODEL: "test/test-fallback" }
 
-it.effect("skips the primary's group partner in favor of the next pool entry", () =>
+it.effect("the text primary falls back to its vision partner first", () =>
   withFallbackEnv(
     { ...PAIR, ENK_AI_FALLBACK_MODELS: '["test/test-fallback", "test/test-fallback2"]', ENK_AI_FALLBACK_RETRIES: "0" },
     () =>
@@ -1493,10 +1494,40 @@ it.effect("skips the primary's group partner in favor of the next pool entry", (
 
             yield* prompt.loop({ sessionID: chat.id })
 
-            // test-fallback is the primary's image partner, so the chain must jump straight
-            // to test-fallback2 rather than bounce within the pair
+            // test-fallback is the primary's vision partner; that direction is allowed, so it
+            // is the first fallback rather than being skipped for test-fallback2
             expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual([
               "test-model",
+              "test-fallback",
+            ])
+          }),
+        { git: true, config: cfgFallbackGroup },
+      ),
+  ),
+)
+
+it.effect("the vision primary skips its text partner in favor of the next pool entry", () =>
+  withFallbackEnv(
+    { ...PAIR, ENK_AI_FALLBACK_MODELS: '["test/test-model", "test/test-fallback2"]', ENK_AI_FALLBACK_RETRIES: "0" },
+    () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const { test, prompt, chat, sessions } = yield* boot()
+            yield* test.push(apiFailure(false))
+            yield* test.reply(...replyStop("recovered"))
+            const msg = yield* user(chat.id, "hello")
+            yield* sessions.updateMessage({
+              ...msg,
+              model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-fallback") },
+            })
+
+            yield* prompt.loop({ sessionID: chat.id })
+
+            // test-model is the vision primary's text partner — an image turn must not land
+            // on a blind model, so the chain jumps straight to test-fallback2
+            expect((yield* test.inputs).map((input) => input.model.id as string)).toEqual([
+              "test-fallback",
               "test-fallback2",
             ])
           }),
@@ -1505,14 +1536,18 @@ it.effect("skips the primary's group partner in favor of the next pool entry", (
   ),
 )
 
-it.effect("a pool holding only the primary's group partner leaves no fallback", () =>
-  withFallbackEnv({ ...PAIR, ...POOL, ENK_AI_FALLBACK_RETRIES: "0" }, () =>
+it.effect("a pool holding only the vision primary's text partner leaves no fallback", () =>
+  withFallbackEnv({ ...PAIR, ENK_AI_FALLBACK_MODELS: '["test/test-model"]', ENK_AI_FALLBACK_RETRIES: "0" }, () =>
     provideTmpdirInstance(
       () =>
         Effect.gen(function* () {
-          const { test, prompt, chat } = yield* boot()
+          const { test, prompt, chat, sessions } = yield* boot()
           yield* test.push(apiFailure(false))
-          yield* user(chat.id, "hello")
+          const msg = yield* user(chat.id, "hello")
+          yield* sessions.updateMessage({
+            ...msg,
+            model: { providerID: ProviderID.make("test"), modelID: ModelID.make("test-fallback") },
+          })
 
           const result = yield* prompt.loop({ sessionID: chat.id })
 
@@ -1524,7 +1559,7 @@ it.effect("a pool holding only the primary's group partner leaves no fallback", 
   ),
 )
 
-it.effect("the group rule leaves a primary outside the pair alone", () =>
+it.effect("the pair rule leaves a primary outside the pair alone", () =>
   // Same pool and pair, but the turn runs on test-fallback2 (outside the pair), so the
   // partner model stays a legitimate fallback.
   withFallbackEnv(

@@ -1020,25 +1020,25 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
       // The primary model followed by every fallback model that actually resolves. Entries naming a
       // provider or model this deployment does not have are dropped rather than failing the turn,
-      // so a pool shared across environments stays usable. Entries sharing an exclusive group with
-      // the primary (e.g. a text model and its vision partner) are dropped as well — see
-      // ModelFallback.groups().
+      // so a pool shared across environments stays usable. When the primary is a vision model, its
+      // text partner is dropped as well — an image turn must not fall back to a model that cannot
+      // see the image. See ModelFallback.pairs().
       const resolveChain = (primary: { providerID: ProviderID; modelID: ModelID }, sessionID: SessionID) =>
         Effect.gen(function* () {
           const head = yield* getModel(primary.providerID, primary.modelID, sessionID)
           const chain: { model: Provider.Model; variant?: string }[] = [{ model: head }]
           const primaryKey = `${primary.providerID}/${primary.modelID}`
           const seen = new Set([primaryKey])
-          const groups = ModelFallback.groups()
+          const pairs = ModelFallback.pairs()
 
           for (const entry of ModelFallback.parsePool(Flag.ENK_AI_FALLBACK_MODELS)) {
             const key = `${entry.providerID}/${entry.modelID}`
             if (seen.has(key)) continue
             seen.add(key)
-            if (ModelFallback.excluded(primary, entry, groups)) {
+            if (ModelFallback.excluded(primary, entry, pairs)) {
               if (!warnedExcluded.has(`${primaryKey}->${key}`)) {
                 warnedExcluded.add(`${primaryKey}->${key}`)
-                log.info("fallback model excluded by group rule", { primary: primaryKey, model: key })
+                log.info("fallback model excluded by pair rule", { primary: primaryKey, model: key })
               }
               continue
             }
@@ -1056,7 +1056,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           }
           // A non-empty pool that leaves the primary alone (every entry excluded, missing, or a
           // duplicate) is legal but worth a trace: this turn has no fallback at all, which
-          // usually means the pool needs a model from outside the primary's group.
+          // usually means the pool needs a model outside the primary's exclusion pairs.
           if (chain.length === 1 && seen.size > 1 && !warnedExcluded.has(primaryKey)) {
             warnedExcluded.add(primaryKey)
             log.warn("no fallback models remain for primary", { primary: primaryKey })

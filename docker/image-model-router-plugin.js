@@ -13,8 +13,9 @@
 //
 // 설정 — 우선순위: env > opencode.jsonc plugin 옵션 > 내장 기본값.
 //   env:  ENK_AI_IMAGE_MODEL=minimax/MiniMax-M3, ENK_AI_IMAGE_MODEL_VARIANT=adaptive
-//         (helm 이 주입. ENK_AI_MODEL × ENK_AI_IMAGE_MODEL 페어는 팰백 배타 그룹으로도
-//          자동 유도된다 — packages/opencode/src/enk/model-fallback.ts)
+//         (helm 이 주입. ENK_AI_MODEL × ENK_AI_IMAGE_MODEL 페어에서 비전 모델 → 텍스트 모델
+//          방향의 팰백 배제가 자동 유도된다. 반대 방향(텍스트 → 비전)은 허용 —
+//          packages/opencode/src/enk/model-fallback.ts)
 //   옵션: ["./image-model-router-plugin.js", { "model": "minimax/MiniMax-M3", "variant": "adaptive" }]
 //   - model: 이미지 메시지를 처리할 모델 (providerID/modelID)
 //   - variant: 전환 시 사용할 variant. 대상 모델에 존재할 때만 적용.

@@ -57,8 +57,9 @@ export namespace Flag {
   export declare const ENK_AI_MODEL: string | undefined
   export declare const ENK_AI_MODEL_VARIANT: string | undefined
   // The vision partner of ENK_AI_MODEL ("provider/model"): the model that image-carrying
-  // messages are routed to (docker/image-model-router-plugin.js), and the other half of the
-  // implicit fallback exclusion pair (src/enk/model-fallback.ts).
+  // messages are routed to (docker/image-model-router-plugin.js). Also derives a directional
+  // fallback exclusion — this vision model never falls back to ENK_AI_MODEL, while the
+  // reverse direction stays allowed (src/enk/model-fallback.ts).
   export declare const ENK_AI_IMAGE_MODEL: string | undefined
   export declare const ENK_AI_IMAGE_MODEL_VARIANT: string | undefined
   // Model fallback. See src/enk/model-fallback.ts.

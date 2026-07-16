@@ -27,43 +27,50 @@ export namespace ModelFallback {
   ]
 
   /**
-   * Exclusive groups: models in the same group never fall back to each other. A text model
-   * and its vision partner form such a pair — an image turn must not fall back to a model
-   * that cannot see the image, and a failing pair should exit to a third provider rather
-   * than bounce between its members.
+   * Directional exclusion pairs: a vision model never falls back to its text partner.
+   * Image-carrying turns are routed to the vision model (docker/image-model-router-plugin.js),
+   * so falling back from it to the text partner would land the image on a model that cannot
+   * see it. The reverse direction is safe and allowed — the text model falling back to its
+   * vision partner just reaches a model that handles text too, which is exactly what a
+   * deployment pairing the two wants as its first fallback.
    *
    * On top of this built-in default, the deployment's ENK_AI_MODEL × ENK_AI_IMAGE_MODEL
-   * pair (when both are set) is derived as a group automatically, so the routing pair and
-   * the fallback exclusion can never drift apart.
+   * pair (when both are set) is derived automatically, so the routing pair and the
+   * fallback exclusion can never drift apart.
    */
-  export const DEFAULT_GROUPS: readonly (readonly string[])[] = [
-    ["deepseek/deepseek-v4-pro", "minimax/MiniMax-M3"],
+  export interface Pair {
+    text: string
+    vision: string
+  }
+
+  export const DEFAULT_PAIRS: readonly Pair[] = [
+    { text: "deepseek/deepseek-v4-pro", vision: "minimax/MiniMax-M3" },
   ]
 
   const modelKey = (model: { providerID: string; modelID: string }) => `${model.providerID}/${model.modelID}`
 
-  export function groups(): string[][] {
-    const result = DEFAULT_GROUPS.map((group) => [...group])
+  export function pairs(): Pair[] {
+    const result: Pair[] = [...DEFAULT_PAIRS]
     const primary = ModelPolicy.parseModel(Flag.ENK_AI_MODEL)
     const image = ModelPolicy.parseModel(Flag.ENK_AI_IMAGE_MODEL)
     if (primary && image) {
-      const pair = [modelKey(primary), modelKey(image)]
-      if (pair[0] !== pair[1]) result.push(pair)
+      const pair = { text: modelKey(primary), vision: modelKey(image) }
+      if (pair.text !== pair.vision) result.push(pair)
     }
     return result
   }
 
-  /** True when the pool entry shares an exclusive group with the turn's primary model. */
+  /** True when the turn's primary model is a pair's vision model and the pool entry its text partner. */
   export function excluded(
     primary: { providerID: string; modelID: string },
     entry: PoolEntry,
-    groupList: readonly (readonly string[])[] = groups(),
+    pairList: readonly Pair[] = pairs(),
   ): boolean {
     const primaryKey = modelKey(primary)
     const entryKey = modelKey(entry)
-    // The same model is deduplication's concern, not the group rule's.
+    // The same model is deduplication's concern, not the pair rule's.
     if (primaryKey === entryKey) return false
-    return groupList.some((group) => group.includes(primaryKey) && group.includes(entryKey))
+    return pairList.some((pair) => pair.vision === primaryKey && pair.text === entryKey)
   }
 
   function entry(raw: unknown): PoolEntry | undefined {
