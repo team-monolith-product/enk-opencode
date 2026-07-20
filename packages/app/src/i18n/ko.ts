@@ -80,6 +80,7 @@ export const dict = {
   "envKeys.delete.confirm": "삭제 확인",
   "envKeys.toast.saved.title": "API 키 저장됨",
   "envKeys.toast.saved.description": "프로젝트 .env 파일에 저장되었습니다",
+  "envKeys.error.load": "저장된 키 목록을 불러오지 못했습니다. 서버가 아직 이 기능을 지원하지 않을 수 있습니다.",
   "envKeys.error.invalidKey": "영문·숫자·밑줄만 사용, 숫자로 시작할 수 없습니다",
   "envKeys.error.duplicate": "이미 존재하는 키입니다",
   "envKeys.error.valueRequired": "값을 입력하세요",

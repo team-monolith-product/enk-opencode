@@ -5,7 +5,7 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useMutation } from "@tanstack/solid-query"
-import { batch, createResource, createSignal, For, Show } from "solid-js"
+import { batch, createSignal, For, onMount, Show } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
@@ -32,14 +32,22 @@ export function DialogEnvKeys() {
     return { server: conn.http, directory: sdk.directory, fetch: platform.fetch }
   }
 
-  const [existing, { refetch }] = createResource(
-    async () => {
-      const o = opts()
-      if (!o) return []
-      return listEnvKeys(o)
-    },
-    { initialValue: [] },
-  )
+  // createResource 를 쓰지 않는다: 구버전 서버(라우트 없음)에서 404 가 나면 리소스 읽기가
+  // 렌더 중 throw 해 앱 최상위 ErrorBoundary 로 전파된다(전체 화면이 에러 페이지로 교체).
+  // 실패는 다이얼로그 안의 안내 문구로만 처리한다.
+  const [existing, setExisting] = createSignal<string[]>([])
+  const [loadError, setLoadError] = createSignal(false)
+  const refetch = async () => {
+    const o = opts()
+    if (!o) return
+    try {
+      setExisting(await listEnvKeys(o))
+      setLoadError(false)
+    } catch {
+      setLoadError(true)
+    }
+  }
+  onMount(() => void refetch())
 
   // 기존 키 덮어쓰기 입력값 (키 이름 → 새 값). 빈 문자열이면 변경 없음.
   const [updates, setUpdates] = createStore<Record<string, string>>({})
@@ -155,6 +163,12 @@ export function DialogEnvKeys() {
       <div class="flex flex-col gap-6 px-2.5 pb-3 overflow-y-auto max-h-[60vh]">
         <form onSubmit={save} class="px-2.5 pb-6 flex flex-col gap-6">
           <p class="text-14-regular text-text-base">{language.t("envKeys.description")}</p>
+
+          <Show when={loadError()}>
+            <p class="text-12-regular" style={{ color: "var(--text-on-critical-base)" }}>
+              {language.t("envKeys.error.load")}
+            </p>
+          </Show>
 
           <Show when={existing().length > 0}>
             <div class="flex flex-col gap-3">

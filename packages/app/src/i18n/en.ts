@@ -84,6 +84,7 @@ export const dict = {
   "envKeys.delete.confirm": "Confirm delete",
   "envKeys.toast.saved.title": "API keys saved",
   "envKeys.toast.saved.description": "Saved to the project .env file",
+  "envKeys.error.load": "Could not load saved keys. The server may not support this feature yet.",
   "envKeys.error.invalidKey": "Use letters, digits and underscores; must not start with a digit",
   "envKeys.error.duplicate": "This key already exists",
   "envKeys.error.valueRequired": "Enter a value",

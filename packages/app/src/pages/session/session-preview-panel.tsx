@@ -554,9 +554,10 @@ export function SessionBrowserChrome(props: {
   const [copied, setCopied] = createSignal(false)
 
   const openEnvKeys = () => {
-    void import("@/components/dialog-env-keys").then((x) => {
-      dialog.show(() => <x.DialogEnvKeys />)
-    })
+    // 배포 직후 구버전 페이지에서 새 청크 로드가 실패할 수 있다 — 조용히 죽지 말고 토스트로 알린다.
+    import("@/components/dialog-env-keys")
+      .then((x) => dialog.show(() => <x.DialogEnvKeys />))
+      .catch(() => showToast({ title: language.t("common.requestFailed") }))
   }
   let copyTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => copyTimer && clearTimeout(copyTimer))

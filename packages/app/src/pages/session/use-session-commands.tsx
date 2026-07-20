@@ -265,9 +265,9 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   }
 
   const manageEnvKeys = () => {
-    void import("@/components/dialog-env-keys").then((x) => {
-      dialog.show(() => <x.DialogEnvKeys />)
-    })
+    import("@/components/dialog-env-keys")
+      .then((x) => dialog.show(() => <x.DialogEnvKeys />))
+      .catch(() => showToast({ title: language.t("common.requestFailed") }))
   }
 
   const toggleAutoAccept = () => {
