@@ -945,4 +945,37 @@ describe("file/index Filesystem patterns", () => {
       })
     })
   })
+
+  describe("File.read() - secret env masking", () => {
+    test("masks values when reading .env but keeps key names", async () => {
+      await using tmp = await tmpdir()
+      await fs.writeFile(path.join(tmp.path, ".env"), "# note\nAPI_KEY=super-secret-abc\nexport TOKEN=xyz123\n", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const result = await File.read(".env")
+          expect(result.type).toBe("text")
+          expect(result.content).not.toContain("super-secret-abc")
+          expect(result.content).not.toContain("xyz123")
+          expect(result.content).toContain("API_KEY=••••••••")
+          expect(result.content).toContain("TOKEN=••••••••")
+          expect(result.content).toContain("# note")
+        },
+      })
+    })
+
+    test("does not mask .env.example", async () => {
+      await using tmp = await tmpdir()
+      await fs.writeFile(path.join(tmp.path, ".env.example"), "API_KEY=your-key-here\n", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const result = await File.read(".env.example")
+          expect(result.content).toContain("API_KEY=your-key-here")
+        },
+      })
+    })
+  })
 })

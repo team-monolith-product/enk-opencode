@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
 import { stat, readFile, writeFile } from "fs/promises"
 import { EnvFileRoutes } from "../../src/server/routes/env-file"
+import { EnvFile } from "../../src/util/env-file"
 import { Instance } from "../../src/project/instance"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
@@ -18,6 +19,28 @@ const put = (values: Record<string, string>) =>
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ values }),
   })
+
+describe("EnvFile.isSecretFile / mask", () => {
+  test("isSecretFile detects .env variants but not .env.example", () => {
+    expect(EnvFile.isSecretFile(".env")).toBe(true)
+    expect(EnvFile.isSecretFile(".env.local")).toBe(true)
+    expect(EnvFile.isSecretFile("sub/dir/.env.production")).toBe(true)
+    expect(EnvFile.isSecretFile(".env.example")).toBe(false)
+    expect(EnvFile.isSecretFile("env.ts")).toBe(false)
+    expect(EnvFile.isSecretFile("README.md")).toBe(false)
+  })
+
+  test("mask hides values but keeps key names, comments and blanks", () => {
+    const input = "# comment\n\nexport API_KEY=super-secret\nOTHER=value123\nnot a key line\n"
+    const masked = EnvFile.mask(input)
+    expect(masked).not.toContain("super-secret")
+    expect(masked).not.toContain("value123")
+    expect(masked).toContain("# comment")
+    expect(masked).toContain("API_KEY=••••••••")
+    expect(masked).toContain("OTHER=••••••••")
+    expect(masked).toContain("not a key line")
+  })
+})
 
 describe("EnvFileRoutes", () => {
   test("PUT creates .env with mode 0600", async () => {

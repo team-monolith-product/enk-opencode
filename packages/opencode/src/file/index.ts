@@ -13,6 +13,7 @@ import z from "zod"
 import { Global } from "../global"
 import { Instance } from "../project/instance"
 import { Filesystem } from "../util/filesystem"
+import { EnvFile } from "../util/env-file"
 import { Log } from "../util/log"
 import { Protected } from "./protected"
 import { Ripgrep } from "./ripgrep"
@@ -519,6 +520,12 @@ export namespace File {
         const full = path.join(Instance.directory, file)
 
         if (!Instance.containsPath(full)) throw new Error("Access denied: path escapes project directory")
+
+        // 시크릿 env 파일은 뷰어에서 열려도 값이 새지 않도록 마스킹해서 반환한다(write-only 일관).
+        if (EnvFile.isSecretFile(file)) {
+          const raw = yield* appFs.readFileString(full).pipe(Effect.catch(() => Effect.succeed("")))
+          return { type: "text" as const, content: EnvFile.mask(raw).trim() }
+        }
 
         if (isImageByExtension(file)) {
           const exists = yield* appFs.existsSafe(full)

@@ -6,6 +6,26 @@ import { Filesystem } from "@/util/filesystem"
 export namespace EnvFile {
   export const KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/
   const LINE_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/
+  // .env / .env.local 등은 시크릿. .env.example 은 예시라 제외.
+  const SECRET_NAME_RE = /^\.env(\..+)?$/
+
+  // 파일명(basename)이 시크릿 env 파일인지. UI 파일트리/검색/뷰어에서 값 노출을 막는 판정에 쓴다.
+  export function isSecretFile(name: string): boolean {
+    const base = name.replaceAll("\\", "/").split("/").pop() ?? name
+    return SECRET_NAME_RE.test(base) && base !== ".env.example"
+  }
+
+  // 키 이름은 유지하고 값만 마스킹한다(주석/빈 줄/무관 라인 보존). 뷰어에서 열려도 값이 새지 않게.
+  export function mask(content: string): string {
+    return content
+      .split("\n")
+      .map((line) => {
+        const match = LINE_RE.exec(line)
+        if (!match) return line
+        return `${match[1]}=••••••••`
+      })
+      .join("\n")
+  }
 
   export function parseNames(content: string): string[] {
     const names: string[] = []
