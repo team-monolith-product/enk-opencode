@@ -6,62 +6,15 @@ import { Instance } from "../../project/instance"
 import { DevServerReplay, probePort } from "../../enk/dev-server-replay"
 import { serveUrl } from "../../tool/ensure-dev-server"
 
-const RESTART_READY_TIMEOUT_MS = 15000
+type RestartResult = DevServerReplay.StartResult & { url?: string }
 
-async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (abort.aborted) return false
-    if (await probePort(port)) return true
-    await new Promise((r) => setTimeout(r, 300))
-  }
-  return false
-}
-
-// 연타/멀티탭 대비 in-flight 가드(디렉토리별). read→set 사이에 await 가 없어 동시 요청 둘째는
-// 반드시 already_starting 으로 빠진다(Node 단일 스레드라 이 구간은 원자적).
-const getGuard = Instance.state<{ launching: boolean }>(() => ({ launching: false }))
-
-type RestartResult = {
-  status: "already_running" | "started" | "failed" | "no_command" | "already_starting"
-  url?: string
-  port?: number
-  ms: number
-  reason?: string
-}
-
-// UI("다시 시도")에서 부르는 dev 서버 재시작. ensure_dev_server 가 DevServerReplay 로 기록해 둔
-// 커맨드를 그대로 재실행한다.
+// UI("다시 시도")에서 부르는 dev 서버 재시작. 서버 부팅 시 자동 1회 실행과 같은 경로를 쓴다.
 async function restart(abort: AbortSignal): Promise<RestartResult> {
-  const startedAt = Date.now()
-  const ms = () => Date.now() - startedAt
-
-  const record = await DevServerReplay.loadRecord(Instance.directory)
-  if (!record) return { status: "no_command", ms: ms() }
-
-  // 원자적 check→set: 이 두 줄 사이에 await 가 없어야 동시 요청 둘째가 반드시 already_starting 으로 빠진다.
-  // probePort/launch 는 플래그를 세운 뒤에 하고, finally 로 반드시 되돌린다.
-  const guard = getGuard()
-  if (guard.launching) return { status: "already_starting", port: record.port, ms: ms() }
-  guard.launching = true
-  try {
-    if (await probePort(record.port)) {
-      return { status: "already_running", url: serveUrl(record.port), port: record.port, ms: ms() }
-    }
-    DevServerReplay.launch(record.cmd, record.cwd)
-    const ready = await waitForPort(record.port, RESTART_READY_TIMEOUT_MS, abort)
-    if (!ready) {
-      return {
-        status: "failed",
-        port: record.port,
-        ms: ms(),
-        reason: `포트 ${record.port} 가 ${RESTART_READY_TIMEOUT_MS}ms 안에 LISTEN 되지 않았습니다: ${record.cmd}`,
-      }
-    }
-    return { status: "started", url: serveUrl(record.port), port: record.port, ms: ms() }
-  } finally {
-    getGuard().launching = false
+  const result = await DevServerReplay.start({ directory: Instance.directory, abort })
+  if (result.status === "already_running" || result.status === "started") {
+    return { ...result, url: serveUrl(result.port!) }
   }
+  return result
 }
 
 // 서버가 로컬로 dev 서버를 직접 찔러 실제 HTTP 상태를 얻는다 — CHP/CORS 모호함 없는 권위 있는 신호.
@@ -86,7 +39,7 @@ type StatusResult = { state: PreviewState; port?: number; httpStatus?: number }
 async function status(): Promise<StatusResult> {
   const record = await DevServerReplay.loadRecord(Instance.directory)
   const port = record?.port ?? 3000
-  if (getGuard().launching) return { state: "starting", port }
+  if (DevServerReplay.isLaunching(Instance.directory)) return { state: "starting", port }
   if (!(await probePort(port))) {
     return record ? { state: "startable", port } : { state: "none" }
   }

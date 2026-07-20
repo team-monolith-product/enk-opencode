@@ -88,38 +88,56 @@ describe("DevServerReplay", () => {
     })
   })
 
-  describe("replay", () => {
-    test("does nothing when ENK_PROJECT_DIRECTORY is not set", async () => {
+  describe("start", () => {
+    // launch 후 LISTEN 을 기다리는 시간 — 테스트 커맨드는 포트를 열지 않으므로 짧게 잡는다.
+    const READY = 300
+
+    test("reports no_command when ENK_PROJECT_DIRECTORY is not set", async () => {
       const dir = await tempProjectDir()
       const marker = join(dir, "marker")
       await writeState(dir, { cmd: `echo ok > ${marker}`, cwd: dir, port: await freePort() })
 
       delete process.env["ENK_PROJECT_DIRECTORY"]
-      await DevServerReplay.replay()
+      const result = await DevServerReplay.start({ readyTimeoutMs: READY })
 
+      expect(result.status).toBe("no_command")
       await new Promise((r) => setTimeout(r, 200))
       expect(existsSync(marker)).toBe(false)
     })
 
-    test("does nothing when the state file is missing", async () => {
+    test("reports no_command when the state file is missing", async () => {
       const dir = await tempProjectDir()
       process.env["ENK_PROJECT_DIRECTORY"] = dir
 
-      await DevServerReplay.replay()
+      expect((await DevServerReplay.start({ readyTimeoutMs: READY })).status).toBe("no_command")
     })
 
-    test("replays the recorded command", async () => {
+    test("launches the recorded command", async () => {
       const dir = await tempProjectDir()
       const marker = join(dir, "marker")
       await writeState(dir, { cmd: `echo ok > ${marker}`, cwd: dir, port: await freePort() })
 
       process.env["ENK_PROJECT_DIRECTORY"] = dir
-      await DevServerReplay.replay()
+      await DevServerReplay.start({ readyTimeoutMs: READY })
 
       expect(await waitFor(() => existsSync(marker))).toBe(true)
     })
 
-    test("skips replay when the port is already listening", async () => {
+    test("reports started once the recorded port begins listening", async () => {
+      const dir = await tempProjectDir()
+      const port = await freePort()
+      // launch 가 실제로 포트를 열어야 started 가 나온다 — 짧게 LISTEN 하는 커맨드를 기록한다.
+      const cmd = `bun -e 'require("net").createServer().listen(${port}, "127.0.0.1", () => setTimeout(() => process.exit(0), 3000))'`
+      await writeState(dir, { cmd, cwd: dir, port })
+
+      process.env["ENK_PROJECT_DIRECTORY"] = dir
+      const result = await DevServerReplay.start({ readyTimeoutMs: 8000 })
+
+      expect(result.status).toBe("started")
+      expect(result.port).toBe(port)
+    })
+
+    test("reports already_running without launching when the port is listening", async () => {
       const dir = await tempProjectDir()
       const marker = join(dir, "marker")
       const { server, port } = await listen()
@@ -127,22 +145,40 @@ describe("DevServerReplay", () => {
       await writeState(dir, { cmd: `echo ok > ${marker}`, cwd: dir, port })
 
       process.env["ENK_PROJECT_DIRECTORY"] = dir
-      await DevServerReplay.replay()
+      const result = await DevServerReplay.start({ readyTimeoutMs: READY })
 
+      expect(result.status).toBe("already_running")
       await new Promise((r) => setTimeout(r, 200))
       expect(existsSync(marker)).toBe(false)
     })
 
-    test("skips replay when the recorded cwd no longer exists", async () => {
+    test("fails without launching when the recorded cwd no longer exists", async () => {
       const dir = await tempProjectDir()
       const marker = join(dir, "marker")
       await writeState(dir, { cmd: `echo ok > ${marker}`, cwd: join(dir, "gone"), port: await freePort() })
 
       process.env["ENK_PROJECT_DIRECTORY"] = dir
-      await DevServerReplay.replay()
+      const result = await DevServerReplay.start({ readyTimeoutMs: READY })
 
+      expect(result.status).toBe("failed")
       await new Promise((r) => setTimeout(r, 200))
       expect(existsSync(marker)).toBe(false)
+    })
+
+    test("reports already_starting for a concurrent call and exposes isLaunching", async () => {
+      const dir = await tempProjectDir()
+      const marker = join(dir, "marker")
+      await writeState(dir, { cmd: `echo ok > ${marker}`, cwd: dir, port: await freePort() })
+
+      process.env["ENK_PROJECT_DIRECTORY"] = dir
+      const first = DevServerReplay.start({ readyTimeoutMs: 1000 })
+      await waitFor(() => DevServerReplay.isLaunching(), 1000)
+      expect(DevServerReplay.isLaunching()).toBe(true)
+
+      expect((await DevServerReplay.start({ readyTimeoutMs: READY })).status).toBe("already_starting")
+
+      await first
+      expect(DevServerReplay.isLaunching()).toBe(false)
     })
   })
 })

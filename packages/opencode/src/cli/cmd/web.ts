@@ -38,8 +38,9 @@ export const WebCommand = cmd({
       UI.println(UI.Style.TEXT_WARNING_BOLD + "!  " + "OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
     const opts = await resolveNetworkOptions(args)
-    // 기록된 dev 서버 커맨드 재실행 — 순수 spawn(부트스트랩 없음)이라 부팅 비용이 없다.
-    void DevServerReplay.replay().catch(() => {})
+    // 미리보기 "다시 시도" 버튼과 같은 경로로 dev 서버를 부팅 시 1회 자동 기동한다.
+    // fire-and-forget 이라 LISTEN 대기가 서버 리슨을 막지 않는다.
+    void DevServerReplay.start().catch(() => {})
     const server = Server.listen(opts)
     const suffix = opts.basePath && opts.basePath !== "/" ? opts.basePath : ""
     UI.empty()

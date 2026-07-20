@@ -88,30 +88,79 @@ export namespace DevServerReplay {
     }
   }
 
-  /** 부팅 시 기록된 커맨드를 재실행한다. 조건이 하나라도 어긋나면 조용히 건너뛴다. */
-  export async function replay() {
-    const dir = stateDir()
-    if (!dir) return
+  export type StartResult = {
+    status: "already_running" | "started" | "failed" | "no_command" | "already_starting"
+    port?: number
+    ms: number
+    reason?: string
+  }
 
-    const file = resolve(dir, FILE)
-    let state: State
+  const READY_TIMEOUT_MS = 15000
+
+  // 디렉토리별 in-flight 가드. UI("다시 시도") 요청 경로와 부팅 경로가 같은 맵을 봐야 부팅 launch 중
+  // 들어온 요청이 already_starting 으로 빠지고 status() 도 starting 을 보고하므로 모듈 스코프에 둔다.
+  const launching = new Set<string>()
+
+  export function isLaunching(fallback?: string) {
+    const dir = stateDir(fallback)
+    return dir ? launching.has(dir) : false
+  }
+
+  async function waitForPort(port: number, timeoutMs: number, abort?: AbortSignal): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (abort?.aborted) return false
+      if (await probePort(port)) return true
+      await new Promise((r) => setTimeout(r, 300))
+    }
+    return false
+  }
+
+  /**
+   * 기록된 커맨드로 dev 서버를 띄운다. UI 의 "다시 시도" 버튼과 서버 부팅이 함께 쓰는 단일 경로.
+   * 멱등: 이미 떠 있으면 already_running, 기동 중이면 already_starting 을 돌려주므로 반복 호출이 안전하다.
+   */
+  export async function start(
+    opts: { directory?: string; abort?: AbortSignal; readyTimeoutMs?: number } = {},
+  ): Promise<StartResult> {
+    const readyTimeoutMs = opts.readyTimeoutMs ?? READY_TIMEOUT_MS
+    const startedAt = Date.now()
+    const ms = () => Date.now() - startedAt
+
+    const record = await loadRecord(opts.directory)
+    if (!record) return { status: "no_command", ms: ms() }
+
+    // 원자적 check→set: 이 두 줄 사이에 await 가 없어야 동시 요청 둘째가 반드시 already_starting 으로 빠진다.
+    // probePort/launch 는 플래그를 세운 뒤에 하고, finally 로 반드시 되돌린다.
+    const key = stateDir(opts.directory)!
+    if (launching.has(key)) return { status: "already_starting", port: record.port, ms: ms() }
+    launching.add(key)
     try {
-      state = State.parse(await Bun.file(file).json())
-    } catch {
-      return
+      if (await probePort(record.port)) {
+        return { status: "already_running", port: record.port, ms: ms() }
+      }
+      if (!existsSync(record.cwd)) {
+        return {
+          status: "failed",
+          port: record.port,
+          ms: ms(),
+          reason: `기록된 cwd 가 존재하지 않습니다: ${record.cwd}`,
+        }
+      }
+      const child = launch(record.cmd, record.cwd)
+      log.info("launched dev server", { pid: child.pid, port: record.port, cwd: record.cwd })
+      if (!(await waitForPort(record.port, readyTimeoutMs, opts.abort))) {
+        return {
+          status: "failed",
+          port: record.port,
+          ms: ms(),
+          reason: `포트 ${record.port} 가 ${readyTimeoutMs}ms 안에 LISTEN 되지 않았습니다: ${record.cmd}`,
+        }
+      }
+      return { status: "started", port: record.port, ms: ms() }
+    } finally {
+      launching.delete(key)
     }
-
-    if (!existsSync(state.cwd)) {
-      log.warn("recorded cwd no longer exists, skipping replay", { cwd: state.cwd })
-      return
-    }
-    if (await probePort(state.port)) {
-      log.info("dev server already listening, skipping replay", { port: state.port })
-      return
-    }
-
-    const child = launch(state.cmd, state.cwd)
-    log.info("replayed dev server", { pid: child.pid, port: state.port, cwd: state.cwd })
   }
 
   /** 기록된 dev 서버 커맨드를 반환한다. 없거나 파싱 실패면 undefined. UI 재시작 등에서 재사용. */
