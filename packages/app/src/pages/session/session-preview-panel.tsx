@@ -637,14 +637,15 @@ export function SessionBrowserChrome(props: {
           />
         </TooltipKeybind>
         {/* API 키(.env) 다이얼로그 — 운영 레이아웃엔 커맨드 팔레트가 없어 여기 직접 노출한다. */}
-        <IconButton
+        <button
           type="button"
-          icon="settings-gear"
-          variant="ghost"
-          size="small"
+          class={ghostBtn + " !w-auto px-1.5 text-11-medium text-text-weak"}
           onClick={openEnvKeys}
           aria-label={language.t("command.env.keys")}
-        />
+          title={language.t("command.env.keys")}
+        >
+          ENV
+        </button>
         <div class="flex items-center shrink-0">
           {/* 뒤로/앞으로 — 자식 history 미러로 활성 판단, 클릭 시 자식 history 이동 */}
           <button
