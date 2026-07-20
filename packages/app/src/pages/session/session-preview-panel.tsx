@@ -93,6 +93,10 @@ export function createSessionPreview() {
 
     let disposed = false
     let pollTimer: ReturnType<typeof setTimeout> | undefined
+    // 서버 연결당 1회, startable(기록은 있는데 안 떠 있음)을 처음 만나면 "다시 시도"를 대신 눌러준다.
+    // pod 재스폰 직후 사용자가 버튼을 눌러야만 미리보기가 살아나던 걸 없앤다. 이 effect 는 서버가
+    // 바뀔 때만 재실행되므로 플래그가 곧 "스폰당 1회"가 된다.
+    let autoRetried = false
     const poll = async () => {
       if (disposed) return
       let server: DevServerStatusResult | undefined
@@ -119,6 +123,10 @@ export function createSessionPreview() {
       if (next.state === "starting") {
         if (pollTimer) clearTimeout(pollTimer)
         pollTimer = setTimeout(() => void poll(), STARTING_POLL_MS)
+      }
+      if (next.state === "startable" && !autoRetried) {
+        autoRetried = true
+        void restart()
       }
     }
     recheck = () => void poll()
