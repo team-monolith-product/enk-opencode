@@ -132,6 +132,14 @@ function createGlobalSync() {
     })
   }
 
+  // Sessions being viewed right now. Session trimming has no notion of the active route, so without
+  // this an old-but-open session gets its caches dropped while the user is looking at it.
+  const pinnedSessions = new Set<string>()
+  const pinSession = (sessionID: string) => {
+    pinnedSessions.add(sessionID)
+    return () => pinnedSessions.delete(sessionID)
+  }
+
   const setSessionTodo = (sessionID: string, todos: Todo[] | undefined) => {
     if (!sessionID) return
     if (!todos) {
@@ -143,7 +151,7 @@ function createGlobalSync() {
       )
       return
     }
-    setGlobalStore("session_todo", sessionID, reconcile(todos, { key: "id" }))
+    setGlobalStore("session_todo", sessionID, reconcile(todos, { key: null }))
   }
 
   const paused = () => untrack(() => globalStore.reload) !== undefined
@@ -196,7 +204,7 @@ function createGlobalSync() {
       })
       if (next.length !== store.session.length) {
         setStore("session", reconcile(next, { key: "id" }))
-        cleanupDroppedSessionCaches(store, setStore, next, setSessionTodo)
+        cleanupDroppedSessionCaches(store, setStore, next, setSessionTodo, pinnedSessions)
       }
       children.unpin(directory)
       return
@@ -228,7 +236,7 @@ function createGlobalSync() {
           }),
         )
         setStore("session", reconcile(sessions, { key: "id" }))
-        cleanupDroppedSessionCaches(store, setStore, sessions, setSessionTodo)
+        cleanupDroppedSessionCaches(store, setStore, sessions, setSessionTodo, pinnedSessions)
         sessionMeta.set(directory, { limit })
       })
       .catch((err) => {
@@ -321,6 +329,7 @@ function createGlobalSync() {
       setStore,
       push: queue.push,
       setSessionTodo,
+      pinnedSessions,
       vcsCache: children.vcsCache.get(directory),
       loadLsp: () => {
         sdkFor(directory)
@@ -422,6 +431,10 @@ function createGlobalSync() {
     project: projectApi,
     todo: {
       set: setSessionTodo,
+    },
+    session: {
+      /** Protect a session's caches from trim-driven cleanup while it is on screen. Returns an unpin. */
+      pin: pinSession,
     },
   }
 }

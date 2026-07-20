@@ -529,7 +529,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           }
 
           if (cached !== undefined) {
-            setStore("todo", sessionID, reconcile(cached, { key: "id" }))
+            setStore("todo", sessionID, reconcile(cached, { key: null }))
           }
 
           const key = keyFor(directory, sessionID)
@@ -537,7 +537,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             retry(() => client.session.todo({ sessionID })).then((todo) => {
               if (!tracked(directory, sessionID)) return
               const list = todo.data ?? []
-              setStore("todo", sessionID, reconcile(list, { key: "id" }))
+              setStore("todo", sessionID, reconcile(list, { key: null }))
               globalSync.todo.set(sessionID, list)
             }),
           )

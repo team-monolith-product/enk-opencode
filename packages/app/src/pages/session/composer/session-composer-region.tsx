@@ -108,7 +108,7 @@ export function SessionComposerRegion(props: {
   })
 
   const [store, setStore] = createStore({
-    ready: false,
+    ready: props.ready || props.state.dock(),
     height: 320,
     body: undefined as HTMLDivElement | undefined,
     expanded: false,
@@ -140,11 +140,15 @@ export function SessionComposerRegion(props: {
   createEffect(() => {
     route.sessionKey()
     const ready = props.ready
+    const dock = props.state.dock()
     const delay = 140
 
     clear()
-    setStore("ready", false)
-    if (!ready) return
+    if (store.ready || (!ready && !dock)) return
+    if (dock) {
+      setStore("ready", true)
+      return
+    }
 
     frame = requestAnimationFrame(() => {
       frame = undefined
@@ -158,7 +162,11 @@ export function SessionComposerRegion(props: {
   onCleanup(clear)
 
   const open = createMemo(() => store.ready && props.state.dock() && !props.state.closing())
-  const progress = useSpring(() => (open() ? 1 : 0), { visualDuration: 0.3, bounce: 0 })
+  const progress = useSpring(
+    () => (open() ? 1 : 0),
+    { visualDuration: 0.3, bounce: 0 },
+    () => `${route.sessionKey()}\0${store.ready}`,
+  )
   const value = createMemo(() => Math.max(0, Math.min(1, progress())))
   const dock = createMemo(() => (store.ready && props.state.dock()) || value() > 0.001)
   const rolled = createMemo(() => (props.revert?.items.length ? props.revert : undefined))
@@ -369,6 +377,34 @@ export function SessionComposerRegion(props: {
                   "flex min-h-0 flex-1 flex-col": floating(),
                 }}
               >
+              {/* The todo dock lives outside the prompt gate: prompt.ready() drops to false while an
+                  uncached session loads, and the dock must not unmount for that. */}
+              <Show when={dock()}>
+                <div
+                  classList={{
+                    "overflow-hidden": true,
+                    "pointer-events-none": value() < 0.98,
+                    "shrink-0": floating(),
+                  }}
+                  style={
+                    floating()
+                      ? undefined
+                      : {
+                          "max-height": `${full() * value()}px`,
+                        }
+                  }
+                >
+                  <div ref={(el) => setStore("body", el)}>
+                    <SessionTodoDock
+                      sessionID={route.params.id}
+                      todos={props.state.todos()}
+                      collapseLabel={language.t("session.todo.collapse")}
+                      expandLabel={language.t("session.todo.expand")}
+                      dockProgress={value()}
+                    />
+                  </div>
+                </div>
+              </Show>
               <Show
                 when={prompt.ready()}
                 fallback={
@@ -385,38 +421,21 @@ export function SessionComposerRegion(props: {
                         </div>
                       )}
                     </Show>
-                    <div class="w-full min-h-32 md:min-h-40 rounded-md border border-border-weak-base bg-background-base/50 px-4 py-3 text-text-weak whitespace-pre-wrap pointer-events-none">
+                    <div
+                      class="w-full min-h-32 md:min-h-40 rounded-md border border-border-weak-base bg-background-base/50 px-4 py-3 text-text-weak whitespace-pre-wrap pointer-events-none"
+                      style={
+                        floating()
+                          ? undefined
+                          : {
+                              "margin-top": `${-lift()}px`,
+                            }
+                      }
+                    >
                       {handoffPrompt() || language.t("prompt.loading")}
                     </div>
                   </>
                 }
               >
-                <Show when={dock()}>
-                  <div
-                    classList={{
-                      "overflow-hidden": true,
-                      "pointer-events-none": value() < 0.98,
-                      "shrink-0": floating(),
-                    }}
-                    style={
-                      floating()
-                        ? undefined
-                        : {
-                            "max-height": `${full() * value()}px`,
-                          }
-                    }
-                  >
-                    <div ref={(el) => setStore("body", el)}>
-                      <SessionTodoDock
-                        sessionID={route.params.id}
-                        todos={props.state.todos()}
-                        collapseLabel={language.t("session.todo.collapse")}
-                        expandLabel={language.t("session.todo.expand")}
-                        dockProgress={value()}
-                      />
-                    </div>
-                  </div>
-                </Show>
                 <Show when={rolled()} keyed>
                   {(revert) => (
                     <div
