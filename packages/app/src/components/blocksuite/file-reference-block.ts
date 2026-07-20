@@ -1,4 +1,4 @@
-import { BlockComponent, BlockViewExtension, FlavourExtension } from "@blocksuite/block-std"
+import { BlockComponent, BlockViewExtension, FlavourExtension, type EditorHost } from "@blocksuite/block-std"
 import { DeleteIcon, DragHandleConfigExtension, getAttachmentFileIcons, HoverController } from "@blocksuite/blocks"
 import { defineBlockSchema, type BlockSchemaType, type SchemaToModel } from "@blocksuite/store"
 import { css, html } from "lit"
@@ -147,6 +147,8 @@ export class FileReferenceBlockComponent extends BlockComponent<FileReferenceBlo
     event.stopPropagation()
   }
 
+  private keyHost?: EditorHost
+
   private keys = (event: KeyboardEvent) => {
     if (this.doc.readonly) return
     if (event.key !== "Backspace" && event.key !== "Delete") return
@@ -211,13 +213,17 @@ export class FileReferenceBlockComponent extends BlockComponent<FileReferenceBlo
     this.hover.setReference(this)
     this.addEventListener("click", this.press)
     this.addEventListener("keydown", this.keys)
-    document.addEventListener("keydown", this.keys, true)
+    // 이 에디터(host) 안의 키만 듣는다. document 에 걸면 모달의 네이티브 input 등 에디터 밖 입력의
+    // Backspace/Delete 까지 가로채 지우기가 먹통이 된다. 붙인 host 를 기억해 뒀다 그대로 해제한다.
+    this.keyHost = this.host
+    this.keyHost?.addEventListener("keydown", this.keys, true)
   }
 
   override disconnectedCallback() {
     this.removeEventListener("click", this.press)
     this.removeEventListener("keydown", this.keys)
-    document.removeEventListener("keydown", this.keys, true)
+    this.keyHost?.removeEventListener("keydown", this.keys, true)
+    this.keyHost = undefined
     super.disconnectedCallback()
   }
 
