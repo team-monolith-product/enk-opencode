@@ -66,7 +66,6 @@ export const dict = {
   "command.env.keys.description": "프로젝트 .env 파일에 환경변수 저장",
   "envKeys.title": "환경변수",
   "envKeys.description": "프로젝트 .env 파일에 저장됩니다. 값은 저장 후 다시 표시되지 않으며 AI에게도 보이지 않습니다.",
-  "envKeys.badge.hidden": "AI에 숨김",
   "envKeys.existing.label": "저장됨",
   "envKeys.existing.placeholder": "•••••••• 변경하려면 입력",
   "envKeys.new.label": "새 변수",

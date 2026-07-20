@@ -167,17 +167,11 @@ export function DialogEnvKeys() {
     <Dialog title={language.t("envKeys.title")} transition fit>
       <form onSubmit={save} class="flex flex-col">
         <div class="flex flex-col gap-5 px-5 pb-5 overflow-y-auto max-h-[56vh]">
-          {/* 안내 — .env 시그니처 칩 + AI 숨김 배지로 성격을 한눈에. */}
+          {/* 안내 — .env 시그니처 칩 + 설명. */}
           <div class="flex flex-col gap-2">
-            <div class="flex items-center gap-2">
-              <span class="font-mono text-11-medium text-text-weak px-1.5 py-0.5 rounded bg-surface-inset-base border border-border-weaker-base">
-                .env
-              </span>
-              <span class="inline-flex items-center gap-1 text-11-medium text-text-weak">
-                <Icon name="circle-check" class="size-3.5 shrink-0 opacity-70" />
-                {language.t("envKeys.badge.hidden")}
-              </span>
-            </div>
+            <span class="font-mono text-11-medium text-text-weak px-1.5 py-0.5 self-start rounded bg-surface-inset-base border border-border-weaker-base">
+              .env
+            </span>
             <p class="text-13-regular text-text-weak leading-relaxed">{language.t("envKeys.description")}</p>
           </div>
 

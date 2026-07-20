@@ -70,7 +70,6 @@ export const dict = {
   "command.env.keys.description": "Save environment variables to the project .env file",
   "envKeys.title": "Environment variables",
   "envKeys.description": "Saved to the project's .env file. Values are never shown again and stay hidden from the AI.",
-  "envKeys.badge.hidden": "Hidden from AI",
   "envKeys.existing.label": "Saved",
   "envKeys.existing.placeholder": "•••••••• type to change",
   "envKeys.new.label": "New variables",
