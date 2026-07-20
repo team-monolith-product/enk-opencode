@@ -27,6 +27,10 @@ const RETRY_COOLDOWN_MS = 1500
 // 상태가 starting(기동 중)일 때 자동 재폴링 간격 — ready/errored 로 전이되면 자동 종료된다.
 const STARTING_POLL_MS = 2000
 
+// startable(기록은 있는데 아직 안 뜸)일 때 재폴링 간격. 부팅 replay 처럼 우리가 띄우지 않은 경로로
+// dev 서버가 늦게 올라와도 사용자 조작 없이 미리보기가 뜨게 한다. 곧 전이될 starting 보다 느리게 잡는다.
+const STARTABLE_POLL_MS = 5000
+
 // previewUrl 에 실제로 닿는지 — "iframe 을 띄울지"의 진짜 기준.
 // 서버측 probePort(127.0.0.1:PORT)/self-probe 는 배포 환경에서 CHP 라우팅과 어긋날 수 있어(서버는
 // 못 잡는데 클라는 CHP 경유로 닿음), 서버가 "안 뜸"이라 해도 클라가 닿으면 띄운다.
@@ -93,9 +97,9 @@ export function createSessionPreview() {
 
     let disposed = false
     let pollTimer: ReturnType<typeof setTimeout> | undefined
-    // 서버 연결당 1회, startable(기록은 있는데 안 떠 있음)을 처음 만나면 "다시 시도"를 대신 눌러준다.
-    // pod 재스폰 직후 사용자가 버튼을 눌러야만 미리보기가 살아나던 걸 없앤다. 이 effect 는 서버가
-    // 바뀔 때만 재실행되므로 플래그가 곧 "스폰당 1회"가 된다.
+    // startable(기록은 있는데 안 떠 있음)을 처음 만나면 "다시 시도"를 대신 눌러준다.
+    // pod 재스폰 직후 사용자가 버튼을 눌러야만 미리보기가 살아나던 걸 없앤다.
+    // 이 effect 가 재실행되면(서버 전환 등) 플래그도 초기화돼 새 연결에서 다시 1회 시도한다.
     let autoRetried = false
     const poll = async () => {
       if (disposed) return
@@ -119,14 +123,20 @@ export function createSessionPreview() {
       }
 
       setPreviewStatus(next)
-      // 기동 중이면 곧 전이되므로 짧게 재폴링(ready/errored 로 바뀌면 자동 종료).
-      if (next.state === "starting") {
+      // 아직 결론이 안 난 상태(starting·startable)에서는 계속 지켜본다. startable 도 폴링을 이어가야
+      // 아래 자동 재시도가 already_starting 을 받거나 부팅 replay 가 늦게 뜰 때 화면이 고착되지 않는다.
+      // ready/errored/none 으로 가면 타이머가 더 안 걸려 자동 종료된다.
+      const repollMs =
+        next.state === "starting" ? STARTING_POLL_MS : next.state === "startable" ? STARTABLE_POLL_MS : undefined
+      if (repollMs !== undefined) {
         if (pollTimer) clearTimeout(pollTimer)
-        pollTimer = setTimeout(() => void poll(), STARTING_POLL_MS)
+        pollTimer = setTimeout(() => void poll(), repollMs)
       }
+      // 자동 재시도는 연결당 1회만 — 실패해도 위 재폴링이 계속 상태를 따라가고, 사용자는 버튼으로
+      // 언제든 다시 시도할 수 있다. 토스트는 사용자가 누른 게 아니므로 띄우지 않는다.
       if (next.state === "startable" && !autoRetried) {
         autoRetried = true
-        void restart()
+        void restart({ silent: true })
       }
     }
     recheck = () => void poll()
@@ -189,11 +199,16 @@ export function createSessionPreview() {
   const [restarting, setRestarting] = createSignal(false)
   let restartCooldownUntil = 0
   let restartInflight: Promise<void> | undefined
-  const restart = () => {
+  // silent: 자동 호출용 — 사용자가 누른 게 아니므로 실패 토스트를 띄우지 않는다.
+  const restart = (opts?: { silent?: boolean }) => {
     if (restartInflight) return restartInflight
     if (Date.now() < restartCooldownUntil) return Promise.resolve()
     const conn = server.current
     if (!conn) return Promise.resolve()
+    const notifyError = (title: string, description?: string) => {
+      if (opts?.silent) return
+      showToast({ variant: "error", title, description })
+    }
     setRestarting(true)
     restartInflight = restartDevServer({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
       .then((res) => {
@@ -204,17 +219,13 @@ export function createSessionPreview() {
           // 이미 뜨는 중 — 조용히 상태만 재확인하고 쿨다운 뒤 재시도할 수 있게 둔다.
           recheck()
         } else if (res.status === "no_command") {
-          showToast({ variant: "error", title: language.t("session.preview.retry.noServer") })
+          notifyError(language.t("session.preview.retry.noServer"))
         } else {
-          showToast({
-            variant: "error",
-            title: language.t("session.preview.retry.failed"),
-            description: res.reason,
-          })
+          notifyError(language.t("session.preview.retry.failed"), res.reason)
         }
       })
       .catch(() => {
-        showToast({ variant: "error", title: language.t("session.preview.retry.failed") })
+        notifyError(language.t("session.preview.retry.failed"))
       })
       .finally(() => {
         restartInflight = undefined
