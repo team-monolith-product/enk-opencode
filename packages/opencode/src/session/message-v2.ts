@@ -28,6 +28,15 @@ export namespace MessageV2 {
     return mime.startsWith("image/") || mime === "application/pdf"
   }
 
+  // Compaction re-sends history with stripMedia, but a giant text part (a legacy inlined
+  // attachment or a huge paste) can overflow the compaction request itself, leaving the
+  // session permanently stuck. Anything past this many characters gets placeholdered.
+  export const STRIP_TEXT_LIMIT = 100_000
+
+  export function stripTextPlaceholder(length: number) {
+    return `[Large text content omitted during compaction: ${length} characters]`
+  }
+
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
   export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
   export const StructuredOutputError = NamedError.create(
@@ -649,7 +658,10 @@ export namespace MessageV2 {
           if (part.type === "text" && !part.ignored)
             userMessage.parts.push({
               type: "text",
-              text: part.text,
+              text:
+                options?.stripMedia && part.text.length > STRIP_TEXT_LIMIT
+                  ? stripTextPlaceholder(part.text.length)
+                  : part.text,
             })
           // text/plain and directory files are converted into text parts, ignore them
           if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {

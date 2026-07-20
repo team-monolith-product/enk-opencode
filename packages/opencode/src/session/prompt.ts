@@ -74,6 +74,10 @@ const OUTPUT_DRAIN_MS = 100
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
 
+  // Fallback cap for inlining an uploaded text attachment when it could not be persisted and
+  // read back through the Read tool. Roughly mirrors the Read tool's own output cap.
+  const INLINE_TEXT_ATTACHMENT_LIMIT = 50_000
+
   export interface Interface {
     readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
     readonly runnerState: (sessionID: SessionID) => Effect.Effect<Runner.State<MessageV2.WithParts, never>["_tag"]>
@@ -1167,15 +1171,72 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             switch (url.protocol) {
               case "data:":
                 if (part.mime === "text/plain") {
-                  // Text-based attachments (html, csv, json, source…) arrive as text/plain, so their
-                  // contents get inlined here. Persist them too so the agent has a real path to the
-                  // original file, matching the binary-attachment branch below.
+                  // Text-based attachments (html, csv, json, source…) arrive as text/plain. Persist
+                  // them and surface the contents through the Read tool over the saved copy — its
+                  // output cap means an oversized upload gets truncated with a "read more via this
+                  // path" notice instead of inlined wholesale, which would permanently overflow the
+                  // context window (compaction included, since text parts are never stripped).
                   const saved = yield* attachment.save({
                     url: part.url,
                     mime: part.mime,
                     filename: part.filename,
                   })
-                  const pieces: Draft<MessageV2.Part>[] = [
+                  if (saved) {
+                    const args = { filePath: saved }
+                    const read = yield* Effect.promise(() => ReadTool.init()).pipe(
+                      Effect.flatMap((t) =>
+                        Effect.promise(() =>
+                          t.execute(args, {
+                            sessionID: input.sessionID,
+                            abort: new AbortController().signal,
+                            agent: input.agent!,
+                            messageID: info.id,
+                            extra: { bypassCwdCheck: true },
+                            messages: [],
+                            metadata: async () => {},
+                            ask: async () => {},
+                          }),
+                        ),
+                      ),
+                      Effect.exit,
+                    )
+                    if (Exit.isSuccess(read)) {
+                      return [
+                        {
+                          messageID: info.id,
+                          sessionID: input.sessionID,
+                          type: "text",
+                          synthetic: true,
+                          text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
+                        },
+                        {
+                          messageID: info.id,
+                          sessionID: input.sessionID,
+                          type: "text",
+                          synthetic: true,
+                          text: read.value.output,
+                        },
+                        {
+                          messageID: info.id,
+                          sessionID: input.sessionID,
+                          type: "text",
+                          synthetic: true,
+                          text: `The attached file ${part.filename ?? part.mime} is saved on disk at ${saved}. Use that path when you need the original file itself, for example to read the rest of it or to copy it somewhere as an asset.`,
+                        },
+                        { ...part, messageID: info.id, sessionID: input.sessionID },
+                      ]
+                    }
+                    log.error("failed to read saved text attachment", { error: Cause.squash(read.cause), saved })
+                  }
+                  // Persisting or reading back failed — inline the decoded text as before, but
+                  // capped so a huge upload can never poison the session permanently.
+                  const decoded = decodeDataUrl(part.url)
+                  const text =
+                    decoded.length > INLINE_TEXT_ATTACHMENT_LIMIT
+                      ? decoded.slice(0, INLINE_TEXT_ATTACHMENT_LIMIT) +
+                        `\n\n[Attachment truncated: showing the first ${INLINE_TEXT_ATTACHMENT_LIMIT} of ${decoded.length} characters]`
+                      : decoded
+                  return [
                     {
                       messageID: info.id,
                       sessionID: input.sessionID,
@@ -1188,20 +1249,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       sessionID: input.sessionID,
                       type: "text",
                       synthetic: true,
-                      text: decodeDataUrl(part.url),
+                      text,
                     },
+                    { ...part, messageID: info.id, sessionID: input.sessionID },
                   ]
-                  if (saved) {
-                    pieces.push({
-                      messageID: info.id,
-                      sessionID: input.sessionID,
-                      type: "text",
-                      synthetic: true,
-                      text: `The attached file ${part.filename ?? part.mime} is saved on disk at ${saved}. Use that path when you need the original file itself, for example to copy it somewhere as an asset.`,
-                    })
-                  }
-                  pieces.push({ ...part, messageID: info.id, sessionID: input.sessionID })
-                  return pieces
                 }
                 {
                   const saved = yield* attachment.save({

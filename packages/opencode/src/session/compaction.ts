@@ -296,7 +296,11 @@ When constructing the summary, try to stick to this template:
               const replayPart =
                 part.type === "file" && MessageV2.isMedia(part.mime)
                   ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
-                  : part
+                  : // A giant text part (legacy inlined attachment, huge paste) would immediately
+                    // re-overflow the freshly compacted session, so replay a placeholder instead.
+                    part.type === "text" && part.text.length > MessageV2.STRIP_TEXT_LIMIT
+                    ? { ...part, text: MessageV2.stripTextPlaceholder(part.text.length) }
+                    : part
               yield* session.updatePart({
                 ...replayPart,
                 id: PartID.ascending(),
