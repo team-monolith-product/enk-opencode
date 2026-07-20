@@ -18,6 +18,8 @@ import { Shell } from "@/shell/shell"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncate"
 import { Plugin } from "@/plugin"
+import { EnvFile } from "@/util/env-file"
+import { readdir } from "fs/promises"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -60,6 +62,14 @@ type Scan = {
   dirs: Set<string>
   patterns: Set<string>
   always: Set<string>
+  envFiles: Set<string>
+}
+
+// .env(.local 등) 는 UI 로 저장한 시크릿이라 내용 접근을 막는다. .env.example 은 예외.
+const ENV_FILE_RE = /^\.env(\..+)?$/
+function isEnvFile(file: string) {
+  const base = path.basename(file)
+  return ENV_FILE_RE.test(base) && base !== ".env.example"
 }
 
 export const log = Log.create({ service: "bash-tool" })
@@ -228,6 +238,7 @@ async function collect(root: Node, cwd: string, ps: boolean, shell: string): Pro
     dirs: new Set<string>(),
     patterns: new Set<string>(),
     always: new Set<string>(),
+    envFiles: new Set<string>(),
   }
 
   for (const node of commands(root)) {
@@ -235,14 +246,14 @@ async function collect(root: Node, cwd: string, ps: boolean, shell: string): Pro
     const tokens = command.map((item) => item.text)
     const cmd = ps ? tokens[0]?.toLowerCase() : tokens[0]
 
-    if (cmd && FILES.has(cmd)) {
-      for (const arg of pathArgs(command, ps)) {
-        const resolved = await argPath(arg, cwd, ps, shell)
-        log.info("resolved path", { arg, resolved })
-        if (!resolved || Instance.containsPath(resolved)) continue
-        const dir = (await Filesystem.isDir(resolved)) ? resolved : path.dirname(resolved)
-        scan.dirs.add(dir)
-      }
+    for (const arg of pathArgs(command, ps)) {
+      const resolved = await argPath(arg, cwd, ps, shell)
+      if (resolved && isEnvFile(resolved)) scan.envFiles.add(resolved)
+      if (!(cmd && FILES.has(cmd))) continue
+      log.info("resolved path", { arg, resolved })
+      if (!resolved || Instance.containsPath(resolved)) continue
+      const dir = (await Filesystem.isDir(resolved)) ? resolved : path.dirname(resolved)
+      scan.dirs.add(dir)
     }
 
     if (tokens.length && (!cmd || !CWD.has(cmd))) {
@@ -266,6 +277,17 @@ async function parse(command: string, ps: boolean) {
 }
 
 async function ask(ctx: Tool.Context, scan: Scan) {
+  // 명령 문자열 패턴 매칭(ENV_FILE_GUARD 의 bash 규칙)을 우회하는 표기( $HOME/.env 등 )도
+  // 인자 경로 해석 단계에서 잡아 read 권한으로 물어본다 — 중앙 가드가 deny 한다.
+  if (scan.envFiles.size > 0) {
+    await ctx.ask({
+      permission: "read",
+      patterns: Array.from(scan.envFiles),
+      always: [],
+      metadata: {},
+    })
+  }
+
   if (scan.dirs.size > 0) {
     const globs = Array.from(scan.dirs).map((dir) => {
       if (process.platform === "win32") return Filesystem.normalizePathPattern(path.join(dir, "*"))
@@ -290,10 +312,27 @@ async function ask(ctx: Tool.Context, scan: Scan) {
 
 async function shellEnv(ctx: Tool.Context, cwd: string) {
   const extra = await Plugin.trigger("shell.env", { cwd, sessionID: ctx.sessionID, callID: ctx.callID }, { env: {} })
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...extra.env,
   }
+  // Bun 이 서버 시작 시 cwd 의 .env 를 process.env 로 자동 로드하므로, 명령 문자열에 ".env" 가
+  // 없어도 `env`/`echo $KEY` 로 시크릿이 새어나갈 수 있다. 프로젝트 .env 계열 파일에 정의된
+  // 키는 자식 프로세스 환경에서 제거한다.
+  for (const name of await projectEnvFileKeys()) delete env[name]
+  return env
+}
+
+async function projectEnvFileKeys() {
+  const keys = new Set<string>()
+  try {
+    const entries = await readdir(Instance.directory)
+    for (const entry of entries) {
+      if (!isEnvFile(entry)) continue
+      for (const name of await EnvFile.names(path.join(Instance.directory, entry))) keys.add(name)
+    }
+  } catch {}
+  return keys
 }
 
 function launch(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {

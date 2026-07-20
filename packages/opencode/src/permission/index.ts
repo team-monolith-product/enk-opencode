@@ -135,6 +135,23 @@ export namespace Permission {
     return evalRule(permission, pattern, ...rulesets)
   }
 
+  // .env 는 UI 로 입력한 API 키 등 시크릿 저장소(write-only)라 LLM 도구가 내용을 읽으면 안 된다.
+  // evaluate 는 last-match-wins 이므로 이 가드를 마지막 ruleset 으로 넘기면 유저 설정·OPENCODE_PERMISSION·
+  // 저장된 "always" 승인보다 항상 우선한다. .env.example 은 시크릿이 아니므로 허용.
+  // bash 패턴은 토큰 형태(공백/슬래시 경계)로 잡아 "grep process.env src" 같은 명령을 오탐하지 않는다.
+  export const ENV_FILE_GUARD: Ruleset = [
+    { permission: "read", pattern: "*.env", action: "deny" },
+    { permission: "read", pattern: "*.env.*", action: "deny" },
+    { permission: "read", pattern: "*.env.example", action: "allow" },
+    { permission: "edit", pattern: "*.env", action: "deny" },
+    { permission: "edit", pattern: "*.env.*", action: "deny" },
+    { permission: "edit", pattern: "*.env.example", action: "allow" },
+    { permission: "bash", pattern: "* .env *", action: "deny" },
+    { permission: "bash", pattern: "* .env.*", action: "deny" },
+    { permission: "bash", pattern: "*/.env *", action: "deny" },
+    { permission: "bash", pattern: "*/.env.*", action: "deny" },
+  ]
+
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Permission") {}
 
   export const layer = Layer.effect(
@@ -169,11 +186,13 @@ export namespace Permission {
         let needsAsk = false
 
         for (const pattern of request.patterns) {
-          const rule = evaluate(request.permission, pattern, ruleset, approved)
+          const rule = evaluate(request.permission, pattern, ruleset, approved, ENV_FILE_GUARD)
           log.info("evaluated", { permission: request.permission, pattern, action: rule })
           if (rule.action === "deny") {
             return yield* new DeniedError({
-              ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
+              ruleset: [...ruleset, ...ENV_FILE_GUARD].filter((rule) =>
+                Wildcard.match(request.permission, rule.permission),
+              ),
             })
           }
           if (rule.action === "allow") continue

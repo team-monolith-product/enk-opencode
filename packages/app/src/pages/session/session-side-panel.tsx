@@ -213,6 +213,12 @@ export function SessionSidePanel(props: {
     })
   }
 
+  const openEnvKeys = () => {
+    void import("@/components/dialog-env-keys").then((x) => {
+      dialog.show(() => <x.DialogEnvKeys />)
+    })
+  }
+
   const [store, setStore] = createStore({
     activeDraggable: undefined as string | undefined,
   })
@@ -506,8 +512,17 @@ export function SessionSidePanel(props: {
                 {/* 운영 레이아웃은 타이틀바/헤더가 없어 "파일 검색" 버튼이 사라진다.
                   탐색기 상단에 직접 노출해 동일한 DialogSelectFile 모달을 연다. */}
                 <Show when={env.productionLayout()}>
-                  <div class="shrink-0 px-3 pt-3">
-                    <FileSearchButton onClick={openFileSearch} />
+                  <div class="shrink-0 px-3 pt-3 flex items-center gap-1">
+                    <FileSearchButton onClick={openFileSearch} class="flex flex-1 max-w-full min-w-0" />
+                    {/* 운영 레이아웃엔 커맨드 팔레트가 없어(파일 검색으로 대체) API 키 다이얼로그
+                      진입점을 여기 직접 노출한다. */}
+                    <IconButton
+                      type="button"
+                      icon="settings-gear"
+                      variant="ghost"
+                      onClick={openEnvKeys}
+                      aria-label={language.t("command.env.keys")}
+                    />
                   </div>
                 </Show>
                 <Tabs

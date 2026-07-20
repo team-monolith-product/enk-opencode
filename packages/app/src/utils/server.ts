@@ -72,3 +72,26 @@ export function restartDevServer(opts: {
     .post({ url: "/dev-server/restart" })
     .then((res) => res.data as DevServerRestartResult)
 }
+
+// /env-file/* 도 SDK 코드젠 미포함이라 devServerClient 와 같은 방식으로 호출한다.
+// 서버는 키 이름만 반환한다(값은 write-only — 어떤 응답에도 값이 실리지 않음).
+type EnvFileOpts = { server: ServerConnection.HttpBase; directory: string; fetch?: typeof fetch }
+type EnvFileKeys = { keys: string[] }
+
+export function listEnvKeys(opts: EnvFileOpts): Promise<string[]> {
+  return devServerClient(opts)
+    .get({ url: "/env-file" })
+    .then((res) => (res.data as EnvFileKeys).keys)
+}
+
+export function saveEnvKeys(opts: EnvFileOpts, values: Record<string, string>): Promise<string[]> {
+  return devServerClient(opts)
+    .put({ url: "/env-file", body: { values } })
+    .then((res) => (res.data as EnvFileKeys).keys)
+}
+
+export function deleteEnvKey(opts: EnvFileOpts, name: string): Promise<string[]> {
+  return devServerClient(opts)
+    .delete({ url: `/env-file/${name}` })
+    .then((res) => (res.data as EnvFileKeys).keys)
+}
