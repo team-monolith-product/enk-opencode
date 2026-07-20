@@ -186,6 +186,69 @@ describe("session.prompt missing file", () => {
   })
 })
 
+describe("session.prompt uploaded text attachments", () => {
+  function dataUrl(content: string) {
+    return `data:text/plain;base64,${Buffer.from(content, "utf8").toString("base64")}`
+  }
+
+  async function promptWithUpload(content: string, filename: string) {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+    })
+
+    return await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await SessionPrompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          noReply: true,
+          parts: [
+            { type: "text", text: "look at this file" },
+            {
+              type: "file",
+              mime: "text/plain",
+              url: dataUrl(content),
+              filename,
+            },
+          ],
+        })
+        if (msg.info.role !== "user") throw new Error("expected user message")
+        const texts = msg.parts.filter((part) => part.type === "text").map((part) => part.text)
+        await Session.remove(session.id)
+        return texts
+      },
+    })
+  }
+
+  test("surfaces uploaded text through the Read tool with the saved path", async () => {
+    const content = "col1,col2\nalpha,1\nbeta,2\n"
+    const texts = await promptWithUpload(content, "data.csv")
+
+    expect(texts.some((text) => text.startsWith("Called the Read tool with the following input:"))).toBe(true)
+    expect(texts.some((text) => text.includes("col1,col2"))).toBe(true)
+    expect(texts.some((text) => text.includes("is saved on disk at"))).toBe(true)
+  })
+
+  test("caps an oversized upload instead of inlining it wholesale", async () => {
+    // ~200KB of CSV-ish lines — well past the Read tool's 50KB output cap.
+    const content = Array.from({ length: 2000 }, (_, i) => `${i},${"a".repeat(100)}`).join("\n")
+    const texts = await promptWithUpload(content, "big.csv")
+
+    const inlined = texts.reduce((total, text) => total + text.length, 0)
+    expect(inlined).toBeLessThan(content.length / 2)
+    expect(texts.some((text) => text.includes("Output capped at 50 KB"))).toBe(true)
+  })
+})
+
 describe("session.prompt special characters", () => {
   test("handles filenames with # character", async () => {
     await using tmp = await tmpdir({

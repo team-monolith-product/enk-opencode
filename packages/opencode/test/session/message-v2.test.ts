@@ -267,6 +267,50 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("stripMedia placeholders oversized text parts so compaction requests fit", async () => {
+    const messageID = "m-user"
+    const big = "x".repeat(MessageV2.STRIP_TEXT_LIMIT + 1)
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(messageID),
+        parts: [
+          {
+            ...basePart(messageID, "p1"),
+            type: "text",
+            text: "small",
+          },
+          {
+            ...basePart(messageID, "p2"),
+            type: "text",
+            text: big,
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, model, { stripMedia: true })).toStrictEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "small" },
+          { type: "text", text: MessageV2.stripTextPlaceholder(big.length) },
+        ],
+      },
+    ])
+
+    // Without stripMedia the full text is preserved.
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "small" },
+          { type: "text", text: big },
+        ],
+      },
+    ])
+  })
+
   test("converts assistant tool completion into tool-call + tool-result messages with attachments", async () => {
     const userID = "m-user"
     const assistantID = "m-assistant"
