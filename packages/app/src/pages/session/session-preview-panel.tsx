@@ -559,6 +559,8 @@ export function SessionBrowserChrome(props: {
   onReload: () => void
   onHome?: () => void
   previewReady?: boolean
+  /** 현재 보이는 뷰가 미리보기인지. false 면(파일/컨텍스트/리뷰 탭) 미리보기 전용 컨트롤(뒤/앞/새로고침)을 흐리게. */
+  previewActive?: boolean
   /** 클라 에러가 있으면 항상 노출되는 경고 버튼 — 누르면 에러 카드를 토글한다. */
   showErrorButton?: boolean
   errorCount?: number
@@ -582,6 +584,9 @@ export function SessionBrowserChrome(props: {
   onCleanup(() => copyTimer && clearTimeout(copyTimer))
 
   const previewBlocked = () => props.previewReady === false
+  // 미리보기가 지금 보이는 뷰가 아니면(파일/컨텍스트/리뷰 탭) 미리보기 전용 컨트롤(뒤/앞/새로고침)을 흐리게 —
+  // "이 바는 지금 화면과 별개"임을 시각적으로 알린다. 동작은 그대로 두고 표시만 흐리게 한다.
+  const previewInactive = () => props.previewActive === false
 
   // 주소 입력 — 편집 중에는 draft 를, 아니면 항상 props.path 를 표시(자식 라우팅 따라 갱신).
   let inputEl: HTMLInputElement | undefined
@@ -670,6 +675,7 @@ export function SessionBrowserChrome(props: {
           <button
             type="button"
             class={ghostBtn}
+            classList={{ "opacity-50": previewInactive() }}
             aria-label={language.t("common.back")}
             disabled={previewBlocked() || !props.canGoBack}
             onClick={() => props.onBack?.()}
@@ -681,6 +687,7 @@ export function SessionBrowserChrome(props: {
           <button
             type="button"
             class={ghostBtn}
+            classList={{ "opacity-50": previewInactive() }}
             aria-label={language.t("common.forward")}
             disabled={previewBlocked() || !props.canGoForward}
             onClick={() => props.onForward?.()}
@@ -761,6 +768,7 @@ export function SessionBrowserChrome(props: {
           <button
             type="button"
             class={ghostBtn + " !size-5"}
+            classList={{ "opacity-50": previewInactive() }}
             aria-label={language.t("common.refresh")}
             disabled={previewBlocked()}
             onClick={() => props.onReload()}

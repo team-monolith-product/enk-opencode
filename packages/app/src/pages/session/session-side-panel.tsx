@@ -278,6 +278,7 @@ export function SessionSidePanel(props: {
           {/* 브라우저 chrome 바 — 시안처럼 상단 전체 폭을 차지(탐색기·미리보기 위). */}
           <SessionBrowserChrome
             previewReady={preview.previewReady()}
+            previewActive={activeTab() === "preview"}
             host={browserAddress().host}
             path={browserAddress().path}
             editablePath={browserAddress().editablePath}
