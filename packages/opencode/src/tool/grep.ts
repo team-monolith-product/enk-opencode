@@ -44,6 +44,9 @@ export const GrepTool = Tool.define("grep", {
     if (params.include) {
       args.push("--glob", params.include)
     }
+    // .env 시크릿은 검색 결과로도 노출 금지 (Permission.ENV_FILE_GUARD 와 짝). grep 의 permission
+    // 패턴은 정규식이라 경로 기반 차단이 불가능하고 rg 가 --hidden 으로 돌므로 여기서 제외한다.
+    args.push("--glob", "!**/.env", "--glob", "!**/.env.*", "--glob", "!**/*.env")
     args.push(searchPath)
 
     const proc = Process.spawn([rgPath, ...args], {

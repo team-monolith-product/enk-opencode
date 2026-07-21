@@ -109,8 +109,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     const preview = selectionPreview(path, selection)
     const tab = activeFileTab()
     const filePath = tab ? file.pathFromTab(tab) : path
-    const lines =
-      filePath === path ? (file.selectedLines(path) as SelectedLineRange | null | undefined) : undefined
+    const lines = filePath === path ? (file.selectedLines(path) as SelectedLineRange | null | undefined) : undefined
     const range: SelectedLineRange = {
       start: selection.startLine,
       end: selection.endLine,
@@ -143,6 +142,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const mcpCommand = withCategory(language.t("command.category.mcp"))
   const agentCommand = withCategory(language.t("command.category.agent"))
   const permissionsCommand = withCategory(language.t("command.category.permissions"))
+  const envCommand = withCategory(language.t("command.category.env"))
 
   const isAutoAcceptActive = () => {
     const sessionID = params.id
@@ -262,6 +262,12 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     void import("@/components/dialog-select-mcp").then((x) => {
       dialog.show(() => <x.DialogSelectMcp />)
     })
+  }
+
+  const manageEnvKeys = () => {
+    import("@/components/dialog-env-keys")
+      .then((x) => dialog.show(() => <x.DialogEnvKeys />))
+      .catch(() => showToast({ title: language.t("common.requestFailed") }))
   }
 
   const toggleAutoAccept = () => {
@@ -534,6 +540,16 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     }),
   ]
 
+  const envCmds = () => [
+    envCommand({
+      id: "env.keys",
+      title: language.t("command.env.keys"),
+      description: language.t("command.env.keys.description"),
+      slash: "env",
+      onSelect: manageEnvKeys,
+    }),
+  ]
+
   const agentCmds = () => [
     agentCommand({
       id: "agent.cycle",
@@ -575,6 +591,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     // ENT-69 운영 빌드에서는 모델 피커 진입(`mod+'`, `/model`, `shift+mod+d`)을 차단 (로컬 vite dev에서만 유지).
     ...(import.meta.env.DEV ? modelCmds() : []),
     ...mcpCmds(),
+    ...envCmds(),
     ...agentCmds(),
     ...(import.meta.env.VITE_DISABLE_PROMPT_PERMISSIONS === "true" ? [] : permissionsCmds()),
   ])
