@@ -114,3 +114,41 @@ describe("AiUsage.buildStepAttributes", () => {
     expect(attrs.cache_read).toBe(0)
   })
 })
+
+describe("AiUsage.remember (bounded idempotency-key set)", () => {
+  test("adds keys and leaves the set untouched while under the cap", () => {
+    const set = new Set<string>()
+    AiUsage.remember(set, "a", 3)
+    AiUsage.remember(set, "b", 3)
+    expect([...set]).toEqual(["a", "b"])
+  })
+
+  test("never grows past the cap", () => {
+    const set = new Set<string>()
+    for (let i = 0; i < 1000; i++) AiUsage.remember(set, `k${i}`, 10)
+    expect(set.size).toBe(10)
+  })
+
+  test("evicts the oldest keys first (FIFO), keeping the most recent", () => {
+    const set = new Set<string>()
+    for (const k of ["a", "b", "c"]) AiUsage.remember(set, k, 3)
+    AiUsage.remember(set, "d", 3) // over cap → oldest ("a") evicted
+    expect([...set]).toEqual(["b", "c", "d"])
+    AiUsage.remember(set, "e", 3)
+    expect([...set]).toEqual(["c", "d", "e"])
+  })
+
+  test("re-adding an existing key is a no-op and does not change ordering or size", () => {
+    const set = new Set<string>()
+    for (const k of ["a", "b", "c"]) AiUsage.remember(set, k, 3)
+    AiUsage.remember(set, "a", 3) // already present — Set.add is a no-op, still under cap
+    expect([...set]).toEqual(["a", "b", "c"])
+  })
+
+  test("shrinks a set that starts over the cap down to it in one call", () => {
+    const set = new Set<string>(["a", "b", "c", "d", "e"])
+    AiUsage.remember(set, "f", 3)
+    expect(set.size).toBe(3)
+    expect([...set]).toEqual(["d", "e", "f"])
+  })
+})

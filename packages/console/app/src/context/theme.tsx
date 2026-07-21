@@ -17,20 +17,30 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       theme: initial(),
     })
 
+    // Reflect the theme onto the DOM only. Deliberately does NOT persist here: writing localStorage on
+    // mount would pin the initially-resolved theme and permanently defeat the entry-server FOUC script's
+    // `prefers-color-scheme` fallback (its `!t` branch), so a later OS light/dark switch would be ignored.
     createEffect(() => {
       if (typeof document !== "object") return
       document.documentElement.setAttribute("data-theme", store.theme)
-      localStorage.setItem("theme", store.theme)
     })
+
+    // Persist only on an explicit user choice, so an absent key keeps meaning "follow the system".
+    const persist = (next: "light" | "dark") => {
+      if (typeof localStorage === "object") localStorage.setItem("theme", next)
+    }
 
     return {
       theme: () => store.theme,
       isDark: () => store.theme === "dark",
       setTheme(next: "light" | "dark") {
         setStore("theme", next)
+        persist(next)
       },
       toggle() {
-        setStore("theme", store.theme === "dark" ? "light" : "dark")
+        const next = store.theme === "dark" ? "light" : "dark"
+        setStore("theme", next)
+        persist(next)
       },
     }
   },

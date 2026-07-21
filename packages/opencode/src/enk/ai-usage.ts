@@ -38,6 +38,12 @@ export namespace AiUsage {
 
   const MAX_ATTEMPTS = 5
   const MAX_PENDING = 1000
+  // Upper bound on the idempotency-key set. `sent` only exists to avoid redundant POSTs of a record
+  // we've already queued; correctness (no double-bill) is guaranteed server-side by rails upsert-dedup
+  // on (message_id, step_index, phase). So we can safely evict the oldest keys FIFO once the set grows
+  // past this cap — worst case an evicted key allows one idempotent re-POST. Kept well above
+  // MAX_PENDING so a still-queued record's key is never evicted under normal load. ~40B/key → ~sub-MB.
+  const MAX_SENT_KEYS = 10_000
   const BATCH_MAX = 50 // max records per POST (do_many accepts an array)
   const FLUSH_WINDOW_MS = 250 // coalesce bursts of step reports into one request
   const API_PATH = "/api/v1/ai_usages/do_many"
@@ -73,10 +79,24 @@ export namespace AiUsage {
   }
 
   const pending: Attributes[] = [] // bounded FIFO queue
-  const sent = new Set<string>() // idempotency keys already enqueued — dedupes repeated updates
+  const sent = new Set<string>() // idempotency keys already enqueued — dedupes repeated updates (bounded, see remember)
   let draining = false // serial-drain guard: at most one request in flight
   let dropped = 0 // records discarded due to MAX_PENDING overflow
   let warnedDisabled = false // suppress repeated "not configured" warnings
+
+  /**
+   * Record `key` as enqueued, evicting the oldest keys (FIFO — a Set preserves insertion order) so the
+   * set never exceeds `max`. Bounds memory on a long-lived server: without this, `sent` grew ~one key
+   * per turn forever. Pure and exported for tests.
+   */
+  export function remember(set: Set<string>, key: string, max: number) {
+    set.add(key)
+    if (set.size <= max) return
+    for (const oldest of set) {
+      set.delete(oldest)
+      if (set.size <= max) return
+    }
+  }
 
   function enabled() {
     return Boolean(Flag.ENK_HACKATHON_RAILS_URL && Flag.ENK_AI_USAGE_TOKEN)
@@ -152,8 +172,10 @@ export namespace AiUsage {
   function enqueue(record: Attributes) {
     const key = idempotencyKey(record.message_id, record.step_index, record.phase)
     if (sent.has(key)) return // already enqueued — dedupe retries / re-renders
-    sent.add(key)
     if (pending.length >= MAX_PENDING) {
+      // Overflow: drop the record WITHOUT registering its key. Marking it "sent" here would
+      // permanently block a later re-emit (projector replay, fallback retry) once capacity frees
+      // up — that usage would be lost forever. Leaving the key unset lets it re-enqueue then.
       dropped++
       if (dropped % 100 === 1) {
         log.warn("ai usage queue full, dropping", { dropped, max: MAX_PENDING })
@@ -161,6 +183,7 @@ export namespace AiUsage {
       }
       return
     }
+    remember(sent, key, MAX_SENT_KEYS)
     pending.push(record)
     void drain()
   }
