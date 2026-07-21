@@ -46,6 +46,12 @@ const testManagedConfigDir = path.join(dir, "managed")
 process.env["OPENCODE_TEST_MANAGED_CONFIG_DIR"] = testManagedConfigDir
 process.env["OPENCODE_DISABLE_DEFAULT_PLUGINS"] = "true"
 
+// 프로덕션에선 파일워처 구독을 부팅 창 밖(기본 5초)으로 미뤄 cold EFS 경쟁을 피하지만,
+// 테스트는 init 직후 파일 변경을 확정적으로 감지해야 하므로 지연 없이 동기로 구독한다.
+// (test/file/watcher.test.ts 는 자체 ConfigProvider 로 0 을 주지만, FileWatcher.init() 을
+// 기본 config provider 로 쓰는 test/project/vcs.test.ts 등은 이 전역 설정에 의존한다.)
+process.env["OPENCODE_FILEWATCHER_DEFER_MS"] = "0"
+
 // Write the cache version file to prevent global/index.ts from clearing the cache
 const cacheDir = path.join(dir, "cache", "opencode")
 await fs.mkdir(cacheDir, { recursive: true })

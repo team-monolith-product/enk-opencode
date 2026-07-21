@@ -16,6 +16,7 @@ import { getDevServerStatus, restartDevServer, type DevServerStatusResult } from
 import { SessionPreviewFallback } from "./session-preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
 import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./session-preview-address"
+import { needsReachabilityProbe, resolvePreviewState } from "./session-preview-state"
 
 // session.idle 리로드 뒤 자가치유(브릿지 주입) 파일 쓰기가 도착하길 기다리는 유예 시간.
 // 이 시간 뒤에도 dirty 면 heal 쓰기가 들어온 것으로 보고 1회 더 리로드한다.
@@ -31,18 +32,21 @@ const STARTING_POLL_MS = 2000
 // dev 서버가 늦게 올라와도 사용자 조작 없이 미리보기가 뜨게 한다. 곧 전이될 starting 보다 느리게 잡는다.
 const STARTABLE_POLL_MS = 5000
 
-// previewUrl 에 실제로 닿는지 — "iframe 을 띄울지"의 진짜 기준.
+// previewUrl 에 실제로 닿는지 — "iframe 을 띄울지"의 보조 신호.
 // 서버측 probePort(127.0.0.1:PORT)/self-probe 는 배포 환경에서 CHP 라우팅과 어긋날 수 있어(서버는
-// 못 잡는데 클라는 CHP 경유로 닿음), 서버가 "안 뜸"이라 해도 클라가 닿으면 띄운다.
-// cross-origin 이라 CORS 로 막히면(throw) 낙관적으로 true — iframe 은 CORS 없이 로드되니 일단 띄우고
-// 브릿지 연결/에러(A 오버레이)로 뒤에서 판단한다. 확실한 다운(503)만 false.
+// 못 잡는데 클라는 CHP 경유로 닿음), 서버가 none/startable 이라 해도 클라가 닿으면 iframe 을 띄운다.
+//
+// mode:"no-cors" 로 던진다: cross-origin 이라 status/본문은 못 읽지만(opaque), 서버가 CORS 헤더를
+// 안 줘도 응답만 오면 throw 하지 않는다. 그래서 throw 는 "진짜 못 닿음"(connection refused/DNS 실패)
+// 만 뜻하게 좁혀지고, 그때 false 를 돌려 fallback UI 와 자동 재시도가 살아나게 한다. 예전 mode:"cors"
+// 는 CORS 차단과 실제 다운을 못 구분해 둘 다 낙관적으로 true 처리 → 다운 시 두 기능이 죽었다.
 async function previewReachable(url: string | undefined): Promise<boolean> {
   if (!url) return false
   try {
-    const res = await fetch(url, { cache: "no-store", mode: "cors" })
-    return res.status !== 503
-  } catch {
+    await fetch(url, { cache: "no-store", mode: "no-cors" })
     return true
+  } catch {
+    return false
   }
 }
 
@@ -111,16 +115,12 @@ export function createSessionPreview() {
       }
       if (disposed) return
 
-      let next: DevServerStatusResult
-      if (!server || server.state === "starting" || server.state === "ready") {
-        // 서버 판정이 확실하거나(ready/starting) status 호출이 실패한 경우는 그대로 둔다.
-        next = server ?? { state: "starting" }
-      } else {
-        // 서버는 안 뜬 걸로 보지만(none/startable/errored) probePort/self-probe 가 CHP 라우팅과 어긋날 수 있다.
-        // 클라가 previewUrl 에 실제로 닿으면 iframe 을 띄워 브릿지 연결·에러(A 오버레이)로 판단하게 한다.
-        next = (await previewReachable(previewUrl())) ? { state: "ready", port: server.port } : server
-        if (disposed) return
-      }
+      // 애매한 "서버가 안 떴다" 상태(none/startable)만 클라 도달 체크로 보정한다. errored 는 서버
+      // self-probe(HTTP>=500)가 권위 있으니 클라가 덮지 않고(그래야 errored fallback·재시도가 보인다),
+      // ready/starting 은 볼 필요가 없다. 도달 체크는 그 두 상태에서만 fetch 한 번을 쓴다.
+      const reachable = needsReachabilityProbe(server) ? await previewReachable(previewUrl()) : false
+      if (disposed) return
+      const next = resolvePreviewState(server, reachable)
 
       setPreviewStatus(next)
       // 아직 결론이 안 난 상태(starting·startable)에서는 계속 지켜본다. startable 도 폴링을 이어가야
