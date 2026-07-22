@@ -2,7 +2,6 @@ import { describeRoute, resolver } from "hono-openapi"
 import { Hono } from "hono"
 import { proxy } from "hono/proxy"
 import z from "zod"
-import { createHash } from "node:crypto"
 import { Log } from "../util/log"
 import { Format } from "../format"
 import { TuiRoutes } from "./routes/tui"
@@ -32,7 +31,7 @@ import { EventRoutes } from "./routes/event"
 import { DocRoutes } from "../doc/routes"
 import { SessionDocRoutes } from "../doc/session-routes"
 import { errorHandler } from "./middleware"
-import { DEFAULT_CSP, csp } from "./csp"
+import { csp, themePreloadHash } from "./csp"
 
 const log = Log.create({ service: "server" })
 
@@ -267,17 +266,17 @@ export const InstanceRoutes = (app?: Hono) =>
         if (!match) return c.json({ error: "Not Found" }, 404)
         const file = Bun.file(match)
         if (await file.exists()) {
-          c.header("Content-Type", file.type)
           if (file.type.startsWith("text/html")) {
-            c.header("Content-Security-Policy", DEFAULT_CSP)
+            let html = await file.text()
+            const hash = themePreloadHash(html)
             if (basePath !== "/") {
-              const html = await file.text()
-              const rewritten = html
+              html = html
                 .replace(/(href|src)="\//g, `$1="`)
                 .replace("<head>", `<head>\n    <base href="${basePath}/" />`)
-              return c.html(rewritten)
             }
+            return c.html(html, { headers: { "Content-Security-Policy": csp(hash) } })
           }
+          c.header("Content-Type", file.type)
           return c.body(await file.arrayBuffer())
         } else {
           return c.json({ error: "Not Found" }, 404)
@@ -293,10 +292,7 @@ export const InstanceRoutes = (app?: Hono) =>
         const isHTML = response.headers.get("content-type")?.includes("text/html")
         if (isHTML) {
           let html = await response.text()
-          const scriptMatch = html.match(
-            /<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i,
-          )
-          const hash = scriptMatch ? createHash("sha256").update(scriptMatch[2]).digest("base64") : ""
+          const hash = themePreloadHash(html)
           if (basePath !== "/") {
             html = html
               .replace(/(href|src)="\//g, `$1="`)
