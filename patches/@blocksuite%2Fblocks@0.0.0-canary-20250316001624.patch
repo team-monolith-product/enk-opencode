@@ -1,4 +1,602 @@
+diff --git a/node_modules/@blocksuite/blocks/.bun-tag-fd025a2e6a15e5b5 b/.bun-tag-fd025a2e6a15e5b5
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/database-block/adapters/html.js b/dist/database-block/adapters/html.js
+index 704da852be9ccb8c5719d659903ccb993562bab2..bf3f989d71592e40abee67cd6cd079d44332f495 100644
+--- a/dist/database-block/adapters/html.js
++++ b/dist/database-block/adapters/html.js
+@@ -1,8 +1,22 @@
+ import { DatabaseBlockSchema, } from '@blocksuite/affine-model';
+-import { BlockHtmlAdapterExtension, HastUtils, TextUtils, } from '@blocksuite/affine-shared/adapters';
++import { BlockHtmlAdapterExtension, HastUtils, } from '@blocksuite/affine-shared/adapters';
+ import { nanoid } from '@blocksuite/store';
+ import { format } from 'date-fns/format';
+-const DATABASE_NODE_TYPES = ['table', 'thead', 'tbody', 'th', 'tr'];
++const DATABASE_NODE_TYPES = ['table'];
++// Tracks whether the matching enter() opened a database node, so leave() only
++// closes what was actually opened (a table without rows opens nothing).
++const TABLE_OPEN_KEY = 'affine:table:open';
++const TABLE_SECTION_TAGS = ['thead', 'tbody', 'tfoot'];
++// Collect the rows of a table, whether they sit directly under it or inside a
++// thead/tbody/tfoot section.
++const collectTableRows = (table) => HastUtils.getElementChildren(table).flatMap(child => {
++    if (child.tagName === 'tr') {
++        return [child];
++    }
++    return TABLE_SECTION_TAGS.includes(child.tagName)
++        ? HastUtils.getElementChildren(child).filter(row => row.tagName === 'tr')
++        : [];
++});
+ export const databaseBlockHtmlAdapterMatcher = {
+     flavour: DatabaseBlockSchema.model.flavour,
+     toMatch: o => HastUtils.isElement(o.node) && DATABASE_NODE_TYPES.includes(o.node.tagName),
+@@ -12,104 +26,117 @@ export const databaseBlockHtmlAdapterMatcher = {
+             if (!HastUtils.isElement(o.node)) {
+                 return;
+             }
+-            const { walkerContext } = context;
+-            if (o.node.tagName === 'table') {
+-                const tableHeader = HastUtils.querySelector(o.node, 'thead');
+-                if (!tableHeader) {
+-                    return;
+-                }
+-                const tableHeaderRow = HastUtils.querySelector(tableHeader, 'tr');
+-                if (!tableHeaderRow) {
+-                    return;
+-                }
+-                // Table header row as database header row
+-                const viewsColumns = tableHeaderRow.children.map(() => {
+-                    return {
+-                        id: nanoid(),
+-                        hide: false,
+-                        width: 180,
+-                    };
+-                });
+-                // Build database cells from table body rows
+-                const cells = Object.create(null);
+-                const tableBody = HastUtils.querySelector(o.node, 'tbody');
+-                tableBody?.children.forEach(row => {
+-                    const rowId = nanoid();
+-                    cells[rowId] = Object.create(null);
+-                    row.children.forEach((cell, index) => {
+-                        cells[rowId][viewsColumns[index].id] = {
+-                            columnId: viewsColumns[index].id,
+-                            value: TextUtils.createText(cell.children
+-                                .map(child => ('value' in child ? child.value : ''))
+-                                .join('')),
+-                        };
+-                    });
+-                });
+-                // Build database columns from table header row
+-                const columns = tableHeaderRow.children.map((_child, index) => {
+-                    return {
+-                        type: index === 0 ? 'title' : 'rich-text',
+-                        name: _child.children
+-                            .map(child => ('value' in child ? child.value : ''))
+-                            .join(''),
+-                        data: {},
+-                        id: viewsColumns[index].id,
++            const { walkerContext, deltaConverter } = context;
++            if (o.node.tagName !== 'table') {
++                return;
++            }
++            // Rows may sit directly under the table or inside a section element.
++            const tableRows = collectTableRows(o.node);
++            const tableHeaderRow = tableRows[0];
++            if (!tableHeaderRow) {
++                // Nothing to build a database from. Remember it so leave() does not
++                // close a node that was never opened.
++                walkerContext.pushGlobalContextStack(TABLE_OPEN_KEY, false);
++                return;
++            }
++            const tableHeaderCells = HastUtils.getElementChildren(tableHeaderRow);
++            const tableBodyRows = tableRows.slice(1);
++            // Table header row as database header row
++            const viewsColumns = tableHeaderCells.map(() => {
++                return {
++                    id: nanoid(),
++                    hide: false,
++                    width: 180,
++                };
++            });
++            // Build database cells from table body rows
++            const cells = Object.create(null);
++            const rowIds = tableBodyRows.map(() => nanoid());
++            tableBodyRows.forEach((row, rowIndex) => {
++                const rowId = rowIds[rowIndex];
++                cells[rowId] = Object.create(null);
++                HastUtils.getElementChildren(row).forEach((cell, index) => {
++                    const column = viewsColumns[index];
++                    // Ignore cells the header row has no column for.
++                    if (!column) {
++                        return;
++                    }
++                    cells[rowId][column.id] = {
++                        columnId: column.id,
++                        // Convert the whole cell through the delta converter so inline
++                        // elements (links, bold, code, ...) survive the paste.
++                        value: {
++                            '$blocksuite:internal:text$': true,
++                            delta: deltaConverter.astToDelta(cell),
++                        },
+                     };
+                 });
+-                walkerContext.openNode({
+-                    type: 'block',
+-                    id: nanoid(),
+-                    flavour: 'affine:database',
+-                    props: {
+-                        views: [
+-                            {
+-                                id: nanoid(),
+-                                name: 'Table View',
+-                                mode: 'table',
+-                                columns: [],
+-                                filter: {
+-                                    type: 'group',
+-                                    op: 'and',
+-                                    conditions: [],
+-                                },
+-                                header: {
+-                                    titleColumn: viewsColumns[0]?.id,
+-                                    iconColumn: 'type',
+-                                },
++            });
++            // Build database columns from table header row
++            const columns = tableHeaderCells.map((_child, index) => {
++                return {
++                    type: index === 0 ? 'title' : 'rich-text',
++                    // Column names are plain strings, so collect the text content of
++                    // the header cell instead of only its direct text children.
++                    name: HastUtils.getTextContent(_child),
++                    data: {},
++                    id: viewsColumns[index].id,
++                };
++            });
++            walkerContext.openNode({
++                type: 'block',
++                id: nanoid(),
++                flavour: 'affine:database',
++                props: {
++                    views: [
++                        {
++                            id: nanoid(),
++                            name: 'Table View',
++                            mode: 'table',
++                            columns: [],
++                            filter: {
++                                type: 'group',
++                                op: 'and',
++                                conditions: [],
++                            },
++                            header: {
++                                titleColumn: viewsColumns[0]?.id,
++                                iconColumn: 'type',
+                             },
+-                        ],
+-                        title: {
+-                            '$blocksuite:internal:text$': true,
+-                            delta: [],
+                         },
+-                        cells,
+-                        columns,
++                    ],
++                    title: {
++                        '$blocksuite:internal:text$': true,
++                        delta: [],
+                     },
+-                    children: [],
+-                }, 'children');
+-                walkerContext.setNodeContext('affine:table:rowid', Object.keys(cells));
+-                walkerContext.skipChildren(1);
+-            }
+-            // The first child of each table body row is the database title cell
+-            if (o.node.tagName === 'tr') {
+-                const { deltaConverter } = context;
++                    cells,
++                    columns,
++                },
++                children: [],
++            }, 'children');
++            walkerContext.pushGlobalContextStack(TABLE_OPEN_KEY, true);
++            // The first cell of each table body row is the database title cell
++            tableBodyRows.forEach((row, rowIndex) => {
++                const titleCell = HastUtils.getElementChildren(row)[0];
+                 walkerContext
+                     .openNode({
+                     type: 'block',
+-                    id: walkerContext.getNodeContext('affine:table:rowid').shift() ?? nanoid(),
++                    id: rowIds[rowIndex],
+                     flavour: 'affine:paragraph',
+                     props: {
+                         text: {
+                             '$blocksuite:internal:text$': true,
+-                            delta: deltaConverter.astToDelta(o.node.children[0]),
++                            delta: titleCell ? deltaConverter.astToDelta(titleCell) : [],
+                         },
+                         type: 'text',
+                     },
+                     children: [],
+                 })
+                     .closeNode();
+-                walkerContext.skipAllChildren();
+-            }
++            });
++            // Rows are handled above, so keep the walker out of the table subtree.
++            // skipChildren (instead of skipAllChildren) still runs leave().
++            walkerContext.skipChildren(o.node.children.length);
+         },
+         leave: (o, context) => {
+             if (!HastUtils.isElement(o.node)) {
+@@ -117,7 +144,12 @@ export const databaseBlockHtmlAdapterMatcher = {
+             }
+             const { walkerContext } = context;
+             if (o.node.tagName === 'table') {
+-                walkerContext.closeNode();
++                const stack = walkerContext.getGlobalContextStack(TABLE_OPEN_KEY);
++                const opened = stack.pop();
++                walkerContext.setGlobalContextStack(TABLE_OPEN_KEY, stack);
++                if (opened) {
++                    walkerContext.closeNode();
++                }
+             }
+         },
+     },
+diff --git a/dist/root-block/widgets/format-bar/format-bar.js b/dist/root-block/widgets/format-bar/format-bar.js
+index 9f41e2e57b8a2f128b74af3ba43c6f68c5da7ea9..9cccca91a034addcfbf824c86735716414eba1b0 100644
+--- a/dist/root-block/widgets/format-bar/format-bar.js
++++ b/dist/root-block/widgets/format-bar/format-bar.js
+@@ -226,9 +226,21 @@ let AffineFormatBarWidget = (() => {
+                 this.requestUpdate();
+             });
+         }
++        _hide() {
++            const bar = this.formatBarElement;
++            if (!bar || !('hidePopover' in bar))
++                return;
++            if (!bar.matches(':popover-open'))
++                return;
++            bar.hidePopover();
++        }
+         _listenFloatingElement() {
+             const formatQuickBarElement = this.formatBarElement;
+             assertExists(formatQuickBarElement, 'format quick bar should exist');
++            if ('showPopover' in formatQuickBarElement &&
++                !formatQuickBarElement.matches(':popover-open')) {
++                formatQuickBarElement.showPopover();
++            }
+             const listenFloatingElement = (getElement) => {
+                 const initialElement = getElement();
+                 if (!initialElement) {
+@@ -241,6 +253,7 @@ let AffineFormatBarWidget = (() => {
+                     if (!element)
+                         return;
+                     computePosition(element, formatQuickBarElement, {
++                        strategy: 'fixed',
+                         placement: this._placement,
+                         middleware: [
+                             offset(10),
+@@ -465,6 +478,7 @@ let AffineFormatBarWidget = (() => {
+         disconnectedCallback() {
+             super.disconnectedCallback();
+             this._abortController.abort();
++            this._hide();
+             this.reset();
+             this._lastCursor = undefined;
+         }
+@@ -474,7 +488,7 @@ let AffineFormatBarWidget = (() => {
+             }
+             const items = ConfigRenderer(this);
+             return html `
+-      <editor-toolbar class="${AFFINE_FORMAT_BAR_WIDGET}">
++      <editor-toolbar popover="manual" class="${AFFINE_FORMAT_BAR_WIDGET}">
+         ${items}
+         <editor-toolbar-separator></editor-toolbar-separator>
+         ${toolbarMoreButton(this)}
+@@ -487,6 +501,7 @@ let AffineFormatBarWidget = (() => {
+         }
+         updated() {
+             if (!this._shouldDisplay()) {
++                this._hide();
+                 if (this._floatDisposables) {
+                     this._floatDisposables.dispose();
+                 }
+diff --git a/dist/root-block/widgets/format-bar/styles.js b/dist/root-block/widgets/format-bar/styles.js
+index b98a3c3b50fcde5ba4b71da04e0b1b5335dbfc90..ed3ad1195e39e8908ddf969983c7ffc861a49cd7 100644
+--- a/dist/root-block/widgets/format-bar/styles.js
++++ b/dist/root-block/widgets/format-bar/styles.js
+@@ -43,12 +43,20 @@ const paragraphButtonStyle = css `
+ `;
+ export const formatBarStyle = css `
+   .affine-format-bar-widget {
+-    position: absolute;
++    position: fixed;
+     display: none;
++    inset: auto;
++    margin: 0;
++    padding: 0;
++    overflow: visible;
+     z-index: var(--affine-z-index-popover);
+     user-select: none;
+   }
+ 
++  .affine-format-bar-widget:popover-open {
++    display: flex;
++  }
++
+   ${paragraphButtonStyle}
+ `;
+ //# sourceMappingURL=styles.js.map
+\ No newline at end of file
+diff --git a/src/database-block/adapters/html.ts b/src/database-block/adapters/html.ts
+index f8f942283be45f7b0a8d4b068f3c3a4429fb84c2..d0481042c11e5e8c1bcf3bdbccc99c877b3ce380 100644
+--- a/src/database-block/adapters/html.ts
++++ b/src/database-block/adapters/html.ts
+@@ -11,12 +11,29 @@ import {
+   type BlockHtmlAdapterMatcher,
+   HastUtils,
+   type InlineHtmlAST,
+-  TextUtils,
+ } from '@blocksuite/affine-shared/adapters';
+ import { type BlockSnapshot, nanoid } from '@blocksuite/store';
+ import { format } from 'date-fns/format';
+ 
+-const DATABASE_NODE_TYPES = ['table', 'thead', 'tbody', 'th', 'tr'];
++const DATABASE_NODE_TYPES = ['table'];
++
++// Tracks whether the matching enter() opened a database node, so leave() only
++// closes what was actually opened (a table without rows opens nothing).
++const TABLE_OPEN_KEY = 'affine:table:open';
++
++const TABLE_SECTION_TAGS = ['thead', 'tbody', 'tfoot'];
++
++// Collect the rows of a table, whether they sit directly under it or inside a
++// thead/tbody/tfoot section.
++const collectTableRows = (table: Element): Element[] =>
++  HastUtils.getElementChildren(table).flatMap(child => {
++    if (child.tagName === 'tr') {
++      return [child];
++    }
++    return TABLE_SECTION_TAGS.includes(child.tagName)
++      ? HastUtils.getElementChildren(child).filter(row => row.tagName === 'tr')
++      : [];
++  });
+ 
+ export const databaseBlockHtmlAdapterMatcher: BlockHtmlAdapterMatcher = {
+   flavour: DatabaseBlockSchema.model.flavour,
+@@ -28,118 +45,127 @@ export const databaseBlockHtmlAdapterMatcher: BlockHtmlAdapterMatcher = {
+       if (!HastUtils.isElement(o.node)) {
+         return;
+       }
+-      const { walkerContext } = context;
+-      if (o.node.tagName === 'table') {
+-        const tableHeader = HastUtils.querySelector(o.node, 'thead');
+-        if (!tableHeader) {
+-          return;
+-        }
+-        const tableHeaderRow = HastUtils.querySelector(tableHeader, 'tr');
+-        if (!tableHeaderRow) {
+-          return;
+-        }
+-        // Table header row as database header row
+-        const viewsColumns = tableHeaderRow.children.map(() => {
+-          return {
+-            id: nanoid(),
+-            hide: false,
+-            width: 180,
+-          };
+-        });
++      const { walkerContext, deltaConverter } = context;
++      if (o.node.tagName !== 'table') {
++        return;
++      }
+ 
+-        // Build database cells from table body rows
+-        const cells = Object.create(null);
+-        const tableBody = HastUtils.querySelector(o.node, 'tbody');
+-        tableBody?.children.forEach(row => {
+-          const rowId = nanoid();
+-          cells[rowId] = Object.create(null);
+-          (row as Element).children.forEach((cell, index) => {
+-            cells[rowId][viewsColumns[index].id] = {
+-              columnId: viewsColumns[index].id,
+-              value: TextUtils.createText(
+-                (cell as Element).children
+-                  .map(child => ('value' in child ? child.value : ''))
+-                  .join('')
+-              ),
+-            };
+-          });
+-        });
++      // Rows may sit directly under the table or inside a section element.
++      const tableRows = collectTableRows(o.node);
++      const tableHeaderRow = tableRows[0];
++      if (!tableHeaderRow) {
++        // Nothing to build a database from. Remember it so leave() does not
++        // close a node that was never opened.
++        walkerContext.pushGlobalContextStack<boolean>(TABLE_OPEN_KEY, false);
++        return;
++      }
++      const tableHeaderCells = HastUtils.getElementChildren(tableHeaderRow);
++      const tableBodyRows = tableRows.slice(1);
++
++      // Table header row as database header row
++      const viewsColumns = tableHeaderCells.map(() => {
++        return {
++          id: nanoid(),
++          hide: false,
++          width: 180,
++        };
++      });
+ 
+-        // Build database columns from table header row
+-        const columns = tableHeaderRow.children.map((_child, index) => {
+-          return {
+-            type: index === 0 ? 'title' : 'rich-text',
+-            name: (_child as Element).children
+-              .map(child => ('value' in child ? child.value : ''))
+-              .join(''),
+-            data: {},
+-            id: viewsColumns[index].id,
++      // Build database cells from table body rows
++      const cells = Object.create(null);
++      const rowIds = tableBodyRows.map(() => nanoid());
++      tableBodyRows.forEach((row, rowIndex) => {
++        const rowId = rowIds[rowIndex];
++        cells[rowId] = Object.create(null);
++        HastUtils.getElementChildren(row).forEach((cell, index) => {
++          const column = viewsColumns[index];
++          // Ignore cells the header row has no column for.
++          if (!column) {
++            return;
++          }
++          cells[rowId][column.id] = {
++            columnId: column.id,
++            // Convert the whole cell through the delta converter so inline
++            // elements (links, bold, code, ...) survive the paste.
++            value: {
++              '$blocksuite:internal:text$': true,
++              delta: deltaConverter.astToDelta(cell),
++            },
+           };
+         });
++      });
+ 
+-        walkerContext.openNode(
+-          {
+-            type: 'block',
+-            id: nanoid(),
+-            flavour: 'affine:database',
+-            props: {
+-              views: [
+-                {
+-                  id: nanoid(),
+-                  name: 'Table View',
+-                  mode: 'table',
+-                  columns: [],
+-                  filter: {
+-                    type: 'group',
+-                    op: 'and',
+-                    conditions: [],
+-                  },
+-                  header: {
+-                    titleColumn: viewsColumns[0]?.id,
+-                    iconColumn: 'type',
+-                  },
++      // Build database columns from table header row
++      const columns = tableHeaderCells.map((_child, index) => {
++        return {
++          type: index === 0 ? 'title' : 'rich-text',
++          // Column names are plain strings, so collect the text content of
++          // the header cell instead of only its direct text children.
++          name: HastUtils.getTextContent(_child),
++          data: {},
++          id: viewsColumns[index].id,
++        };
++      });
++
++      walkerContext.openNode(
++        {
++          type: 'block',
++          id: nanoid(),
++          flavour: 'affine:database',
++          props: {
++            views: [
++              {
++                id: nanoid(),
++                name: 'Table View',
++                mode: 'table',
++                columns: [],
++                filter: {
++                  type: 'group',
++                  op: 'and',
++                  conditions: [],
++                },
++                header: {
++                  titleColumn: viewsColumns[0]?.id,
++                  iconColumn: 'type',
+                 },
+-              ],
+-              title: {
+-                '$blocksuite:internal:text$': true,
+-                delta: [],
+               },
+-              cells,
+-              columns,
++            ],
++            title: {
++              '$blocksuite:internal:text$': true,
++              delta: [],
+             },
+-            children: [],
++            cells,
++            columns,
+           },
+-          'children'
+-        );
+-        walkerContext.setNodeContext('affine:table:rowid', Object.keys(cells));
+-        walkerContext.skipChildren(1);
+-      }
++          children: [],
++        },
++        'children'
++      );
++      walkerContext.pushGlobalContextStack<boolean>(TABLE_OPEN_KEY, true);
+ 
+-      // The first child of each table body row is the database title cell
+-      if (o.node.tagName === 'tr') {
+-        const { deltaConverter } = context;
++      // The first cell of each table body row is the database title cell
++      tableBodyRows.forEach((row, rowIndex) => {
++        const titleCell = HastUtils.getElementChildren(row)[0];
+         walkerContext
+           .openNode({
+             type: 'block',
+-            id:
+-              (
+-                walkerContext.getNodeContext(
+-                  'affine:table:rowid'
+-                ) as Array<string>
+-              ).shift() ?? nanoid(),
++            id: rowIds[rowIndex],
+             flavour: 'affine:paragraph',
+             props: {
+               text: {
+                 '$blocksuite:internal:text$': true,
+-                delta: deltaConverter.astToDelta(o.node.children[0]),
++                delta: titleCell ? deltaConverter.astToDelta(titleCell) : [],
+               },
+               type: 'text',
+             },
+             children: [],
+           })
+           .closeNode();
+-        walkerContext.skipAllChildren();
+-      }
++      });
++
++      // Rows are handled above, so keep the walker out of the table subtree.
++      // skipChildren (instead of skipAllChildren) still runs leave().
++      walkerContext.skipChildren(o.node.children.length);
+     },
+     leave: (o, context) => {
+       if (!HastUtils.isElement(o.node)) {
+@@ -147,7 +173,12 @@ export const databaseBlockHtmlAdapterMatcher: BlockHtmlAdapterMatcher = {
+       }
+       const { walkerContext } = context;
+       if (o.node.tagName === 'table') {
+-        walkerContext.closeNode();
++        const stack = walkerContext.getGlobalContextStack<boolean>(TABLE_OPEN_KEY);
++        const opened = stack.pop();
++        walkerContext.setGlobalContextStack(TABLE_OPEN_KEY, stack);
++        if (opened) {
++          walkerContext.closeNode();
++        }
+       }
+     },
+   },
 diff --git a/src/root-block/widgets/format-bar/format-bar.ts b/src/root-block/widgets/format-bar/format-bar.ts
+index 3691dc9e085b2d3d1adac77fea89b2e6d8816ac9..fa9ab5ba7699715f12cfc42dcc5e55d4273859d8 100644
 --- a/src/root-block/widgets/format-bar/format-bar.ts
 +++ b/src/root-block/widgets/format-bar/format-bar.ts
 @@ -236,9 +236,22 @@ export class AffineFormatBarWidget extends WidgetComponent {
@@ -58,93 +656,12 @@ diff --git a/src/root-block/widgets/format-bar/format-bar.ts b/src/root-block/wi
          this._floatDisposables.dispose();
        }
 diff --git a/src/root-block/widgets/format-bar/styles.ts b/src/root-block/widgets/format-bar/styles.ts
+index 27222b37b446bc4556e82be6b560b26b373b40a0..769e080c95d458387686c68c754765f48f5e69cf 100644
 --- a/src/root-block/widgets/format-bar/styles.ts
 +++ b/src/root-block/widgets/format-bar/styles.ts
 @@ -46,11 +46,19 @@ const paragraphButtonStyle = css`
  
  export const formatBarStyle = css`
-   .affine-format-bar-widget {
--    position: absolute;
-+    position: fixed;
-     display: none;
-+    inset: auto;
-+    margin: 0;
-+    padding: 0;
-+    overflow: visible;
-     z-index: var(--affine-z-index-popover);
-     user-select: none;
-   }
- 
-+  .affine-format-bar-widget:popover-open {
-+    display: flex;
-+  }
-+
-   ${paragraphButtonStyle}
- `;
-diff --git a/dist/root-block/widgets/format-bar/format-bar.js b/dist/root-block/widgets/format-bar/format-bar.js
---- a/dist/root-block/widgets/format-bar/format-bar.js
-+++ b/dist/root-block/widgets/format-bar/format-bar.js
-@@ -226,9 +226,21 @@ let AffineFormatBarWidget = (() => {
-                 this.requestUpdate();
-             });
-         }
-+        _hide() {
-+            const bar = this.formatBarElement;
-+            if (!bar || !('hidePopover' in bar))
-+                return;
-+            if (!bar.matches(':popover-open'))
-+                return;
-+            bar.hidePopover();
-+        }
-         _listenFloatingElement() {
-             const formatQuickBarElement = this.formatBarElement;
-             assertExists(formatQuickBarElement, 'format quick bar should exist');
-+            if ('showPopover' in formatQuickBarElement &&
-+                !formatQuickBarElement.matches(':popover-open')) {
-+                formatQuickBarElement.showPopover();
-+            }
-             const listenFloatingElement = (getElement) => {
-                 const initialElement = getElement();
-                 if (!initialElement) {
-@@ -241,6 +253,7 @@ let AffineFormatBarWidget = (() => {
-                     if (!element)
-                         return;
-                     computePosition(element, formatQuickBarElement, {
-+                        strategy: 'fixed',
-                         placement: this._placement,
-                         middleware: [
-                             offset(10),
-@@ -465,6 +478,7 @@ let AffineFormatBarWidget = (() => {
-         disconnectedCallback() {
-             super.disconnectedCallback();
-             this._abortController.abort();
-+            this._hide();
-             this.reset();
-             this._lastCursor = undefined;
-         }
-@@ -474,7 +488,7 @@ let AffineFormatBarWidget = (() => {
-             }
-             const items = ConfigRenderer(this);
-             return html `
--      <editor-toolbar class="${AFFINE_FORMAT_BAR_WIDGET}">
-+      <editor-toolbar popover="manual" class="${AFFINE_FORMAT_BAR_WIDGET}">
-         ${items}
-         <editor-toolbar-separator></editor-toolbar-separator>
-         ${toolbarMoreButton(this)}
-@@ -487,6 +501,7 @@ let AffineFormatBarWidget = (() => {
-         }
-         updated() {
-             if (!this._shouldDisplay()) {
-+                this._hide();
-                 if (this._floatDisposables) {
-                     this._floatDisposables.dispose();
-                 }
-diff --git a/dist/root-block/widgets/format-bar/styles.js b/dist/root-block/widgets/format-bar/styles.js
---- a/dist/root-block/widgets/format-bar/styles.js
-+++ b/dist/root-block/widgets/format-bar/styles.js
-@@ -43,11 +43,19 @@ const paragraphButtonStyle = css `
- `;
- export const formatBarStyle = css `
    .affine-format-bar-widget {
 -    position: absolute;
 +    position: fixed;
