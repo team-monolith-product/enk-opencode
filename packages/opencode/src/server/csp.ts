@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { Flag } from "../flag/flag"
 
 declare const OPENCODE_ASSET_ORIGIN: string
@@ -34,3 +35,13 @@ const buildCsp = (hash = "") =>
 
 export const DEFAULT_CSP = buildCsp()
 export const csp = (hash = "") => buildCsp(hash)
+
+// 테마 프리로드 스크립트는 FOUC 를 막으려고 빌드 시 인라인된다(app/vite.js). script-src 에
+// 'unsafe-inline' 이 없으므로 내용의 sha256 을 CSP 에 실어야 실행된다. 임베디드/프록시 양쪽
+// HTML 응답이 같은 규칙을 써야 해서 여기서 공유한다. src 가 있으면 외부 스크립트라 해시 불필요.
+export const themePreloadHash = (html: string) => {
+  const match = html.match(
+    /<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i,
+  )
+  return match ? createHash("sha256").update(match[2]).digest("base64") : ""
+}

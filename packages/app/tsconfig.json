@@ -22,6 +22,6 @@
       "@blocksuite/store": ["./node_modules/@blocksuite/store/dist/index.d.ts"]
     }
   },
-  "include": ["src", "package.json"],
+  "include": ["src", "vite.js", "package.json"],
   "exclude": ["dist", "ts-dist"]
 }

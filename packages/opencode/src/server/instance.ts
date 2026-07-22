@@ -2,7 +2,6 @@ import { describeRoute, resolver } from "hono-openapi"
 import { Hono } from "hono"
 import { proxy } from "hono/proxy"
 import z from "zod"
-import { createHash } from "node:crypto"
 import { Log } from "../util/log"
 import { Format } from "../format"
 import { TuiRoutes } from "./routes/tui"
@@ -32,19 +31,9 @@ import { EventRoutes } from "./routes/event"
 import { DocRoutes } from "../doc/routes"
 import { SessionDocRoutes } from "../doc/session-routes"
 import { errorHandler } from "./middleware"
-import { csp } from "./csp"
+import { csp, themePreloadHash } from "./csp"
 
 const log = Log.create({ service: "server" })
-
-// 테마 프리로드 스크립트는 FOUC 를 막으려고 빌드 시 인라인된다(app/vite.js). script-src 에
-// 'unsafe-inline' 이 없으므로 내용의 sha256 을 CSP 에 실어야 실행된다. 임베디드/프록시 양쪽
-// HTML 경로가 같은 규칙을 써야 해서 여기서 공유한다. src 속성이 있으면 인라인이 아니라 해시 불필요.
-const themePreloadHash = (html: string) => {
-  const match = html.match(
-    /<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i,
-  )
-  return match ? createHash("sha256").update(match[2]).digest("base64") : ""
-}
 
 const embeddedUIPromise = Flag.OPENCODE_DISABLE_EMBEDDED_WEB_UI
   ? Promise.resolve(null)
