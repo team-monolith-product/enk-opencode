@@ -32,9 +32,19 @@ import { EventRoutes } from "./routes/event"
 import { DocRoutes } from "../doc/routes"
 import { SessionDocRoutes } from "../doc/session-routes"
 import { errorHandler } from "./middleware"
-import { DEFAULT_CSP, csp } from "./csp"
+import { csp } from "./csp"
 
 const log = Log.create({ service: "server" })
+
+// 테마 프리로드 스크립트는 FOUC 를 막으려고 빌드 시 인라인된다(app/vite.js). script-src 에
+// 'unsafe-inline' 이 없으므로 내용의 sha256 을 CSP 에 실어야 실행된다. 임베디드/프록시 양쪽
+// HTML 경로가 같은 규칙을 써야 해서 여기서 공유한다. src 속성이 있으면 인라인이 아니라 해시 불필요.
+const themePreloadHash = (html: string) => {
+  const match = html.match(
+    /<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i,
+  )
+  return match ? createHash("sha256").update(match[2]).digest("base64") : ""
+}
 
 const embeddedUIPromise = Flag.OPENCODE_DISABLE_EMBEDDED_WEB_UI
   ? Promise.resolve(null)
@@ -267,17 +277,17 @@ export const InstanceRoutes = (app?: Hono) =>
         if (!match) return c.json({ error: "Not Found" }, 404)
         const file = Bun.file(match)
         if (await file.exists()) {
-          c.header("Content-Type", file.type)
           if (file.type.startsWith("text/html")) {
-            c.header("Content-Security-Policy", DEFAULT_CSP)
+            let html = await file.text()
+            const hash = themePreloadHash(html)
             if (basePath !== "/") {
-              const html = await file.text()
-              const rewritten = html
+              html = html
                 .replace(/(href|src)="\//g, `$1="`)
                 .replace("<head>", `<head>\n    <base href="${basePath}/" />`)
-              return c.html(rewritten)
             }
+            return c.html(html, { headers: { "Content-Security-Policy": csp(hash) } })
           }
+          c.header("Content-Type", file.type)
           return c.body(await file.arrayBuffer())
         } else {
           return c.json({ error: "Not Found" }, 404)
@@ -293,10 +303,7 @@ export const InstanceRoutes = (app?: Hono) =>
         const isHTML = response.headers.get("content-type")?.includes("text/html")
         if (isHTML) {
           let html = await response.text()
-          const scriptMatch = html.match(
-            /<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i,
-          )
-          const hash = scriptMatch ? createHash("sha256").update(scriptMatch[2]).digest("base64") : ""
+          const hash = themePreloadHash(html)
           if (basePath !== "/") {
             html = html
               .replace(/(href|src)="\//g, `$1="`)
