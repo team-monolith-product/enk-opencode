@@ -45,6 +45,7 @@ import { ServerConnection, ServerProvider, serverName, useServer } from "@/conte
 import { SettingsProvider } from "@/context/settings"
 import { TerminalProvider } from "@/context/terminal"
 import { ProjectSummaryBridge } from "@/components/project-summary-bridge"
+import { ProjectThumbnailBridge } from "@/components/project-thumbnail-bridge"
 import DirectoryLayout from "@/pages/directory-layout"
 import Layout from "@/pages/layout"
 import { ErrorPage } from "./pages/error"
@@ -62,6 +63,7 @@ if (typeof location === "object" && /\/session(?:\/|$)/.test(location.pathname))
 
 const SessionRoute = () => (
   <SessionProviders>
+    <ProjectThumbnailBridge />
     <Session />
   </SessionProviders>
 )
