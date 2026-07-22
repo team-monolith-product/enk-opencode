@@ -21,7 +21,6 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
-import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
@@ -68,7 +67,6 @@ import {
   followupShouldQueue,
   NON_EMPTY_TEXT,
   promptHasDraft,
-  sessionBusy,
   submitIntent,
   type FollowupMode,
 } from "./prompt-input/composer-state"
@@ -80,14 +78,12 @@ import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { promptFromDocMarkdown } from "@/components/prompt-input/prompt-plain"
 import { PromptDocShell } from "./prompt-input/doc-shell"
-import { createPromptDoc, type PromptDocConfig } from "./prompt-input/doc"
 import { MAX_PROMPT_DOC_CHARS } from "@/constants/prompt"
 import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
-import { connectSubmit, respondSubmit, startSubmit, startStopSubmit, type DocSubmitState } from "./prompt-input/doc-submit"
-import { startRtcKeepalive } from "@/utils/rtc-keepalive"
-import { DialogDocSubmit } from "./doc-submit/dialog-doc-submit"
+import { startSubmit } from "./prompt-input/doc-submit"
+import { usePromptDocSession, type PromptMode } from "@/context/prompt-doc-session"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 
 interface PromptInputProps {
@@ -145,8 +141,6 @@ const permissionsOff = import.meta.env.VITE_DISABLE_PROMPT_PERMISSIONS === "true
 const footerOff = import.meta.env.VITE_DISABLE_PROMPT_FOOTER === "true"
 const wysiwygOnly = import.meta.env.VITE_DISABLE_WYSIWYG_ONLY === "true"
 
-type PromptMode = "normal" | "shell" | "doc"
-
 const canvasMode = (mode: PromptMode) => mode === "doc"
 const DOC_MIN = 150
 const DOC_HEIGHT = 300
@@ -157,7 +151,6 @@ const AUTO_EXPAND_KEY = "prompt.doc.autoExpand"
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
   const navigate = useNavigate()
-  const globalSDK = useGlobalSDK()
   const globalSync = useGlobalSync()
   const sync = useSync()
   const local = useLocal()
@@ -317,16 +310,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return paths
   })
   const info = createMemo(() => (params.id ? sync.session.get(params.id) : undefined))
-  const status = createMemo(
-    () =>
-      sync.data.session_status[params.id ?? ""] ?? {
-        type: "idle",
-      },
-  )
-  const working = createMemo(() => {
-    const id = params.id
-    return sessionBusy(status(), id ? sync.data.message[id] : undefined)
-  })
+  // The collaborative doc, the consent socket and the composer mode are owned by the session (see
+  // context/prompt-doc-session): this component unmounts whenever a question or permission dock
+  // takes over, and none of that state may die with it.
+  const session = usePromptDocSession()
+  const doc = session.doc
+  const docMode = session.mode
+  const setDocMode = session.setMode
+  const working = session.working
   const imageAttachments = createMemo(() =>
     prompt.current().filter((part): part is ImageAttachmentPart => part.type === "image"),
   )
@@ -337,7 +328,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     savedPrompt: PromptHistoryEntry | null
     placeholder: number
     draggingType: "image" | "@mention" | null
-    mode: PromptMode
     applyingHistory: boolean
   }>({
     popover: null,
@@ -345,7 +335,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     savedPrompt: null as PromptHistoryEntry | null,
     placeholder: Math.floor(Math.random() * EXAMPLES.length),
     draggingType: null,
-    mode: "doc",
     applyingHistory: false,
   })
   const [height, setHeight] = createSignal(DOC_HEIGHT)
@@ -474,7 +463,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const max = () => Math.max(DOC_MIN, Math.floor(window.innerHeight * DOC_RATIO))
   const clamp = (value: number) => Math.min(max(), Math.max(DOC_MIN, value))
   const fit = () => {
-    if (store.mode !== "doc") return
+    if (docMode() !== "doc") return
     setHeight((value) => clamp(value))
   }
   const shellResize = (event: PointerEvent & { currentTarget: HTMLDivElement }) => {
@@ -543,7 +532,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   onCleanup(() => window.removeEventListener("resize", fit))
   createEffect(fit)
 
-  const buttonsSpring = useSpring(() => (store.mode === "shell" ? 0 : 1), { visualDuration: 0.2, bounce: 0 })
+  const buttonsSpring = useSpring(() => (docMode() === "shell" ? 0 : 1), { visualDuration: 0.2, bounce: 0 })
   const motion = (value: number) => ({
     opacity: value,
     transform: `scale(${0.95 + value * 0.05})`,
@@ -551,55 +540,22 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     "pointer-events": value > 0.5 ? ("auto" as const) : ("none" as const),
   })
   const buttons = createMemo(() => motion(buttonsSpring()))
-  const submitStyle = createMemo(() => (canvasMode(store.mode) ? motion(1) : buttons()))
+  const submitStyle = createMemo(() => (canvasMode(docMode()) ? motion(1) : buttons()))
   const shell = createMemo(() => motion(1 - buttonsSpring()))
   const control = createMemo(() => ({ height: "28px", ...buttons() }))
 
   const commentCount = createMemo(() => {
-    if (store.mode !== "normal") return 0
+    if (docMode() !== "normal") return 0
     return prompt.context.items().filter((item) => !!item.comment?.trim()).length
   })
 
   const parentParams = useParentParams()
   // `?readonly=true` makes this client a pure observer (captured once at module load, so it is stable).
   const readonly = parentParams.readonly
-  const [docConfig, setDocConfig] = createStore<PromptDocConfig>({
-    sessionID: params.id,
-    url: sdk.url,
-    directory: sdk.directory,
-    submitKey: submitConfig(),
-    stopKey: stopConfig(),
-    user: parentParams.user[0],
-    readonly,
-  })
-  createEffect(() => {
-    setDocConfig({
-      sessionID: params.id,
-      url: sdk.url,
-      directory: sdk.directory,
-      submitKey: submitConfig(),
-      stopKey: stopConfig(),
-      user: parentParams.user[0],
-      readonly,
-    })
-  })
-  const doc = createPromptDoc({
-    config: docConfig,
-    client: sdk.client,
-    onSubmit: () => void submit(),
-    // Esc in the doc editor: swallow BlockSuite's native handling always; stop only while a run is
-    // in flight (requestStop drives the shared stop-consent vote in collaborative docs).
-    onStop: () => {
-      if (working()) void requestStop()
-    },
-  })
-  // detach() keeps the doc handle (sync + undo history) alive across panel unmounts, so the
-  // component itself owns the final teardown.
-  onCleanup(() => doc.dispose())
 
   const bridge = usePromptDocBridge()
   createEffect(() => {
-    bridge.setMode(store.mode)
+    bridge.setMode(docMode())
   })
   const relPath = (path: string) => {
     const dir = sdk.directory.replace(/\/+$/, "")
@@ -611,11 +567,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   createEffect(() => {
     bridge.setAddReference((path, nodeType) => {
-      if (store.mode !== "doc") return false
+      if (docMode() !== "doc") return false
       return doc.addReference(relPath(path), nodeType ?? "file")
     })
     bridge.setAddLineReference((input) => {
-      if (store.mode !== "doc") return false
+      if (docMode() !== "doc") return false
       const range = input.selection
       return doc.addLineReference({
         path: relPath(input.path),
@@ -653,7 +609,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const [countShake, setCountShake] = createSignal(0)
 
   const hasDraft = createMemo(() => {
-    if (store.mode === "doc") return doc.filled()
+    if (docMode() === "doc") return doc.filled()
     if (imageAttachments().length > 0 || commentCount() > 0) return true
     if (!prompt.dirty()) return false
     return promptHasDraft(prompt.current())
@@ -713,208 +669,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     context: prompt.context,
     replace: comments.replace,
   })
-  const [approval, setApproval] = createSignal<DocSubmitState | undefined>()
-  let approvalID: string | undefined
-  let finalizedID: string | undefined
-  let approvalSession: string | undefined
-
-  const approvalActor = () => doc.actorID()
-  const clearContext = () => {
-    for (const item of prompt.context.items()) {
-      prompt.context.remove(item.key)
-    }
-  }
-  const closeApproval = () => {
-    dialog.close()
-    approvalID = undefined
-    setApproval(undefined)
-  }
-  const showApproval = (state: DocSubmitState) => {
-    const actorID = approvalActor()
-    if (!actorID) return
-    // No membership gate here: the server casts only to connected peers and joins any connected
-    // non-member to a pending vote (dynamic membership), so every state we receive is ours to
-    // render. The old gate silently dropped casts when membership drifted — the "dialog never
-    // appeared" bug.
-    // Terminal states are handled exactly once per submit: a server replay on reconnect (or a
-    // duplicate cast) for an already-resolved submit must not re-clear context or re-open a dialog.
-    if (state.status !== "pending") {
-      if (finalizedID === state.submitID) return
-      finalizedID = state.submitID
-      // A 'stop' vote shows no terminal screen — any resolution just closes. Stopping the response
-      // and the response finishing on its own are the same end state, so there's nothing to show:
-      // on approval the server already cancelled the run; a reject/expire simply does nothing.
-      if (state.targetKind === "stop") {
-        if (approvalID === state.submitID) closeApproval()
-        return
-      }
-    }
-    if (state.status === "sent") {
-      clearContext()
-      if (approvalID === state.submitID) closeApproval()
-      return
-    }
-    setApproval(state)
-    if (approvalID === state.submitID) return
-    approvalID = state.submitID
-    dialog.show(
-      () => (
-        <DialogDocSubmit
-          state={approval}
-          actorID={actorID}
-          spectator={readonly}
-          kind={approval()?.targetKind === "stop" ? "stop" : "doc"}
-          sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
-          approve={() => {
-            const current = approval()
-            if (!current) return
-            void respondSubmit({
-              baseUrl: sdk.url,
-              directory: sdk.directory,
-              sessionID: current.sessionID,
-              submitID: current.submitID,
-              actorID,
-              action: "approve",
-            })
-              .then(setApproval)
-              .catch(() =>
-                showToast({
-                  title: "전송 동의 실패",
-                  description: language.t("common.requestFailed"),
-                }),
-              )
-          }}
-          cancel={() => {
-            const current = approval()
-            if (!current) return
-            void respondSubmit({
-              baseUrl: sdk.url,
-              directory: sdk.directory,
-              sessionID: current.sessionID,
-              submitID: current.submitID,
-              actorID,
-              action: "cancel",
-            })
-              .then(setApproval)
-              .catch(() =>
-                showToast({
-                  title: "전송 동의 취소 실패",
-                  description: language.t("common.requestFailed"),
-                }),
-              )
-          }}
-          exclude={() => {
-            const current = approval()
-            if (!current) return
-            void respondSubmit({
-              baseUrl: sdk.url,
-              directory: sdk.directory,
-              sessionID: current.sessionID,
-              submitID: current.submitID,
-              actorID,
-              action: "exclude",
-            })
-              .then(setApproval)
-              .catch(() =>
-                showToast({
-                  title: "전송 실패",
-                  description: language.t("common.requestFailed"),
-                }),
-              )
-          }}
-          close={closeApproval}
-          onExpire={() => {
-            // Server terminal cast never arrived — drive the same "expired" transition locally so the
-            // dialog resolves instead of freezing at 0초. Routed through showApproval so finalizedID is
-            // set: a late server cast for this submit is then ignored rather than re-opening the dialog.
-            const current = approval()
-            if (current?.status === "pending") showApproval({ ...current, status: "expired" })
-          }}
-        />
-      ),
-      () => {
-        const current = approval()
-        if (current?.status === "pending") {
-          approvalID = undefined
-          window.setTimeout(() => {
-            const next = approval()
-            if (next?.status === "pending") showApproval(next)
-          }, 120)
-          return
-        }
-        approvalID = undefined
-        setApproval(undefined)
-      },
-    )
-  }
-
-  createEffect((prev) => {
-    const id = params.id
-    if (prev === id) return id
-    doc.reset()
-    return id
-  })
-
-  createEffect(() => {
-    const id = params.id
-    if (!id) return
-    void doc.refresh(id)
-  })
-
-  // Keep this tab's JS alive for the whole collaborative doc session — always on, not toggled by
-  // visibility or participant count (a frozen tab cannot re-enable itself when someone joins later,
-  // and full-window occlusion flips the hidden state without a reliable event on every platform).
-  // This is what lets a backgrounded collaborator keep ponging (stays out of 나감) and keep
-  // receiving vote casts. Readonly spectators don't participate, so they skip it.
-  createEffect(() => {
-    if (store.mode !== "doc" || readonly) return
-    const stop = startRtcKeepalive()
-    onCleanup(stop)
-  })
-
-  createEffect(() => {
-    const sessionID = params.id
-    const docID = doc.docID()
-    const actorID = doc.actorID()
-    if (store.mode !== "doc" || !sessionID || !docID || !actorID) return
-    // A readonly viewer connects observer-only: it WATCHES the consent vote (spectator dialog) but the
-    // server keeps observers out of `peers`/targets(), so it is never counted as a 동시전송 target.
-    const stop = connectSubmit({
-      baseUrl: sdk.url,
-      directory: sdk.directory,
-      sessionID,
-      docID,
-      actorID,
-      observer: readonly,
-      event: (event) => showApproval(event.state),
-    })
-    onCleanup(stop)
-  })
-
-  createEffect(() => {
-    const id = params.id
-    if (!id) return
-    void globalSDK.event.start()
-    const unsub = globalSDK.event.on(sdk.directory, (event) => {
-      const item = event as {
-        type: string
-        properties: { sessionID: string; docID: string; clientID?: string; init?: boolean }
-      }
-      if (item.type !== "doc.prompt.rotated") return
-      const props = item.properties
-      if (props.sessionID !== id) return
-      if (props.clientID === doc.clientID) return
-      void doc.pivot(props.sessionID, props.docID, { init: props.init ?? false }).then(() => {
-        if (store.mode === "doc") return
-        setStore("mode", "doc")
-      })
-    })
-    onCleanup(unsub)
-  })
 
   const contextItems = createMemo(() => {
     const items = prompt.context.items()
-    if (store.mode !== "shell") return items
+    if (docMode() !== "shell") return items
     return items.filter((item) => !isLineContextItem(item) && !item.comment?.trim())
   })
 
@@ -947,7 +705,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const placeholder = createMemo(() =>
     promptPlaceholder({
-      mode: store.mode,
+      mode: docMode(),
       commentCount: commentCount(),
       example: suggest() ? language.t(EXAMPLES[store.placeholder]) : "",
       suggest: suggest(),
@@ -1076,7 +834,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           file={file!}
           onAdd={async (edited) => {
             try {
-              if (store.mode === "doc") await doc.addFiles([edited])
+              if (docMode() === "doc") await doc.addFiles([edited])
               else await addAttachments([edited])
             } catch {
               showToast({ title: language.t("common.requestFailed") })
@@ -1092,9 +850,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     // A readonly viewer stays locked in the read-only doc view — no switching into the editable
     // normal/shell composers.
     if (readonly) return
-    if (store.mode === mode) return
-    if (store.mode === "doc" && mode !== "doc") doc.detach()
-    setStore("mode", mode)
+    if (docMode() === mode) return
+    if (docMode() === "doc" && mode !== "doc") doc.detach()
+    setDocMode(mode)
     setStore("popover", null)
     if (mode === "normal") requestAnimationFrame(() => editorRef?.focus())
   }
@@ -1109,7 +867,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const modeButtons = () => (
     <Show when={!wysiwygOnly}>
       {modes.map((item) => {
-        const selected = store.mode === item.mode
+        const selected = docMode() === item.mode
         return (
           <Tooltip placement="top" value={language.t(item.label)}>
             <Button
@@ -1123,7 +881,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 "pointer-events-none bg-surface-base-active text-text-strong [&_[data-slot=icon-svg]]:text-icon-strong":
                   selected,
               }}
-              style={canvasMode(store.mode) ? undefined : buttons()}
+              style={canvasMode(docMode()) ? undefined : buttons()}
               aria-disabled={selected || readonly}
               tabIndex={selected || readonly ? -1 : undefined}
               onClick={() => setMode(item.mode)}
@@ -1144,7 +902,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       title: language.t("prompt.action.attachFile"),
       category: language.t("command.category.file"),
       keybind: "mod+u",
-      disabled: store.mode !== "normal",
+      disabled: docMode() !== "normal",
       onSelect: pick,
     },
     {
@@ -1152,7 +910,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       title: language.t("command.prompt.mode.shell"),
       category: language.t("command.category.session"),
       keybind: shellModeKey,
-      disabled: store.mode === "shell",
+      disabled: docMode() === "shell",
       onSelect: () => setMode("shell"),
     },
     {
@@ -1160,14 +918,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       title: language.t("command.prompt.mode.normal"),
       category: language.t("command.category.session"),
       keybind: normalModeKey,
-      disabled: store.mode === "normal",
+      disabled: docMode() === "normal",
       onSelect: () => setMode("normal"),
     },
     {
       id: "prompt.mode.doc",
       title: language.t("command.prompt.mode.doc"),
       category: language.t("command.category.session"),
-      disabled: store.mode === "doc",
+      disabled: docMode() === "doc",
       onSelect: () => setMode("doc"),
     },
     // Registered purely so send/stop shortcuts appear in Settings → Shortcuts (Prompt group) and
@@ -1487,7 +1245,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       () => prompt.current(),
       (parts) => {
         if (composing()) return
-        if (canvasMode(store.mode)) return
+        if (canvasMode(docMode())) return
         if (!editorRef) return
         reconcile(parts.filter((part) => part.type !== "image"))
       },
@@ -1495,7 +1253,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   )
 
   createEffect(() => {
-    if (canvasMode(store.mode)) return
+    if (canvasMode(docMode())) return
     requestAnimationFrame(() => {
       if (!editorRef) return
       reconcile(prompt.current().filter((part) => part.type !== "image"))
@@ -1606,7 +1364,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return
     }
 
-    const shellMode = store.mode === "shell"
+    const shellMode = docMode() === "shell"
 
     if (!shellMode) {
       if (promptTriggersOff) {
@@ -1638,7 +1396,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const addPart = (part: ContentPart) => {
     if (part.type === "image") return false
-    if (store.mode === "doc") {
+    if (docMode() === "doc") {
       const cursor = prompt.cursor() ?? promptLength(prompt.current())
       prompt.set([...prompt.current(), part], cursor)
       return true
@@ -1753,7 +1511,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           })
         }
 
-        setStore("mode", "normal")
+        setDocMode("normal")
         setStore("popover", null)
         setStore("historyIndex", -1)
         setStore("savedPrompt", null)
@@ -1772,7 +1530,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const navigateHistory = (direction: "up" | "down") => {
     const result = navigatePromptHistory({
       direction,
-      entries: store.mode === "shell" ? shellHistory.entries : history.entries,
+      entries: docMode() === "shell" ? shellHistory.entries : history.entries,
       historyIndex: store.historyIndex,
       currentPrompt: prompt.current(),
       currentComments: historyComments(),
@@ -1791,7 +1549,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     isDialogActive: () => !!dialog.active,
     setDraggingType: (type) => setStore("draggingType", type),
     focusEditor: () => {
-      if (store.mode === "doc") {
+      if (docMode() === "doc") {
         doc.refocus()
         return
       }
@@ -1800,7 +1558,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     },
     addPart,
     dropPath: async (path) => {
-      if (store.mode !== "doc") return false
+      if (docMode() !== "doc") return false
       const dir = sdk.directory.replace(/\/+$/, "")
       const rel =
         path.startsWith(dir) && (path === dir || path[dir.length] === "/")
@@ -1811,7 +1569,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return ok
     },
     dropFiles: async (list) => {
-      if (store.mode !== "doc") return false
+      if (docMode() !== "doc") return false
       const { added, tooLarge } = await doc.addFiles(list)
       if (tooLarge) {
         showToast({
@@ -1847,7 +1605,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
 
   createEffect(() => {
-    if (store.mode !== "doc") return
+    if (docMode() !== "doc") return
     if (params.id) return
     void ensure().then((id) => {
       if (!id) return
@@ -1860,7 +1618,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     imageAttachments,
     commentCount,
     autoAccept: () => accepting(),
-    mode: () => store.mode,
+    mode: () => docMode(),
     working,
     editor: () => editorRef,
     queueScroll,
@@ -1869,9 +1627,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     resetHistoryNavigation: () => {
       resetHistoryNavigation(true)
     },
-    setMode: (mode) => setStore("mode", mode),
+    setMode: (mode) => setDocMode(mode),
     setPopover: (popover) => setStore("popover", popover),
-    newSessionWorktree: () => (store.mode === "doc" ? "main" : props.newSessionWorktree),
+    newSessionWorktree: () => (docMode() === "doc" ? "main" : props.newSessionWorktree),
     onNewSessionWorktreeReset: props.onNewSessionWorktreeReset,
     shouldQueue: () => followupShouldQueue(params.id, mode(), working()),
     onQueue: props.onQueue,
@@ -1888,7 +1646,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onAbort: props.onAbort,
     onSubmit: props.onSubmit,
     approve: async (input) => {
-      if (store.mode !== "doc") return false
+      if (docMode() !== "doc") return false
       const docID = doc.docID()
       const actorID = doc.actorID()
       if (!docID || !actorID) return false
@@ -1918,11 +1676,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             parts: input.parts,
           },
         })
-        approvalSession = input.sessionID
-        showApproval(state)
+        session.setApprovalSession(input.sessionID)
+        session.showApproval(state)
         return true
       } catch {
-        approvalSession = input.sessionID
+        session.setApprovalSession(input.sessionID)
         showToast({
           title: "전송 동의 요청 실패",
           description: language.t("common.requestFailed"),
@@ -1934,49 +1692,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const exitDoc = () => {
     doc.detach()
-    setStore("mode", "normal")
+    setDocMode("normal")
     setStore("popover", null)
     requestAnimationFrame(() => editorRef?.focus())
   }
 
-  // Stopping the AI mid-response is a shared action in a collaborative doc: gate it behind the same
-  // consent vote as sending. Solo (or non-doc) falls straight through to a direct abort. The dialog
-  // is driven by the vote, so it stays up even if the response finishes first; on resolution it just
-  // closes (server already cancelled on approval, or nothing on reject — same end state either way).
-  const requestStop = async () => {
-    const sessionID = params.id
-    const docID = doc.docID()
-    const actorID = doc.actorID()
-    if (store.mode !== "doc" || !sessionID || !docID || !actorID) {
-      await abort()
-      return
-    }
-    const list = doc.actors()
-    const ids = Array.from(new Set([actorID, ...list.map((item) => item.actorID)]))
-    if (ids.length <= 1) {
-      await abort()
-      return
-    }
-    const names: Record<string, string> = {}
-    for (const item of list) {
-      const name = item.name?.trim()
-      if (name && name !== item.actorID) names[item.actorID] = name
-    }
-    try {
-      const state = await startStopSubmit({
-        baseUrl: sdk.url,
-        directory: sdk.directory,
-        sessionID,
-        docID,
-        actorID,
-        names,
-      })
-      approvalSession = sessionID
-      showApproval(state)
-    } catch {
-      await abort()
-    }
-  }
+  // Stopping is a shared action (see context/prompt-doc-session): the session owns the vote so it
+  // still works — and still asks — while a question or permission dock hides this composer. The
+  // local abort side effects (queued followups, todos) are handed over below via setHandlers.
+  const requestStop = () => session.requestStop()
 
   async function submit() {
     // A readonly viewer cannot send or stop — the submit affordances are hidden, this is defensive.
@@ -1986,7 +1710,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return
     }
 
-    if (store.mode === "doc") {
+    if (docMode() === "doc") {
       // Over the limit: the submit button stays enabled so a press gives feedback — shake the red
       // count and toast, but do not send. Covers both the button and the submit-key path.
       if (doc.length() > MAX_PROMPT_DOC_CHARS) {
@@ -2022,7 +1746,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           dataUrl: asset.dataUrl,
         })) ?? []),
       ]
-      approvalSession = undefined
+      session.setApprovalSession(undefined)
       const sessionID = await handleSubmit(undefined, {
         prompt: base,
         prepare: async (id) => [
@@ -2031,7 +1755,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         ],
       })
       if (!sessionID) return
-      if (approvalSession === sessionID) return
+      if (session.approvalSession() === sessionID) return
       try {
         await doc.advance(sessionID)
       } catch {
@@ -2051,10 +1775,22 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     void submit()
   }
 
+  // Hand the session what only a mounted composer can do: build and send the prompt (the doc
+  // editor's submit key routes through the session's doc handle), and unwind the local queue on a
+  // solo stop. Cleared on unmount so a stop pressed while a question dock is up aborts directly
+  // instead of calling into a disposed composer.
+  session.setHandlers({
+    submit: () => void submit(),
+    abort: async () => {
+      await abort()
+    },
+  })
+  onCleanup(() => session.setHandlers({}))
+
   const handleKeyDown = (event: KeyboardEvent) => {
     if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "u") {
       event.preventDefault()
-      if (store.mode !== "normal") return
+      if (docMode() !== "normal") return
       pick()
       return
     }
@@ -2077,10 +1813,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
     }
 
-    if (!promptTriggersOff && event.key === "!" && store.mode === "normal") {
+    if (!promptTriggersOff && event.key === "!" && docMode() === "normal") {
       const cursorPosition = getCursorPosition(editorRef)
       if (cursorPosition === 0) {
-        setStore("mode", "shell")
+        setDocMode("shell")
         setStore("popover", null)
         event.preventDefault()
         return
@@ -2095,14 +1831,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         return
       }
 
-      if (store.mode === "shell") {
-        setStore("mode", "normal")
+      if (docMode() === "shell") {
+        setDocMode("normal")
         event.preventDefault()
         event.stopPropagation()
         return
       }
 
-      if (store.mode === "doc") {
+      if (docMode() === "doc") {
         void exitDoc()
         event.preventDefault()
         event.stopPropagation()
@@ -2124,10 +1860,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
     }
 
-    if (store.mode === "shell") {
+    if (docMode() === "shell") {
       const { collapsed, cursorPosition, textLength } = getCaretState()
       if (event.key === "Backspace" && collapsed && cursorPosition === 0 && textLength === 0) {
-        setStore("mode", "normal")
+        setDocMode("normal")
         event.preventDefault()
         return
       }
@@ -2227,7 +1963,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         void requestStop()
         return
       }
-      if (store.mode === "doc") {
+      if (docMode() === "doc") {
         void submit()
         return
       }
@@ -2240,12 +1976,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       ref={(el) => (rootRef = el)}
       classList={{
         "relative flex w-full flex-col gap-0": true,
-        "size-full max-h-[512px] min-h-0": store.mode !== "doc" && !props.expanded,
+        "size-full max-h-[512px] min-h-0": docMode() !== "doc" && !props.expanded,
         "flex-1 min-h-0": props.expanded,
         relative: props.expanded,
       }}
       style={
-        store.mode === "doc" && !props.expanded
+        docMode() === "doc" && !props.expanded
           ? {
               height: `${height()}px`,
               "min-height": `${DOC_MIN}px`,
@@ -2268,7 +2004,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         }, 0)
       }}
     >
-      <Show when={store.mode === "doc" && !props.expanded}>
+      <Show when={docMode() === "doc" && !props.expanded}>
         <div
           data-component="prompt-doc-resize-handle"
           class="group absolute -top-2.5 left-8 right-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
@@ -2306,7 +2042,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         classList={{
           "group/prompt-input": true,
           "border-icon-info-active border-dashed": store.draggingType !== null,
-          "flex min-h-0 flex-1 flex-col": canvasMode(store.mode) || props.expanded,
+          "flex min-h-0 flex-1 flex-col": canvasMode(docMode()) || props.expanded,
           [props.class ?? ""]: !!props.class,
         }}
       >
@@ -2341,10 +2077,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           data-component="prompt-body"
           classList={{
             relative: true,
-            "flex min-h-0 flex-1 flex-col": canvasMode(store.mode),
+            "flex min-h-0 flex-1 flex-col": canvasMode(docMode()),
           }}
           onMouseDown={(e) => {
-            if (canvasMode(store.mode)) return
+            if (canvasMode(docMode())) return
             const target = e.target
             if (!(target instanceof HTMLElement)) return
             if (
@@ -2358,7 +2094,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           }}
         >
           <Show
-            when={store.mode === "doc"}
+            when={docMode() === "doc"}
             fallback={
               <div
                 classList={{
@@ -2379,9 +2115,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   aria-multiline="true"
                   aria-label={placeholder()}
                   contenteditable="true"
-                  autocapitalize={store.mode === "normal" ? "sentences" : "off"}
-                  autocorrect={store.mode === "normal" ? "on" : "off"}
-                  spellcheck={store.mode === "normal"}
+                  autocapitalize={docMode() === "normal" ? "sentences" : "off"}
+                  autocorrect={docMode() === "normal" ? "on" : "off"}
+                  spellcheck={docMode() === "normal"}
                   onInput={handleInput}
                   onPaste={handlePaste}
                   onCompositionStart={handleCompositionStart}
@@ -2393,7 +2129,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     "w-full text-14-regular text-text-strong focus:outline-none whitespace-pre-wrap": true,
                     "[&_[data-type=file]]:text-syntax-property": true,
                     "[&_[data-type=agent]]:text-syntax-type": true,
-                    "font-mono!": store.mode === "shell",
+                    "font-mono!": docMode() === "shell",
                   }}
                   style={{ "padding-bottom": space }}
                 />
@@ -2401,7 +2137,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   <div
                     data-component="prompt-input-placeholder"
                     class="absolute top-0 inset-x-0 text-14-regular text-text-weak pointer-events-none whitespace-nowrap truncate"
-                    classList={{ "font-mono!": store.mode === "shell" }}
+                    classList={{ "font-mono!": docMode() === "shell" }}
                     style={{ "padding-bottom": space }}
                   >
                     {placeholder()}
@@ -2430,7 +2166,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             />
           </Show>
 
-          <Show when={!canvasMode(store.mode)}>
+          <Show when={!canvasMode(docMode())}>
             <div
               aria-hidden="true"
               class="pointer-events-none absolute inset-x-0 bottom-0"
@@ -2442,7 +2178,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             />
           </Show>
 
-          <Show when={!canvasMode(store.mode)}>
+          <Show when={!canvasMode(docMode())}>
             <div class="pointer-events-none absolute bottom-2 right-2 flex items-center gap-1">
               <input
                 ref={fileInputRef}
@@ -2465,10 +2201,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     data-action="prompt-submit"
                     type="submit"
                     disabled={
-                      store.mode === "shell" ||
-                      (store.mode === "normal" && !hasDraft() && submitAction() === "send")
+                      docMode() === "shell" ||
+                      (docMode() === "normal" && !hasDraft() && submitAction() === "send")
                     }
-                    tabIndex={store.mode === "shell" ? -1 : undefined}
+                    tabIndex={docMode() === "shell" ? -1 : undefined}
                     icon={submitIcon()}
                     variant="primary"
                     class="size-7.5"
@@ -2480,7 +2216,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             </div>
 
             <div class="pointer-events-none absolute bottom-2 left-2 flex items-center gap-1">
-              <Show when={store.mode === "normal"}>
+              <Show when={docMode() === "normal"}>
                 <div
                   class="pointer-events-auto flex items-center gap-1"
                   style={{
@@ -2511,11 +2247,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           </Show>
         </div>
       </DockShellForm>
-      <Show when={!footerOff && (store.mode === "normal" || store.mode === "shell" || canvasMode(store.mode))}>
+      <Show when={!footerOff && (docMode() === "normal" || docMode() === "shell" || canvasMode(docMode()))}>
         <DockTray attach="top">
           <div class="px-1.75 pt-5.5 pb-2 flex items-center gap-2 min-w-0">
             <div class="flex items-center gap-1.5 min-w-0 flex-1 relative">
-              <Show when={store.mode === "shell"}>
+              <Show when={docMode() === "shell"}>
                 <div
                   class="h-7 flex items-center gap-1.5 max-w-[160px] min-w-0 absolute inset-y-0 left-0"
                   style={{

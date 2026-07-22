@@ -47,6 +47,7 @@ import { useTerminal } from "@/context/terminal"
 import { sessionBusy } from "@/components/prompt-input/composer-state"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
+import { createPromptDocSession, PromptDocSessionProvider } from "@/context/prompt-doc-session"
 import {
   createOpenDiffTab,
   createOpenReviewFile,
@@ -361,6 +362,10 @@ export default function Page() {
   })
 
   const composer = createSessionComposerState()
+  // Owns the collaborative prompt doc, the consent socket and the consent dialog for as long as the
+  // session page lives — the composer that renders them unmounts whenever a question or permission
+  // dock takes the dock, and this state must outlive that.
+  const promptDocSession = createPromptDocSession()
 
   // Session trimming is unaware of the active route, so keep the viewed session's caches alive.
   createEffect(() => {
@@ -1916,9 +1921,65 @@ export default function Page() {
 
   if (env.productionLayout()) {
     return (
+      <PromptDocSessionProvider value={promptDocSession}>
+        <div data-component="codle-session" class="relative size-full overflow-hidden flex flex-col p-2 md:p-3">
+          <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-2 md:gap-3">
+            <SessionPanelColumn class="@container relative flex flex-col min-h-0 h-full flex-1 min-w-0" />
+            <SessionSidePanel
+              reviewPanel={reviewPanel()}
+              activeDiff={activeDiffPath()}
+              onChangeFileClick={openChangeFile}
+              reviewSnap={ui.reviewSnap}
+              size={size}
+            />
+          </div>
+        </div>
+      </PromptDocSessionProvider>
+    )
+  }
+
+  return (
+    <PromptDocSessionProvider value={promptDocSession}>
       <div data-component="codle-session" class="relative size-full overflow-hidden flex flex-col p-2 md:p-3">
+        <SessionHeader />
         <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-2 md:gap-3">
-          <SessionPanelColumn class="@container relative flex flex-col min-h-0 h-full flex-1 min-w-0" />
+          <Show when={!isDesktop() && !!params.id && !env.disableChangeFiles()}>
+            <Tabs value={store.mobileTab} class="h-auto">
+              <Tabs.List>
+                <Tabs.Trigger
+                  value="session"
+                  class="!w-1/2 !max-w-none"
+                  classes={{ button: "w-full" }}
+                  onClick={() => setStore("mobileTab", "session")}
+                >
+                  {language.t("session.tab.session")}
+                </Tabs.Trigger>
+                <Tabs.Trigger
+                  value="changes"
+                  class="!w-1/2 !max-w-none !border-r-0"
+                  classes={{ button: "w-full" }}
+                  onClick={() => setStore("mobileTab", "changes")}
+                >
+                  {hasReview()
+                    ? language.t("session.review.filesChanged", { count: reviewCount() })
+                    : language.t("session.review.change.other")}
+                </Tabs.Trigger>
+              </Tabs.List>
+            </Tabs>
+          </Show>
+
+          {/* Session panel */}
+          <SessionPanelColumn
+            classList={{
+              "shrink-0 flex flex-col min-h-0 h-full flex-1 md:flex-none": true,
+              "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
+                !size.active() && !ui.reviewSnap,
+            }}
+            style={{
+              width: sessionPanelWidth(),
+            }}
+          />
+
           <SessionSidePanel
             reviewPanel={reviewPanel()}
             activeDiff={activeDiffPath()}
@@ -1927,61 +1988,9 @@ export default function Page() {
             size={size}
           />
         </div>
+
+        <TerminalPanel />
       </div>
-    )
-  }
-
-  return (
-    <div data-component="codle-session" class="relative size-full overflow-hidden flex flex-col p-2 md:p-3">
-      <SessionHeader />
-      <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-2 md:gap-3">
-        <Show when={!isDesktop() && !!params.id && !env.disableChangeFiles()}>
-          <Tabs value={store.mobileTab} class="h-auto">
-            <Tabs.List>
-              <Tabs.Trigger
-                value="session"
-                class="!w-1/2 !max-w-none"
-                classes={{ button: "w-full" }}
-                onClick={() => setStore("mobileTab", "session")}
-              >
-                {language.t("session.tab.session")}
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="changes"
-                class="!w-1/2 !max-w-none !border-r-0"
-                classes={{ button: "w-full" }}
-                onClick={() => setStore("mobileTab", "changes")}
-              >
-                {hasReview()
-                  ? language.t("session.review.filesChanged", { count: reviewCount() })
-                  : language.t("session.review.change.other")}
-              </Tabs.Trigger>
-            </Tabs.List>
-          </Tabs>
-        </Show>
-
-        {/* Session panel */}
-        <SessionPanelColumn
-          classList={{
-            "shrink-0 flex flex-col min-h-0 h-full flex-1 md:flex-none": true,
-            "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
-              !size.active() && !ui.reviewSnap,
-          }}
-          style={{
-            width: sessionPanelWidth(),
-          }}
-        />
-
-        <SessionSidePanel
-          reviewPanel={reviewPanel()}
-          activeDiff={activeDiffPath()}
-          onChangeFileClick={openChangeFile}
-          reviewSnap={ui.reviewSnap}
-          size={size}
-        />
-      </div>
-
-      <TerminalPanel />
-    </div>
+    </PromptDocSessionProvider>
   )
 }
