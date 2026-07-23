@@ -14,7 +14,7 @@ function currentSessionID(): string | undefined {
   return m?.[1]
 }
 
-const TIMEOUT_MS = 30_000
+const TIMEOUT_MS = 60_000
 
 export function ProjectSummaryBridge() {
   onMount(() => {
