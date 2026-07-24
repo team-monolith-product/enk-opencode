@@ -37,15 +37,17 @@ const STARTABLE_POLL_MS = 5000
 // 서버측 probePort(127.0.0.1:PORT)/self-probe 는 배포 환경에서 CHP 라우팅과 어긋날 수 있어(서버는
 // 못 잡는데 클라는 CHP 경유로 닿음), 서버가 none/startable 이라 해도 클라가 닿으면 iframe 을 띄운다.
 //
-// mode:"no-cors" 로 던진다: cross-origin 이라 status/본문은 못 읽지만(opaque), 서버가 CORS 헤더를
-// 안 줘도 응답만 오면 throw 하지 않는다. 그래서 throw 는 "진짜 못 닿음"(connection refused/DNS 실패)
-// 만 뜻하게 좁혀지고, 그때 false 를 돌려 fallback UI 와 자동 재시도가 살아나게 한다. 예전 mode:"cors"
-// 는 CORS 차단과 실제 다운을 못 구분해 둘 다 낙관적으로 true 처리 → 다운 시 두 기능이 죽었다.
+// mode:"cors" 로 상태 코드를 읽어 판정한다. 실행물 dev 서버가 죽으면 앞단 프록시(CHP)가 502/503/504
+// 를 돌려주는데, 이건 "결과물 서버 다운"이라 미리보기를 띄우면 안 된다(죽은 서버 위에 프록시 오류
+// 페이지가 노출됨). 서버 self-probe 와 같은 경계(>=500 = 다운)를 그대로 써서 클라·서버 판정을 맞춘다
+// — 503 만 보던 예전 코드는 502/504 를 놓쳤다. throw(CORS 차단이든 연결 거부든)면 확증이 없으니
+// 보수적으로 false: none/startable 이 유지돼 fallback UI 와 자동 재시도가 살아난다.
+// (no-cors 는 opaque 라 상태 코드를 못 읽어 503 도 "닿음"으로 새어나갔다 — 그래서 안 쓴다.)
 async function previewReachable(url: string | undefined): Promise<boolean> {
   if (!url) return false
   try {
-    await fetch(url, { cache: "no-store", mode: "no-cors" })
-    return true
+    const res = await fetch(url, { cache: "no-store", mode: "cors" })
+    return res.status < 500
   } catch {
     return false
   }
