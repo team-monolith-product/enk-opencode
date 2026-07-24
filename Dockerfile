@@ -27,8 +27,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ARG PLAYWRIGHT_MCP_VERSION=0.0.70
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+# @playwright/mcp 가 실제 사용하는 playwright 버전으로 브라우저를 설치해야 한다.
+# npx playwright install 은 최신 playwright 를 받아 다른 chromium 리비전을 깔아
+# 런타임에 MCP 가 찾는 리비전과 어긋난다(브라우저 실행파일 없음).
 RUN npm install -g @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} \
-    && npx playwright install --with-deps chromium \
+    && PW_VER=$(node -p "require('$(npm root -g)/@playwright/mcp/package.json').dependencies.playwright") \
+    && npm install -g "playwright@${PW_VER}" \
+    && playwright install --with-deps chromium \
     && rm -rf /tmp/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
