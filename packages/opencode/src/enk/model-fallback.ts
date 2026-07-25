@@ -24,6 +24,7 @@ export namespace ModelFallback {
     // config, and is dropped at resolve time wherever that config is absent.
     { providerID: "minimax", modelID: "MiniMax-M3", variant: "adaptive" },
     { providerID: "google", modelID: "gemini-3.5-flash", variant: "high" },
+    { providerID: "google", modelID: "gemini-3.6-flash", variant: "high" },
   ]
 
   /**
