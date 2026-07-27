@@ -194,22 +194,31 @@ describe("ProviderTransform.options - kimi anthropic thinking budget", () => {
       headers: {},
     }) as any
 
-  test("enables bounded thinking for kimi-k3 (always-on reasoning) so it finalizes an answer", () => {
+  test("enables adaptive thinking for kimi-k3 (Moonshot uses adaptive effort, not token budgets)", () => {
     const result = ProviderTransform.options({
       model: createKimiModel("kimi-k3", 131_072),
       sessionID,
       providerOptions: {},
     })
-    expect(result.thinking).toEqual({ type: "enabled", budgetTokens: 16_000 })
+    expect(result.thinking).toEqual({ type: "adaptive", display: "summarized" })
+    expect(result.effort).toBe("high")
   })
 
-  test("still enables bounded thinking for kimi-k2.5", () => {
+  test("enables adaptive thinking for kimi-k2.5 too", () => {
     const result = ProviderTransform.options({
       model: createKimiModel("kimi-k2.5", 262_144),
       sessionID,
       providerOptions: {},
     })
-    expect(result.thinking).toEqual({ type: "enabled", budgetTokens: 16_000 })
+    expect(result.thinking).toEqual({ type: "adaptive", display: "summarized" })
+    expect(result.effort).toBe("high")
+  })
+
+  test("does not enable thinking for a kimi model without reasoning capability", () => {
+    const model = createKimiModel("kimi-k3", 131_072)
+    model.capabilities.reasoning = false
+    const result = ProviderTransform.options({ model, sessionID, providerOptions: {} })
+    expect(result.thinking).toBeUndefined()
   })
 })
 

@@ -18,6 +18,20 @@ function mimeToModality(mime: string): Modality | undefined {
   return undefined
 }
 
+// Kimi(Moonshot) 계열 감지: providerID/모델 id 에 kimi|moonshot 이 있거나 upstream Moonshot 호스트일 때.
+// ENK 는 CHP 프록시를 거쳐 url 이 moonshot 호스트가 아니지만 providerID 가 "moonshotai" 라 매칭된다.
+function isKimiFamily(model: Provider.Model): boolean {
+  if (
+    [model.providerID, model.api.id].some((id) => {
+      const value = id.toLowerCase()
+      return value.includes("kimi") || value.includes("moonshot")
+    })
+  )
+    return true
+  const url = model.api.url.toLowerCase()
+  return ["api.kimi.com", "api.moonshot.ai", "api.moonshot.cn", "api.moonshotai.cn"].some((host) => url.includes(host))
+}
+
 function head(data: Data) {
   if (data instanceof URL) return
   if (data instanceof Uint8Array) return data.subarray(0, 16)
@@ -836,20 +850,17 @@ export namespace ProviderTransform {
       }
     }
 
-    // Enable thinking by default for kimi-k2.5/k2p5/k3 models using anthropic SDK.
-    // kimi-k3 는 상시 max-effort 추론 모델이라 예산 상한을 주지 않으면 추론만 하다 최종 답변을 못 낸다.
     const modelId = input.model.api.id.toLowerCase()
+    // Moonshot(Kimi)의 Anthropic 호환 API 는 token budget 이 아니라 adaptive effort 를 쓴다(upstream 방식).
+    // isKimiFamily 로 감지해 kimi-k3 등 모든 Kimi 모델을 커버하고, display:"summarized" 로
+    // 멀티턴 replay 시 thinking 이 보존되게 한다. 예산 상한이 없어야 상시 추론 모델이 답변까지 마친다.
     if (
-      (input.model.api.npm === "@ai-sdk/anthropic" || input.model.api.npm === "@ai-sdk/google-vertex/anthropic") &&
-      (modelId.includes("k2p5") ||
-        modelId.includes("kimi-k2.5") ||
-        modelId.includes("kimi-k2p5") ||
-        modelId.includes("kimi-k3"))
+      ["@ai-sdk/anthropic", "@ai-sdk/google-vertex/anthropic"].includes(input.model.api.npm) &&
+      isKimiFamily(input.model) &&
+      input.model.capabilities.reasoning
     ) {
-      result["thinking"] = {
-        type: "enabled",
-        budgetTokens: Math.min(16_000, Math.floor(input.model.limit.output / 2 - 1)),
-      }
+      result["thinking"] = { type: "adaptive", display: "summarized" }
+      result["effort"] = "high"
     }
 
     // Enable thinking for reasoning models on alibaba-cn (DashScope).
