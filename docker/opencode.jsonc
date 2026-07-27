@@ -41,6 +41,17 @@
         },
       },
     },
+    "kimi": {
+      // CHP가 anthropic 규약을 제공함으로, 여기에도 anthropic 규약을 사용한다.
+      "npm": "@ai-sdk/anthropic",
+      "options": {
+        "baseURL": "${KIMI_BASE_URL}",
+        "apiKey": "proxy-auth",
+      },
+      "models": {
+        "kimi-k3": {},
+      },
+    },
   },
   "mcp": {
     "playwright": {
