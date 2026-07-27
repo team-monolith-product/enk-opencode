@@ -170,6 +170,49 @@ describe("ProviderTransform.options - google thinkingConfig gating", () => {
   })
 })
 
+describe("ProviderTransform.options - kimi anthropic thinking budget", () => {
+  const sessionID = "test-session-kimi"
+
+  const createKimiModel = (apiId: string, output: number) =>
+    ({
+      id: `moonshotai/${apiId}`,
+      providerID: "moonshotai",
+      api: { id: apiId, url: "http://opencode-proxy-public/kimi/v1", npm: "@ai-sdk/anthropic" },
+      name: apiId,
+      capabilities: {
+        temperature: true,
+        reasoning: true,
+        attachment: true,
+        toolcall: true,
+        input: { text: true, audio: false, image: true, video: false, pdf: false },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: false,
+      },
+      limit: { context: 1_048_576, output },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  test("enables bounded thinking for kimi-k3 (always-on reasoning) so it finalizes an answer", () => {
+    const result = ProviderTransform.options({
+      model: createKimiModel("kimi-k3", 131_072),
+      sessionID,
+      providerOptions: {},
+    })
+    expect(result.thinking).toEqual({ type: "enabled", budgetTokens: 16_000 })
+  })
+
+  test("still enables bounded thinking for kimi-k2.5", () => {
+    const result = ProviderTransform.options({
+      model: createKimiModel("kimi-k2.5", 262_144),
+      sessionID,
+      providerOptions: {},
+    })
+    expect(result.thinking).toEqual({ type: "enabled", budgetTokens: 16_000 })
+  })
+})
+
 describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
   const sessionID = "test-session-123"
 

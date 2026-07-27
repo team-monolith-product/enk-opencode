@@ -836,11 +836,15 @@ export namespace ProviderTransform {
       }
     }
 
-    // Enable thinking by default for kimi-k2.5/k2p5 models using anthropic SDK
+    // Enable thinking by default for kimi-k2.5/k2p5/k3 models using anthropic SDK.
+    // kimi-k3 는 상시 max-effort 추론 모델이라 예산 상한을 주지 않으면 추론만 하다 최종 답변을 못 낸다.
     const modelId = input.model.api.id.toLowerCase()
     if (
       (input.model.api.npm === "@ai-sdk/anthropic" || input.model.api.npm === "@ai-sdk/google-vertex/anthropic") &&
-      (modelId.includes("k2p5") || modelId.includes("kimi-k2.5") || modelId.includes("kimi-k2p5"))
+      (modelId.includes("k2p5") ||
+        modelId.includes("kimi-k2.5") ||
+        modelId.includes("kimi-k2p5") ||
+        modelId.includes("kimi-k3"))
     ) {
       result["thinking"] = {
         type: "enabled",
