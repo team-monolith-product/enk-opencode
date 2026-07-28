@@ -49,7 +49,7 @@
         "apiKey": "proxy-auth",
       },
       "models": {
-        "solar-open2": {},
+        "solar-open2": { "reasoning": true },
       },
     },
   },
