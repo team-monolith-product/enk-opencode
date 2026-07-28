@@ -41,6 +41,18 @@
         },
       },
     },
+    "upstage": {
+      // CHP가 Upstage OpenAI 호환 엔드포인트를 프록시하므로 openai-compatible 규약을 사용한다.
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "${UPSTAGE_BASE_URL}",
+        "apiKey": "proxy-auth",
+      },
+      "models": {
+        // 노출 이름은 upstage/solar-open2, Upstage API 서빙 ID는 solar-open2-250b.
+        "solar-open2": { "id": "solar-open2-250b" },
+      },
+    },
   },
   "mcp": {
     "playwright": {
