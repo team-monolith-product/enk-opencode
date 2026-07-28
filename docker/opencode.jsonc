@@ -49,8 +49,7 @@
         "apiKey": "proxy-auth",
       },
       "models": {
-        // 노출 이름은 upstage/solar-open2, Upstage API 서빙 ID는 solar-open2-250b.
-        "solar-open2": { "id": "solar-open2-250b" },
+        "solar-open2": {},
       },
     },
   },
