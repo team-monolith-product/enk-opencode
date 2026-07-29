@@ -26,6 +26,7 @@ import { EnvFileRoutes } from "./routes/env-file"
 import { DevServerRoutes } from "./routes/dev-server"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProjectSummaryRoutes } from "./routes/project-summary"
+import { PlanDocRoutes } from "./routes/plan-doc"
 import { ProviderRoutes } from "./routes/provider"
 import { EventRoutes } from "./routes/event"
 import { DocRoutes } from "../doc/routes"
@@ -51,6 +52,7 @@ export const InstanceRoutes = (app?: Hono) =>
     .route("/dev-server", DevServerRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/project-summary", ProjectSummaryRoutes())
+    .route("/plan-doc", PlanDocRoutes())
     .route("/session", SessionRoutes().route("/", SessionDocRoutes()))
     .route("/doc", DocRoutes())
     .route("/permission", PermissionRoutes())

@@ -1772,6 +1772,24 @@ export type Env = {
   aiModelVariant?: string
 }
 
+export type EnvFileKeys = {
+  keys: Array<string>
+}
+
+export type DevServerStatus = {
+  state: "none" | "starting" | "startable" | "ready" | "errored"
+  port?: number
+  httpStatus?: number
+}
+
+export type DevServerRestart = {
+  status: "already_running" | "started" | "failed" | "no_command" | "already_starting"
+  url?: string
+  port?: number
+  ms: number
+  reason?: string
+}
+
 export type ToolIds = Array<string>
 
 export type ToolListItem = {
@@ -1862,6 +1880,20 @@ export type McpResource = {
   client: string
 }
 
+export type PlanDoc = {
+  title: string
+  tagline: string
+  body: string
+  bodyNarrative: string
+  manualSlots: Array<string>
+  caveats: Array<string>
+  sparse: boolean
+}
+
+export type PlanDocBusy = {
+  error: "busy"
+}
+
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -1923,7 +1955,7 @@ export type DocSubmitActor = {
   actorID: string
   name: string
   color: string
-  status: "pending" | "approved"
+  status: "pending" | "approved" | "left"
 }
 
 export type DocSubmit = {
@@ -2794,6 +2826,125 @@ export type EnvGetResponses = {
 
 export type EnvGetResponse = EnvGetResponses[keyof EnvGetResponses]
 
+export type EnvFileListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-file"
+}
+
+export type EnvFileListResponses = {
+  /**
+   * Key names
+   */
+  200: EnvFileKeys
+}
+
+export type EnvFileListResponse = EnvFileListResponses[keyof EnvFileListResponses]
+
+export type EnvFileSetData = {
+  body?: {
+    values: {
+      [key: string]: string
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-file"
+}
+
+export type EnvFileSetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type EnvFileSetError = EnvFileSetErrors[keyof EnvFileSetErrors]
+
+export type EnvFileSetResponses = {
+  /**
+   * Key names after update
+   */
+  200: EnvFileKeys
+}
+
+export type EnvFileSetResponse = EnvFileSetResponses[keyof EnvFileSetResponses]
+
+export type EnvFileRemoveData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-file/{name}"
+}
+
+export type EnvFileRemoveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type EnvFileRemoveError = EnvFileRemoveErrors[keyof EnvFileRemoveErrors]
+
+export type EnvFileRemoveResponses = {
+  /**
+   * Key names after removal
+   */
+  200: EnvFileKeys
+}
+
+export type EnvFileRemoveResponse = EnvFileRemoveResponses[keyof EnvFileRemoveResponses]
+
+export type DevServerStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/dev-server/status"
+}
+
+export type DevServerStatusResponses = {
+  /**
+   * Dev server status
+   */
+  200: DevServerStatus
+}
+
+export type DevServerStatusResponse = DevServerStatusResponses[keyof DevServerStatusResponses]
+
+export type DevServerRestartData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/dev-server/restart"
+}
+
+export type DevServerRestartResponses = {
+  /**
+   * Dev server restart result
+   */
+  200: DevServerRestart
+}
+
+export type DevServerRestartResponse = DevServerRestartResponses[keyof DevServerRestartResponses]
+
 export type ToolIdsData = {
   body?: never
   path?: never
@@ -3145,6 +3296,36 @@ export type ProjectSummaryGenerateResponses = {
 }
 
 export type ProjectSummaryGenerateResponse = ProjectSummaryGenerateResponses[keyof ProjectSummaryGenerateResponses]
+
+export type PlanDocGenerateData = {
+  body?: {
+    sessionID?: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/plan-doc/generate"
+}
+
+export type PlanDocGenerateErrors = {
+  /**
+   * Selected session has an assistant turn in flight
+   */
+  409: PlanDocBusy
+}
+
+export type PlanDocGenerateError = PlanDocGenerateErrors[keyof PlanDocGenerateErrors]
+
+export type PlanDocGenerateResponses = {
+  /**
+   * Generated plan document
+   */
+  200: PlanDoc
+}
+
+export type PlanDocGenerateResponse = PlanDocGenerateResponses[keyof PlanDocGenerateResponses]
 
 export type SessionListData = {
   body?: never
@@ -4240,7 +4421,7 @@ export type SessionPromptDocSubmitData = {
   body?: {
     docID: string
     actorID: string
-    actorIDs: Array<string>
+    actorIDs?: Array<string>
     names?: {
       [key: string]: string
     }
@@ -4301,7 +4482,7 @@ export type SessionPromptDocStopData = {
   body?: {
     docID: string
     actorID: string
-    actorIDs: Array<string>
+    actorIDs?: Array<string>
     names?: {
       [key: string]: string
     }
@@ -4342,7 +4523,7 @@ export type SessionPromptDocStopResponse = SessionPromptDocStopResponses[keyof S
 export type SessionPromptDocSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel"
+    action: "approve" | "cancel" | "exclude"
   }
   path: {
     sessionID: string
@@ -4389,6 +4570,7 @@ export type SessionPromptDocSubmitConnectData = {
     workspace?: string
     docID: string
     actorID: string
+    observer?: boolean
   }
   url: "/session/{sessionID}/prompt-doc/submit/connect"
 }
@@ -4421,7 +4603,7 @@ export type SessionQuestionSubmitData = {
   body?: {
     requestID: string
     actorID: string
-    actorIDs: Array<string>
+    actorIDs?: Array<string>
     names?: {
       [key: string]: string
     }
@@ -4468,7 +4650,7 @@ export type SessionQuestionSubmitResponse = SessionQuestionSubmitResponses[keyof
 export type SessionQuestionSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel"
+    action: "approve" | "cancel" | "exclude"
   }
   path: {
     sessionID: string
@@ -4515,6 +4697,7 @@ export type SessionQuestionSubmitConnectData = {
     workspace?: string
     requestID: string
     actorID: string
+    observer?: boolean
   }
   url: "/session/{sessionID}/question/submit/connect"
 }

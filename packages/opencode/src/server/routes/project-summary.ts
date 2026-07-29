@@ -78,7 +78,7 @@ const ENTRY_HINTS: RegExp[] = [
 
 const PATH_REGEX = /[\w./-]+\.(?:tsx?|jsx?|html|css|scss|md|json|py|go|rs|java|kt|rb|swift|vue|svelte|toml|yaml|yml)\b/g
 
-async function collectFiles(root: string): Promise<string[]> {
+export async function collectFiles(root: string): Promise<string[]> {
   const out: string[] = []
   async function walk(dir: string, depth: number) {
     if (depth > MAX_DEPTH || out.length >= MAX_FILES) return
@@ -121,8 +121,8 @@ function rankFiles(files: string[], mentioned: Set<string>): string[] {
   return [...files].sort((a, b) => score(b) - score(a))
 }
 
-async function buildWorkspaceContext(root: string, transcript: string): Promise<string> {
-  const files = await collectFiles(root)
+export async function buildWorkspaceContext(root: string, transcript: string, collected?: string[]): Promise<string> {
+  const files = collected ?? (await collectFiles(root))
   if (files.length === 0) return ""
   const mentioned = extractMentionedPaths(transcript)
   const ranked = rankFiles(files, mentioned)
