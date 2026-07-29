@@ -45,6 +45,7 @@ import { ServerConnection, ServerProvider, serverName, useServer } from "@/conte
 import { SettingsProvider } from "@/context/settings"
 import { TerminalProvider } from "@/context/terminal"
 import { ProjectSummaryBridge } from "@/components/project-summary-bridge"
+import { StorybookChatBridge } from "@/components/storybook-chat-bridge"
 import DirectoryLayout from "@/pages/directory-layout"
 import Layout from "@/pages/layout"
 import { ErrorPage } from "./pages/error"
@@ -321,6 +322,7 @@ export function AppInterface(props: {
       servers={props.servers}
     >
       <ProjectSummaryBridge />
+      <StorybookChatBridge />
       <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
         <ServerKey>
           <GlobalSDKProvider>
