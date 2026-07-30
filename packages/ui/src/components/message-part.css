@@ -833,32 +833,79 @@
   }
 }
 
-/* 외부 연동 값 입력 도크. 껍데기는 permission 도크와 같은 리듬을 쓰고 내부는 컴포넌트에서 조판한다. */
+/* 외부 연동 값 입력 도크. 시안(c3-env-secure) 기준 — 상단 해저드 스트라이프가 달린 한 장 카드.
+   내용과 액션 사이에 구분선이 없어야 하므로 카드 테두리·라운드·그림자를 래퍼로 올리고,
+   셸(body)과 트레이(footer)는 배경 없는 평면으로 눕힌다. 각자 카드를 그리면 사이에 선이 생긴다. */
 [data-component="dock-prompt"][data-kind="env"] {
+  /* 해저드 사선 색 — 디자인 시스템의 helmet/ink 고정값. 전송 동의 오버레이가 같은 값을 자기
+     스코프에 선언해 쓰고 있어(doc-submit.css) 여기서도 스코프에 선언한다. 테마와 무관한 브랜드 장치다. */
+  --env-hazard-mark: #ffce2b;
+  --env-hazard-ink: #17171c;
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 0;
   min-height: 0;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  box-shadow: var(--shadow-xs-border);
+  background-color: var(--surface-raised-stronger-non-alpha);
 
   [data-slot="env-body"] {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 9px;
     flex: 1;
     min-height: 0;
-    padding: 12px 12px 0;
+    /* 위 여백은 스트라이프(12px) + 10px. 아래는 푸터가 이어 받는다. */
+    padding: 22px 14px 0;
+    background-color: transparent;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  /* 비가역 액션 경고 — 정적 사선 12px. doc-submit 의 동의 타이머 바와 같은 어휘. */
+  [data-slot="env-body"]::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 12px;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      var(--env-hazard-mark) 0 14.1421356px,
+      var(--env-hazard-ink) 14.1421356px 28.2842712px
+    );
+    background-size: 40px 100%;
   }
 
   [data-slot="env-header"] {
-    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  [data-slot="env-content"] {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    flex: 1;
+    min-height: 0;
   }
 
   [data-slot="env-footer"] {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
+    flex-shrink: 0;
+    padding: 9px 14px 14px;
+    margin-top: 0;
+    background-color: transparent;
+    border: 0;
+    border-radius: 0;
   }
 }
 

@@ -156,19 +156,22 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
     <DockPrompt
       kind="env"
       header={
-        <div class="flex items-center gap-2">
-          <span class="inline-flex items-center justify-center text-icon-base">
-            <Icon name="shield" size="normal" />
+        <>
+          <span class="inline-flex shrink-0 items-center justify-center text-icon-base">
+            <Icon name="lock" size="small" />
           </span>
-          <span class="text-14-medium text-text-strong">{language.t("envRequest.title")}</span>
-          <span class="text-13-regular text-text-weak truncate min-w-0">· {props.request.label}</span>
-        </div>
+          <span class="text-13-medium text-text-strong shrink-0">{language.t("envRequest.title")}</span>
+          <span class="text-12-regular text-text-weaker truncate min-w-0">· {props.request.label}</span>
+        </>
       }
       footer={
         <>
+          {/* 좌: 안내 한 줄. 누가 입력 중이면 같은 줄에 이어 붙인다(시안은 액션과 한 행). */}
           <div class="flex items-center gap-1.5 min-w-0">
+            <span class="text-12-regular text-text-weak shrink-0">{language.t("envRequest.notice.ai")}</span>
             <Show when={others().length > 0}>
-              <span class="text-12-regular text-text-weaker truncate">
+              <span class="text-12-regular text-text-weaker truncate min-w-0">
+                ·{" "}
                 {language.t("envRequest.editing", {
                   names: others()
                     .map((item) => item.name)
@@ -177,11 +180,12 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
               </span>
             </Show>
           </div>
+          <div class="flex-1" />
           <div class="flex items-center gap-2 shrink-0">
-            <Button variant="ghost" size="normal" onClick={() => void skip()} disabled={busy() || readonly}>
-              {language.t("envRequest.skip")}
+            <Button variant="secondary" size="small" onClick={() => void skip()} disabled={busy() || readonly}>
+              {language.t("envRequest.cancel")}
             </Button>
-            <Button variant="primary" size="normal" onClick={() => void save()} disabled={!canSave()}>
+            <Button variant="primary" size="small" onClick={() => void save()} disabled={!canSave()}>
               {language.t("envRequest.save")}
             </Button>
           </div>
@@ -189,11 +193,12 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
       }
     >
       <Show when={props.request.reason}>
-        <p class="text-13-regular text-text-weak leading-relaxed">{props.request.reason}</p>
+        <p class="text-12-regular text-text-weak leading-relaxed">{props.request.reason}</p>
       </Show>
 
-      <div class="flex items-start gap-2">
-        <div class="basis-[38%] shrink-0">
+      {/* 이름 = 값. 이름은 AI 가 정한 값으로 시작하고 팀이 함께 고칠 수 있다. */}
+      <div class="flex items-center gap-2">
+        <div class="basis-[44%] shrink-0 min-w-0">
           <TextField
             class="font-mono"
             label={language.t("envRequest.field.name.label")}
@@ -204,11 +209,12 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
             onChange={(v) => edit("key", v)}
           />
         </div>
-        <span class="font-mono text-13-regular text-text-weaker pt-2 shrink-0">=</span>
+        <span class="font-mono text-13-regular text-text-weaker shrink-0">=</span>
         <div class="flex-1 min-w-0">
           {/* 입력 중에는 값을 가리지 않는다 — 방금 붙여넣은 값을 눈으로 확인할 수 있어야 한다. */}
           <TextField
             class="font-mono"
+            autofocus
             label={language.t("envRequest.field.value.label")}
             hideLabel
             autocomplete="off"
@@ -221,21 +227,16 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
         </div>
       </div>
 
-      <div class="flex flex-col gap-1">
-        <span class="text-12-regular text-text-weaker">{language.t("envRequest.notice.ai")}</span>
-        {/* 공동 편집이라 팀원 화면에 값이 그대로 보인다. 개인 키를 넣는 사람에게 필요한 안내다. */}
-        <span class="text-12-regular text-text-weaker">{language.t("envRequest.notice.team")}</span>
-        <Show when={props.request.docsUrl}>
-          {(url) => (
-            <span class="text-12-regular text-text-weaker truncate">
-              {language.t("envRequest.notice.docs", { url: url() })}
-            </span>
-          )}
-        </Show>
-        <Show when={readonly}>
-          <span class="text-12-regular text-text-weaker">{language.t("envRequest.readonly")}</span>
-        </Show>
-      </div>
+      <Show when={props.request.docsUrl}>
+        {(url) => (
+          <span class="text-12-regular text-text-weaker truncate">
+            {language.t("envRequest.notice.docs", { url: url() })}
+          </span>
+        )}
+      </Show>
+      <Show when={readonly}>
+        <span class="text-12-regular text-text-weaker">{language.t("envRequest.readonly")}</span>
+      </Show>
     </DockPrompt>
   )
 }
