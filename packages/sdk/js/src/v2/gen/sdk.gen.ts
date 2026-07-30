@@ -1697,7 +1697,7 @@ export class PlanDoc extends HeyApiClient {
   /**
    * Generate plan document
    *
-   * Generate a hackathon plan document (standard + narrative markdown) from the session transcript, tool events, net diff and workspace state. Always returns 200 with manual slots when input is sparse.
+   * Generate a hackathon plan document (standard + narrative markdown) from the session transcript, tool events, net diff and workspace state. Always returns 200 with manual slots when the input is sparse or generation fails. Returns 404 for an unknown session and 400 while the session has a turn in flight.
    */
   public generate<ThrowOnError extends boolean = false>(
     parameters?: {

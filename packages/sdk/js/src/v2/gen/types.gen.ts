@@ -1890,10 +1890,6 @@ export type PlanDoc = {
   sparse: boolean
 }
 
-export type PlanDocBusy = {
-  error: "busy"
-}
-
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -3311,9 +3307,13 @@ export type PlanDocGenerateData = {
 
 export type PlanDocGenerateErrors = {
   /**
-   * Selected session has an assistant turn in flight
+   * Bad request
    */
-  409: PlanDocBusy
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
 }
 
 export type PlanDocGenerateError = PlanDocGenerateErrors[keyof PlanDocGenerateErrors]
