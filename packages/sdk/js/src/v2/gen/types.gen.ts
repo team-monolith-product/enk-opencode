@@ -285,6 +285,10 @@ export type EnvRequest = {
    * Where the user can obtain the value
    */
   docsUrl?: string
+  /**
+   * Ask again even though a value is already stored, so the user can replace it
+   */
+  replace?: boolean
   id: string
   sessionID: string
   tool?: {

@@ -196,6 +196,11 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
         <p class="text-12-regular text-text-weak leading-relaxed">{props.request.reason}</p>
       </Show>
 
+      {/* 이미 저장된 값을 바꾸러 온 경우. 저장하면 되돌릴 수 없으니 미리 알린다. */}
+      <Show when={props.request.replace}>
+        <p class="text-12-regular text-text-weak leading-relaxed">{language.t("envRequest.notice.replace")}</p>
+      </Show>
+
       {/* 이름 = 값. 이름은 AI 가 정한 값으로 시작하고 팀이 함께 고칠 수 있다. */}
       <div class="flex items-center gap-2">
         <div class="basis-[44%] shrink-0 min-w-0">

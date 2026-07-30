@@ -138,3 +138,26 @@ test("submit - a renamed key wins and the tool is told the final name", async ()
     },
   })
 })
+
+test("Info - replace lets the request be raised even when a value exists", async () => {
+  await using tmp = await tmpdir({ git: true })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const file = path.join(tmp.path, ".env")
+      await EnvFile.set(file, { DATA_GO_KR_KEY: "expired" })
+
+      // 툴은 이름이 이미 있으면 되돌아가지만, 교체 의도가 있으면 다시 띄운다.
+      const pending = EnvRequest.ask({ sessionID, info: { ...info, replace: true } })
+      const [request] = await EnvRequest.list()
+      expect(request.replace).toBe(true)
+
+      await EnvRequest.submit({ requestID: request.id, file, value: "fresh" })
+      expect((await pending).status).toBe("saved")
+
+      const content = await Bun.file(file).text()
+      expect(content).toContain("DATA_GO_KR_KEY=fresh")
+      expect(content).not.toContain("expired")
+    },
+  })
+})

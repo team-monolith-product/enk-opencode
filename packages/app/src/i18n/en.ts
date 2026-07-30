@@ -73,6 +73,7 @@ export const dict = {
   "envRequest.field.value.label": "Value",
   "envRequest.field.value.placeholder": "Paste the value here",
   "envRequest.notice.ai": "This value is not passed to the AI",
+  "envRequest.notice.replace": "A value is already stored. Saving replaces it, and the old value cannot be recovered",
   "envRequest.notice.docs": "Get the value from {url}",
   "envRequest.editing": "{names} is filling this in",
   "envRequest.readonly": "You are watching, so you cannot enter a value.",

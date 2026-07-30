@@ -33,6 +33,10 @@ export namespace EnvRequest {
       label: z.string().max(120).describe("Service name shown to the user, in their language"),
       reason: z.string().max(500).optional().describe("Why this value is needed, in the user's language"),
       docsUrl: z.string().max(500).optional().describe("Where the user can obtain the value"),
+      replace: z
+        .boolean()
+        .optional()
+        .describe("Ask again even though a value is already stored, so the user can replace it"),
     })
     .meta({ ref: "EnvRequestInfo" })
   export type Info = z.infer<typeof Info>

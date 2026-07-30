@@ -13,8 +13,9 @@ export const EnvRequestTool = Tool.define("env_request", {
     const file = path.join(Instance.directory, ".env")
 
     // 이미 값이 있으면 참가자를 다시 붙잡지 않는다. 값을 읽지 않고 이름만 확인한다.
+    // 다만 교체 의도(replace)가 있으면 띄운다 — 키가 만료됐거나 잘못 넣은 값을 고칠 길이 필요하다.
     const existing = await EnvFile.names(file)
-    if (existing.includes(params.name)) {
+    if (existing.includes(params.name) && !params.replace) {
       return {
         title: params.label,
         output: `A value for ${params.name} is already stored. Continue without asking the user.`,

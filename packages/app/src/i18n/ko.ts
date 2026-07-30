@@ -69,6 +69,7 @@ export const dict = {
   "envRequest.field.value.label": "값",
   "envRequest.field.value.placeholder": "받은 값을 붙여넣어요",
   "envRequest.notice.ai": "이 값은 AI에게 전달되지 않아요",
+  "envRequest.notice.replace": "이미 저장된 값이 있어요. 저장하면 교체되고 이전 값은 되돌릴 수 없어요",
   "envRequest.notice.docs": "값은 {url} 에서 받아요",
   "envRequest.editing": "{names}님이 입력 중",
   "envRequest.readonly": "관전 중에는 값을 넣을 수 없어요.",

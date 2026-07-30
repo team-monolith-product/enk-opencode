@@ -11,6 +11,7 @@ RULES
 - NEVER ask the user to type a secret value into the chat, into a file, or into a form you build inside their app. This tool is the only correct path. A value typed anywhere else ends up in your context and in the app's source.
 - NEVER try to read the stored value afterwards. It is write-only by design, and reading environment files is blocked.
 - Pick `name` yourself in UPPER_SNAKE_CASE, matching what your code reads. The user does not know variable names; they only paste a value.
+- If a value for that name is already stored, this tool returns immediately without bothering the user. Set `replace: true` to open the input anyway — do that when the user asks to change the value, or when the stored one is clearly failing (the service rejects it as invalid or expired). Do not set it just to check whether a value exists.
 - Write `label` and `reason` in the user's language. They are shown as-is.
 
 RESULT
