@@ -40,6 +40,29 @@ export namespace HubAuth {
   // AIDEV-NOTE: in-memory 세션 캐시. pod 재시작 시 초기화되며, Hub OAuth 재인증이 발생한다.
   const sessions = new Map<string, Session>()
 
+  // AIDEV-NOTE: 토큰 -> 사용자 캐시. Rails 같은 server-to-server 호출은 매 요청에 같은 토큰을
+  // 실어 보내는데, 캐시가 없으면 요청마다 Hub API 왕복이 붙는다. 실패는 캐시하지 않아
+  // (Hub 일시 장애로 사용자가 CACHE_TTL 동안 막히지 않게) 성공한 해석만 담는다.
+  const TOKEN_CACHE_MAX = 256
+  const tokenUsers = new Map<string, { user: string; cachedAt: number }>()
+
+  async function resolveUser(token: string): Promise<string | undefined> {
+    const cached = tokenUsers.get(token)
+    if (cached && Date.now() - cached.cachedAt < CACHE_TTL) return cached.user
+    const name = await userinfo(token)
+    if (!name) {
+      tokenUsers.delete(token)
+      return undefined
+    }
+    tokenUsers.delete(token)
+    if (tokenUsers.size >= TOKEN_CACHE_MAX) {
+      const oldest = tokenUsers.keys().next().value
+      if (oldest !== undefined) tokenUsers.delete(oldest)
+    }
+    tokenUsers.set(token, { user: name, cachedAt: Date.now() })
+    return name
+  }
+
   export function enabled(): boolean {
     return !!(Flag.JUPYTERHUB_API_URL && Flag.JUPYTERHUB_API_TOKEN && Flag.JUPYTERHUB_USER)
   }
@@ -211,6 +234,7 @@ export namespace HubAuth {
 
       const password = Flag.OPENCODE_SERVER_PASSWORD
       const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
+      const authorization = c.req.header("authorization")
 
       // --- Hub OAuth 모드 ---
       if (enabled()) {
@@ -224,7 +248,7 @@ export namespace HubAuth {
             }
             // AIDEV-NOTE: 캐시 만료. Hub API에 토큰 유효성만 재확인한다.
             // Python 원본의 _check_hub_user -> user_for_token 호출과 동일한 패턴.
-            const name = await userinfo(session.token)
+            const name = await resolveUser(session.token)
             if (name === Flag.JUPYTERHUB_USER) {
               sessions.set(sid, { ...session, cachedAt: Date.now() })
               return next()
@@ -236,20 +260,16 @@ export namespace HubAuth {
 
         // 2. Basic Auth 자격 증명이 있으면 Basic Auth로 처리 (CLI/SDK 요청)
         if (password && tryTokenAuth(c, username, password)) return next()
-        if (password) {
-          const header = c.req.header("authorization")
-          if (header?.startsWith("Basic ")) {
-            return basicAuth({ username, password })(c, next)
-          }
+        if (password && authorization?.startsWith("Basic ")) {
+          return basicAuth({ username, password })(c, next)
         }
 
         // 2.5 Hub API 토큰 (server-to-server 요청) -> Hub API로 소유자 검증
         // AIDEV-NOTE: Rails 가 Token.issue 로 발급한 사용자 토큰을 Authorization: token 헤더로
         // 보낸다. OAuth 리다이렉트를 따라갈 수 없는 백엔드 호출 경로라, 토큰 소유자가 이 pod
         // 소유자(JUPYTERHUB_USER)와 일치할 때만 통과시킨다 (팀 간 격리).
-        const authorization = c.req.header("authorization")
         if (authorization?.startsWith("token ")) {
-          const name = await userinfo(authorization.slice("token ".length))
+          const name = await resolveUser(authorization.slice("token ".length))
           if (name === Flag.JUPYTERHUB_USER) return next()
           log.warn("hub api token rejected", { resolved_user: name })
           return c.text("Forbidden", 403)
