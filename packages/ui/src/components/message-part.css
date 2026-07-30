@@ -851,6 +851,23 @@
   box-shadow: var(--shadow-xs-border);
   background-color: var(--surface-raised-stronger-non-alpha);
 
+  /* 앱 codle 레이아웃이 모든 shell/tray 에 카드 테두리를 입힌다(app/src/index.css). 특정도가 같으면
+     나중에 로드되는 그쪽이 이겨 카드 안에 카드가 그려지므로, 셀렉터를 한 단계 더 조인다. */
+  [data-slot="env-body"][data-dock-surface="shell"],
+  [data-slot="env-body"][data-dock-surface="shell"]:focus-within {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  [data-slot="env-footer"][data-dock-surface="tray"] {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
   [data-slot="env-body"] {
     position: relative;
     display: flex;

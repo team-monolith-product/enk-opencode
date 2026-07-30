@@ -33,6 +33,9 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
 
   let channel: EnvDraftChannel | undefined
   let disposed = false
+  // 지금 이 사람이 잡고 있는 칸. 내가 친 글자가 소켓을 돌아와 이 칸을 덮으면 한글 조합이 깨져
+  // "테스트트이입니다다" 처럼 자모가 중복된다. 그래서 잡고 있는 칸에는 원격 값을 적용하지 않는다.
+  let focused: "key" | "value" | undefined
 
   const others = createMemo(() => presence().filter((item) => item.editing && item.actorID !== actor()?.actorID))
 
@@ -135,7 +138,10 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
         requestID,
         actorID: registered.actorID,
         key: props.request.name,
-        onDraft: (next) => setDraft({ key: next.key, value: next.value }),
+        onDraft: (next) => {
+          if (focused !== "key") setDraft("key", next.key)
+          if (focused !== "value") setDraft("value", next.value)
+        },
         onPresence: (list) => setPresence(list),
       })
       broadcast(false)
@@ -211,6 +217,8 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
             autocomplete="off"
             value={draft.key}
             disabled={readonly}
+            onFocus={() => (focused = "key")}
+            onBlur={() => (focused = undefined)}
             onChange={(v) => edit("key", v)}
           />
         </div>
@@ -226,8 +234,12 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
             placeholder={language.t("envRequest.field.value.placeholder")}
             value={draft.value}
             disabled={readonly}
+            onFocus={() => (focused = "value")}
             onChange={(v) => edit("value", v)}
-            onBlur={() => broadcast(false)}
+            onBlur={() => {
+              focused = undefined
+              broadcast(false)
+            }}
           />
         </div>
       </div>
