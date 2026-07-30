@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { Session } from "../../src/session"
+import { SessionPrompt } from "../../src/session/prompt"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { PlanDoc } from "../../src/enk/plan-doc"
@@ -101,6 +102,50 @@ describe("planDoc.generate endpoint", () => {
         const body = (await response.json()) as PlanDoc.Result
         expect(body.sparse).toBe(true)
         expect(body.manualSlots).toEqual([...PlanDoc.BLOCKS])
+      },
+    })
+  })
+
+  test("returns 409 with a named error when the session is busy", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const busy = spyOn(SessionPrompt, "assertNotBusy").mockRejectedValue(new Session.BusyError(session.id))
+
+        try {
+          const response = await generate({ sessionID: session.id })
+          expect(response.status).toBe(409)
+          expect(await response.json()).toEqual({ name: "SessionBusyError", data: { sessionID: session.id } })
+          expect(busy).toHaveBeenCalledWith(session.id)
+        } finally {
+          busy.mockRestore()
+        }
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+
+  test("skips archived sessions when picking a fallback session", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const archived = await Session.create({})
+        await fill(archived.id, 3)
+        await Session.setArchived({ sessionID: archived.id, time: Date.now() })
+
+        expect([...Session.list({ roots: true })].map((s) => s.id)).toContain(archived.id)
+        expect([...Session.list({ roots: true, archived: false })].map((s) => s.id)).not.toContain(archived.id)
+
+        const response = await generate({})
+        expect(response.status).toBe(200)
+        const body = (await response.json()) as PlanDoc.Result
+        expect(body.manualSlots).toEqual([...PlanDoc.BLOCKS])
+
+        await Session.remove(archived.id)
       },
     })
   })

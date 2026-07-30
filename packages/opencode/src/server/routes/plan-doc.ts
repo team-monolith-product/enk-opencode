@@ -14,8 +14,15 @@ import { WorkspaceContext } from "../../enk/workspace-context"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 import { Log } from "../../util/log"
+import { NamedError } from "@opencode-ai/util/error"
 
 const log = Log.create({ service: "plan-doc" })
+
+// AIDEV-NOTE: 전역 errorHandler 는 Session.BusyError 를 400 UnknownError 로 내보내는데,
+// 그러면 잘못된 sessionID(400)와 구분이 안 되고 Rails 가 메시지 문자열로 판별해야 한다.
+// 기획서 생성은 "지금 바쁘니 나중에 다시" 가 정상 흐름이라, 이 라우트에서만 409 로 매핑한다.
+// 본문은 다른 에러와 같은 NamedError 형태를 유지한다.
+export const SessionBusyError = NamedError.create("SessionBusyError", z.object({ sessionID: z.string() }))
 
 const EMPTY_CAVEAT = "작업 기록이 부족해서 기획서 틀만 준비했어요. 빈칸을 직접 채워주세요."
 const DEGRADED_CAVEAT = "툴 사용 기록이 없는 세션이라 대화 내용만으로 작성했어요. 내용을 꼭 확인해 주세요."
@@ -23,7 +30,7 @@ const FAILED_CAVEAT = "기획서를 자동으로 쓰지 못해 틀만 준비했�
 
 async function resolveSession(sessionID?: SessionID) {
   if (sessionID) return Session.get(sessionID)
-  const candidates = [...Session.list({ roots: true, limit: 50 })]
+  const candidates = [...Session.list({ roots: true, limit: 50, archived: false })]
   if (candidates.length === 0) return undefined
   const counts = Session.userMessageCounts(candidates.map((s) => s.id))
   const picked = PlanDoc.selectPrimary(
@@ -102,7 +109,7 @@ export const PlanDocRoutes = lazy(() =>
     describeRoute({
       summary: "Generate plan document",
       description:
-        "Generate a hackathon plan document (standard + narrative markdown) from the session transcript, tool events, net diff and workspace state. Always returns 200 with manual slots when the input is sparse or generation fails. Returns 404 for an unknown session and 400 while the session has a turn in flight.",
+        "Generate a hackathon plan document (standard + narrative markdown) from the session transcript, tool events, net diff and workspace state. Always returns 200 with manual slots when the input is sparse or generation fails. Returns 404 for an unknown session and 409 while the session has a turn in flight.",
       operationId: "planDoc.generate",
       responses: {
         200: {
@@ -114,6 +121,14 @@ export const PlanDocRoutes = lazy(() =>
           },
         },
         ...errors(400, 404),
+        409: {
+          description: "Selected session has a turn in flight, retry later",
+          content: {
+            "application/json": {
+              schema: resolver(SessionBusyError.Schema),
+            },
+          },
+        },
       },
     }),
     validator(
@@ -127,7 +142,14 @@ export const PlanDocRoutes = lazy(() =>
       const session = await resolveSession(body.sessionID)
       if (!session) return c.json(PlanDoc.skeleton(EMPTY_CAVEAT))
 
-      await SessionPrompt.assertNotBusy(session.id)
+      try {
+        await SessionPrompt.assertNotBusy(session.id)
+      } catch (err) {
+        if (err instanceof Session.BusyError)
+          return c.json(new SessionBusyError({ sessionID: session.id }).toObject(), 409)
+        throw err
+      }
+
       const msgs = await Session.messages({ sessionID: session.id })
       const serialized = PlanDoc.serialize(msgs, session.directory)
 
