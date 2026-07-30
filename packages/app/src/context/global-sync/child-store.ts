@@ -175,6 +175,7 @@ export function createChildStoreManager(input: {
             todo: {},
             permission: {},
             question: {},
+            env_request: {},
             mcp_ready: false,
             mcp: {},
             lsp_ready: false,

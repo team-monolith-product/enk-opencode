@@ -55,6 +55,9 @@ const permissionRequest = (id: string, sessionID: string, title = id) =>
     always: [],
   }) as PermissionRequest
 
+const envRequest = (id: string, sessionID: string, name = "DATA_GO_KR_KEY") =>
+  ({ id, sessionID, name, label: "\uc678\ubd80 \uc11c\ube44\uc2a4" }) as never
+
 const questionRequest = (id: string, sessionID: string, title = id) =>
   ({
     id,
@@ -86,6 +89,7 @@ const baseState = (input: Partial<State> = {}) =>
     todo: {},
     permission: {},
     question: {},
+    env_request: {},
     mcp: {},
     lsp: [],
     vcs: undefined,
@@ -675,5 +679,35 @@ describe("applyDirectoryEvent", () => {
 
     expect(pushes).toEqual(["/tmp"])
     expect(lspLoads).toBe(1)
+  })
+
+  test("tracks env request lifecycle and never stores a value", () => {
+    const sessionID = "ses_1"
+    const [store, setStore] = createStore(baseState({}))
+
+    applyDirectoryEvent({
+      event: { type: "env.request.asked", properties: envRequest("env_1", sessionID) },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+    expect(store.env_request[sessionID]?.map((x) => x.id)).toEqual(["env_1"])
+    // \uc774\ubca4\ud2b8 \uc5b4\ub514\uc5d0\ub3c4 \uac12\uc774 \uc5c6\uc74c\uc744 \ubc15\uc544\ub454\ub2e4 \u2014 \uc0c8\uba74 \ubaa8\ub378 \ucee8\ud14d\uc2a4\ud2b8\ub85c \uac00\ub294 \uacbd\ub85c\uac00 \uc0dd\uae34\ub2e4.
+    expect(JSON.stringify(store.env_request[sessionID])).not.toContain("value")
+
+    applyDirectoryEvent({
+      event: {
+        type: "env.request.resolved",
+        properties: { sessionID, requestID: "env_1", name: "DATA_GO_KR_KEY", status: "saved" },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+    expect(store.env_request[sessionID]).toEqual([])
   })
 })

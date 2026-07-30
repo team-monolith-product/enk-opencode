@@ -23,6 +23,7 @@ import { FileRoutes } from "./routes/file"
 import { ConfigRoutes } from "./routes/config"
 import { EnvRoutes } from "./routes/env"
 import { EnvFileRoutes } from "./routes/env-file"
+import { EnvRequestRoutes } from "./routes/env-request"
 import { DevServerRoutes } from "./routes/dev-server"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProjectSummaryRoutes } from "./routes/project-summary"
@@ -48,6 +49,7 @@ export const InstanceRoutes = (app?: Hono) =>
     .route("/config", ConfigRoutes())
     .route("/env", EnvRoutes())
     .route("/env-file", EnvFileRoutes())
+    .route("/env-request", EnvRequestRoutes())
     .route("/dev-server", DevServerRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/project-summary", ProjectSummaryRoutes())

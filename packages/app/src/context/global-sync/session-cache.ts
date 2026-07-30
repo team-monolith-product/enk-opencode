@@ -1,4 +1,5 @@
 import type {
+  EnvRequest,
   FileDiff,
   Message,
   Part,
@@ -18,6 +19,7 @@ type SessionCache = {
   part: Record<string, Part[] | undefined>
   permission: Record<string, PermissionRequest[] | undefined>
   question: Record<string, QuestionRequest[] | undefined>
+  env_request: Record<string, EnvRequest[] | undefined>
 }
 
 export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<string>) {
@@ -37,6 +39,7 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
     delete store.session_status[sessionID]
     delete store.permission[sessionID]
     delete store.question[sessionID]
+    delete store.env_request[sessionID]
   }
 }
 

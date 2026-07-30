@@ -3,6 +3,7 @@ import type {
   Command,
   Config,
   Env,
+  EnvRequest,
   FileDiff,
   LspStatus,
   McpStatus,
@@ -60,6 +61,9 @@ export type State = {
   }
   question: {
     [sessionID: string]: QuestionRequest[]
+  }
+  env_request: {
+    [sessionID: string]: EnvRequest[]
   }
   mcp_ready: boolean
   mcp: {

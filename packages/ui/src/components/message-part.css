@@ -833,6 +833,35 @@
   }
 }
 
+/* 외부 연동 값 입력 도크. 껍데기는 permission 도크와 같은 리듬을 쓰고 내부는 컴포넌트에서 조판한다. */
+[data-component="dock-prompt"][data-kind="env"] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+
+  [data-slot="env-body"] {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+    padding: 12px 12px 0;
+  }
+
+  [data-slot="env-header"] {
+    padding: 0;
+  }
+
+  [data-slot="env-footer"] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+}
+
 [data-component="dock-prompt"][data-kind="question"] {
   position: relative;
   display: flex;

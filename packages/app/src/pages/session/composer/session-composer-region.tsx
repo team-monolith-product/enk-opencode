@@ -7,6 +7,7 @@ import { usePrompt } from "@/context/prompt"
 import { getSessionHandoff, setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
+import { SessionEnvRequestDock } from "@/pages/session/composer/session-env-request-dock"
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
@@ -343,40 +344,48 @@ export function SessionComposerRegion(props: {
           shell = el
         }}
       >
-          <div
-            classList={{
-              "relative flex min-h-0 flex-1 flex-col": floating(),
-            }}
-          >
-            <Show when={props.state.questionRequest()} keyed>
-              {(request) => (
-                <div>
-                  <SessionQuestionDock request={request} onSubmit={props.onResponseSubmit} />
-                </div>
-              )}
-            </Show>
+        <div
+          classList={{
+            "relative flex min-h-0 flex-1 flex-col": floating(),
+          }}
+        >
+          <Show when={props.state.questionRequest()} keyed>
+            {(request) => (
+              <div>
+                <SessionQuestionDock request={request} onSubmit={props.onResponseSubmit} />
+              </div>
+            )}
+          </Show>
 
-            <Show when={props.state.permissionRequest()} keyed>
-              {(request) => (
-                <div>
-                  <SessionPermissionDock
-                    request={request}
-                    responding={props.state.permissionResponding()}
-                    onDecide={(response) => {
-                      props.onResponseSubmit()
-                      props.state.decide(response)
-                    }}
-                  />
-                </div>
-              )}
-            </Show>
+          <Show when={props.state.envRequest()} keyed>
+            {(request) => (
+              <div>
+                <SessionEnvRequestDock request={request} onSubmit={props.onResponseSubmit} />
+              </div>
+            )}
+          </Show>
 
-            <Show when={!props.state.blocked()}>
-              <div
-                classList={{
-                  "flex min-h-0 flex-1 flex-col": floating(),
-                }}
-              >
+          <Show when={props.state.permissionRequest()} keyed>
+            {(request) => (
+              <div>
+                <SessionPermissionDock
+                  request={request}
+                  responding={props.state.permissionResponding()}
+                  onDecide={(response) => {
+                    props.onResponseSubmit()
+                    props.state.decide(response)
+                  }}
+                />
+              </div>
+            )}
+          </Show>
+
+          <Show when={!props.state.blocked()}>
+            <div
+              classList={{
+                "flex min-h-0 flex-1 flex-col": floating(),
+              }}
+            >
               {/* The todo dock lives outside the prompt gate: prompt.ready() drops to false while an
                   uncached session loads, and the dock must not unmount for that. */}
               <Show when={dock()}>
@@ -509,9 +518,9 @@ export function SessionComposerRegion(props: {
                   />
                 </div>
               </Show>
-              </div>
-            </Show>
-          </div>
+            </div>
+          </Show>
+        </div>
       </SessionComposerShell>
     </div>
   )

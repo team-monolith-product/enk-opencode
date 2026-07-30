@@ -13,6 +13,7 @@ import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import { EnsureDevServerTool } from "./ensure-dev-server"
+import { EnvRequestTool } from "./env-request"
 import type { Agent } from "../agent/agent"
 import { Tool } from "./tool"
 import { Config } from "../config/config"
@@ -119,6 +120,8 @@ export namespace ToolRegistry {
         return [
           InvalidTool,
           ...(question ? [QuestionTool] : []),
+          // 값 입력창을 띄울 클라이언트가 있어야 의미가 있으므로 question 과 같은 조건으로 건다.
+          ...(question ? [EnvRequestTool] : []),
           BashTool,
           ReadTool,
           GlobTool,
