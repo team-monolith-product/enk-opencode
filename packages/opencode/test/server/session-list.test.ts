@@ -95,4 +95,23 @@ describe("Session.list", () => {
       },
     })
   })
+
+  test("keeps archived sessions by default and drops them when archived is false", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const live = await Session.create({ title: "live-session" })
+        const archived = await Session.create({ title: "archived-session" })
+        await Session.setArchived({ sessionID: archived.id, time: Date.now() })
+
+        expect([...Session.list()].map((s) => s.id)).toContain(archived.id)
+        expect([...Session.list({ archived: true })].map((s) => s.id)).toContain(archived.id)
+
+        const ids = [...Session.list({ archived: false })].map((s) => s.id)
+        expect(ids).toContain(live.id)
+        expect(ids).not.toContain(archived.id)
+      },
+    })
+  })
 })

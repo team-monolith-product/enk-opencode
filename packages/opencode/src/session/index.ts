@@ -741,6 +741,10 @@ export namespace Session {
     start?: number
     search?: string
     limit?: number
+    // archived: false 면 보관된 세션을 뺀다(listGlobal 과 같은 뜻). 다만 생략했을 때는
+    // listGlobal 과 달리 보관 세션을 그대로 포함한다 -- GET /session, opencode export,
+    // 세션 선택 CLI 가 지금 그 결과를 전제로 돌아서, 기본값을 바꾸면 조용히 회귀한다.
+    archived?: boolean
   }) {
     const project = Instance.project
     const conditions = [eq(SessionTable.project_id, project.id)]
@@ -759,6 +763,9 @@ export namespace Session {
     }
     if (input?.search) {
       conditions.push(like(SessionTable.title, `%${input.search}%`))
+    }
+    if (input?.archived === false) {
+      conditions.push(isNull(SessionTable.time_archived))
     }
 
     const limit = input?.limit ?? 100
