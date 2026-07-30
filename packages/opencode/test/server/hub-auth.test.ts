@@ -50,4 +50,39 @@ describe("HubAuth internal token", () => {
     expect(stderr.includes("Error")).toBe(false)
     expect(stdout).toContain("OK")
   })
+
+  test("hub OAuth 모드: 허브 API 토큰은 소유자 일치 시 통과, 불일치 시 403", () => {
+    const script = `
+      process.env.JUPYTERHUB_API_URL = "http://hub.invalid/api"
+      process.env.JUPYTERHUB_API_TOKEN = "test-token"
+      process.env.JUPYTERHUB_USER = "student"
+      const { Hono } = await import("hono")
+      const { HubAuth } = await import("./src/server/hub-auth.ts")
+      globalThis.fetch = async (url, init) => {
+        const auth = new Headers(init?.headers).get("authorization") ?? ""
+        if (auth === "token owner-token") return Response.json({ name: "student" })
+        if (auth === "token other-token") return Response.json({ name: "intruder" })
+        return new Response("forbidden", { status: 403 })
+      }
+      const app = new Hono().use(HubAuth.auth()).get("/provider", (c) => c.json({ ok: true }))
+
+      const owner = await app.request("/provider", { headers: { authorization: "token owner-token" } })
+      if (owner.status !== 200) throw new Error("owner expected 200, got " + owner.status)
+
+      const other = await app.request("/provider", { headers: { authorization: "token other-token" } })
+      if (other.status !== 403) throw new Error("other expected 403, got " + other.status)
+
+      const invalid = await app.request("/provider", { headers: { authorization: "token bad-token" } })
+      if (invalid.status !== 403) throw new Error("invalid expected 403, got " + invalid.status)
+      console.log("OK")
+    `
+    const result = Bun.spawnSync(["bun", "-e", script], {
+      cwd: pkgRoot,
+      env: { ...process.env },
+    })
+    const stdout = result.stdout.toString()
+    const stderr = result.stderr.toString()
+    expect(stderr.includes("Error")).toBe(false)
+    expect(stdout).toContain("OK")
+  })
 })

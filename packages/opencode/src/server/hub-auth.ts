@@ -196,7 +196,8 @@ export namespace HubAuth {
    * Hub 배포 환경 (JUPYTERHUB_API_URL 존재):
    *   - 유효한 세션 쿠키 -> 통과
    *   - Basic Auth 헤더 또는 ?token -> 기존 Basic Auth로 검증
-   *   - 둘 다 없음 -> Hub OAuth 리다이렉트 (브라우저 요청)
+   *   - Authorization: token <hub-api-token> -> Hub API로 소유자 검증 (server-to-server)
+   *   - 모두 없음 -> Hub OAuth 리다이렉트 (브라우저 요청)
    *
    * 독립 실행 환경 (JUPYTERHUB_API_URL 미존재):
    *   - OPENCODE_SERVER_PASSWORD 설정됨 -> Basic Auth 검증
@@ -240,6 +241,18 @@ export namespace HubAuth {
           if (header?.startsWith("Basic ")) {
             return basicAuth({ username, password })(c, next)
           }
+        }
+
+        // 2.5 Hub API 토큰 (server-to-server 요청) -> Hub API로 소유자 검증
+        // AIDEV-NOTE: Rails 가 Token.issue 로 발급한 사용자 토큰을 Authorization: token 헤더로
+        // 보낸다. OAuth 리다이렉트를 따라갈 수 없는 백엔드 호출 경로라, 토큰 소유자가 이 pod
+        // 소유자(JUPYTERHUB_USER)와 일치할 때만 통과시킨다 (팀 간 격리).
+        const authorization = c.req.header("authorization")
+        if (authorization?.startsWith("token ")) {
+          const name = await userinfo(authorization.slice("token ".length))
+          if (name === Flag.JUPYTERHUB_USER) return next()
+          log.warn("hub api token rejected", { resolved_user: name })
+          return c.text("Forbidden", 403)
         }
 
         // 3. 브라우저 요청 -> Hub OAuth 리다이렉트
