@@ -29,27 +29,22 @@ export namespace PlanDoc {
     ),
     narrative: z.string(),
     caveats: z.array(z.string()),
-    manualSlots: z.array(z.string()),
   })
   export type Shape = z.infer<typeof Shape>
 
+  // chars 는 항목 하나의 글자 수, count 는 목록 길이 상한.
   export const LIMITS = {
-    title: 60,
-    tagline: 120,
-    problem: 600,
-    targetUser: 160,
-    targetUsers: 5,
-    userStory: 200,
-    userStories: 6,
-    featureName: 60,
-    features: 8,
-    screen: 120,
-    screens: 8,
-    tech: 600,
-    milestone: 120,
-    changelog: 16,
-    caveat: 240,
-    slot: 80,
+    title: { chars: 60 },
+    tagline: { chars: 120 },
+    problem: { chars: 600 },
+    targetUsers: { chars: 160, count: 5 },
+    userStories: { chars: 200, count: 6 },
+    features: { chars: 60, count: 8 },
+    screens: { chars: 120, count: 8 },
+    tech: { chars: 600 },
+    changelog: { chars: 120, count: 16 },
+    caveats: { chars: 240, count: 8 },
+    manualSlots: { count: 10 },
   } as const
 
   export const Result = z
@@ -83,13 +78,7 @@ export namespace PlanDoc {
 
   const USER_TURN_CAP = 2_000
   const TRANSCRIPT_BUDGET = 100_000
-
-  export function isBusy(messages: MessageV2.WithParts[]): boolean {
-    const last = messages.at(-1)
-    if (!last) return false
-    const info = last.info
-    return info.role === "assistant" && !info.time.completed && !info.error
-  }
+  export const PLAN_FILE_BUDGET = 20_000
 
   export function selectPrimary(candidates: { id: string; userCount: number; updated: number }[]): string | undefined {
     let best: (typeof candidates)[number] | undefined
@@ -114,14 +103,11 @@ export namespace PlanDoc {
 
   export interface Serialized {
     transcript: string
-    userCount: number
-    toolEventCount: number
     degraded: boolean
   }
 
   export function serialize(messages: MessageV2.WithParts[], root?: string): Serialized {
     const lines: string[] = []
-    let userCount = 0
     let toolEventCount = 0
 
     for (const msg of messages) {
@@ -132,7 +118,6 @@ export namespace PlanDoc {
           .join("\n")
           .trim()
         if (!text) continue
-        userCount++
         lines.push(`[user] ${text.length > USER_TURN_CAP ? text.slice(0, USER_TURN_CAP) + "…" : text}`)
         continue
       }
@@ -157,8 +142,6 @@ export namespace PlanDoc {
 
     return {
       transcript: capTranscript(lines, TRANSCRIPT_BUDGET),
-      userCount,
-      toolEventCount,
       degraded: toolEventCount === 0,
     }
   }
@@ -186,6 +169,11 @@ export namespace PlanDoc {
     return [...head, "... (중략) ...", ...tail].join("\n\n")
   }
 
+  export function capText(text: string, budget: number): string {
+    if (text.length <= budget) return text
+    return text.slice(0, budget) + "\n... (중략) ..."
+  }
+
   export function renderNetDiff(diffs: Snapshot.FileDiff[], root?: string): string {
     if (diffs.length === 0) return ""
     const lines = diffs.map((d) => {
@@ -209,28 +197,38 @@ export namespace PlanDoc {
 
   const NUMERIC_PATTERNS = [/\d[\d,.]*\s*(%|퍼센트)/, /\d[\d,.]*\s*배/, /\d[\d,.]*\s*명/]
   const SUPERLATIVES = ["최고", "혁신", "완벽", "최초", "압도적"]
-  const AI_CLAIM = /(AI|인공지능)\s*(가|이|은|는)?\s*(분석|추천|설계|학습)/
+  const AI_CLAIM = /(AI|인공지능)\s*(가|이|은|는)?\s*(분석|추천|설계|학습)/i
 
   function escapeRegExp(input: string) {
     return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   }
 
-  function termPattern(term: string) {
-    return new RegExp(`(?<![\\w.@/-])${escapeRegExp(term)}(?![\\w.@/-])`, "i")
+  export interface Gate {
+    check(text: string): string | undefined
   }
 
-  export function checkText(text: string, terms: string[]): string | undefined {
-    for (const pattern of NUMERIC_PATTERNS) {
-      if (pattern.test(text)) return "근거 없는 수치"
+  // 금지 용어는 파일·의존성 이름 수백 개라, 문장마다 새 RegExp 를 만들면 비용이 크다.
+  // 한 번만 교차 패턴으로 합쳐 두고 문장마다 재사용한다.
+  export function gate(terms: string[]): Gate {
+    const sorted = [...terms].sort((a, b) => b.length - a.length)
+    const pattern =
+      sorted.length > 0
+        ? new RegExp(`(?<![\\w.@/-])(?:${sorted.map(escapeRegExp).join("|")})(?![\\w.@/-])`, "i")
+        : undefined
+    return {
+      check(text: string) {
+        for (const numeric of NUMERIC_PATTERNS) {
+          if (numeric.test(text)) return "근거 없는 수치"
+        }
+        for (const word of SUPERLATIVES) {
+          if (text.includes(word)) return `최상급 표현("${word}")`
+        }
+        if (AI_CLAIM.test(text)) return "AI 동작 원리 단정"
+        const hit = pattern?.exec(text)
+        if (hit) return `기술 용어("${hit[0]}")`
+        return undefined
+      },
     }
-    for (const word of SUPERLATIVES) {
-      if (text.includes(word)) return `최상급 표현("${word}")`
-    }
-    if (AI_CLAIM.test(text)) return "AI 동작 원리 단정"
-    for (const term of terms) {
-      if (termPattern(term).test(text)) return `기술 용어("${term}")`
-    }
-    return undefined
   }
 
   export function splitSentences(text: string): string[] {
@@ -261,132 +259,99 @@ export namespace PlanDoc {
 
   export function clamp(shape: Shape): Shape {
     return {
-      title: truncate(shape.title, LIMITS.title),
-      tagline: truncate(shape.tagline, LIMITS.tagline),
-      problem: truncate(shape.problem, LIMITS.problem),
-      targetUsers: shape.targetUsers.slice(0, LIMITS.targetUsers).map((t) => truncate(t, LIMITS.targetUser)),
-      userStories: shape.userStories.slice(0, LIMITS.userStories).map((s) => truncate(s, LIMITS.userStory)),
+      title: truncate(shape.title, LIMITS.title.chars),
+      tagline: truncate(shape.tagline, LIMITS.tagline.chars),
+      problem: truncate(shape.problem, LIMITS.problem.chars),
+      targetUsers: shape.targetUsers
+        .slice(0, LIMITS.targetUsers.count)
+        .map((t) => truncate(t, LIMITS.targetUsers.chars)),
+      userStories: shape.userStories
+        .slice(0, LIMITS.userStories.count)
+        .map((s) => truncate(s, LIMITS.userStories.chars)),
       features: shape.features
-        .slice(0, LIMITS.features)
-        .map((f) => ({ ...f, name: truncate(f.name, LIMITS.featureName) })),
-      screens: shape.screens.slice(0, LIMITS.screens).map((s) => truncate(s, LIMITS.screen)),
+        .slice(0, LIMITS.features.count)
+        .map((f) => ({ ...f, name: truncate(f.name, LIMITS.features.chars) })),
+      screens: shape.screens.slice(0, LIMITS.screens.count).map((s) => truncate(s, LIMITS.screens.chars)),
       tech: {
-        overview: truncate(shape.tech.overview, LIMITS.tech),
-        data: truncate(shape.tech.data, LIMITS.tech),
+        overview: truncate(shape.tech.overview, LIMITS.tech.chars),
+        data: truncate(shape.tech.data, LIMITS.tech.chars),
       },
       changelog: shape.changelog
-        .slice(0, LIMITS.changelog)
-        .map((c) => ({ ...c, milestone: truncate(c.milestone, LIMITS.milestone) })),
+        .slice(0, LIMITS.changelog.count)
+        .map((c) => ({ ...c, milestone: truncate(c.milestone, LIMITS.changelog.chars) })),
       narrative: shape.narrative.trim(),
-      caveats: shape.caveats.map((c) => truncate(c, LIMITS.caveat)),
-      manualSlots: shape.manualSlots.map((s) => truncate(s, LIMITS.slot)),
+      caveats: shape.caveats.slice(0, LIMITS.caveats.count).map((c) => truncate(c, LIMITS.caveats.chars)),
     }
   }
 
-  export interface Violation {
-    block: Block
+  export type GateField = Block | "caveats"
+
+  export interface Removed {
+    block: GateField
     text: string
     reason: string
   }
 
-  export function findViolations(shape: Shape, terms: string[]): Violation[] {
-    const out: Violation[] = []
-    const check = (block: Block, text: string) => {
-      for (const sentence of splitSentences(text)) {
-        const reason = checkText(sentence, terms)
-        if (reason) out.push({ block, text: sentence, reason })
-      }
-    }
-    check("title", shape.title)
-    check("tagline", shape.tagline)
-    check("problem", shape.problem)
-    for (const item of shape.targetUsers) check("targetUsers", item)
-    for (const item of shape.userStories) check("userStories", item)
-    for (const item of shape.features) check("features", item.name)
-    for (const item of shape.screens) check("screens", item)
-    check("tech", shape.tech.overview)
-    check("tech", shape.tech.data)
-    for (const item of shape.changelog) check("changelog", item.milestone)
-    check("narrative", shape.narrative)
-    return out
-  }
-
-  function stripProse(text: string, terms: string[]): { text: string; removed: number } {
-    let removed = 0
-    const kept = text
-      .split("\n")
-      .map((line) =>
-        line
-          .split(/(?<=[.!?…])\s+/)
-          .filter((sentence) => {
-            if (!sentence.trim()) return true
-            if (checkText(sentence, terms)) {
-              removed++
-              return false
-            }
-            return true
-          })
-          .join(" "),
-      )
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-    return { text: kept.trim(), removed }
-  }
-
-  export function stripViolations(shape: Shape, terms: string[]): { shape: Shape; caveats: string[] } {
-    const caveats: string[] = []
-    let removed = 0
+  export function strip(shape: Shape, gate: Gate): { shape: Shape; removed: Removed[] } {
+    const removed: Removed[] = []
     const next: Shape = structuredClone(shape)
 
-    if (checkText(next.title, terms)) {
-      next.title = ""
-      removed++
+    const keep = (block: GateField, text: string) => {
+      const reason = gate.check(text)
+      if (!reason) return true
+      removed.push({ block, text, reason })
+      return false
     }
-    if (checkText(next.tagline, terms)) {
-      next.tagline = ""
-      removed++
-    }
-
-    for (const key of ["problem", "narrative"] as const) {
-      const result = stripProse(next[key], terms)
-      next[key] = result.text
-      removed += result.removed
-    }
-    for (const key of ["overview", "data"] as const) {
-      const result = stripProse(next.tech[key], terms)
-      next.tech[key] = result.text
-      removed += result.removed
-    }
-
-    const keepItem = (text: string) => {
-      if (checkText(text, terms)) {
-        removed++
-        return false
+    // 위반이 없으면 원문을 그대로 돌려준다. 문장 재조립은 서사의 문단 구분을 지우므로
+    // 실제로 뺀 문장이 있을 때만 감수한다.
+    const scrub = (block: GateField, text: string) => {
+      const kept: string[] = []
+      let hit = false
+      for (const sentence of splitSentences(text)) {
+        if (keep(block, sentence)) kept.push(sentence)
+        else hit = true
       }
-      return true
+      return hit ? kept.join(" ") : text
     }
-    next.targetUsers = next.targetUsers.filter(keepItem)
-    next.userStories = next.userStories.filter(keepItem)
-    next.features = next.features.filter((f) => keepItem(f.name))
-    next.screens = next.screens.filter(keepItem)
-    next.changelog = next.changelog.filter((c) => keepItem(c.milestone))
 
-    if (removed > 0) caveats.push(`검증 규칙에 걸린 문장 ${removed}건을 자동으로 뺐어요. 직접 확인해 주세요.`)
-    return { shape: next, caveats }
-  }
+    if (!keep("title", next.title)) next.title = ""
+    if (!keep("tagline", next.tagline)) next.tagline = ""
+    next.problem = scrub("problem", next.problem)
+    next.narrative = scrub("narrative", next.narrative)
+    next.tech.overview = scrub("tech", next.tech.overview)
+    next.tech.data = scrub("tech", next.tech.data)
+    next.targetUsers = next.targetUsers.filter((item) => keep("targetUsers", item))
+    next.userStories = next.userStories.filter((item) => keep("userStories", item))
+    next.features = next.features.filter((item) => keep("features", item.name))
+    next.screens = next.screens.filter((item) => keep("screens", item))
+    next.changelog = next.changelog.filter((item) => keep("changelog", item.milestone))
+    next.caveats = next.caveats.filter((item) => keep("caveats", item))
 
-  export function normalizeSlots(slots: string[]): string[] {
-    const known = new Set<string>(BLOCKS)
-    return [...new Set(slots.filter((slot) => known.has(slot)))]
+    return { shape: next, removed }
   }
 
   export function computeSparse(slots: string[]): boolean {
     return CORE_BLOCKS.some((block) => slots.includes(block))
   }
 
-  const SLOT_PLACEHOLDER = "_(여기에 직접 적어주세요)_"
+  const SLOT_LABEL: Record<Block, string> = {
+    title: "제목",
+    tagline: "한 줄 소개",
+    problem: "풀고 싶은 문제",
+    targetUsers: "타겟 사용자",
+    userStories: "유저 스토리",
+    features: "핵심 기능",
+    screens: "화면 흐름",
+    tech: "기술 구조",
+    changelog: "변경 이력",
+    narrative: "만든 이야기",
+  }
 
-  function emptySlots(shape: Shape): Block[] {
+  export function slotMarker(block: Block): string {
+    return `[[빈칸: ${SLOT_LABEL[block]}]]`
+  }
+
+  export function emptySlots(shape: Shape): Block[] {
     const slots: Block[] = []
     if (!shape.title.trim()) slots.push("title")
     if (!shape.tagline.trim()) slots.push("tagline")
@@ -395,7 +360,7 @@ export namespace PlanDoc {
     if (shape.userStories.length === 0) slots.push("userStories")
     if (shape.features.length === 0) slots.push("features")
     if (shape.screens.length === 0) slots.push("screens")
-    if (!shape.tech.overview.trim() && !shape.tech.data.trim()) slots.push("tech")
+    if (!shape.tech.overview.trim() || !shape.tech.data.trim()) slots.push("tech")
     if (shape.changelog.length === 0) slots.push("changelog")
     if (!shape.narrative.trim()) slots.push("narrative")
     return slots
@@ -414,54 +379,59 @@ export namespace PlanDoc {
     pivot: "방향 전환",
   }
 
-  export function render(shape: Shape, slots: string[]): string {
-    const has = (block: Block) => !slots.includes(block)
+  export function render(shape: Shape): string {
     const list = (items: string[]) => items.map((item) => `- ${item}`).join("\n")
 
     const sections: string[] = []
     sections.push("## 1. 유저 스토리 기획서")
     sections.push("### 풀고 싶은 문제")
-    sections.push(has("problem") ? shape.problem : SLOT_PLACEHOLDER)
+    sections.push(shape.problem.trim() ? shape.problem : slotMarker("problem"))
     sections.push("### 타겟 사용자")
-    sections.push(has("targetUsers") ? list(shape.targetUsers) : SLOT_PLACEHOLDER)
+    sections.push(shape.targetUsers.length > 0 ? list(shape.targetUsers) : slotMarker("targetUsers"))
     sections.push("### 유저 스토리")
-    sections.push(has("userStories") ? list(shape.userStories) : SLOT_PLACEHOLDER)
-    sections.push("### 주요 기능")
+    sections.push(shape.userStories.length > 0 ? list(shape.userStories) : slotMarker("userStories"))
+    sections.push("### 핵심 기능")
     sections.push(
-      has("features")
+      shape.features.length > 0
         ? shape.features.map((f) => `- ${f.name} (${FEATURE_STATUS[f.status]})`).join("\n")
-        : SLOT_PLACEHOLDER,
+        : slotMarker("features"),
     )
-    sections.push("### 화면 구성")
-    sections.push(has("screens") ? list(shape.screens) : SLOT_PLACEHOLDER)
+    sections.push("### 화면 흐름")
+    sections.push(shape.screens.length > 0 ? list(shape.screens) : slotMarker("screens"))
 
     sections.push("## 2. 기술 구조")
     sections.push("### 구조 개요")
-    sections.push(has("tech") && shape.tech.overview.trim() ? shape.tech.overview : SLOT_PLACEHOLDER)
+    sections.push(shape.tech.overview.trim() ? shape.tech.overview : slotMarker("tech"))
     sections.push("### 데이터")
-    sections.push(has("tech") && shape.tech.data.trim() ? shape.tech.data : SLOT_PLACEHOLDER)
+    sections.push(shape.tech.data.trim() ? shape.tech.data : slotMarker("tech"))
 
     sections.push("## 3. 변경 이력")
     sections.push(
-      has("changelog")
+      shape.changelog.length > 0
         ? shape.changelog
             .map((c) => `- [${CHANGELOG_KIND[c.kind]}] ${c.milestone}${c.kind === "rollback" ? " (시도 후 철회)" : ""}`)
             .join("\n")
-        : SLOT_PLACEHOLDER,
+        : slotMarker("changelog"),
     )
 
     return sections.join("\n\n") + "\n"
   }
 
+  // 주의사항은 응답 필드로만 두면 문서를 그대로 옮겨 쓰는 곳에서 사라진다. 본문 끝에도 함께 적는다.
+  export function withCaveats(body: string, caveats: string[]): string {
+    if (caveats.length === 0) return body
+    return `${body}\n## 한계\n\n${caveats.map((c) => `- ${c}`).join("\n")}\n`
+  }
+
   export function finalize(shape: Shape, extraCaveats: string[] = []): Result {
-    const slots = [...new Set([...normalizeSlots(shape.manualSlots), ...emptySlots(shape)])]
-    const caveats = [...new Set([...shape.caveats, ...extraCaveats])]
-    const narrative = slots.includes("narrative") ? SLOT_PLACEHOLDER : shape.narrative
+    const slots = emptySlots(shape).slice(0, LIMITS.manualSlots.count)
+    const caveats = [...new Set([...shape.caveats, ...extraCaveats])].slice(0, LIMITS.caveats.count)
+    const narrative = shape.narrative.trim() ? shape.narrative : slotMarker("narrative")
     return {
       title: shape.title,
       tagline: shape.tagline,
-      body: render(shape, slots),
-      bodyNarrative: narrative,
+      body: withCaveats(render(shape), caveats),
+      bodyNarrative: withCaveats(narrative, caveats),
       manualSlots: slots,
       caveats,
       sparse: computeSparse(slots),
@@ -481,7 +451,6 @@ export namespace PlanDoc {
       changelog: [],
       narrative: "",
       caveats: [],
-      manualSlots: [],
     }
   }
 
