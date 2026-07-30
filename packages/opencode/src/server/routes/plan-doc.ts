@@ -201,7 +201,7 @@ export const PlanDocRoutes = lazy(() =>
           schema: PlanDoc.Shape,
           system: SYSTEM,
           prompt: feedback ? `${prompt}\n\n${feedback}` : prompt,
-        }).then((result) => result.object)
+        }).then((result) => PlanDoc.clamp(result.object))
 
       let object = await generate()
       const extraCaveats: string[] = []

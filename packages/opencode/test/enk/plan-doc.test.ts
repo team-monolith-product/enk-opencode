@@ -175,6 +175,52 @@ function baseShape(): PlanDoc.Shape {
   }
 }
 
+describe("PlanDoc.truncate / clamp", () => {
+  test("keeps text within the limit untouched", () => {
+    expect(PlanDoc.truncate("짧은 문장이다.", 60)).toBe("짧은 문장이다.")
+  })
+
+  test("cuts at a sentence boundary when possible", () => {
+    const text = "첫 문장이다. 두 번째 문장은 길어서 상한을 넘긴다."
+    expect(PlanDoc.truncate(text, 20)).toBe("첫 문장이다.")
+  })
+
+  test("falls back to a word boundary with an ellipsis", () => {
+    const result = PlanDoc.truncate("aaaa bbbb cccc dddd eeee ffff", 20)
+    expect(result.length).toBeLessThanOrEqual(20)
+    expect(result.endsWith("…")).toBe(true)
+    expect(result).toBe("aaaa bbbb cccc dddd…")
+  })
+
+  test("clamps over-long prose instead of failing", () => {
+    const long = `${"가".repeat(400)}. ${"나".repeat(400)}.`
+    const shape = { ...baseShape(), tech: { overview: long, data: long } }
+    const clamped = PlanDoc.clamp(shape)
+
+    expect(clamped.tech.overview.length).toBeLessThanOrEqual(PlanDoc.LIMITS.tech)
+    expect(clamped.tech.data.length).toBeLessThanOrEqual(PlanDoc.LIMITS.tech)
+  })
+
+  test("slices over-long lists to their limits", () => {
+    const shape = {
+      ...baseShape(),
+      features: Array.from({ length: 12 }, (_, i) => ({ name: `기능 ${i}`, status: "works" as const })),
+      screens: Array.from({ length: 12 }, (_, i) => `화면 ${i}`),
+    }
+    const clamped = PlanDoc.clamp(shape)
+
+    expect(clamped.features).toHaveLength(PlanDoc.LIMITS.features)
+    expect(clamped.screens).toHaveLength(PlanDoc.LIMITS.screens)
+  })
+
+  test("accepts output that the previous hard schema rejected", () => {
+    const shape = { ...baseShape(), tech: { overview: "가".repeat(420), data: "나".repeat(420) } }
+
+    expect(() => PlanDoc.Shape.parse(shape)).not.toThrow()
+    expect(PlanDoc.clamp(shape).tech.overview.length).toBeLessThanOrEqual(PlanDoc.LIMITS.tech)
+  })
+})
+
 describe("PlanDoc.findViolations / stripViolations", () => {
   test("finds violations per block", () => {
     const shape = baseShape()

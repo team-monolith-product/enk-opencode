@@ -4,36 +4,53 @@ import type { MessageV2 } from "@/session/message-v2"
 import type { Snapshot } from "@/snapshot"
 
 export namespace PlanDoc {
+  // 길이·개수 상한은 스키마에 걸지 않는다. 상한을 걸면 초과분 한 곳 때문에
+  // generateObject 가 응답 전체를 거부해 생성이 실패한다. 생성 후 clamp 로 다듬는다.
   export const Shape = z.object({
-    title: z.string().max(40),
-    tagline: z.string().max(80),
-    problem: z.string().max(400),
-    targetUsers: z.array(z.string().max(120)).max(4),
-    userStories: z.array(z.string().max(140)).max(5),
-    features: z
-      .array(
-        z.object({
-          name: z.string().max(40),
-          status: z.enum(["works", "planned", "unfinished"]),
-        }),
-      )
-      .max(6),
-    screens: z.array(z.string().max(80)).max(6),
-    tech: z.object({ overview: z.string().max(240), data: z.string().max(240) }),
-    changelog: z
-      .array(
-        z.object({
-          kind: z.enum(["add", "fix", "rollback", "pivot"]),
-          milestone: z.string().max(80),
-          keptInFinal: z.boolean(),
-        }),
-      )
-      .max(12),
+    title: z.string(),
+    tagline: z.string(),
+    problem: z.string(),
+    targetUsers: z.array(z.string()),
+    userStories: z.array(z.string()),
+    features: z.array(
+      z.object({
+        name: z.string(),
+        status: z.enum(["works", "planned", "unfinished"]),
+      }),
+    ),
+    screens: z.array(z.string()),
+    tech: z.object({ overview: z.string(), data: z.string() }),
+    changelog: z.array(
+      z.object({
+        kind: z.enum(["add", "fix", "rollback", "pivot"]),
+        milestone: z.string(),
+        keptInFinal: z.boolean(),
+      }),
+    ),
     narrative: z.string(),
-    caveats: z.array(z.string().max(140)),
-    manualSlots: z.array(z.string().max(60)),
+    caveats: z.array(z.string()),
+    manualSlots: z.array(z.string()),
   })
   export type Shape = z.infer<typeof Shape>
+
+  export const LIMITS = {
+    title: 60,
+    tagline: 120,
+    problem: 600,
+    targetUser: 160,
+    targetUsers: 5,
+    userStory: 200,
+    userStories: 6,
+    featureName: 60,
+    features: 8,
+    screen: 120,
+    screens: 8,
+    tech: 600,
+    milestone: 120,
+    changelog: 16,
+    caveat: 240,
+    slot: 80,
+  } as const
 
   export const Result = z
     .object({
@@ -221,6 +238,49 @@ export namespace PlanDoc {
       .split(/(?<=[.!?…])\s+|\n+/)
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
+  }
+
+  // 문장 경계에서 자르고, 첫 문장부터 넘치면 단어 경계에서 자른 뒤 말줄임을 붙인다.
+  export function truncate(text: string, limit: number): string {
+    const trimmed = text.trim()
+    if (trimmed.length <= limit) return trimmed
+
+    const kept: string[] = []
+    for (const sentence of splitSentences(trimmed)) {
+      if ([...kept, sentence].join(" ").length > limit) break
+      kept.push(sentence)
+    }
+    if (kept.length > 0) return kept.join(" ")
+
+    const head = trimmed.slice(0, limit - 1)
+    if (/\s/.test(trimmed.charAt(limit - 1))) return `${head.trimEnd()}…`
+
+    const boundary = head.lastIndexOf(" ")
+    return `${(boundary > limit / 2 ? head.slice(0, boundary) : head).trimEnd()}…`
+  }
+
+  export function clamp(shape: Shape): Shape {
+    return {
+      title: truncate(shape.title, LIMITS.title),
+      tagline: truncate(shape.tagline, LIMITS.tagline),
+      problem: truncate(shape.problem, LIMITS.problem),
+      targetUsers: shape.targetUsers.slice(0, LIMITS.targetUsers).map((t) => truncate(t, LIMITS.targetUser)),
+      userStories: shape.userStories.slice(0, LIMITS.userStories).map((s) => truncate(s, LIMITS.userStory)),
+      features: shape.features
+        .slice(0, LIMITS.features)
+        .map((f) => ({ ...f, name: truncate(f.name, LIMITS.featureName) })),
+      screens: shape.screens.slice(0, LIMITS.screens).map((s) => truncate(s, LIMITS.screen)),
+      tech: {
+        overview: truncate(shape.tech.overview, LIMITS.tech),
+        data: truncate(shape.tech.data, LIMITS.tech),
+      },
+      changelog: shape.changelog
+        .slice(0, LIMITS.changelog)
+        .map((c) => ({ ...c, milestone: truncate(c.milestone, LIMITS.milestone) })),
+      narrative: shape.narrative.trim(),
+      caveats: shape.caveats.map((c) => truncate(c, LIMITS.caveat)),
+      manualSlots: shape.manualSlots.map((s) => truncate(s, LIMITS.slot)),
+    }
   }
 
   export interface Violation {
