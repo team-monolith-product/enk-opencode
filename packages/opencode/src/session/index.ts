@@ -9,10 +9,10 @@ import { Config } from "../config/config"
 import { Flag } from "../flag/flag"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt } from "../storage/db"
+import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt, count, sql } from "../storage/db"
 import { SyncEvent } from "../sync"
 import type { SQL } from "../storage/db"
-import { SessionTable } from "./session.sql"
+import { MessageTable, SessionTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
 import { Storage } from "@/storage/storage"
 import { Log } from "../util/log"
@@ -775,6 +775,25 @@ export namespace Session {
     for (const row of rows) {
       yield fromRow(row)
     }
+  }
+
+  // 세션별 사용자 메시지 수. 메시지 본문(data)을 올리지 않고 SQL 에서 집계한다.
+  export function userMessageCounts(sessionIDs: SessionID[]): Map<SessionID, number> {
+    if (sessionIDs.length === 0) return new Map()
+    const rows = Database.use((db) =>
+      db
+        .select({ session_id: MessageTable.session_id, total: count() })
+        .from(MessageTable)
+        .where(
+          and(
+            inArray(MessageTable.session_id, sessionIDs),
+            eq(sql`json_extract(${MessageTable.data}, '$.role')`, "user"),
+          ),
+        )
+        .groupBy(MessageTable.session_id)
+        .all(),
+    )
+    return new Map(rows.map((row) => [row.session_id, row.total]))
   }
 
   export function* listGlobal(input?: {
