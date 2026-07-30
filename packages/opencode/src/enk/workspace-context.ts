@@ -58,7 +58,8 @@ export namespace WorkspaceContext {
     /(^|\/)app\/page\.[jt]sx?$/,
   ]
 
-  const PATH_REGEX = /[\w./-]+\.(?:tsx?|jsx?|html|css|scss|md|json|py|go|rs|java|kt|rb|swift|vue|svelte|toml|yaml|yml)\b/g
+  const PATH_REGEX =
+    /[\w./-]+\.(?:tsx?|jsx?|html|css|scss|md|json|py|go|rs|java|kt|rb|swift|vue|svelte|toml|yaml|yml)\b/g
 
   export async function collect(root: string): Promise<string[]> {
     const out: string[] = []
