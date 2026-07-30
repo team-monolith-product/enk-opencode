@@ -1890,6 +1890,13 @@ export type PlanDoc = {
   sparse: boolean
 }
 
+export type SessionBusyError = {
+  name: "SessionBusyError"
+  data: {
+    sessionID: string
+  }
+}
+
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -3314,6 +3321,10 @@ export type PlanDocGenerateErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Selected session has a turn in flight, retry later
+   */
+  409: SessionBusyError
 }
 
 export type PlanDocGenerateError = PlanDocGenerateErrors[keyof PlanDocGenerateErrors]
