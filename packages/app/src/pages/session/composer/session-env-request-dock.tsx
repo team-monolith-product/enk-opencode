@@ -12,11 +12,15 @@ import { connectEnvDraft, type EnvDraftChannel, type EnvPresenceEntry } from "@/
 import { useLanguage } from "@/context/language"
 import { useParentParams } from "@/context/parent-params"
 import { useSDK } from "@/context/sdk"
+import { merge } from "./env-draft-merge"
 
-// AI 가 외부 서비스 값을 요청하면 뜨는 입력 도크. 팀 전원 화면에 뜨고 이름·값을 함께 채운다.
+// AI 가 외부 서비스 값을 요청하면 뜨는 입력 도크. 팀 전원 화면에 뜨고 값을 함께 채운다.
 //
 // 값이 지나가는 곳은 여기(브라우저 메모리) → 초안 소켓 → 저장 요청 본문, 이 셋뿐이다. 대화 메시지에도
 // 문서에도 남기지 않고 모델에게도 가지 않는다. 관전자는 서버가 초안 소켓을 거절하므로 읽기 전용으로만 본다.
+//
+// 변수 이름은 AI 요청(props.request.name)이 단일 원본이다. 이름 입력 UI 를 제거했으므로 원격 초안의
+// key 는 무시하고, 저장 때도 이름을 다시 실어 보내지 않는다.
 export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: () => void }) {
   const language = useLanguage()
   const sdk = useSDK()
@@ -26,16 +30,15 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
   const sessionID = props.request.sessionID
   const requestID = props.request.id
 
-  const [draft, setDraft] = createStore({ key: props.request.name, value: "" })
+  const [draft, setDraft] = createStore({ value: "" })
   const [presence, setPresence] = createSignal<EnvPresenceEntry[]>([])
   const [actor, setActor] = createSignal<{ actorID: string; name: string; color: string }>()
   const [busy, setBusy] = createSignal(false)
 
   let channel: EnvDraftChannel | undefined
   let disposed = false
-  // 지금 이 사람이 잡고 있는 칸. 내가 친 글자가 소켓을 돌아와 이 칸을 덮으면 한글 조합이 깨져
-  // "테스트트이입니다다" 처럼 자모가 중복된다. 그래서 잡고 있는 칸에는 원격 값을 적용하지 않는다.
-  let focused: "key" | "value" | undefined
+  // 값 칸을 잡고 있을 때는 원격 value 를 덮지 않는다 — 한글 조합 보호(env-draft-merge).
+  let focused: "value" | undefined
 
   const others = createMemo(() => presence().filter((item) => item.editing && item.actorID !== actor()?.actorID))
 
@@ -45,9 +48,9 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
     channel.sendPresence({ actorID: a.actorID, name: a.name, color: a.color, editing })
   }
 
-  const edit = (field: "key" | "value", text: string) => {
-    setDraft(field, text)
-    channel?.sendOp({ kind: field, text })
+  const edit = (text: string) => {
+    setDraft("value", text)
+    channel?.sendOp({ kind: "value", text })
     broadcast(true)
   }
 
@@ -58,16 +61,13 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
 
   const save = async () => {
     if (busy() || readonly) return
-    const key = draft.key.trim()
     const value = draft.value
-    if (!key || !value) return
+    if (!value) return
     setBusy(true)
     try {
       await sdk.client.envRequest.submit({
         requestID,
         directory: sdk.directory,
-        // 서버가 정한 이름과 다를 때만 실어 보낸다.
-        ...(key === props.request.name ? {} : { name: key }),
         value,
       })
       // 저장 직후 로컬 사본을 지운다. 이후 전원 도크는 resolved 이벤트로 닫힌다.
@@ -131,6 +131,7 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
         color: registered.color,
       })
 
+      if (disposed) return
       channel = connectEnvDraft({
         baseUrl: sdk.url,
         directory: sdk.directory,
@@ -139,11 +140,18 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
         actorID: registered.actorID,
         key: props.request.name,
         onDraft: (next) => {
-          if (focused !== "key") setDraft("key", next.key)
-          if (focused !== "value") setDraft("value", next.value)
+          // 이름 UI 가 없으므로 원격 key 는 버린다. value 만 IME 보호 merge.
+          const patch = merge(focused, { key: props.request.name, value: next.value })
+          if (patch.value !== undefined) setDraft("value", patch.value)
         },
         onPresence: (list) => setPresence(list),
       })
+      // cleanup 이 connect 직전·직후에 끼면 소켓이 남을 수 있어 한 번 더 막는다.
+      if (disposed) {
+        channel.close()
+        channel = undefined
+        return
+      }
       broadcast(false)
     })()
   })
@@ -156,7 +164,7 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
     setDraft("value", "")
   })
 
-  const canSave = createMemo(() => !!draft.key.trim() && !!draft.value && !busy() && !readonly)
+  const canSave = createMemo(() => !!draft.value && !busy() && !readonly)
 
   return (
     <DockPrompt
@@ -166,17 +174,23 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
           <span class="inline-flex shrink-0 items-center justify-center text-icon-base">
             <Icon name="lock" size="small" />
           </span>
-          <span class="text-13-medium text-text-strong shrink-0">{language.t("envRequest.title")}</span>
-          <span class="text-12-regular text-text-weaker truncate min-w-0">· {props.request.label}</span>
+          <span data-slot="env-title" class="shrink-0">
+            {language.t("envRequest.title")}
+          </span>
+          <span data-slot="env-subtitle" class="text-text-weaker truncate min-w-0">
+            · {props.request.label}
+          </span>
         </>
       }
       footer={
         <>
           {/* 좌: 안내 한 줄. 누가 입력 중이면 같은 줄에 이어 붙인다(시안은 액션과 한 행). */}
           <div class="flex items-center gap-1.5 min-w-0">
-            <span class="text-12-regular text-text-weak shrink-0">{language.t("envRequest.notice.ai")}</span>
+            <span data-slot="env-note" class="text-text-weak shrink-0">
+              {language.t("envRequest.notice.ai")}
+            </span>
             <Show when={others().length > 0}>
-              <span class="text-12-regular text-text-weaker truncate min-w-0">
+              <span data-slot="env-note" class="text-text-weaker truncate min-w-0">
                 ·{" "}
                 {language.t("envRequest.editing", {
                   names: others()
@@ -198,61 +212,36 @@ export function SessionEnvRequestDock(props: { request: EnvRequest; onSubmit?: (
         </>
       }
     >
-      <Show when={props.request.reason}>
-        <p class="text-12-regular text-text-weak leading-relaxed">{props.request.reason}</p>
-      </Show>
-
-      {/* 이미 저장된 값을 바꾸러 온 경우. 저장하면 되돌릴 수 없으니 미리 알린다. */}
+      {/* 시안의 붙여넣기 버튼은 쓰지 않는다 — clipboard.readText() 가 브라우저 권한 창을 띄운다.
+         일반 붙여넣기(⌘V)는 입력칸에서 그대로 된다. */}
       <Show when={props.request.replace}>
-        <p class="text-12-regular text-text-weak leading-relaxed">{language.t("envRequest.notice.replace")}</p>
+        <p data-slot="env-note" class="text-text-weak">
+          {language.t("envRequest.notice.replace")}
+        </p>
       </Show>
 
-      {/* 이름 = 값. 이름은 AI 가 정한 값으로 시작하고 팀이 함께 고칠 수 있다. */}
-      <div class="flex items-center gap-2">
-        <div class="basis-[44%] shrink-0 min-w-0">
-          <TextField
-            class="font-mono"
-            label={language.t("envRequest.field.name.label")}
-            hideLabel
-            autocomplete="off"
-            value={draft.key}
-            disabled={readonly}
-            onFocus={() => (focused = "key")}
-            onBlur={() => (focused = undefined)}
-            onChange={(v) => edit("key", v)}
-          />
-        </div>
-        <span class="font-mono text-13-regular text-text-weaker shrink-0">=</span>
-        <div class="flex-1 min-w-0">
-          {/* 입력 중에는 값을 가리지 않는다 — 방금 붙여넣은 값을 눈으로 확인할 수 있어야 한다. */}
-          <TextField
-            class="font-mono"
-            autofocus
-            label={language.t("envRequest.field.value.label")}
-            hideLabel
-            autocomplete="off"
-            placeholder={language.t("envRequest.field.value.placeholder")}
-            value={draft.value}
-            disabled={readonly}
-            onFocus={() => (focused = "value")}
-            onChange={(v) => edit("value", v)}
-            onBlur={() => {
-              focused = undefined
-              broadcast(false)
-            }}
-          />
-        </div>
-      </div>
+      {/* 입력 중에는 값을 가리지 않는다 — 방금 붙여넣은 값을 눈으로 확인할 수 있어야 한다. */}
+      <TextField
+        class="font-mono"
+        autofocus
+        label={language.t("envRequest.field.value.label")}
+        hideLabel
+        autocomplete="off"
+        placeholder={language.t("envRequest.field.value.placeholder")}
+        value={draft.value}
+        disabled={readonly}
+        onFocus={() => (focused = "value")}
+        onChange={edit}
+        onBlur={() => {
+          focused = undefined
+          broadcast(false)
+        }}
+      />
 
-      <Show when={props.request.docsUrl}>
-        {(url) => (
-          <span class="text-12-regular text-text-weaker truncate">
-            {language.t("envRequest.notice.docs", { url: url() })}
-          </span>
-        )}
-      </Show>
       <Show when={readonly}>
-        <span class="text-12-regular text-text-weaker">{language.t("envRequest.readonly")}</span>
+        <span data-slot="env-note" class="text-text-weaker">
+          {language.t("envRequest.readonly")}
+        </span>
       </Show>
     </DockPrompt>
   )

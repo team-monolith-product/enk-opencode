@@ -648,6 +648,7 @@
     "solid-js@1.9.10": "patches/solid-js@1.9.10.patch",
     "@standard-community/standard-openapi@0.2.9": "patches/@standard-community%2Fstandard-openapi@0.2.9.patch",
     "@ai-sdk/anthropic@3.0.64": "patches/@ai-sdk%2Fanthropic@3.0.64.patch",
+    "@blocksuite/block-std@0.0.0-canary-20250316001624": "patches/@blocksuite%2Fblock-std@0.0.0-canary-20250316001624.patch",
     "@blocksuite/blocks@0.0.0-canary-20250316001624": "patches/@blocksuite%2Fblocks@0.0.0-canary-20250316001624.patch",
   },
   "overrides": {

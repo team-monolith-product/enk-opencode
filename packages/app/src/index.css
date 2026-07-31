@@ -438,6 +438,49 @@
     display: none;
   }
 
+  /* 값 입력 도크 — Affine 전역 input 리셋·text-field 기본을 이 도크에서만 이긴다. */
+  [data-component="dock-prompt"][data-kind="env"] [data-component="input"][data-variant="normal"] [data-slot="input-input"] {
+    height: 32px !important;
+    padding: 0 12px !important;
+    font-size: 13px !important;
+    line-height: 32px !important;
+  }
+
+  [data-component="dock-prompt"][data-kind="env"] [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"] {
+    height: 32px;
+    min-height: 32px;
+    align-items: center;
+    border-radius: 4px;
+    border-color: var(--border-strong-base);
+    overflow: visible;
+  }
+
+  [data-component="dock-prompt"][data-kind="env"]
+    [data-component="input"][data-variant="normal"]
+    [data-slot="input-wrapper"]:focus-within:not(:has([data-readonly])) {
+    border-color: var(--text-strong) !important;
+    box-shadow: var(--focus-ring-soft) !important;
+  }
+
+  [data-component="dock-prompt"][data-kind="env"] [data-slot="env-body"][data-dock-surface="shell"],
+  [data-component="dock-prompt"][data-kind="env"] [data-slot="env-body"][data-dock-surface="shell"]:focus-within {
+    overflow: visible;
+    box-shadow: none;
+    border: 0;
+    padding-bottom: 16px;
+  }
+
+  [data-component="dock-prompt"][data-kind="env"] [data-component="button"] {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 4px;
+  }
+
+  [data-component="dock-prompt"][data-kind="env"] [data-component="button"][data-variant="secondary"] {
+    box-shadow: none;
+  }
+
   [data-component="session-prompt-dock"][data-variant="codle"] [data-dock-surface="tray"] {
     background: color-mix(in srgb, var(--app-paper) 82%, var(--app-frame) 18%);
     border-color: color-mix(in srgb, var(--app-line) 72%, transparent);
@@ -1474,4 +1517,91 @@
 :root[data-theme="jitda"] [data-component="resize-handle"][data-direction="horizontal"].session-panel-resize:hover::before,
 :root[data-theme="jitda"] [data-component="resize-handle"][data-direction="horizontal"].session-panel-resize:active::before {
   background: var(--border-strong-base);
+}
+
+/* E · 외부 연동 관리 다이얼로그 — 시안 EEnvKeys(env-keys-list) */
+/* 기본 dialog-container 는 640px 고정이라 560 콘텐츠가 왼쪽으로 치우침 → 컨테이너도 560 에 맞춘다. */
+[data-component="dialog"]:has(.env-keys-dialog) [data-slot="dialog-container"] {
+  width: min(560px, calc(100vw - 48px));
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog {
+  --env-hazard-mark: #ffce2b;
+  --env-hazard-ink: #17171c;
+  position: relative;
+  align-self: center;
+  width: 100%;
+  max-width: 560px;
+  border-radius: 10px;
+  overflow: hidden;
+  padding-top: 8px;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 8px;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--env-hazard-mark) 0 14.1421356px,
+    var(--env-hazard-ink) 14.1421356px 28.2842712px
+  );
+  pointer-events: none;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-header"] {
+  padding: 24px 28px 8px;
+  border-bottom: none;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-title"] {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-description"] {
+  padding: 0 28px 18px;
+  margin: 0;
+  border-bottom: 1px solid var(--border-weaker-base);
+  color: var(--text-weak);
+  font-size: 13px;
+  line-height: 1.55;
+  align-items: flex-start;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-body"] {
+  padding: 0;
+  width: 100%;
+}
+
+/* 시안 jt-input: height 28 · padding 0 12 · font 13. Affine 전역 input 리셋이 패딩을 0으로 밀어 이겨 둔다. */
+[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"] {
+  height: 28px;
+  min-height: 28px;
+  align-items: center;
+  border-radius: 4px;
+  border-color: var(--border-strong-base);
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+/* 디자인 시스템 §Input: ink 테두리 + 옐로우 2px 글로우 (c-helmet). */
+[data-component="dialog"]
+  [data-slot="dialog-content"].env-keys-dialog
+  [data-component="input"][data-variant="normal"]
+  [data-slot="input-wrapper"]:focus-within:not(:has([data-readonly])) {
+  border-color: var(--text-strong) !important;
+  box-shadow: 0 0 0 2px var(--focus-ring-color) !important;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-component="input"][data-variant="normal"] [data-slot="input-input"] {
+  height: 28px !important;
+  padding: 0 12px !important;
+  font-size: 13px !important;
+  line-height: 28px !important;
+  box-sizing: border-box;
+  outline: none !important;
 }

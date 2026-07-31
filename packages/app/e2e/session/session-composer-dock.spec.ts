@@ -5,10 +5,11 @@ import {
   type ComposerProbeState,
   type ComposerWindow,
 } from "../../src/testing/session-composer"
-import { cleanupSession, clearSessionDockSeed, seedSessionQuestion } from "../actions"
+import { cleanupSession, clearSessionDockSeed, seedSessionEnvRequest, seedSessionQuestion } from "../actions"
 import {
+  composerReadySelector,
+  envDockSelector,
   permissionDockSelector,
-  promptSelector,
   questionDockSelector,
   sessionComposerDockSelector,
   sessionTodoToggleButtonSelector,
@@ -61,22 +62,34 @@ async function setAutoAccept(page: any, enabled: boolean) {
 
 async function expectQuestionBlocked(page: any) {
   await expect(page.locator(questionDockSelector)).toBeVisible()
-  await expect(page.locator(promptSelector)).toHaveCount(0)
+  await expect(page.locator(composerReadySelector)).toHaveCount(0)
 }
 
 async function expectQuestionOpen(page: any) {
   await expect(page.locator(questionDockSelector)).toHaveCount(0)
-  await expect(page.locator(promptSelector)).toBeVisible()
+  await expect(page.locator(composerReadySelector).first()).toBeVisible()
 }
 
 async function expectPermissionBlocked(page: any) {
   await expect(page.locator(permissionDockSelector)).toBeVisible()
-  await expect(page.locator(promptSelector)).toHaveCount(0)
+  await expect(page.locator(composerReadySelector)).toHaveCount(0)
 }
 
 async function expectPermissionOpen(page: any) {
   await expect(page.locator(permissionDockSelector)).toHaveCount(0)
-  await expect(page.locator(promptSelector)).toBeVisible()
+  await expect(page.locator(composerReadySelector).first()).toBeVisible()
+}
+
+async function expectEnvBlocked(page: any) {
+  await expect(page.locator(envDockSelector)).toBeVisible()
+  await expect(page.locator(composerReadySelector)).toHaveCount(0)
+  // 시안 붙여넣기 버튼은 쓰지 않는다 — clipboard 권한 창을 띄운다.
+  await expect(page.locator(envDockSelector).getByRole("button", { name: /붙여넣기|paste/i })).toHaveCount(0)
+}
+
+async function expectEnvOpen(page: any) {
+  await expect(page.locator(envDockSelector)).toHaveCount(0)
+  await expect(page.locator(composerReadySelector).first()).toBeVisible()
 }
 
 async function todoDock(page: any, sessionID: string) {
@@ -260,12 +273,10 @@ test("default dock shows prompt input", async ({ page, sdk, gotoSession }) => {
     await gotoSession(session.id)
 
     await expect(page.locator(sessionComposerDockSelector)).toBeVisible()
-    await expect(page.locator(promptSelector)).toBeVisible()
+    await expect(page.locator(composerReadySelector).first()).toBeVisible()
     await expect(page.locator(questionDockSelector)).toHaveCount(0)
     await expect(page.locator(permissionDockSelector)).toHaveCount(0)
-
-    await page.locator(promptSelector).click()
-    await expect(page.locator(promptSelector)).toBeFocused()
+    await expect(page.locator(envDockSelector)).toHaveCount(0)
   })
 })
 
@@ -531,7 +542,89 @@ test("keyboard focus stays off prompt while blocked", async ({ page, sdk, gotoSe
 
       await page.locator("main").click({ position: { x: 5, y: 5 } })
       await page.keyboard.type("abc")
-      await expect(page.locator(promptSelector)).toHaveCount(0)
+      await expect(page.locator(composerReadySelector)).toHaveCount(0)
+    })
+  })
+})
+
+test("blocked env request hides prompt and unblocks after skip", async ({ page, sdk, gotoSession }) => {
+  await withDockSession(sdk, "e2e composer dock env skip", async (session) => {
+    await withDockSeed(sdk, session.id, async () => {
+      await gotoSession(session.id)
+
+      // question e2e 처럼 실제 툴 시드 → resolved 이벤트로 도크가 바로 닫히는지 본다 (리로드 금지).
+      await seedSessionEnvRequest(sdk, {
+        sessionID: session.id,
+        name: "E2E_ENV_SKIP_KEY",
+        label: "공공데이터포털 API 키",
+        reason: "오픈 API 인증키가 필요합니다.",
+        docsUrl: "https://www.data.go.kr",
+      })
+
+      await expectEnvBlocked(page)
+      const dock = page.locator(envDockSelector)
+      await expect(dock.getByText("안전 입력").or(dock.getByText("Secure input"))).toBeVisible()
+      await expect(dock.getByText(/공공데이터포털 API 키/)).toBeVisible()
+      await expect(dock.locator('[data-slot="input-input"]')).toBeVisible()
+
+      await dock.getByRole("button", { name: /취소|cancel/i }).click()
+      await expectEnvOpen(page)
+    })
+  })
+})
+
+test("blocked env request submits value and restores prompt", async ({ page, sdk, gotoSession }) => {
+  await withDockSession(sdk, "e2e composer dock env save", async (session) => {
+    await withDockSeed(sdk, session.id, async () => {
+      await gotoSession(session.id)
+
+      await seedSessionEnvRequest(sdk, {
+        sessionID: session.id,
+        name: "E2E_ENV_SAVE_KEY",
+        label: "공공데이터포털 API 키",
+        replace: true,
+      })
+
+      await expectEnvBlocked(page)
+      const dock = page.locator(envDockSelector)
+      await expect(dock.getByText(/이미 저장된 값이 있어요|already stored/i)).toBeVisible()
+
+      let submitted: string | undefined
+      await page.route(/\/env-request\/[^/]+\/submit(?:\?.*)?$/, async (route: any) => {
+        const body = route.request().postDataJSON() as { value?: string; name?: string } | null
+        submitted = body?.value
+        // 이름은 AI 요청이 원본 — 클라이언트가 rename 을 실어내면 안 된다.
+        expect(body?.name).toBeUndefined()
+        await route.continue()
+      })
+
+      const input = dock.locator('[data-slot="input-input"]')
+      await input.fill("secret-from-e2e")
+      await dock.getByRole("button", { name: /안전하게 저장|save securely/i }).click()
+
+      await expectEnvOpen(page)
+      expect(submitted).toBe("secret-from-e2e")
+    })
+  })
+})
+
+test("env dock keeps prompt hidden while typing a value", async ({ page, sdk, gotoSession }) => {
+  await withDockSession(sdk, "e2e composer dock env typing", async (session) => {
+    await withDockSeed(sdk, session.id, async () => {
+      await gotoSession(session.id)
+
+      await seedSessionEnvRequest(sdk, {
+        sessionID: session.id,
+        name: "E2E_ENV_TYPE_KEY",
+        label: "공공데이터포털 API 키",
+      })
+
+      await expectEnvBlocked(page)
+      const input = page.locator(`${envDockSelector} [data-slot="input-input"]`)
+      await input.click()
+      await page.keyboard.type("abc")
+      await expect(input).toHaveValue("abc")
+      await expect(page.locator(composerReadySelector)).toHaveCount(0)
     })
   })
 })

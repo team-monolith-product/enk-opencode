@@ -77,23 +77,7 @@ export const Env = {
         <span class="text-12-regular text-text-weaker truncate min-w-0">· 식약처 공공데이터</span>
       </>
     ),
-    children: (
-      <>
-        <p class="text-12-regular text-text-weak leading-relaxed">카페인 함량을 가져오려면 필요해요</p>
-        <p class="text-12-regular text-text-weak leading-relaxed">
-          이미 저장된 값이 있어요. 저장하면 교체되고 이전 값은 되돌릴 수 없어요
-        </p>
-        <div class="flex items-center gap-2">
-          <div class="basis-[44%] shrink-0 min-w-0">
-            <TextField class="font-mono" label="이름" hideLabel value="VITE_DATA_GO_KR_KEY" />
-          </div>
-          <span class="font-mono text-13-regular text-text-weaker shrink-0">=</span>
-          <div class="flex-1 min-w-0">
-            <TextField class="font-mono" label="값" hideLabel placeholder="받은 값을 붙여넣어요" />
-          </div>
-        </div>
-      </>
-    ),
+    children: <TextField class="font-mono" label="값" hideLabel placeholder="받은 값을 붙여넣어요" />,
     footer: (
       <>
         <div class="flex items-center gap-1.5 min-w-0">

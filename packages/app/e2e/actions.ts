@@ -18,6 +18,7 @@ import {
   listItemSelector,
   listItemKeySelector,
   listItemKeyStartsWithSelector,
+  composerReadySelector,
   promptSelector,
   terminalSelector,
   workspaceItemSelector,
@@ -478,7 +479,7 @@ export async function waitSession(page: Page, input: { directory: string; sessio
         }
 
         return page
-          .locator(promptSelector)
+          .locator(composerReadySelector)
           .first()
           .isVisible()
           .catch(() => false)
@@ -769,6 +770,45 @@ export async function seedSessionQuestion(
   return { id: result.id }
 }
 
+export async function seedSessionEnvRequest(
+  sdk: ReturnType<typeof createSdk>,
+  input: {
+    sessionID: string
+    name: string
+    label: string
+    reason?: string
+    docsUrl?: string
+    replace?: boolean
+  },
+) {
+  const text = [
+    "Your only valid response is one env_request tool call.",
+    `Use this JSON input: ${JSON.stringify({
+      name: input.name,
+      label: input.label,
+      ...(input.reason ? { reason: input.reason } : {}),
+      ...(input.docsUrl ? { docsUrl: input.docsUrl } : {}),
+      ...(input.replace ? { replace: true } : {}),
+    })}`,
+    "Do not output plain text.",
+    "After calling the tool, wait for the user response.",
+  ].join("\n")
+
+  const result = await seed({
+    sdk,
+    sessionID: input.sessionID,
+    prompt: text,
+    timeout: 30_000,
+    probe: async () => {
+      const list = await sdk.envRequest.list().then((x) => x.data ?? [])
+      return list.find((item) => item.sessionID === input.sessionID && item.name === input.name)
+    },
+  })
+
+  if (!result) throw new Error("Timed out seeding env request")
+  return { id: result.id }
+}
+
 export async function seedSessionPermission(
   sdk: ReturnType<typeof createSdk>,
   input: {
@@ -892,9 +932,10 @@ export async function seedSessionTodos(
 }
 
 export async function clearSessionDockSeed(sdk: ReturnType<typeof createSdk>, sessionID: string) {
-  const [questions, permissions] = await Promise.all([
+  const [questions, permissions, envs] = await Promise.all([
     sdk.question.list().then((x) => x.data ?? []),
     sdk.permission.list().then((x) => x.data ?? []),
+    sdk.envRequest.list().then((x) => x.data ?? []),
   ])
 
   await Promise.all([
@@ -904,6 +945,9 @@ export async function clearSessionDockSeed(sdk: ReturnType<typeof createSdk>, se
     ...permissions
       .filter((item) => item.sessionID === sessionID)
       .map((item) => sdk.permission.reply({ requestID: item.id, reply: "reject" }).catch(() => undefined)),
+    ...envs
+      .filter((item) => item.sessionID === sessionID)
+      .map((item) => sdk.envRequest.reject({ requestID: item.id }).catch(() => undefined)),
   ])
 
   return true

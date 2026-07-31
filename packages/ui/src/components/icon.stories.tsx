@@ -107,6 +107,8 @@ const names = [
   "arrow-down-to-line",
   "warning",
   "link",
+  "plug",
+  "clock",
   "providers",
   "models",
 ]

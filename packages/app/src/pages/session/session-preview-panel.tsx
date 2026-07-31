@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import type { ErrorEntry } from "@/lib/preview-bridge-protocol"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
@@ -13,7 +13,7 @@ import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { getDevServerStatus, restartDevServer, type DevServerStatusResult } from "@/utils/server"
+import { getDevServerStatus, listEnvKeys, restartDevServer, type DevServerStatusResult } from "@/utils/server"
 import { SessionPreviewFallback } from "./session-preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
 import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./session-preview-address"
@@ -574,12 +574,27 @@ export function SessionBrowserChrome(props: {
   const language = useLanguage()
   const command = useCommand()
   const dialog = useDialog()
+  const server = useServer()
+  const sdk = useSDK()
+  const platform = usePlatform()
   const [copied, setCopied] = createSignal(false)
 
+  // 시안: 저장된 연결 수 > 0 일 때만 배지. 값 필요 줄은 세지 않는다.
+  const [envCount, setEnvCount] = createSignal(0)
+  const refreshEnvCount = () => {
+    const conn = server.current
+    if (!conn) return
+    void listEnvKeys({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
+      .then((keys) => setEnvCount(keys.length))
+      .catch(() => setEnvCount(0))
+  }
+  onMount(() => refreshEnvCount())
+
   const openEnvKeys = () => {
+    refreshEnvCount()
     // 배포 직후 구버전 페이지에서 새 청크 로드가 실패할 수 있다 — 조용히 죽지 말고 토스트로 알린다.
     import("@/components/dialog-env-keys")
-      .then((x) => dialog.show(() => <x.DialogEnvKeys />))
+      .then((x) => dialog.show(() => <x.DialogEnvKeys />, refreshEnvCount))
       .catch(() => showToast({ title: language.t("common.requestFailed") }))
   }
   let copyTimer: ReturnType<typeof setTimeout> | undefined
@@ -662,16 +677,6 @@ export function SessionBrowserChrome(props: {
             aria-controls="file-tree-panel"
           />
         </TooltipKeybind>
-        {/* API 키(.env) 다이얼로그 — 운영 레이아웃엔 커맨드 팔레트가 없어 여기 직접 노출한다. */}
-        <button
-          type="button"
-          class={ghostBtn + " !w-auto px-1.5 text-11-medium text-text-weak"}
-          onClick={openEnvKeys}
-          aria-label={language.t("command.env.keys")}
-          title={language.t("command.env.keys")}
-        >
-          ENV
-        </button>
         <div class="flex items-center shrink-0">
           {/* 뒤로/앞으로 — 자식 history 미러로 활성 판단, 클릭 시 자식 history 이동 */}
           <button
@@ -780,8 +785,26 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 우 그룹 — (에러 시)오류 재표시 + 새 탭에서 열기 + 주소 복사 */}
+      {/* 우 그룹 — 시안 SafariChrome: 외부 연동 + (에러 시)오류 + 새 탭 + 주소 복사 */}
       <div class="flex shrink-0 items-center justify-end gap-1">
+        <button
+          type="button"
+          class={ghostBtn + " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap"}
+          onClick={openEnvKeys}
+          aria-label={language.t("command.env.keys")}
+          title={language.t("command.env.keys.description")}
+        >
+          <Icon name="plug" size="small" />
+          {language.t("command.env.keys")}
+          <Show when={envCount() > 0}>
+            <span
+              class="inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full bg-surface-success-strong text-white font-mono text-[9.5px] font-bold leading-none"
+              aria-label={language.t("command.env.keys.badge", { count: envCount() })}
+            >
+              {envCount()}
+            </span>
+          </Show>
+        </button>
         <Show when={props.showErrorButton}>
           <button
             type="button"
