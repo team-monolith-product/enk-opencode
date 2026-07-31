@@ -118,8 +118,8 @@ export function DialogEnvKeys() {
       const value = row.draft?.trim() ?? ""
       const err: Row["err"] = {}
 
-      // 값 없이 닫힌 filled 줄은 기존 값 유지 — 저장 payload 에 넣지 않는다.
-      if (row.filled && !value) {
+      // 등록된 줄을 안 건드렸으면 기존 값 유지. 값 칸을 연 적 있으면 빈 문자열도 그대로 저장한다.
+      if (row.filled && row.draft === undefined && !row.editing) {
         if (seen.has(name)) {
           ok = false
           setRows(index, "err", { key: language.t("envKeys.error.duplicate") })
@@ -132,9 +132,8 @@ export function DialogEnvKeys() {
 
       if (!KEY_REGEX.test(name)) err.key = language.t("envKeys.error.invalidKey")
       else if (seen.has(name)) err.key = language.t("envKeys.error.duplicate")
-      if (!value) err.value = language.t("envKeys.error.valueRequired")
 
-      if (err.key || err.value) {
+      if (err.key) {
         ok = false
         setRows(index, "err", err)
         return
@@ -190,7 +189,15 @@ export function DialogEnvKeys() {
     saveMutation.mutate(patch)
   }
 
-  const hasChanges = createMemo(() => rows.some((row) => !!row.drop || !!row.draft?.trim()))
+  const hasChanges = createMemo(() =>
+    rows.some((row) => {
+      if (row.drop) return true
+      // 이름은 필수, 값은 빈 문자열 허용 — 직접 추가 줄은 이름만 있어도 저장 가능.
+      if (row.fresh) return !!row.name.trim()
+      if (row.editing || row.draft !== undefined) return true
+      return false
+    }),
+  )
   const empty = createMemo(() => rows.length === 0)
 
   return (
