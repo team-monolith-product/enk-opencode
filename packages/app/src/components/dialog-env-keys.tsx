@@ -73,9 +73,20 @@ export function DialogEnvKeys() {
   }
   onMount(() => void refetch())
 
+  // 다이얼로그가 이미 열린 뒤 마운트된 input 은 HTML autofocus 가 안 먹는다.
+  const focus = (id: string) => {
+    requestAnimationFrame(() => {
+      const el = document.querySelector(
+        `[data-env-row="${CSS.escape(id)}"] [data-slot="input-input"]`,
+      ) as HTMLInputElement | null
+      el?.focus()
+    })
+  }
+
   const add = () => {
     const id = `new-${uid++}`
     setRows(produce((list) => list.push({ id, name: "", filled: false, fresh: true, draft: "" })))
+    focus(id)
   }
 
   const toggleDrop = (index: number) => {
@@ -294,7 +305,11 @@ export function DialogEnvKeys() {
                               <button
                                 type="button"
                                 class="flex-1 min-w-0 inline-flex items-center gap-1.5 text-12-regular text-text-weaker truncate text-left rounded-sm enabled:hover:bg-surface-raised-base-hover enabled:active:bg-surface-base-active px-1 -mx-1 py-0.5 transition-colors"
-                                onClick={() => setRows(i(), "editing", true)}
+                                onClick={() => {
+                                  const id = row.id
+                                  setRows(i(), "editing", true)
+                                  focus(id)
+                                }}
                                 aria-label={language.t("envKeys.field.value.replacePlaceholder")}
                               >
                                 <Icon name="clock" class="size-3 shrink-0" />
@@ -308,7 +323,7 @@ export function DialogEnvKeys() {
                           <div class="flex-1 min-w-0">
                             <TextField
                               class="font-mono"
-                              autofocus={!!row.editing || !!row.fresh}
+                              autofocus={!!row.editing}
                               label={language.t("envKeys.field.value.label")}
                               hideLabel
                               autocomplete="off"
