@@ -12,30 +12,21 @@ import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { deleteEnvKey, listEnvKeys, restartDevServer, saveEnvKeys } from "@/utils/server"
+import {
+  buildEnvPatch,
+  envKeysChanged,
+  focusMounted,
+  formatSavedAt,
+  type EnvErr,
+  type EnvPatch,
+  type EnvRow,
+} from "./dialog-env-keys-form"
 
-// 서버는 키 이름만 내려주고 값은 write-only. 등록 시각 API 가 없어 filled 줄은 "등록됨"으로 표시.
+// 서버는 값 write-only. 목록은 이름·등록시각만. filled 줄은 시각 + [값 교체].
 // 값 교체·등록된 줄 삭제는 로컬 표시만 바꾸고, 푸터 [저장]에서만 반영한다.
 // 직접 추가(fresh) 줄 삭제는 목록에서 바로 제거한다.
 
-const KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/
-
-type Row = {
-  id: string
-  name: string
-  filled: boolean
-  /** 직접 추가 행 — 이름 입력칸. */
-  fresh?: boolean
-  draft?: string
-  editing?: boolean
-  /** 삭제 예정 — 취소선만. 저장 시 서버 삭제. */
-  drop?: boolean
-  err?: { key?: string; value?: string }
-}
-
-type Patch = {
-  values: Record<string, string>
-  drops: string[]
-}
+type Row = EnvRow & { err?: EnvErr }
 
 export function DialogEnvKeys() {
   const dialog = useDialog()
@@ -60,10 +51,11 @@ export function DialogEnvKeys() {
     try {
       const keys = await listEnvKeys(o)
       setRows(
-        keys.map((name) => ({
-          id: name,
-          name,
+        keys.map((entry) => ({
+          id: entry.name,
+          name: entry.name,
           filled: true,
+          updated_at: entry.updated_at,
         })),
       )
       setLoadError(false)
@@ -73,20 +65,9 @@ export function DialogEnvKeys() {
   }
   onMount(() => void refetch())
 
-  // 다이얼로그가 이미 열린 뒤 마운트된 input 은 HTML autofocus 가 안 먹는다.
-  const focus = (id: string) => {
-    requestAnimationFrame(() => {
-      const el = document.querySelector(
-        `[data-env-row="${CSS.escape(id)}"] [data-slot="input-input"]`,
-      ) as HTMLInputElement | null
-      el?.focus()
-    })
-  }
-
   const add = () => {
     const id = `new-${uid++}`
     setRows(produce((list) => list.push({ id, name: "", filled: false, fresh: true, draft: "" })))
-    focus(id)
   }
 
   const toggleDrop = (index: number) => {
@@ -113,53 +94,15 @@ export function DialogEnvKeys() {
   }
 
   const validate = () => {
-    const values: Record<string, string> = {}
-    const drops: string[] = []
-    let ok = true
-    const seen = new Set<string>()
-
+    const result = buildEnvPatch(rows, (key) => language.t(key))
     rows.forEach((row, index) => {
-      if (row.drop) {
-        // 등록된 줄만 여기 온다. fresh 줄은 삭제 시 목록에서 바로 빠진다.
-        drops.push(row.name)
-        return
-      }
-
-      const name = row.name.trim()
-      const value = row.draft?.trim() ?? ""
-      const err: Row["err"] = {}
-
-      // 등록된 줄을 안 건드렸으면 기존 값 유지. 값 칸을 연 적 있으면 빈 문자열도 그대로 저장한다.
-      if (row.filled && row.draft === undefined && !row.editing) {
-        if (seen.has(name)) {
-          ok = false
-          setRows(index, "err", { key: language.t("envKeys.error.duplicate") })
-          return
-        }
-        seen.add(name)
-        setRows(index, "err", undefined)
-        return
-      }
-
-      if (!KEY_REGEX.test(name)) err.key = language.t("envKeys.error.invalidKey")
-      else if (seen.has(name)) err.key = language.t("envKeys.error.duplicate")
-
-      if (err.key) {
-        ok = false
-        setRows(index, "err", err)
-        return
-      }
-      seen.add(name)
-      values[name] = value
-      setRows(index, "err", undefined)
+      setRows(index, "err", result.errs[row.id])
     })
-
-    if (!ok) return
-    return { values, drops } satisfies Patch
+    return result.patch
   }
 
   const saveMutation = useMutation(() => ({
-    mutationFn: async (patch: Patch) => {
+    mutationFn: async (patch: EnvPatch) => {
       const o = opts()
       if (!o) throw new Error("no server connection")
       for (const name of patch.drops) {
@@ -200,15 +143,7 @@ export function DialogEnvKeys() {
     saveMutation.mutate(patch)
   }
 
-  const hasChanges = createMemo(() =>
-    rows.some((row) => {
-      if (row.drop) return true
-      // 이름은 필수, 값은 빈 문자열 허용 — 직접 추가 줄은 이름만 있어도 저장 가능.
-      if (row.fresh) return !!row.name.trim()
-      if (row.editing || row.draft !== undefined) return true
-      return false
-    }),
-  )
+  const hasChanges = createMemo(() => envKeysChanged(rows))
   const empty = createMemo(() => rows.length === 0)
 
   return (
@@ -279,6 +214,9 @@ export function DialogEnvKeys() {
                             <TextField
                               class="font-mono"
                               autofocus
+                              ref={(el: HTMLInputElement) => {
+                                if (el) focusMounted(el)
+                              }}
                               label={language.t("envKeys.field.key.label")}
                               hideLabel
                               placeholder={language.t("envKeys.field.key.placeholder")}
@@ -293,37 +231,36 @@ export function DialogEnvKeys() {
                         <Show
                           when={input()}
                           fallback={
-                            <Show
-                              when={!row.drop}
-                              fallback={
-                                <span class="flex-1 min-w-0 inline-flex items-center gap-1.5 text-12-regular text-text-weaker truncate line-through">
-                                  <Icon name="clock" class="size-3 shrink-0" />
-                                  {language.t("envKeys.saved")}
-                                </span>
-                              }
-                            >
-                              <button
-                                type="button"
-                                class="flex-1 min-w-0 inline-flex items-center gap-1.5 text-12-regular text-text-weaker truncate text-left rounded-sm enabled:hover:bg-surface-raised-base-hover enabled:active:bg-surface-base-active px-1 -mx-1 py-0.5 transition-colors"
-                                onClick={() => {
-                                  const id = row.id
-                                  setRows(i(), "editing", true)
-                                  focus(id)
-                                }}
-                                aria-label={language.t("envKeys.field.value.replacePlaceholder")}
+                            <div class="flex-1 min-w-0 flex items-center justify-end gap-2">
+                              <span
+                                class="min-w-0 inline-flex items-center gap-1.5 text-12-regular text-text-weaker truncate"
+                                classList={{ "line-through": !!row.drop }}
                               >
                                 <Icon name="clock" class="size-3 shrink-0" />
-                                {row.draft?.trim()
-                                  ? language.t("envKeys.field.value.replacePlaceholder")
-                                  : language.t("envKeys.saved")}
-                              </button>
-                            </Show>
+                                {formatSavedAt(row.updated_at, (key, vars) => language.t(key, vars))}
+                              </span>
+                              <Show when={!row.drop}>
+                                <Button
+                                  type="button"
+                                  size="small"
+                                  variant="secondary"
+                                  class="shrink-0"
+                                  onClick={() => setRows(i(), "editing", true)}
+                                >
+                                  {language.t("envKeys.replace")}
+                                </Button>
+                              </Show>
+                            </div>
                           }
                         >
                           <div class="flex-1 min-w-0">
                             <TextField
                               class="font-mono"
                               autofocus={!!row.editing}
+                              ref={(el: HTMLInputElement) => {
+                                // 값 교체로 막 열린 칸만 포커스. fresh 줄은 이름 칸이 포커스를 가져간다.
+                                if (el && row.editing) focusMounted(el)
+                              }}
                               label={language.t("envKeys.field.value.label")}
                               hideLabel
                               autocomplete="off"

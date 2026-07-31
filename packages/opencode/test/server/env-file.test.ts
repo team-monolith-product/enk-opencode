@@ -50,7 +50,10 @@ describe("EnvFileRoutes", () => {
       fn: async () => {
         const res = await put({ API_KEY: "secret-value-1", OTHER_KEY: "v2" })
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ keys: ["API_KEY", "OTHER_KEY"] })
+        const body = await res.json()
+        expect(body.keys).toEqual(["API_KEY", "OTHER_KEY"])
+        expect(typeof body.updated_at.API_KEY).toBe("number")
+        expect(typeof body.updated_at.OTHER_KEY).toBe("number")
 
         const file = path.join(tmp.path, ".env")
         expect(await readFile(file, "utf-8")).toBe("API_KEY=secret-value-1\nOTHER_KEY=v2\n")
@@ -72,13 +75,14 @@ describe("EnvFileRoutes", () => {
 
         const res = await put({ API_KEY: "new-value", ADDED: "added-value" })
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ keys: ["OTHER", "API_KEY", "ADDED"] })
+        const body = await res.json()
+        expect(body.keys).toEqual(["OTHER", "API_KEY", "ADDED"])
         expect(await readFile(file, "utf-8")).toBe("# comment\nOTHER=x\n\nAPI_KEY=new-value\nADDED=added-value\n")
       },
     })
   })
 
-  test("GET returns names only, never values", async () => {
+  test("GET returns names and times only, never values", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
@@ -88,7 +92,9 @@ describe("EnvFileRoutes", () => {
         expect(res.status).toBe(200)
         const raw = await res.text()
         expect(raw).not.toContain("super-secret-abc123")
-        expect(JSON.parse(raw)).toEqual({ keys: ["API_KEY"] })
+        const body = JSON.parse(raw)
+        expect(body.keys).toEqual(["API_KEY"])
+        expect(typeof body.updated_at.API_KEY).toBe("number")
       },
     })
   })
@@ -100,7 +106,7 @@ describe("EnvFileRoutes", () => {
       fn: async () => {
         const res = await EnvFileRoutes().request("/")
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ keys: [] })
+        expect(await res.json()).toEqual({ keys: [], updated_at: {} })
       },
     })
   })
@@ -130,6 +136,21 @@ describe("EnvFileRoutes", () => {
     })
   })
 
+  test("PUT accepts empty string values", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const res = await put({ EMPTY_OK: "" })
+        expect(res.status).toBe(200)
+        const body = await res.json()
+        expect(body.keys).toEqual(["EMPTY_OK"])
+        const file = path.join(tmp.path, ".env")
+        expect(await readFile(file, "utf-8")).toBe("EMPTY_OK=\n")
+      },
+    })
+  })
+
   test("DELETE removes only the target key, including export form", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
@@ -140,7 +161,9 @@ describe("EnvFileRoutes", () => {
 
         const res = await EnvFileRoutes().request("/API_KEY", { method: "DELETE" })
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ keys: ["OTHER"] })
+        const body = await res.json()
+        expect(body.keys).toEqual(["OTHER"])
+        expect(body.updated_at.API_KEY).toBeUndefined()
         expect(await readFile(file, "utf-8")).toBe("# keep\nOTHER=stays\n")
       },
     })
