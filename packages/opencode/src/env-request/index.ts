@@ -36,7 +36,7 @@ export namespace EnvRequest {
       replace: z
         .boolean()
         .optional()
-        .describe("Ask again even though a value is already stored, so the user can replace it"),
+        .describe("Hint that the user is replacing an existing value. Optional — the tool opens the input even when a value is already stored"),
     })
     .meta({ ref: "EnvRequestInfo" })
   export type Info = z.infer<typeof Info>

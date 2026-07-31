@@ -232,14 +232,16 @@ export function DialogEnvKeys() {
               <div class="rounded-md border border-border-weaker-base bg-background-base overflow-hidden">
                 <For each={rows}>
                   {(row, i) => {
-                    const showInput = (!row.filled || !!row.editing) && !row.drop
-                    const pending = !row.filled && !row.editing && !row.drop
+                    // For 콜백은 한 번만 돌아가므로, 분기는 JSX 안에서 store 필드를 읽어야 반응한다.
+                    const input = () => (!row.filled || !!row.editing) && !row.drop
+                    const pending = () => !row.filled && !row.editing && !row.drop
                     return (
                       <div
+                        data-env-row={row.id}
                         class="flex items-center gap-2.5 px-3 py-2.5"
                         classList={{
                           "border-t border-border-weaker-base": i() > 0,
-                          "bg-surface-warning-weak": pending,
+                          "bg-surface-warning-weak": pending(),
                           "opacity-60": !!row.drop,
                         }}
                       >
@@ -271,7 +273,7 @@ export function DialogEnvKeys() {
                         </Show>
 
                         <Show
-                          when={showInput}
+                          when={input()}
                           fallback={
                             <Show
                               when={!row.drop}
@@ -289,7 +291,9 @@ export function DialogEnvKeys() {
                                 aria-label={language.t("envKeys.field.value.replacePlaceholder")}
                               >
                                 <Icon name="clock" class="size-3 shrink-0" />
-                                {language.t("envKeys.saved")}
+                                {row.draft?.trim()
+                                  ? language.t("envKeys.field.value.replacePlaceholder")
+                                  : language.t("envKeys.saved")}
                               </button>
                             </Show>
                           }
@@ -309,13 +313,21 @@ export function DialogEnvKeys() {
                               value={row.draft ?? ""}
                               onChange={(v) => setRows(i(), "draft", v)}
                               onBlur={() => {
-                                if (row.filled) stopEdit(i())
+                                // filled 줄은 포커스가 빠지면 「등록됨」으로 돌리고 초안은 남긴다.
+                                // 같은 줄을 다시 누르면 계속 교체할 수 있다.
+                                if (!row.filled) return
+                                const id = row.id
+                                setTimeout(() => {
+                                  if (!rows[i()]?.editing) return
+                                  const root = document.querySelector(`[data-env-row="${CSS.escape(id)}"]`)
+                                  if (root?.contains(document.activeElement)) return
+                                  stopEdit(i())
+                                }, 0)
                               }}
                               onKeyDown={(e: KeyboardEvent) => {
                                 if (e.key !== "Enter") return
                                 e.preventDefault()
-                                if (row.filled) stopEdit(i())
-                                else (e.target as HTMLElement | null)?.blur?.()
+                                ;(e.target as HTMLElement | null)?.blur?.()
                               }}
                               validationState={row.err?.value ? "invalid" : undefined}
                               error={row.err?.value}
