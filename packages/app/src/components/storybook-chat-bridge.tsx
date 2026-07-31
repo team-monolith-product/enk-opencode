@@ -1,7 +1,7 @@
 import { PostMessageManagerImpl } from "@team-monolith/post-message-manager"
 import { onCleanup, onMount } from "solid-js"
 
-type Result = { status: "ok" } | { status: "error"; message: string }
+type Result = { status: "ok"; text?: string } | { status: "error"; message: string }
 type ChatEvent = { kind: "started" | "tool" | "done" | "error"; detail?: string }
 
 export const STORYBOOK_TOOLS = ["upsert_page", "delete_page", "generate_illustration"]
@@ -24,6 +24,21 @@ export function storybookToolEvent(data: unknown, sessionID?: string): string | 
   const state = part["state"] as { status?: string } | undefined
   if (state?.status !== "completed") return undefined
   return tool
+}
+
+/** 어시스턴트 응답 parts 에서 사용자에게 보여줄 텍스트만 추린다(synthetic·ignored 제외). */
+export function assistantText(parts: unknown): string | undefined {
+  if (!Array.isArray(parts)) return undefined
+  const text = parts
+    .filter((p): p is { type: string; text: string; synthetic?: boolean; ignored?: boolean } => {
+      if (typeof p !== "object" || p === null) return false
+      const part = p as { type?: unknown; text?: unknown; synthetic?: unknown; ignored?: unknown }
+      return part.type === "text" && typeof part.text === "string" && !part.synthetic && !part.ignored
+    })
+    .map((p) => p.text.trim())
+    .filter(Boolean)
+    .join("\n\n")
+  return text || undefined
 }
 
 export function assistantErrorDetail(info: unknown): string | undefined {
@@ -78,14 +93,14 @@ export function StorybookChatBridge() {
             notify({ kind: "error", detail: `HTTP ${res.status}` })
             return { status: "error", message: `HTTP ${res.status}` }
           }
-          const message = (await res.json()) as { info?: unknown }
+          const message = (await res.json()) as { info?: unknown; parts?: unknown }
           const detail = assistantErrorDetail(message.info)
           if (detail) {
             notify({ kind: "error", detail })
             return { status: "error", message: detail }
           }
           notify({ kind: "done" })
-          return { status: "ok" }
+          return { status: "ok", text: assistantText(message.parts) }
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e)
           notify({ kind: "error", detail: message })

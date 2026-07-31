@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { assistantErrorDetail, storybookToolEvent, STORYBOOK_TOOLS } from "./storybook-chat-bridge"
+import { assistantErrorDetail, assistantText, storybookToolEvent, STORYBOOK_TOOLS } from "./storybook-chat-bridge"
 
 function toolEvent(tool: string, status = "completed", sessionID = "ses_1") {
   return {
@@ -42,5 +42,29 @@ describe("assistantErrorDetail", () => {
   test("returns undefined for clean turns", () => {
     expect(assistantErrorDetail({})).toBeUndefined()
     expect(assistantErrorDetail(undefined)).toBeUndefined()
+  })
+})
+
+describe("assistantText", () => {
+  test("joins visible text parts", () => {
+    expect(
+      assistantText([
+        { type: "text", text: "무엇을 만들까요?" },
+        { type: "tool", tool: "upsert_page" },
+        { type: "text", text: "주인공을 알려주세요." },
+      ]),
+    ).toBe("무엇을 만들까요?\n\n주인공을 알려주세요.")
+  })
+
+  test("skips synthetic, ignored, empty parts and non-arrays", () => {
+    expect(
+      assistantText([
+        { type: "text", text: "숨김", synthetic: true },
+        { type: "text", text: "무시", ignored: true },
+        { type: "text", text: "  " },
+      ]),
+    ).toBeUndefined()
+    expect(assistantText(undefined)).toBeUndefined()
+    expect(assistantText("nope")).toBeUndefined()
   })
 })
