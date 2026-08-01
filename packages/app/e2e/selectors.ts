@@ -1,9 +1,13 @@
 export const promptSelector = '[data-component="prompt-input"]'
+/** normal 모드 prompt-input 또는 기본 doc 모드 shell — 세션 준비 완료 판별용 */
+export const composerReadySelector =
+  '[data-component="prompt-input"], [data-component="prompt-doc-shell"]'
 export const terminalPanelSelector = '#terminal-panel[aria-hidden="false"]'
 export const terminalSelector = `${terminalPanelSelector} [data-component="terminal"]`
 export const sessionComposerDockSelector = '[data-component="session-prompt-dock"]'
 export const questionDockSelector = '[data-component="dock-prompt"][data-kind="question"]'
 export const permissionDockSelector = '[data-component="dock-prompt"][data-kind="permission"]'
+export const envDockSelector = '[data-component="dock-prompt"][data-kind="env"]'
 export const permissionRejectSelector = `${permissionDockSelector} [data-slot="permission-footer-actions"] [data-component="button"]:nth-child(1)`
 export const permissionAllowAlwaysSelector = `${permissionDockSelector} [data-slot="permission-footer-actions"] [data-component="button"]:nth-child(2)`
 export const permissionAllowOnceSelector = `${permissionDockSelector} [data-slot="permission-footer-actions"] [data-component="button"]:nth-child(3)`

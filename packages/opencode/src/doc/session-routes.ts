@@ -433,6 +433,87 @@ export const SessionDocRoutes = () =>
         }
       }),
     )
+    .get(
+      "/:sessionID/env-request/draft/connect",
+      describeRoute({
+        summary: "Connect to env request value draft",
+        description:
+          "Bidirectional WebSocket for co-editing the name and value of a pending env request. Participants only — read-only viewers are refused. The draft is in-memory and discarded when the request resolves.",
+        operationId: "session.envRequest.draft.connect",
+        responses: {
+          200: { description: "Connected", content: { "application/json": { schema: resolver(z.boolean()) } } },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ sessionID: SessionID.zod })),
+      validator("query", z.object({ requestID: z.string(), actorID: ActorID.zod, key: z.string() })),
+      upgradeWebSocket(async (c) => {
+        const param = z.object({ sessionID: SessionID.zod }).parse(c.req.param())
+        const query = z
+          .object({ requestID: z.string(), actorID: ActorID.zod, key: z.string() })
+          .parse(c.req.query())
+
+        type Socket = { readyState: number; send: (data: string) => void; close: (code?: number, reason?: string) => void }
+        const isSocket = (value: unknown): value is Socket => {
+          if (!value || typeof value !== "object") return false
+          if (!("readyState" in value)) return false
+          if (!("send" in value) || typeof (value as { send?: unknown }).send !== "function") return false
+          return typeof (value as { readyState?: unknown }).readyState === "number"
+        }
+
+        const Inbound = z.discriminatedUnion("type", [
+          z.object({ type: z.literal("op"), op: Doc.EnvDraftOp }),
+          z.object({ type: z.literal("presence"), entry: Doc.EnvPresenceEntry }),
+        ])
+
+        let handle: ((() => void) & { pong: () => void }) | undefined
+        return {
+          onOpen(_event, ws) {
+            const socket = ws.raw
+            if (!isSocket(socket)) {
+              ws.close()
+              return
+            }
+            // 참여자가 아니면 connect 가 소켓을 닫고 undefined 를 준다(관전자 차단).
+            handle = Doc.envDraftConnect({
+              sessionID: param.sessionID,
+              requestID: query.requestID,
+              actorID: query.actorID,
+              key: query.key,
+              peer: { send: (data) => { if (socket.readyState === 1) socket.send(data) }, close: () => socket.close() },
+            })
+          },
+          onMessage(event) {
+            if (typeof event.data !== "string") return
+            if (isPong(event.data)) {
+              handle?.pong()
+              return
+            }
+            // 초안 조작은 값이 실려 있으므로 내용을 로그에 남기지 않는다.
+            if (!handle) return
+            let parsed: z.infer<typeof Inbound>
+            try {
+              parsed = Inbound.parse(JSON.parse(event.data))
+            } catch {
+              return
+            }
+            if (parsed.type === "op") {
+              Doc.envDraftApply({
+                sessionID: param.sessionID,
+                requestID: query.requestID,
+                key: query.key,
+                op: parsed.op,
+              })
+              return
+            }
+            Doc.envPresenceSet({ sessionID: param.sessionID, requestID: query.requestID, entry: parsed.entry })
+          },
+          onClose() {
+            handle?.()
+          },
+        }
+      }),
+    )
     .post(
       "/:sessionID/actor",
       describeRoute({

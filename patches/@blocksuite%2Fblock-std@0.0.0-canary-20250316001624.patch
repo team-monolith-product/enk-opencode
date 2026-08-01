@@ -1,0 +1,16 @@
+--- a/dist/event/dispatcher.js
++++ b/dist/event/dispatcher.js
+@@ -274,7 +274,13 @@
+     }
+     run(name, context, runners) {
+         if (!this.active)
++            return;
++        // KeyboardControl listens on document; `active` can stay true while focus is in a
++        // native input outside the host, so Backspace/Delete get preventDefault'd. Bail out.
++        if (this._isActiveElementOutsideHost()) {
++            this._setActive(false);
+             return;
++        }
+         const sourceState = context.get('sourceState');
+         if (!runners) {
+             runners = this._getEventScope(name, sourceState);

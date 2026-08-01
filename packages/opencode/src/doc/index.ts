@@ -3,6 +3,7 @@ import z from "zod"
 import { ulid } from "ulid"
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
+import { EnvRequest } from "@/env-request"
 import { Question } from "@/question"
 import { QuestionID } from "@/question/schema"
 import { Session } from "@/session"
@@ -629,6 +630,7 @@ export namespace Doc {
     }
     for (const set of peers.values()) reap(set)
     for (const set of draftPeers.values()) reap(set)
+    for (const set of envDraftPeers.values()) reap(set)
     for (const set of observers.values()) reap(set)
   }
 
@@ -641,7 +643,7 @@ export namespace Doc {
 
   function heartbeatStop() {
     if (!heartbeat) return
-    if (peers.size > 0 || draftPeers.size > 0 || observers.size > 0) return
+    if (peers.size > 0 || draftPeers.size > 0 || envDraftPeers.size > 0 || observers.size > 0) return
     clearInterval(heartbeat)
     heartbeat = undefined
   }
@@ -893,6 +895,8 @@ export namespace Doc {
     // tool times out, or a solo participant auto-replies). The vote path GCs in send() directly.
     Bus.subscribe(Question.Event.Replied, async (event) => questionDraftReset(String(event.properties.requestID)))
     Bus.subscribe(Question.Event.Rejected, async (event) => questionDraftReset(String(event.properties.requestID)))
+    // 값 요청이 닫히면 초안을 즉시 지운다. 여기 남은 값이 나중에 접속한 사람에게 흘러가면 안 된다.
+    Bus.subscribe(EnvRequest.Event.Resolved, async (event) => envDraftReset(String(event.properties.requestID)))
   }
 
   function actorNames(sessionID: SessionID, ids: ActorID[], names?: Record<string, string>) {
@@ -1612,6 +1616,203 @@ export namespace Doc {
         if (!Array.from(set).some((item) => item.actorID === peer.actorID))
           scheduleDraftLeave(input.requestID, peer.actorID)
         if (set.size === 0) draftPeers.delete(input.requestID)
+        heartbeatStop()
+      }
+      return Object.assign(stop, {
+        pong: () => {
+          peer.lastSeen = Date.now()
+        },
+      })
+    },
+  )
+
+  // ── Env value request draft + presence relay ───────────────────────────────────────────────
+  // AI 가 띄운 값 요청 하나를 팀이 함께 채운다. 질문 초안과 모양은 같지만 나르는 게 비밀 값이라
+  // 규칙이 두 가지 다르다.
+  //   1) 관전자(readonly 뷰어)는 붙지 못한다 — 세션 actor 로 등록된 참여자만 받는다
+  //   2) 요청이 닫히는 즉시 초안을 지운다(EnvRequest.Event.Resolved 구독)
+  // 초안은 메모리에만 존재하고 디스크에도 모델 컨텍스트에도 가지 않는다.
+
+  export const EnvDraft = z
+    .object({
+      requestID: z.string(),
+      sessionID: SessionID.zod,
+      // 앱이 읽을 환경변수 이름. AI 가 정한 값으로 시작하지만 참가자가 고칠 수 있다.
+      key: z.string(),
+      value: z.string(),
+      rev: z.number(),
+    })
+    .meta({ ref: "EnvDraft" })
+  export type EnvDraft = z.infer<typeof EnvDraft>
+
+  export const EnvDraftOp = z
+    .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("key"), text: z.string() }),
+      z.object({ kind: z.literal("value"), text: z.string() }),
+    ])
+    .meta({ ref: "EnvDraftOp" })
+  export type EnvDraftOp = z.infer<typeof EnvDraftOp>
+
+  export const EnvPresenceEntry = z
+    .object({
+      actorID: ActorID.zod,
+      name: z.string(),
+      color: z.string(),
+      editing: z.boolean(),
+    })
+    .meta({ ref: "EnvPresenceEntry" })
+  export type EnvPresenceEntry = z.infer<typeof EnvPresenceEntry>
+
+  export const EnvChannelEvent = z
+    .object({
+      type: z.enum(["draft", "presence"]),
+      draft: EnvDraft.optional(),
+      presence: EnvPresenceEntry.array().optional(),
+    })
+    .meta({ ref: "EnvChannelEvent" })
+  export type EnvChannelEvent = z.infer<typeof EnvChannelEvent>
+
+  const envDrafts = new Map<string, EnvDraft>()
+  const envPresences = new Map<string, Map<ActorID, EnvPresenceEntry>>()
+  const envDraftPeers = new Map<string, Set<DraftPeer>>()
+  const envDraftLeaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function castEnvDraft(requestID: string) {
+    const set = envDraftPeers.get(requestID)
+    const draft = envDrafts.get(requestID)
+    if (!set || !draft) return
+    const data = JSON.stringify({ type: "draft", draft } satisfies EnvChannelEvent)
+    set.forEach((peer) => peer.send(data))
+  }
+
+  function castEnvPresence(requestID: string) {
+    const set = envDraftPeers.get(requestID)
+    if (!set) return
+    const list = Array.from(envPresences.get(requestID)?.values() ?? [])
+    const data = JSON.stringify({ type: "presence", presence: list } satisfies EnvChannelEvent)
+    set.forEach((peer) => peer.send(data))
+  }
+
+  function ensureEnvDraft(sessionID: SessionID, requestID: string, key: string) {
+    let draft = envDrafts.get(requestID)
+    if (!draft) {
+      draft = { requestID, sessionID, key, value: "", rev: 0 }
+      envDrafts.set(requestID, draft)
+    }
+    return draft
+  }
+
+  // 이름과 값 모두 last-write-wins. 동시에 친 글자를 병합하지 않는 건 의도된 단순화다 —
+  // 값은 대개 한 사람이 붙여넣고 나머지는 지켜보는 형태라 병합이 오히려 값을 망가뜨린다.
+  export const envDraftApply = fn(
+    z.object({ sessionID: SessionID.zod, requestID: z.string(), key: z.string(), op: EnvDraftOp }),
+    (input) => {
+      const draft = ensureEnvDraft(input.sessionID, input.requestID, input.key)
+      if (input.op.kind === "key") draft.key = input.op.text
+      else draft.value = input.op.text
+      draft.rev += 1
+      castEnvDraft(input.requestID)
+      return draft
+    },
+  )
+
+  export const envPresenceSet = fn(
+    z.object({ sessionID: SessionID.zod, requestID: z.string(), entry: EnvPresenceEntry }),
+    (input) => {
+      const map = envPresences.get(input.requestID) ?? new Map<ActorID, EnvPresenceEntry>()
+      map.set(input.entry.actorID, input.entry)
+      envPresences.set(input.requestID, map)
+      castEnvPresence(input.requestID)
+    },
+  )
+
+  function dropEnvPresence(requestID: string, actorID: ActorID) {
+    const map = envPresences.get(requestID)
+    if (!map) return
+    if (map.delete(actorID)) castEnvPresence(requestID)
+    if (map.size === 0) envPresences.delete(requestID)
+  }
+
+  function scheduleEnvLeave(requestID: string, actorID: ActorID) {
+    const key = `env:${requestID}:${actorID}`
+    const existing = envDraftLeaveTimers.get(key)
+    if (existing) clearTimeout(existing)
+    envDraftLeaveTimers.set(
+      key,
+      setTimeout(() => {
+        envDraftLeaveTimers.delete(key)
+        const set = envDraftPeers.get(requestID)
+        const online = set ? Array.from(set).some((peer) => peer.actorID === actorID) : false
+        if (online) return
+        dropEnvPresence(requestID, actorID)
+      }, LEAVE_GRACE),
+    )
+  }
+
+  function cancelEnvLeave(requestID: string, actorID: ActorID) {
+    const key = `env:${requestID}:${actorID}`
+    const timer = envDraftLeaveTimers.get(key)
+    if (!timer) return
+    clearTimeout(timer)
+    envDraftLeaveTimers.delete(key)
+  }
+
+  /** 요청이 닫히면 공유 상태를 즉시 버린다. 남겨두면 나중에 붙는 클라이언트에게 값이 흘러간다. */
+  export function envDraftReset(requestID: string) {
+    envDrafts.delete(requestID)
+    envPresences.delete(requestID)
+    castEnvPresence(requestID)
+  }
+
+  export const envDraftConnect = fn(
+    z.object({
+      sessionID: SessionID.zod,
+      requestID: z.string(),
+      actorID: ActorID.zod,
+      key: z.string(),
+      peer: z.custom<{ send: (data: string) => void; close?: () => void }>(),
+    }),
+    (input) => {
+      Session.get(input.sessionID)
+
+      // 관전자 차단. readonly 뷰어는 actor 를 등록하지 않으므로 이 조회에서 걸러진다.
+      const actor = Database.use((db) =>
+        db
+          .select()
+          .from(SessionActorTable)
+          .where(
+            and(eq(SessionActorTable.session_id, input.sessionID), eq(SessionActorTable.actor_id, input.actorID)),
+          )
+          .get(),
+      )
+      if (!actor) {
+        input.peer.close?.()
+        return undefined
+      }
+
+      const peer: DraftPeer = {
+        actorID: input.actorID,
+        send: input.peer.send,
+        close: input.peer.close,
+        lastSeen: Date.now(),
+      }
+      const set = envDraftPeers.get(input.requestID) ?? new Set<DraftPeer>()
+      set.add(peer)
+      envDraftPeers.set(input.requestID, set)
+      heartbeatStart()
+      cancelEnvLeave(input.requestID, input.actorID)
+
+      // 늦게 들어온 사람도 팀이 지금까지 채운 내용을 그대로 본다.
+      const draft = ensureEnvDraft(input.sessionID, input.requestID, input.key)
+      peer.send(JSON.stringify({ type: "draft", draft } satisfies EnvChannelEvent))
+      const list = Array.from(envPresences.get(input.requestID)?.values() ?? [])
+      if (list.length) peer.send(JSON.stringify({ type: "presence", presence: list } satisfies EnvChannelEvent))
+
+      const stop = () => {
+        set.delete(peer)
+        if (!Array.from(set).some((item) => item.actorID === peer.actorID))
+          scheduleEnvLeave(input.requestID, peer.actorID)
+        if (set.size === 0) envDraftPeers.delete(input.requestID)
         heartbeatStop()
       }
       return Object.assign(stop, {

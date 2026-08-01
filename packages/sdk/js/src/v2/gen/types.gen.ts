@@ -268,6 +268,52 @@ export type EventTodoUpdated = {
   }
 }
 
+export type EnvRequest = {
+  /**
+   * Environment variable name the app reads (UPPER_SNAKE_CASE)
+   */
+  name: string
+  /**
+   * Service name shown to the user, in their language
+   */
+  label: string
+  /**
+   * Why this value is needed, in the user's language
+   */
+  reason?: string
+  /**
+   * Where the user can obtain the value
+   */
+  docsUrl?: string
+  /**
+   * Ask again even though a value is already stored, so the user can replace it
+   */
+  replace?: boolean
+  id: string
+  sessionID: string
+  tool?: {
+    messageID: string
+    callID: string
+  }
+}
+
+export type EventEnvRequestAsked = {
+  type: "env.request.asked"
+  properties: EnvRequest
+}
+
+export type EnvRequestStatus = "saved" | "skipped" | "canceled"
+
+export type EventEnvRequestResolved = {
+  type: "env.request.resolved"
+  properties: {
+    sessionID: string
+    requestID: string
+    name: string
+    status: EnvRequestStatus
+  }
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -994,6 +1040,8 @@ export type Event =
   | EventFileEdited
   | EventFileWatcherUpdated
   | EventTodoUpdated
+  | EventEnvRequestAsked
+  | EventEnvRequestResolved
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -1772,6 +1820,24 @@ export type Env = {
   aiModelVariant?: string
 }
 
+export type EnvFileKeys = {
+  keys: Array<string>
+}
+
+export type DevServerStatus = {
+  state: "none" | "starting" | "startable" | "ready" | "errored"
+  port?: number
+  httpStatus?: number
+}
+
+export type DevServerRestart = {
+  status: "already_running" | "started" | "failed" | "no_command" | "already_starting"
+  url?: string
+  port?: number
+  ms: number
+  reason?: string
+}
+
 export type ToolIds = Array<string>
 
 export type ToolListItem = {
@@ -1923,7 +1989,7 @@ export type DocSubmitActor = {
   actorID: string
   name: string
   color: string
-  status: "pending" | "approved"
+  status: "pending" | "approved" | "left"
 }
 
 export type DocSubmit = {
@@ -2793,6 +2859,249 @@ export type EnvGetResponses = {
 }
 
 export type EnvGetResponse = EnvGetResponses[keyof EnvGetResponses]
+
+export type EnvFileListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-file"
+}
+
+export type EnvFileListResponses = {
+  /**
+   * Key names
+   */
+  200: EnvFileKeys
+}
+
+export type EnvFileListResponse = EnvFileListResponses[keyof EnvFileListResponses]
+
+export type EnvFileSetData = {
+  body?: {
+    values: {
+      [key: string]: string
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-file"
+}
+
+export type EnvFileSetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type EnvFileSetError = EnvFileSetErrors[keyof EnvFileSetErrors]
+
+export type EnvFileSetResponses = {
+  /**
+   * Key names after update
+   */
+  200: EnvFileKeys
+}
+
+export type EnvFileSetResponse = EnvFileSetResponses[keyof EnvFileSetResponses]
+
+export type EnvFileRemoveData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-file/{name}"
+}
+
+export type EnvFileRemoveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type EnvFileRemoveError = EnvFileRemoveErrors[keyof EnvFileRemoveErrors]
+
+export type EnvFileRemoveResponses = {
+  /**
+   * Key names after removal
+   */
+  200: EnvFileKeys
+}
+
+export type EnvFileRemoveResponse = EnvFileRemoveResponses[keyof EnvFileRemoveResponses]
+
+export type EnvRequestListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-request"
+}
+
+export type EnvRequestListResponses = {
+  /**
+   * List of pending env requests
+   */
+  200: Array<EnvRequest>
+}
+
+export type EnvRequestListResponse = EnvRequestListResponses[keyof EnvRequestListResponses]
+
+export type EnvRequestSubmitData = {
+  body?: {
+    name?: string
+    value: string
+  }
+  path: {
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-request/{requestID}/submit"
+}
+
+export type EnvRequestSubmitErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type EnvRequestSubmitError = EnvRequestSubmitErrors[keyof EnvRequestSubmitErrors]
+
+export type EnvRequestSubmitResponses = {
+  /**
+   * Value stored
+   */
+  200: boolean
+}
+
+export type EnvRequestSubmitResponse = EnvRequestSubmitResponses[keyof EnvRequestSubmitResponses]
+
+export type EnvRequestSkipData = {
+  body?: never
+  path: {
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-request/{requestID}/skip"
+}
+
+export type EnvRequestSkipErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type EnvRequestSkipError = EnvRequestSkipErrors[keyof EnvRequestSkipErrors]
+
+export type EnvRequestSkipResponses = {
+  /**
+   * Request skipped
+   */
+  200: boolean
+}
+
+export type EnvRequestSkipResponse = EnvRequestSkipResponses[keyof EnvRequestSkipResponses]
+
+export type EnvRequestRejectData = {
+  body?: never
+  path: {
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-request/{requestID}/reject"
+}
+
+export type EnvRequestRejectErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type EnvRequestRejectError = EnvRequestRejectErrors[keyof EnvRequestRejectErrors]
+
+export type EnvRequestRejectResponses = {
+  /**
+   * Request rejected
+   */
+  200: boolean
+}
+
+export type EnvRequestRejectResponse = EnvRequestRejectResponses[keyof EnvRequestRejectResponses]
+
+export type DevServerStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/dev-server/status"
+}
+
+export type DevServerStatusResponses = {
+  /**
+   * Dev server status
+   */
+  200: DevServerStatus
+}
+
+export type DevServerStatusResponse = DevServerStatusResponses[keyof DevServerStatusResponses]
+
+export type DevServerRestartData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/dev-server/restart"
+}
+
+export type DevServerRestartResponses = {
+  /**
+   * Dev server restart result
+   */
+  200: DevServerRestart
+}
+
+export type DevServerRestartResponse = DevServerRestartResponses[keyof DevServerRestartResponses]
 
 export type ToolIdsData = {
   body?: never
@@ -4240,7 +4549,7 @@ export type SessionPromptDocSubmitData = {
   body?: {
     docID: string
     actorID: string
-    actorIDs: Array<string>
+    actorIDs?: Array<string>
     names?: {
       [key: string]: string
     }
@@ -4301,7 +4610,7 @@ export type SessionPromptDocStopData = {
   body?: {
     docID: string
     actorID: string
-    actorIDs: Array<string>
+    actorIDs?: Array<string>
     names?: {
       [key: string]: string
     }
@@ -4342,7 +4651,7 @@ export type SessionPromptDocStopResponse = SessionPromptDocStopResponses[keyof S
 export type SessionPromptDocSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel"
+    action: "approve" | "cancel" | "exclude"
   }
   path: {
     sessionID: string
@@ -4389,6 +4698,7 @@ export type SessionPromptDocSubmitConnectData = {
     workspace?: string
     docID: string
     actorID: string
+    observer?: boolean
   }
   url: "/session/{sessionID}/prompt-doc/submit/connect"
 }
@@ -4421,7 +4731,7 @@ export type SessionQuestionSubmitData = {
   body?: {
     requestID: string
     actorID: string
-    actorIDs: Array<string>
+    actorIDs?: Array<string>
     names?: {
       [key: string]: string
     }
@@ -4468,7 +4778,7 @@ export type SessionQuestionSubmitResponse = SessionQuestionSubmitResponses[keyof
 export type SessionQuestionSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel"
+    action: "approve" | "cancel" | "exclude"
   }
   path: {
     sessionID: string
@@ -4515,6 +4825,7 @@ export type SessionQuestionSubmitConnectData = {
     workspace?: string
     requestID: string
     actorID: string
+    observer?: boolean
   }
   url: "/session/{sessionID}/question/submit/connect"
 }
@@ -4580,6 +4891,45 @@ export type SessionQuestionDraftConnectResponses = {
 
 export type SessionQuestionDraftConnectResponse =
   SessionQuestionDraftConnectResponses[keyof SessionQuestionDraftConnectResponses]
+
+export type SessionEnvRequestDraftConnectData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query: {
+    directory?: string
+    workspace?: string
+    requestID: string
+    actorID: string
+    key: string
+  }
+  url: "/session/{sessionID}/env-request/draft/connect"
+}
+
+export type SessionEnvRequestDraftConnectErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionEnvRequestDraftConnectError =
+  SessionEnvRequestDraftConnectErrors[keyof SessionEnvRequestDraftConnectErrors]
+
+export type SessionEnvRequestDraftConnectResponses = {
+  /**
+   * Connected
+   */
+  200: boolean
+}
+
+export type SessionEnvRequestDraftConnectResponse =
+  SessionEnvRequestDraftConnectResponses[keyof SessionEnvRequestDraftConnectResponses]
 
 export type SessionActorListData = {
   body?: never

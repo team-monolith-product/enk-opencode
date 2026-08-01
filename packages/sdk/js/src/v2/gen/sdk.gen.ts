@@ -19,6 +19,8 @@ import type {
   ConfigProvidersResponses,
   ConfigUpdateErrors,
   ConfigUpdateResponses,
+  DevServerRestartResponses,
+  DevServerStatusResponses,
   DocAssetCreateErrors,
   DocAssetCreateResponses,
   DocAssetGetErrors,
@@ -32,7 +34,19 @@ import type {
   DocSyncPullResponses,
   DocSyncPushErrors,
   DocSyncPushResponses,
+  EnvFileListResponses,
+  EnvFileRemoveErrors,
+  EnvFileRemoveResponses,
+  EnvFileSetErrors,
+  EnvFileSetResponses,
   EnvGetResponses,
+  EnvRequestListResponses,
+  EnvRequestRejectErrors,
+  EnvRequestRejectResponses,
+  EnvRequestSkipErrors,
+  EnvRequestSkipResponses,
+  EnvRequestSubmitErrors,
+  EnvRequestSubmitResponses,
   EventSubscribeResponses,
   EventTuiCommandExecute,
   EventTuiPromptAppend,
@@ -141,6 +155,8 @@ import type {
   SessionDeleteMessageResponses,
   SessionDeleteResponses,
   SessionDiffResponses,
+  SessionEnvRequestDraftConnectErrors,
+  SessionEnvRequestDraftConnectResponses,
   SessionForkResponses,
   SessionGetErrors,
   SessionGetResponses,
@@ -1055,6 +1071,308 @@ export class Env extends HeyApiClient {
   }
 }
 
+export class EnvFile extends HeyApiClient {
+  /**
+   * List env file keys
+   *
+   * List the key names stored in the project root .env file. Values are never returned.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<EnvFileListResponses, unknown, ThrowOnError>({
+      url: "/env-file",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Set env file keys
+   *
+   * Merge key=value pairs into the project root .env file. Existing keys are overwritten in place, new keys appended. Values are never returned.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      values?: {
+        [key: string]: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "values" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<EnvFileSetResponses, EnvFileSetErrors, ThrowOnError>({
+      url: "/env-file",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Remove env file key
+   *
+   * Remove a key from the project root .env file.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<EnvFileRemoveResponses, EnvFileRemoveErrors, ThrowOnError>({
+      url: "/env-file/{name}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class EnvRequest extends HeyApiClient {
+  /**
+   * List pending env requests
+   *
+   * Get all pending environment value requests across all sessions.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<EnvRequestListResponses, unknown, ThrowOnError>({
+      url: "/env-request",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Submit env request value
+   *
+   * Store the value for a pending env request in the project root .env file. The value is never returned and never reaches the model.
+   */
+  public submit<ThrowOnError extends boolean = false>(
+    parameters: {
+      requestID: string
+      directory?: string
+      workspace?: string
+      name?: string
+      value?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "name" },
+            { in: "body", key: "value" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<EnvRequestSubmitResponses, EnvRequestSubmitErrors, ThrowOnError>({
+      url: "/env-request/{requestID}/submit",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Skip env request
+   *
+   * Continue without a value. The assistant is told to proceed with sample data.
+   */
+  public skip<ThrowOnError extends boolean = false>(
+    parameters: {
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<EnvRequestSkipResponses, EnvRequestSkipErrors, ThrowOnError>({
+      url: "/env-request/{requestID}/skip",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Reject env request
+   *
+   * Dismiss the request without storing a value.
+   */
+  public reject<ThrowOnError extends boolean = false>(
+    parameters: {
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<EnvRequestRejectResponses, EnvRequestRejectErrors, ThrowOnError>({
+      url: "/env-request/{requestID}/reject",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class DevServer extends HeyApiClient {
+  /**
+   * Preview dev server status
+   *
+   * Report the preview dev server state so the client can pick the right fallback UI: none | starting | startable | ready | errored. The server self-probes http://127.0.0.1:PORT to get an authoritative HTTP status.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<DevServerStatusResponses, unknown, ThrowOnError>({
+      url: "/dev-server/status",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Restart dev server
+   *
+   * Restart the preview dev server by replaying the command recorded by the last ensure_dev_server call. Idempotent: returns already_starting while a launch is in progress and already_running if the port is already listening, so it is safe to call repeatedly.
+   */
+  public restart<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<DevServerRestartResponses, unknown, ThrowOnError>({
+      url: "/dev-server/restart",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Tool extends HeyApiClient {
   /**
    * List tool IDs
@@ -1532,7 +1850,7 @@ export class Submit extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel"
+      action?: "approve" | "cancel" | "exclude"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -1579,6 +1897,7 @@ export class Submit extends HeyApiClient {
       workspace?: string
       docID: string
       actorID: string
+      observer?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -1592,6 +1911,7 @@ export class Submit extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "query", key: "docID" },
             { in: "query", key: "actorID" },
+            { in: "query", key: "observer" },
           ],
         },
       ],
@@ -1844,7 +2164,7 @@ export class Submit2 extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel"
+      action?: "approve" | "cancel" | "exclude"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -1891,6 +2211,7 @@ export class Submit2 extends HeyApiClient {
       workspace?: string
       requestID: string
       actorID: string
+      observer?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -1904,6 +2225,7 @@ export class Submit2 extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "query", key: "requestID" },
             { in: "query", key: "actorID" },
+            { in: "query", key: "observer" },
           ],
         },
       ],
@@ -2031,6 +2353,57 @@ export class Question extends HeyApiClient {
   private _draft?: Draft
   get draft(): Draft {
     return (this._draft ??= new Draft({ client: this.client }))
+  }
+}
+
+export class Draft2 extends HeyApiClient {
+  /**
+   * Connect to env request value draft
+   *
+   * Bidirectional WebSocket for co-editing the name and value of a pending env request. Participants only — read-only viewers are refused. The draft is in-memory and discarded when the request resolves.
+   */
+  public connect<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      requestID: string
+      actorID: string
+      key: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "requestID" },
+            { in: "query", key: "actorID" },
+            { in: "query", key: "key" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      SessionEnvRequestDraftConnectResponses,
+      SessionEnvRequestDraftConnectErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/env-request/draft/connect",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class EnvRequest2 extends HeyApiClient {
+  private _draft?: Draft2
+  get draft(): Draft2 {
+    return (this._draft ??= new Draft2({ client: this.client }))
   }
 }
 
@@ -3096,6 +3469,11 @@ export class Session2 extends HeyApiClient {
   private _question?: Question
   get question(): Question {
     return (this._question ??= new Question({ client: this.client }))
+  }
+
+  private _envRequest?: EnvRequest2
+  get envRequest(): EnvRequest2 {
+    return (this._envRequest ??= new EnvRequest2({ client: this.client }))
   }
 
   private _actor?: Actor
@@ -5029,6 +5407,21 @@ export class OpencodeClient extends HeyApiClient {
   private _env?: Env
   get env(): Env {
     return (this._env ??= new Env({ client: this.client }))
+  }
+
+  private _envFile?: EnvFile
+  get envFile(): EnvFile {
+    return (this._envFile ??= new EnvFile({ client: this.client }))
+  }
+
+  private _envRequest?: EnvRequest
+  get envRequest(): EnvRequest {
+    return (this._envRequest ??= new EnvRequest({ client: this.client }))
+  }
+
+  private _devServer?: DevServer
+  get devServer(): DevServer {
+    return (this._devServer ??= new DevServer({ client: this.client }))
   }
 
   private _tool?: Tool

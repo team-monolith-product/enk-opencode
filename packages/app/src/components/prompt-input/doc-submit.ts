@@ -304,11 +304,15 @@ export type QuestionDraftChannel = {
   close: () => void
 }
 
-const draftMessage = (data: string): { type: "draft"; draft: QuestionDraft } | { type: "presence"; presence: QuestionPresenceEntry[] } | undefined => {
+const draftMessage = (
+  data: string,
+): { type: "draft"; draft: QuestionDraft } | { type: "presence"; presence: QuestionPresenceEntry[] } | undefined => {
   try {
     const value = JSON.parse(data) as { type?: unknown; draft?: unknown; presence?: unknown }
-    if (value?.type === "draft" && value.draft && typeof value.draft === "object") return { type: "draft", draft: value.draft as QuestionDraft }
-    if (value?.type === "presence" && Array.isArray(value.presence)) return { type: "presence", presence: value.presence as QuestionPresenceEntry[] }
+    if (value?.type === "draft" && value.draft && typeof value.draft === "object")
+      return { type: "draft", draft: value.draft as QuestionDraft }
+    if (value?.type === "presence" && Array.isArray(value.presence))
+      return { type: "presence", presence: value.presence as QuestionPresenceEntry[] }
     return
   } catch {
     return
@@ -385,6 +389,125 @@ export function connectQuestionDraft(input: DraftSocketInput): QuestionDraftChan
     sendOp: (op) => push({ type: "op", op }),
     sendPresence: (entry) => {
       // Remember it so onOpen can replay it after a reconnect; send now if we're already connected.
+      lastPresence = JSON.stringify({ type: "presence", entry })
+      if (ws?.readyState === WebSocket.OPEN) ws.send(lastPresence)
+    },
+    close: () => {
+      closed = true
+      if (timer) clearTimeout(timer)
+      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
+    },
+  }
+}
+
+// ── Env value request draft ──────────────────────────────────────────────────────────────────
+// 팀이 하나의 값 요청을 함께 채운다. 질문 초안과 전송 규약은 같지만 서버가 참여자만 받아주고
+// (관전자 차단) 요청이 닫히면 초안을 지운다. 값은 이 소켓과 브라우저 메모리에만 존재한다.
+
+export type EnvDraft = { requestID: string; sessionID: string; key: string; value: string; rev: number }
+
+export type EnvDraftOp = { kind: "key"; text: string } | { kind: "value"; text: string }
+
+export type EnvPresenceEntry = { actorID: string; name: string; color: string; editing: boolean }
+
+export type EnvDraftChannel = {
+  sendOp: (op: EnvDraftOp) => void
+  sendPresence: (entry: EnvPresenceEntry) => void
+  close: () => void
+}
+
+type EnvDraftSocketInput = {
+  baseUrl: string
+  directory: string
+  sessionID: string
+  requestID: string
+  actorID: string
+  /** AI 가 정한 환경변수 이름. 초안이 아직 없을 때 서버가 이 값으로 시작한다. */
+  key: string
+  onDraft: (draft: EnvDraft) => void
+  onPresence: (list: EnvPresenceEntry[]) => void
+}
+
+const envDraftMessage = (
+  data: string,
+): { type: "draft"; draft: EnvDraft } | { type: "presence"; presence: EnvPresenceEntry[] } | undefined => {
+  try {
+    const value = JSON.parse(data) as { type?: unknown; draft?: unknown; presence?: unknown }
+    if (value?.type === "draft" && value.draft && typeof value.draft === "object")
+      return { type: "draft", draft: value.draft as EnvDraft }
+    if (value?.type === "presence" && Array.isArray(value.presence))
+      return { type: "presence", presence: value.presence as EnvPresenceEntry[] }
+    return
+  } catch {
+    return
+  }
+}
+
+export function connectEnvDraft(input: EnvDraftSocketInput): EnvDraftChannel {
+  const url = path(input, `/session/${input.sessionID}/env-request/draft/connect`)
+  url.searchParams.set("requestID", input.requestID)
+  url.searchParams.set("actorID", input.actorID)
+  url.searchParams.set("key", input.key)
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+
+  let closed = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let ws: WebSocket | undefined
+  let queue: string[] = []
+  let lastPresence: string | undefined
+
+  const flush = () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    for (const data of queue) ws.send(data)
+    queue = []
+  }
+
+  const onOpen = () => {
+    if (lastPresence && ws?.readyState === WebSocket.OPEN) ws.send(lastPresence)
+    flush()
+  }
+
+  const push = (msg: unknown) => {
+    queue.push(JSON.stringify(msg))
+    flush()
+  }
+
+  const retry = () => {
+    if (closed || timer) return
+    timer = setTimeout(() => {
+      timer = undefined
+      connect()
+    }, 500)
+  }
+
+  const connect = () => {
+    if (closed) return
+    const socket = new WebSocket(url)
+    ws = socket
+    socket.addEventListener("open", onOpen)
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") return
+      if (handlePing(socket, event.data)) return
+      const next = envDraftMessage(event.data)
+      if (!next) return
+      if (next.type === "draft") input.onDraft(next.draft)
+      else input.onPresence(next.presence)
+    })
+    socket.addEventListener("close", () => {
+      if (ws === socket) ws = undefined
+      retry()
+    })
+    socket.addEventListener("error", () => {
+      if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close()
+      retry()
+    })
+  }
+
+  connect()
+
+  return {
+    sendOp: (op) => push({ type: "op", op }),
+    sendPresence: (entry) => {
       lastPresence = JSON.stringify({ type: "presence", entry })
       if (ws?.readyState === WebSocket.OPEN) ws.send(lastPresence)
     },

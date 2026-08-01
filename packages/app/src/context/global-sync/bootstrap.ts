@@ -1,6 +1,7 @@
 import type {
   Config,
   Env,
+  EnvRequest,
   OpencodeClient,
   Path,
   PermissionRequest,
@@ -319,6 +320,34 @@ export async function bootstrapDirectory(input: {
                   sessionID,
                   reconcile(
                     questions.filter((q) => !!q?.id).sort((a, b) => cmp(a.id, b.id)),
+                    { key: "id" },
+                  ),
+                )
+              }
+            }),
+          )
+        }),
+      ),
+    // 새로고침·재접속 복구. 서버의 pending 목록이 원본이라, 여기서 되살리지 않으면 AI 는 계속
+    // 기다리는데 화면에는 입력창이 없는 상태로 굳는다.
+    () =>
+      retry(() =>
+        input.sdk.envRequest.list().then((x) => {
+          const list = (x.data ?? []).filter((item): item is EnvRequest => !!item?.id && !!item.sessionID)
+          const ids = list.map((item) => item.sessionID)
+          const grouped = groupBySession(list)
+          return warmSessions({ ids, store: input.store, setStore: input.setStore, sdk: input.sdk }).then(() =>
+            batch(() => {
+              for (const sessionID of Object.keys(input.store.env_request)) {
+                if (grouped[sessionID]) continue
+                input.setStore("env_request", sessionID, [])
+              }
+              for (const [sessionID, requests] of Object.entries(grouped)) {
+                input.setStore(
+                  "env_request",
+                  sessionID,
+                  reconcile(
+                    requests.sort((a, b) => cmp(a.id, b.id)),
                     { key: "id" },
                   ),
                 )

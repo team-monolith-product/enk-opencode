@@ -74,14 +74,19 @@ export function restartDevServer(opts: {
 }
 
 // /env-file/* 도 SDK 코드젠 미포함이라 devServerClient 와 같은 방식으로 호출한다.
-// 서버는 키 이름만 반환한다(값은 write-only — 어떤 응답에도 값이 실리지 않음).
+// 서버는 키 이름·등록시각만 반환한다(값은 write-only — 어떤 응답에도 값이 실리지 않음).
 type EnvFileOpts = { server: ServerConnection.HttpBase; directory: string; fetch?: typeof fetch }
-type EnvFileKeys = { keys: string[] }
+type EnvFileKeys = { keys: string[]; updated_at?: Record<string, number> }
+export type EnvKeyEntry = { name: string; updated_at?: number }
 
-export function listEnvKeys(opts: EnvFileOpts): Promise<string[]> {
+export function listEnvKeys(opts: EnvFileOpts): Promise<EnvKeyEntry[]> {
   return devServerClient(opts)
     .get({ url: "/env-file" })
-    .then((res) => (res.data as EnvFileKeys).keys)
+    .then((res) => {
+      const data = res.data as EnvFileKeys
+      const stamp = data.updated_at ?? {}
+      return data.keys.map((name) => ({ name, updated_at: stamp[name] }))
+    })
 }
 
 export function saveEnvKeys(opts: EnvFileOpts, values: Record<string, string>): Promise<string[]> {

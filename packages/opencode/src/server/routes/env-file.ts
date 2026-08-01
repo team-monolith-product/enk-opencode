@@ -7,10 +7,15 @@ import { EnvFile } from "../../util/env-file"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
 
-// 프로젝트 루트 .env 관리(쓰기 전용). 값은 어떤 응답에도 포함하지 않는다 — 키 이름만 반환.
+// 프로젝트 루트 .env 관리(쓰기 전용). 값은 어떤 응답에도 포함하지 않는다 — 키 이름·등록시각만 반환.
 // 경로는 서버 측 Instance.directory 에서만 유도하므로 클라이언트발 path traversal 이 불가능하다.
 const KeyName = z.string().regex(EnvFile.KEY_REGEX).max(256)
-const KeyList = z.object({ keys: z.string().array() }).meta({ ref: "EnvFileKeys" })
+const KeyList = z
+  .object({
+    keys: z.string().array(),
+    updated_at: z.record(z.string(), z.number()).optional(),
+  })
+  .meta({ ref: "EnvFileKeys" })
 const SetBody = z
   .object({
     values: z.record(
@@ -25,23 +30,33 @@ const SetBody = z
 
 const file = () => path.join(Instance.directory, ".env")
 
+async function payload() {
+  const entries = await EnvFile.entries(file())
+  const updated_at: Record<string, number> = {}
+  for (const entry of entries) {
+    if (entry.updated_at !== undefined) updated_at[entry.name] = entry.updated_at
+  }
+  return { keys: entries.map((entry) => entry.name), updated_at }
+}
+
 export const EnvFileRoutes = lazy(() =>
   new Hono()
     .get(
       "/",
       describeRoute({
         summary: "List env file keys",
-        description: "List the key names stored in the project root .env file. Values are never returned.",
+        description:
+          "List the key names stored in the project root .env file, with optional updated_at timestamps. Values are never returned.",
         operationId: "envFile.list",
         responses: {
           200: {
-            description: "Key names",
+            description: "Key names and update times",
             content: { "application/json": { schema: resolver(KeyList) } },
           },
         },
       }),
       async (c) => {
-        return c.json({ keys: await EnvFile.names(file()) })
+        return c.json(await payload())
       },
     )
     .put(
@@ -62,7 +77,8 @@ export const EnvFileRoutes = lazy(() =>
       validator("json", SetBody),
       async (c) => {
         const body = c.req.valid("json")
-        return c.json({ keys: await EnvFile.set(file(), body.values) })
+        await EnvFile.set(file(), body.values)
+        return c.json(await payload())
       },
     )
     .delete(
@@ -82,7 +98,8 @@ export const EnvFileRoutes = lazy(() =>
       validator("param", z.object({ name: KeyName })),
       async (c) => {
         const { name } = c.req.valid("param")
-        return c.json({ keys: await EnvFile.remove(file(), name) })
+        await EnvFile.remove(file(), name)
+        return c.json(await payload())
       },
     ),
 )

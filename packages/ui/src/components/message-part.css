@@ -833,6 +833,160 @@
   }
 }
 
+/* 외부 연동 값 입력 도크. 시안(c3-env-secure)의 수치를 그대로 고정한다 — 앱 기본 폼 크기를 쓰면
+   입력칸·라운드·폰트가 전부 커져 시안과 어긋난다. 참조: participant.jsx OcEnvSecureDock.
+
+   카드 테두리·라운드·그림자는 래퍼가 한 번만 그린다. 셸(body)과 트레이(footer)가 각자 그리면
+   내용과 액션 사이에 선이 생기는데 시안은 한 장이다. 앱 codle 레이아웃이 모든 dock shell 에
+   카드를 입히므로(app/src/index.css) 셀렉터를 한 단계 더 조여 눌러야 한다. */
+[data-component="dock-prompt"][data-kind="env"] {
+  /* 해저드 사선 색 — 테마와 무관한 브랜드 장치. doc-submit 오버레이가 같은 값을 자기 스코프에
+     선언해 쓰고 있어 여기서도 스코프에 선언한다(전역 토큰이 아니다). */
+  --env-hazard-mark: #ffce2b;
+  --env-hazard-ink: #17171c;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  /* 시안 카드: hairline-strong(#B8B4A6) · 라운드 10 · 그림자 한 겹 */
+  border: 1px solid var(--border-strong-base);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 6px 22px rgba(15, 15, 20, 0.06);
+  background-color: var(--input-base);
+
+  [data-slot="env-body"][data-dock-surface="shell"],
+  [data-slot="env-body"][data-dock-surface="shell"]:focus-within {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    /* dock-surface 기본 overflow:hidden 이 인풋 포커스 링·아래쪽을 잘라낸다. */
+    overflow: visible;
+  }
+
+  [data-slot="env-footer"][data-dock-surface="tray"] {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  [data-slot="env-body"] {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    flex: 1;
+    min-height: 0;
+    /* 위 = 스트라이프 12 + 본문 12. 아래 16 = 인풋↔액션 간격(포커스 링이 잘리지 않게). */
+    padding: 24px 14px 16px;
+    overflow: visible;
+  }
+
+  /* 비가역 액션 경고 — 정적 사선 12px */
+  [data-slot="env-body"]::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 12px;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      var(--env-hazard-mark) 0 14.1421356px,
+      var(--env-hazard-ink) 14.1421356px 28.2842712px
+    );
+    background-size: 40px 100%;
+  }
+
+  [data-slot="env-header"] {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  /* 타이포 — 시안 고정값(12.5/700, 11.5/muted). 앱 유틸리티 클래스는 한 치수 크다. */
+  [data-slot="env-title"] {
+    font-size: 12.5px;
+    font-weight: var(--font-weight-bold);
+    line-height: 1.45;
+    color: var(--text-strong);
+  }
+
+  [data-slot="env-subtitle"],
+  [data-slot="env-note"] {
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+
+  [data-slot="env-content"] {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    flex: 1;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  [data-slot="env-footer"] {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    /* 위 간격은 body padding-bottom 이 담당. 좌우·아래만 시안 14 */
+    padding: 0 14px 14px;
+    margin-top: 0;
+  }
+
+  /* 폼 — text-field 기본(2px 12 / 파란 링)보다 셀렉터를 한 단계 깊게 이겨 시안 수치를 쓴다. */
+  [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"] {
+    height: 32px;
+    min-height: 32px;
+    align-items: center;
+    border-radius: 4px;
+    border-color: var(--border-strong-base);
+    box-sizing: border-box;
+    overflow: visible;
+  }
+
+  [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"]:focus-within:not(:has([data-readonly])) {
+    /* 시안 jt-input 포커스 — ink 테두리 + helmet 노란 소프트 링 */
+    border-color: var(--text-strong) !important;
+    box-shadow: var(--focus-ring-soft) !important;
+  }
+
+  /* Affine 전역 `input { padding:0; font-size:xs }` 이 레이어/특이도로 이겨서
+     시안 패딩이 무시된다. 이 도크 스코프에서만 중요도로 고정한다. */
+  [data-component="input"][data-variant="normal"] [data-slot="input-input"] {
+    height: 32px !important;
+    padding: 0 12px !important;
+    font-size: 13px !important;
+    line-height: 32px !important;
+    box-sizing: border-box;
+  }
+
+  [data-component="button"] {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 4px;
+    box-shadow: none;
+  }
+
+  [data-component="button"][data-variant="primary"] {
+    box-shadow: 0 1px 2px rgba(15, 15, 20, 0.04);
+  }
+
+  [data-component="button"][data-variant="secondary"] {
+    border-color: var(--border-strong-base);
+    box-shadow: none;
+  }
+}
+
 [data-component="dock-prompt"][data-kind="question"] {
   position: relative;
   display: flex;

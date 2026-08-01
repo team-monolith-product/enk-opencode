@@ -1,0 +1,24 @@
+Ask the user for a secret value that the app needs to reach an external service (an API key, a service key, a token).
+
+Opens a secure input in the user's app. Everyone in the session sees it and can fill it in together. When they submit, the value is written straight to the project's environment file by the server. You never receive it.
+
+Always opens the input — even when a value for that name is already stored. In that case the user can replace it. Call this tool whenever you need the user to provide or update the value. Do not skip the call because a value might already exist, and do not tell them a request is unnecessary.
+
+WHEN TO USE
+- The code you are writing needs credentials for an external service.
+- The user wants to set or change a secret value.
+- Prefer a keyless alternative first. Many public data services work without credentials, and a working app beats a blocked one. Only call this when a key is genuinely required.
+- If you want to offer the user a choice first (keyless alternative vs. registering a key vs. sample data), ask that with the question tool. Service names are safe to send through a question. Values are not.
+
+RULES
+- NEVER ask the user to type a secret value into the chat, into a file, or into a form you build inside their app. This tool is the only correct path. A value typed anywhere else ends up in your context and in the app's source.
+- NEVER try to read the stored value afterwards. It is write-only by design, and reading environment files is blocked.
+- Pick `name` yourself in UPPER_SNAKE_CASE, matching what your code reads. The user does not know variable names; they only paste a value.
+- Write `label` and `reason` in the user's language. They are shown as-is.
+- `replace` is optional. The tool opens the input either way; when a value already exists it shows a replace notice automatically.
+
+RESULT
+You get back only a status:
+- `saved` — the value is stored. Continue with the work.
+- `skipped` — the user chose to move on without it. Use sample or placeholder data, and say clearly in your reply that the data is temporary.
+- `canceled` — the user dismissed the request. Do not re-open it unless they bring it up again.

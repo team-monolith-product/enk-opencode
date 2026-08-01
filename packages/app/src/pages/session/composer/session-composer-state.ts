@@ -1,6 +1,6 @@
 import { createEffect, createMemo, on, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
-import type { PermissionRequest, QuestionRequest, Todo } from "@opencode-ai/sdk/v2"
+import type { EnvRequest, PermissionRequest, QuestionRequest, Todo } from "@opencode-ai/sdk/v2"
 import { useParams } from "@solidjs/router"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useGlobalSync } from "@/context/global-sync"
@@ -9,7 +9,7 @@ import { usePermission } from "@/context/permission"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { composerDriver, composerEnabled, composerEvent } from "@/testing/session-composer"
-import { sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
+import { sessionEnvRequest, sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
 
 export const todoState = (input: {
   count: number
@@ -38,6 +38,10 @@ export function createSessionComposerState(options?: { closeMs?: number | (() =>
     return sessionQuestionRequest(sync.data.session, sync.data.question, params.id)
   })
 
+  const envRequest = createMemo((): EnvRequest | undefined => {
+    return sessionEnvRequest(sync.data.session, sync.data.env_request, params.id)
+  })
+
   const permissionRequest = createMemo((): PermissionRequest | undefined => {
     return sessionPermissionRequest(sync.data.session, sync.data.permission, params.id, (item) => {
       return !permission.autoResponds(item, sdk.directory)
@@ -47,7 +51,7 @@ export function createSessionComposerState(options?: { closeMs?: number | (() =>
   const blocked = createMemo(() => {
     const id = params.id
     if (!id) return false
-    return !!permissionRequest() || !!questionRequest()
+    return !!permissionRequest() || !!questionRequest() || !!envRequest()
   })
 
   const [test, setTest] = createStore({
@@ -248,6 +252,7 @@ export function createSessionComposerState(options?: { closeMs?: number | (() =>
   return {
     blocked,
     questionRequest,
+    envRequest,
     permissionRequest,
     permissionResponding,
     decide,

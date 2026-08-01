@@ -1,6 +1,7 @@
 import { Binary } from "@opencode-ai/util/binary"
 import { produce, reconcile, type SetStoreFunction, type Store } from "solid-js/store"
 import type {
+  EnvRequest,
   FileDiff,
   Message,
   Part,
@@ -75,8 +76,7 @@ export function cleanupDroppedSessionCaches(
       .map((parts) => parts?.find((part) => !!part?.sessionID)?.sessionID)
       .filter((sessionID): sessionID is string => !!sessionID),
   ].filter(
-    (sessionID, index, list) =>
-      !keep.has(sessionID) && !pinned?.has(sessionID) && list.indexOf(sessionID) === index,
+    (sessionID, index, list) => !keep.has(sessionID) && !pinned?.has(sessionID) && list.indexOf(sessionID) === index,
   )
   if (stale.length === 0) return
   for (const sessionID of stale) {
@@ -360,6 +360,42 @@ export function applyDirectoryEvent(input: {
       if (!result.found) break
       input.setStore(
         "question",
+        props.sessionID,
+        produce((draft) => {
+          draft.splice(result.index, 1)
+        }),
+      )
+      break
+    }
+    case "env.request.asked": {
+      const request = event.properties as EnvRequest
+      const list = input.store.env_request[request.sessionID]
+      if (!list) {
+        input.setStore("env_request", request.sessionID, [request])
+        break
+      }
+      const result = Binary.search(list, request.id, (item) => item.id)
+      if (result.found) {
+        input.setStore("env_request", request.sessionID, result.index, reconcile(request))
+        break
+      }
+      input.setStore(
+        "env_request",
+        request.sessionID,
+        produce((draft) => {
+          draft.splice(result.index, 0, request)
+        }),
+      )
+      break
+    }
+    case "env.request.resolved": {
+      const props = event.properties as { sessionID: string; requestID: string }
+      const list = input.store.env_request[props.sessionID]
+      if (!list) break
+      const result = Binary.search(list, props.requestID, (item) => item.id)
+      if (!result.found) break
+      input.setStore(
+        "env_request",
         props.sessionID,
         produce((draft) => {
           draft.splice(result.index, 1)

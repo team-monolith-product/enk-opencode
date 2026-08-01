@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import type { PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
+import type { EnvRequest, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
 import { todoDockAtBoundary, todoState } from "./session-composer-state"
-import { sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
+import { sessionEnvRequest, sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
 
 const session = (input: { id: string; parentID?: string }) =>
   ({
@@ -21,6 +21,14 @@ const question = (id: string, sessionID: string) =>
     sessionID,
     questions: [],
   }) as QuestionRequest
+
+const env = (id: string, sessionID: string) =>
+  ({
+    id,
+    sessionID,
+    name: "DATA_GO_KR_KEY",
+    label: "공공데이터",
+  }) as EnvRequest
 
 describe("sessionPermissionRequest", () => {
   test("prefers the current session permission", () => {
@@ -102,6 +110,40 @@ describe("sessionQuestionRequest", () => {
     }
 
     expect(sessionQuestionRequest(sessions, questions, "root")?.id).toBe("q-grand")
+  })
+})
+
+describe("sessionEnvRequest", () => {
+  test("prefers the current session env request", () => {
+    const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]
+    const requests = {
+      root: [env("env-root", "root")],
+      child: [env("env-child", "child")],
+    }
+
+    expect(sessionEnvRequest(sessions, requests, "root")?.id).toBe("env-root")
+  })
+
+  test("returns a nested child env request", () => {
+    const sessions = [
+      session({ id: "root" }),
+      session({ id: "child", parentID: "root" }),
+      session({ id: "grand", parentID: "child" }),
+    ]
+    const requests = {
+      grand: [env("env-grand", "grand")],
+    }
+
+    expect(sessionEnvRequest(sessions, requests, "root")?.id).toBe("env-grand")
+  })
+
+  test("returns undefined without a matching tree request", () => {
+    const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]
+    const requests = {
+      other: [env("env-other", "other")],
+    }
+
+    expect(sessionEnvRequest(sessions, requests, "root")).toBeUndefined()
   })
 })
 

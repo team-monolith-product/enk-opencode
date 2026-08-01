@@ -8,6 +8,7 @@ export namespace Identifier {
     message: "msg",
     permission: "per",
     question: "que",
+    envRequest: "env",
     user: "usr",
     part: "prt",
     pty: "pty",
