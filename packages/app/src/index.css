@@ -1644,11 +1644,45 @@
 
 .env-keys-dialog .env-keys-row[data-status="drop"] .env-keys-name {
   color: var(--env-text-muted);
+  text-decoration: line-through;
 }
 
 .env-keys-dialog .env-keys-value {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 마스킹된 값 — 공개하면 같은 자리에 원문이 들어온다. 길면 잘라 줄 높이를 지킨다. */
+.env-keys-dialog .env-keys-mask {
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 값 보기 — 수정과 별개 컨트롤이라 점 옆에 따로 선다. */
+.env-keys-dialog .env-keys-eye {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  color: var(--env-text-weak);
+  background: transparent;
+}
+
+.env-keys-dialog .env-keys-eye:hover:not(:disabled) {
+  background: rgb(0 0 0 / 0.04);
+}
+
+.env-keys-dialog .env-keys-eye:disabled {
+  opacity: 0.6;
 }
 
 /* 상태칩 — 등록됨/저장하면 적용은 버튼(값 보기 겸 교체 진입점), 삭제 예정은 표시 전용.
@@ -1667,9 +1701,14 @@
   font-size: 12.5px;
   font-weight: 600;
   text-align: left;
-  color: var(--env-text-muted);
+  color: var(--env-text-weak);
   background: transparent;
   box-sizing: border-box;
+}
+
+/* 삭제 예정만 표시 전용이라 톤을 한 단계 더 낮춘다. */
+.env-keys-dialog .env-keys-row[data-status="drop"] .env-keys-chip {
+  color: var(--env-text-muted);
 }
 
 .env-keys-dialog button.env-keys-chip:hover:not(:disabled) {

@@ -24,12 +24,15 @@ import {
   type EnvRow,
 } from "./dialog-env-keys-form"
 
-// 목록은 이름만 받는다. 등록된 줄은 잠금칩으로 두고, 칩을 눌러야 그 줄의 값을 한 건 받아와
-// 입력칸에 펼친다 — 값 보기와 교체가 같은 동작이고, 포커스가 빠지면 다시 잠긴다.
+// 목록은 이름만 받는다. 등록된 줄의 값은 서버에서 한 건씩 받아오고, 쓰임새가 둘로 갈린다 —
+// 점을 누르면 입력칸으로 펼쳐 수정하고(포커스가 빠지면 다시 잠금), 눈을 누르면 표시만 바꾼다.
 // 값 교체·등록된 줄 삭제는 로컬 표시만 바꾸고, 푸터 [저장]에서만 반영한다.
 // 직접 추가(fresh) 줄 삭제는 목록에서 바로 제거한다.
 
-type Row = EnvRow & { err?: EnvErr; revealing?: boolean }
+// 길이까지 드러나지 않게 고정 길이로 가린다.
+const MASK = "••••••••••"
+
+type Row = EnvRow & { err?: EnvErr; revealing?: boolean; revealed?: boolean }
 
 export function DialogEnvKeys() {
   const dialog = useDialog()
@@ -71,26 +74,37 @@ export function DialogEnvKeys() {
   }
   onMount(() => void refetch())
 
-  // 잠금칩 클릭 — 값을 받아와 입력칸으로 펼친다. 한 번 받아온 값은 다이얼로그가 사는 동안 재요청하지 않는다.
-  const openValue = async (index: number) => {
+  // 한 번 받아온 값은 다이얼로그가 사는 동안 재요청하지 않는다. 실패하면 아무 상태도 바꾸지 않는다.
+  const loadValue = async (index: number) => {
     const row = rows[index]
-    if (!row || spectator) return
-    if (row.value !== undefined) {
-      setRows(index, "editing", true)
-      return
-    }
+    if (!row || spectator) return false
+    if (row.value !== undefined) return true
     const o = opts()
-    if (!o) return
+    if (!o) return false
     setRows(index, "revealing", true)
     try {
-      const value = await revealEnvKey(o, row.name)
-      setRows(index, "value", value)
-      setRows(index, "editing", true)
+      setRows(index, "value", await revealEnvKey(o, row.name))
+      return true
     } catch {
       showToast({ title: language.t("common.requestFailed") })
+      return false
     } finally {
       setRows(index, "revealing", false)
     }
+  }
+
+  /** 점·「저장하면 적용」칩 클릭 — 값을 입력칸으로 펼쳐 수정한다. */
+  const openValue = async (index: number) => {
+    if (await loadValue(index)) setRows(index, "editing", true)
+  }
+
+  /** 눈 클릭 — 표시만 바꾼다. 수정으로 들어가지 않는다. */
+  const toggleReveal = async (index: number) => {
+    if (rows[index]?.revealed) {
+      setRows(index, "revealed", false)
+      return
+    }
+    if (await loadValue(index)) setRows(index, "revealed", true)
   }
 
   const add = () => {
@@ -285,27 +299,54 @@ export function DialogEnvKeys() {
                                 when={status() !== "drop" && !spectator}
                                 fallback={
                                   <span class="env-keys-chip">
-                                    <Icon name={status() === "drop" ? "trash" : "lock"} class="size-3 shrink-0" />
-                                    {language.t(
-                                      status() === "drop" ? "envKeys.status.drop" : "envKeys.status.registered",
-                                    )}
+                                    <Show when={status() === "drop"}>
+                                      <Icon name="trash" class="size-3 shrink-0" />
+                                      {language.t("envKeys.status.drop")}
+                                    </Show>
+                                    <Show when={status() !== "drop"}>
+                                      <span class="env-keys-mask">{MASK}</span>
+                                    </Show>
                                   </span>
                                 }
                               >
+                                {/* 점(또는 공개된 값)과 「저장하면 적용」은 둘 다 눌러서 수정으로 들어간다. */}
                                 <button
                                   type="button"
                                   class="env-keys-chip"
+                                  aria-label={language.t(
+                                    status() === "replace" ? "envKeys.aria.replace" : "envKeys.aria.value",
+                                    { name: row.name },
+                                  )}
                                   disabled={saveMutation.isPending || !!row.revealing}
                                   onClick={() => void openValue(i())}
                                 >
-                                  <Icon
-                                    name={status() === "replace" ? "refresh" : "lock"}
-                                    class="size-3 shrink-0"
-                                  />
-                                  {language.t(
-                                    status() === "replace" ? "envKeys.status.replace" : "envKeys.status.registered",
-                                  )}
+                                  <Show
+                                    when={status() === "replace"}
+                                    fallback={
+                                      <span class="env-keys-mask">
+                                        {row.revealed && row.value !== undefined ? row.value : MASK}
+                                      </span>
+                                    }
+                                  >
+                                    <Icon name="refresh" class="size-3 shrink-0" />
+                                    {language.t("envKeys.status.replace")}
+                                  </Show>
                                 </button>
+                                {/* 값 보기는 수정과 별개 — 표시만 바꾼다. 교체 예정 줄에는 붙지 않는다. */}
+                                <Show when={status() === "registered"}>
+                                  <button
+                                    type="button"
+                                    class="env-keys-eye"
+                                    aria-label={language.t(
+                                      row.revealed ? "envKeys.aria.hide" : "envKeys.aria.reveal",
+                                      { name: row.name },
+                                    )}
+                                    disabled={saveMutation.isPending || !!row.revealing}
+                                    onClick={() => void toggleReveal(i())}
+                                  >
+                                    <Icon name="eye" class="size-4" />
+                                  </button>
+                                </Show>
                               </Show>
                             </div>
                           }
@@ -344,6 +385,9 @@ export function DialogEnvKeys() {
                           size="small"
                           variant="secondary"
                           class="env-keys-action shrink-0"
+                          aria-label={language.t(row.drop ? "envKeys.aria.deleteUndo" : "envKeys.aria.delete", {
+                            name: row.name,
+                          })}
                           onClick={() => toggleDrop(i())}
                           disabled={saveMutation.isPending}
                         >
