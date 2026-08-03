@@ -10,6 +10,43 @@ export type EnvRow = {
   draft?: string
   editing?: boolean
   drop?: boolean
+  /** 잠금을 풀어 서버에서 받아온 원래 값. draft 가 이것과 같으면 교체로 치지 않는다. */
+  value?: string
+}
+
+/**
+ * 시안의 줄 상태. registered 는 잠금칩, replace 는 「저장하면 적용」(강조 배경),
+ * needsValue 는 값이 비어 입력칸이 열려 있는 줄이다.
+ */
+export type EnvRowStatus = "drop" | "fresh" | "editing" | "replace" | "needsValue" | "registered"
+
+export function envRowStatus(row: EnvRow): EnvRowStatus {
+  if (row.drop) return "drop"
+  if (row.fresh) return "fresh"
+  if (row.editing) return "editing"
+  // 값이 비어 있는 줄은 고쳐도 입력칸을 계속 열어 둔다 — 시안의 「값 필요」줄.
+  if (!row.filled) return "needsValue"
+  if (draftChanged(row)) return "replace"
+  return "registered"
+}
+
+/** 잠금만 풀고 값을 그대로 둔 줄은 변경이 아니다 — 저장 대상에서도 빠진다. */
+function draftChanged(row: EnvRow) {
+  return row.draft !== undefined && row.draft !== (row.value ?? "")
+}
+
+/** 푸터의 "저장하면 교체 N건 · 삭제 N건 반영돼요" 카운트. */
+export function envKeysSummary(rows: EnvRow[]) {
+  let replace = 0
+  let drop = 0
+  for (const row of rows) {
+    if (row.drop) {
+      drop++
+      continue
+    }
+    if (row.fresh ? !!row.name.trim() : draftChanged(row)) replace++
+  }
+  return { replace, drop }
 }
 
 export type EnvErr = { key?: string; value?: string }
@@ -26,32 +63,12 @@ export function focusMounted(el: HTMLElement) {
   queueMicrotask(() => el.focus())
 }
 
-/** 시안: 최근은 상대시각, 하루 넘으면 "M월 D일 HH:mm 등록". */
-export function formatSavedAt(at: number | undefined, t: Translator, now = Date.now()) {
-  if (at === undefined || !Number.isFinite(at)) return t("envKeys.saved")
-  const diff = Math.max(0, now - at)
-  const minutes = Math.floor(diff / 60_000)
-  if (minutes < 1) return t("envKeys.saved.justNow")
-  if (minutes < 60) return t("envKeys.saved.minutesAgo", { count: minutes })
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return t("envKeys.saved.hoursAgo", { count: hours })
-  const date = new Date(at)
-  const hh = String(date.getHours()).padStart(2, "0")
-  const mm = String(date.getMinutes()).padStart(2, "0")
-  return t("envKeys.saved.at", {
-    month: date.getMonth() + 1,
-    day: date.getDate(),
-    time: `${hh}:${mm}`,
-  })
-}
-
 export function envKeysChanged(rows: EnvRow[]) {
   return rows.some((row) => {
     if (row.drop) return true
     // 이름은 필수, 값은 빈 문자열 허용 — 직접 추가 줄은 이름만 있어도 저장 가능.
     if (row.fresh) return !!row.name.trim()
-    if (row.editing || row.draft !== undefined) return true
-    return false
+    return draftChanged(row)
   })
 }
 
@@ -71,8 +88,8 @@ export function buildEnvPatch(rows: EnvRow[], t: Translator) {
     const name = row.name.trim()
     const value = row.draft?.trim() ?? ""
 
-    // 등록된 줄을 안 건드렸으면 기존 값 유지. 값 칸을 연 적 있으면 빈 문자열도 저장한다.
-    if (row.filled && row.draft === undefined && !row.editing) {
+    // 잠금만 풀고 값을 그대로 둔 줄도 "안 건드린" 줄이다 — 기존 값을 그대로 유지한다.
+    if (row.filled && !draftChanged(row)) {
       if (seen.has(name)) {
         ok = false
         errs[row.id] = { key: t("envKeys.error.duplicate") }

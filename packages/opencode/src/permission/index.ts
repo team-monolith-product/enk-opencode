@@ -150,6 +150,10 @@ export namespace Permission {
     { permission: "bash", pattern: "* .env.*", action: "deny" },
     { permission: "bash", pattern: "*/.env *", action: "deny" },
     { permission: "bash", pattern: "*/.env.*", action: "deny" },
+    // 값 조회 API(/env-file/{name}/value)도 같은 이유로 막는다 — 파일 접근만 막으면 서버를 거쳐
+    // 읽는 길이 열린다. `/env-file/` 로 슬래시를 붙여 이 저장소의 env-file.ts 소스 작업은 안 걸리게 한다.
+    { permission: "bash", pattern: "*/env-file/*", action: "deny" },
+    { permission: "webfetch", pattern: "*/env-file/*", action: "deny" },
   ]
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Permission") {}

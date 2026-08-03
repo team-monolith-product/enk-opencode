@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { buildEnvPatch, envKeysChanged, focusMounted, formatSavedAt, KEY_REGEX } from "./dialog-env-keys-form"
+import {
+  buildEnvPatch,
+  envKeysChanged,
+  envKeysSummary,
+  envRowStatus,
+  focusMounted,
+  KEY_REGEX,
+} from "./dialog-env-keys-form"
 
 const t = (key: string) => key
 
@@ -17,12 +24,51 @@ describe("envKeysChanged", () => {
     expect(envKeysChanged([{ id: "A", name: "A", filled: true }])).toBe(false)
   })
 
-  test("true for drop, fresh with name, editing, or draft including empty string", () => {
+  test("true for drop, fresh with name, or a draft that differs from the revealed value", () => {
     expect(envKeysChanged([{ id: "A", name: "A", filled: true, drop: true }])).toBe(true)
     expect(envKeysChanged([{ id: "n", name: "NEW", filled: false, fresh: true, draft: "" }])).toBe(true)
     expect(envKeysChanged([{ id: "n", name: "  ", filled: false, fresh: true, draft: "" }])).toBe(false)
-    expect(envKeysChanged([{ id: "A", name: "A", filled: true, editing: true }])).toBe(true)
-    expect(envKeysChanged([{ id: "A", name: "A", filled: true, draft: "" }])).toBe(true)
+    // 잠금만 풀어 값을 확인하고 그대로 두면 변경이 아니다.
+    expect(envKeysChanged([{ id: "A", name: "A", filled: true, editing: true, value: "v", draft: "v" }])).toBe(false)
+    expect(envKeysChanged([{ id: "A", name: "A", filled: true, editing: true, value: "v" }])).toBe(false)
+    expect(envKeysChanged([{ id: "A", name: "A", filled: true, value: "v", draft: "" }])).toBe(true)
+  })
+})
+
+describe("envRowStatus", () => {
+  test("maps rows to the mockup's four row states", () => {
+    expect(envRowStatus({ id: "A", name: "A", filled: true })).toBe("registered")
+    expect(envRowStatus({ id: "A", name: "A", filled: true, drop: true })).toBe("drop")
+    expect(envRowStatus({ id: "A", name: "A", filled: true, editing: true, value: "v" })).toBe("editing")
+    expect(envRowStatus({ id: "A", name: "A", filled: true, value: "v", draft: "next" })).toBe("replace")
+    expect(envRowStatus({ id: "n", name: "N", filled: false, fresh: true })).toBe("fresh")
+  })
+
+  test("keeps the input open on empty-valued keys even after typing", () => {
+    expect(envRowStatus({ id: "A", name: "A", filled: false })).toBe("needsValue")
+    expect(envRowStatus({ id: "A", name: "A", filled: false, draft: "typed" })).toBe("needsValue")
+  })
+
+  test("drop wins over a pending replacement", () => {
+    expect(envRowStatus({ id: "A", name: "A", filled: true, value: "v", draft: "next", drop: true })).toBe("drop")
+  })
+})
+
+describe("envKeysSummary", () => {
+  test("counts replacements and removals, ignoring rows only looked at", () => {
+    expect(
+      envKeysSummary([
+        { id: "A", name: "A", filled: true, value: "v", draft: "next" },
+        { id: "B", name: "B", filled: true, editing: true, value: "v", draft: "v" },
+        { id: "C", name: "C", filled: true, drop: true },
+        { id: "D", name: "D", filled: true },
+        { id: "n", name: "NEW", filled: false, fresh: true, draft: "x" },
+      ]),
+    ).toEqual({ replace: 2, drop: 1 })
+  })
+
+  test("is all zero when nothing changed", () => {
+    expect(envKeysSummary([{ id: "A", name: "A", filled: true }])).toEqual({ replace: 0, drop: 0 })
   })
 })
 
@@ -44,12 +90,13 @@ describe("buildEnvPatch", () => {
     expect(result.errs.n?.key).toBe("envKeys.error.invalidKey")
   })
 
-  test("writes empty string when filled row is editing or has draft", () => {
-    const editing = buildEnvPatch([{ id: "A", name: "A", filled: true, editing: true }], t)
-    expect(editing.patch).toEqual({ values: { A: "" }, drops: [] })
+  test("writes only when the draft differs from the revealed value", () => {
+    // 열어서 보기만 한 줄은 .env 를 다시 쓰지 않는다 — 저장 시 미리보기 재시작이 따라오기 때문.
+    const looked = buildEnvPatch([{ id: "A", name: "A", filled: true, editing: true, value: "v", draft: "v" }], t)
+    expect(looked.patch).toEqual({ values: {}, drops: [] })
 
-    const draft = buildEnvPatch([{ id: "A", name: "A", filled: true, draft: "" }], t)
-    expect(draft.patch).toEqual({ values: { A: "" }, drops: [] })
+    const cleared = buildEnvPatch([{ id: "A", name: "A", filled: true, value: "v", draft: "" }], t)
+    expect(cleared.patch).toEqual({ values: { A: "" }, drops: [] })
   })
 
   test("collects drops and new values together", () => {
@@ -101,27 +148,5 @@ describe("focusMounted", () => {
     await Promise.resolve()
     expect(document.activeElement).toBe(el)
     el.remove()
-  })
-})
-
-describe("formatSavedAt", () => {
-  const t = (key: string, vars?: Record<string, string | number | boolean>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key
-  const now = Date.parse("2026-07-31T21:00:00")
-
-  test("uses relative labels within a day", () => {
-    expect(formatSavedAt(now - 30_000, t, now)).toBe("envKeys.saved.justNow")
-    expect(formatSavedAt(now - 3 * 60_000, t, now)).toBe('envKeys.saved.minutesAgo:{"count":3}')
-    expect(formatSavedAt(now - 5 * 3_600_000, t, now)).toBe('envKeys.saved.hoursAgo:{"count":5}')
-  })
-
-  test("uses absolute label after a day", () => {
-    expect(formatSavedAt(Date.parse("2026-07-29T21:02:00"), t, now)).toBe(
-      'envKeys.saved.at:{"month":7,"day":29,"time":"21:02"}',
-    )
-  })
-
-  test("falls back when timestamp is missing", () => {
-    expect(formatSavedAt(undefined, t, now)).toBe("envKeys.saved")
   })
 })

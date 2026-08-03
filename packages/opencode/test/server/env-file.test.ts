@@ -42,6 +42,33 @@ describe("EnvFile.isSecretFile / mask", () => {
   })
 })
 
+describe("EnvFile.value", () => {
+  test("reads back exactly what set() wrote, quoting included", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const file = path.join(tmp.path, ".env")
+    await EnvFile.set(file, { PLAIN: "abc123", TRICKY: 'a b "c" \\d', EMPTY: "" })
+    expect(await EnvFile.value(file, "PLAIN")).toBe("abc123")
+    expect(await EnvFile.value(file, "TRICKY")).toBe('a b "c" \\d')
+    expect(await EnvFile.value(file, "EMPTY")).toBe("")
+  })
+
+  test("returns undefined for a missing file or unknown key", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const file = path.join(tmp.path, ".env")
+    expect(await EnvFile.value(file, "NOPE")).toBeUndefined()
+    await EnvFile.set(file, { A: "1" })
+    expect(await EnvFile.value(file, "NOPE")).toBeUndefined()
+  })
+
+  test("reads hand-written export and single quoted forms", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const file = path.join(tmp.path, ".env")
+    await writeFile(file, "export QUOTED='hello world'\nBARE = spaced-out\n")
+    expect(await EnvFile.value(file, "QUOTED")).toBe("hello world")
+    expect(await EnvFile.value(file, "BARE")).toBe("spaced-out")
+  })
+})
+
 describe("EnvFileRoutes", () => {
   test("PUT creates .env with mode 0600", async () => {
     await using tmp = await tmpdir({ git: true })
@@ -99,6 +126,46 @@ describe("EnvFileRoutes", () => {
     })
   })
 
+  // 값 조회는 사람용 경로다. LLM 차단은 네트워크 인증이 아니라 ENV_FILE_GUARD 가 맡는다(env-guard 테스트).
+  test("GET value returns the stored value", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await put({ API_KEY: "super-secret-abc123" })
+        const res = await EnvFileRoutes().request("/API_KEY/value")
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ name: "API_KEY", value: "super-secret-abc123" })
+      },
+    })
+  })
+
+  test("GET value rejects unknown keys and invalid names", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await put({ API_KEY: "value" })
+        expect((await EnvFileRoutes().request("/MISSING/value")).status).toBe(404)
+        expect((await EnvFileRoutes().request("/bad-name/value")).status).toBe(400)
+      },
+    })
+  })
+
+  // UI 는 「값 필요」줄을 이걸로 가른다 — 이름은 있는데 값이 빈 키.
+  test("GET reports which keys have an empty value", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await put({ FILLED: "v", BLANK: "" })
+        const body = await (await EnvFileRoutes().request("/")).json()
+        expect(body.keys).toEqual(["FILLED", "BLANK"])
+        expect(body.empty).toEqual(["BLANK"])
+      },
+    })
+  })
+
   test("GET returns empty list when no .env", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
@@ -106,7 +173,7 @@ describe("EnvFileRoutes", () => {
       fn: async () => {
         const res = await EnvFileRoutes().request("/")
         expect(res.status).toBe(200)
-        expect(await res.json()).toEqual({ keys: [], updated_at: {} })
+        expect(await res.json()).toEqual({ keys: [], updated_at: {}, empty: [] })
       },
     })
   })

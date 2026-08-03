@@ -3,15 +3,18 @@ import path from "path"
 import { Filesystem } from "@/util/filesystem"
 
 // 프로젝트 루트 .env 를 라인 단위로 다루는 유틸. 주석/빈 줄/무관 라인은 그대로 보존한다.
-// 값은 절대 외부(HTTP/LLM)로 반환하지 않는 쓰기 전용 저장소로 쓰인다 — 이름·등록시각만 노출.
+// 값은 LLM 에게는 절대 가지 않는다(Permission.ENV_FILE_GUARD 가 도구 계층에서 .env 접근을 deny).
+// 사람이 opencode UI 에서 확인하는 경로만 value() 로 원문을 읽는다.
 export namespace EnvFile {
   export const KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/
   const LINE_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/
+  const ENTRY_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/
   // .env / .env.local 등은 시크릿. .env.example 은 예시라 제외.
   const SECRET_NAME_RE = /^\.env(\..+)?$/
   const META = ".opencode/env-meta.json"
 
-  export type Entry = { name: string; updated_at?: number }
+  /** empty 는 "이름은 있는데 값이 비어 있음" — UI 가 「값 필요」줄로 구분해 보여준다. */
+  export type Entry = { name: string; updated_at?: number; empty?: boolean }
 
   // 파일명(basename)이 시크릿 env 파일인지. UI 파일트리/검색/뷰어에서 값 노출을 막는 판정에 쓴다.
   export function isSecretFile(name: string): boolean {
@@ -46,15 +49,40 @@ export namespace EnvFile {
     return parseNames(content)
   }
 
-  /** 키 이름 + 등록/수정 시각(ms). 값은 절대 포함하지 않는다. */
+  /** 키 이름 + 등록/수정 시각(ms) + 값이 비었는지. 값 자체는 담지 않는다. */
   export async function entries(file: string): Promise<Entry[]> {
-    const keys = await names(file)
+    const content = (await read(file)) ?? ""
+    const keys = parseNames(content)
+    // 중복 키는 value() 와 같게 첫 줄을 따른다.
+    const empty = new Set<string>()
+    const seen = new Set<string>()
+    for (const line of content.split("\n")) {
+      const match = ENTRY_RE.exec(line)
+      if (!match || seen.has(match[1])) continue
+      seen.add(match[1])
+      if (deserialize(match[2]) === "") empty.add(match[1])
+    }
     const stamp = await loadMeta(file)
     const fallback = await fileMtime(file)
     return keys.map((name) => ({
       name,
       updated_at: stamp[name] ?? fallback,
+      ...(empty.has(name) ? { empty: true } : {}),
     }))
+  }
+
+  /**
+   * 저장된 값 원문. 사람이 opencode UI 에서 확인할 때만 쓴다.
+   * 중복 키가 있으면 set() 이 교체하는 줄과 같은 첫 줄을 따른다.
+   */
+  export async function value(file: string, name: string): Promise<string | undefined> {
+    const content = await read(file)
+    if (content === undefined) return undefined
+    for (const line of content.split("\n")) {
+      const match = ENTRY_RE.exec(line)
+      if (match && match[1] === name) return deserialize(match[2])
+    }
+    return undefined
   }
 
   // 저장 후 전체 키 이름 목록을 반환한다. 기존 키는 제자리에서 교체, 새 키는 끝에 추가.
@@ -94,6 +122,19 @@ export namespace EnvFile {
   function serialize(value: string): string {
     if (/^[A-Za-z0-9_@./:+-]*$/.test(value)) return value
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+  }
+
+  // serialize 의 역함수. 이스케이프는 한 번에 훑어 되돌린다 — \\ 와 \" 를 순차 치환하면
+  // `a\"b` 처럼 둘이 붙은 값이 깨진다. 손으로 쓴 홑따옴표 표기도 받아준다.
+  function deserialize(raw: string): string {
+    const value = raw.trim()
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      return value.slice(1, -1).replace(/\\(.)/g, "$1")
+    }
+    if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
+      return value.slice(1, -1)
+    }
+    return value
   }
 
   async function read(file: string): Promise<string | undefined> {
