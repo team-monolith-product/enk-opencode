@@ -5,7 +5,6 @@ import {
   envKeysSummary,
   envRowStatus,
   focusMounted,
-  formatSavedAt,
   KEY_REGEX,
 } from "./dialog-env-keys-form"
 
@@ -149,27 +148,5 @@ describe("focusMounted", () => {
     await Promise.resolve()
     expect(document.activeElement).toBe(el)
     el.remove()
-  })
-})
-
-describe("formatSavedAt", () => {
-  const t = (key: string, vars?: Record<string, string | number | boolean>) =>
-    vars ? `${key}:${JSON.stringify(vars)}` : key
-  const now = Date.parse("2026-07-31T21:00:00")
-
-  test("uses relative labels within a day", () => {
-    expect(formatSavedAt(now - 30_000, t, now)).toBe("envKeys.saved.justNow")
-    expect(formatSavedAt(now - 3 * 60_000, t, now)).toBe('envKeys.saved.minutesAgo:{"count":3}')
-    expect(formatSavedAt(now - 5 * 3_600_000, t, now)).toBe('envKeys.saved.hoursAgo:{"count":5}')
-  })
-
-  test("uses absolute label after a day", () => {
-    expect(formatSavedAt(Date.parse("2026-07-29T21:02:00"), t, now)).toBe(
-      'envKeys.saved.at:{"month":7,"day":29,"time":"21:02"}',
-    )
-  })
-
-  test("falls back when timestamp is missing", () => {
-    expect(formatSavedAt(undefined, t, now)).toBe("envKeys.saved")
   })
 })

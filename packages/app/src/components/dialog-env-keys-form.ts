@@ -63,25 +63,6 @@ export function focusMounted(el: HTMLElement) {
   queueMicrotask(() => el.focus())
 }
 
-/** 시안: 최근은 상대시각, 하루 넘으면 "M월 D일 HH:mm 등록". */
-export function formatSavedAt(at: number | undefined, t: Translator, now = Date.now()) {
-  if (at === undefined || !Number.isFinite(at)) return t("envKeys.saved")
-  const diff = Math.max(0, now - at)
-  const minutes = Math.floor(diff / 60_000)
-  if (minutes < 1) return t("envKeys.saved.justNow")
-  if (minutes < 60) return t("envKeys.saved.minutesAgo", { count: minutes })
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return t("envKeys.saved.hoursAgo", { count: hours })
-  const date = new Date(at)
-  const hh = String(date.getHours()).padStart(2, "0")
-  const mm = String(date.getMinutes()).padStart(2, "0")
-  return t("envKeys.saved.at", {
-    month: date.getMonth() + 1,
-    day: date.getDate(),
-    time: `${hh}:${mm}`,
-  })
-}
-
 export function envKeysChanged(rows: EnvRow[]) {
   return rows.some((row) => {
     if (row.drop) return true
