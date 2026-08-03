@@ -2,6 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import type { ErrorEntry } from "@/lib/preview-bridge-protocol"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { writeClipboard } from "@opencode-ai/ui/util/clipboard"
 import { showToast } from "@opencode-ai/ui/toast"
@@ -651,14 +652,21 @@ export function SessionBrowserChrome(props: {
     color: "var(--color-text-base)",
   }
 
+  // 좁아질 때 절대 2줄이 되지 않게 flex-nowrap 을 명시하고, 넘치면 잘리는 대신 컨테이너 쿼리
+  // 티어(@max-[…]/chrome)로 우선순위가 낮은 요소부터 덜어낸다. 기준은 뷰포트가 아니라 이 바의 폭 —
+  // 패널이 드래그로 리사이즈되므로(session-side-panel) 뷰포트 미디어 쿼리로는 판정할 수 없다.
+  //   <520px: 「외부 연동」 라벨 숨김(아이콘+배지만)
+  //   <440px: 트래픽 라이트 숨김
+  //   <380px: 연동·새 탭·복사를 ⋯ 메뉴로 접음
   return (
     <div
       data-component="codle-browser-chrome"
-      class="flex items-center gap-2.5 px-3 h-9 shrink-0 border-b border-border-weaker-base bg-background-base"
+      class="@container/chrome flex flex-nowrap items-center gap-2.5 px-3 h-9 shrink-0 overflow-hidden border-b border-border-weaker-base bg-background-base"
     >
       {/* 좌 그룹 — 트래픽 라이트 + 파일 탐색기 토글 + 뒤로/앞으로 */}
       <div class="flex shrink-0 items-center gap-2.5">
-        <div class="flex items-center gap-1.5 shrink-0">
+        {/* 순수 장식이라 가장 먼저 덜어낸다(440px 미만) */}
+        <div class="flex items-center gap-1.5 shrink-0 @max-[440px]/chrome:hidden">
           <span class="size-2.5 rounded-full" style={{ background: "#ff5f57" }} />
           <span class="size-2.5 rounded-full" style={{ background: "#febc2e" }} />
           <span class="size-2.5 rounded-full" style={{ background: "#28c840" }} />
@@ -704,9 +712,11 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 중앙 — 주소 pill (홈 · 주소 · 새로고침), 360px 고정·좁은 크롬에서는 max-w-full 로 축소 */}
+      {/* 중앙 — 주소 pill (홈 · 주소 · 새로고침), 360px 고정·좁은 크롬에서는 max-w-full 로 축소.
+          min-w 가 없으면 pill 테두리만 0 까지 줄고 안의 홈/새로고침 버튼(shrink-0)이 테두리 밖으로
+          삐져나온다 — 하한을 두고 overflow-hidden 으로 넘치는 텍스트를 pill 안에서 자른다. */}
       <div class="flex flex-1 min-w-0 items-center justify-center">
-        <div class="flex h-6 w-[360px] max-w-full min-w-0 items-center gap-1 px-1 rounded-md border border-border-weak-base bg-background-stronger">
+        <div class="flex h-6 w-[360px] max-w-full min-w-[88px] items-center gap-1 overflow-hidden px-1 rounded-md border border-border-weak-base bg-background-stronger">
           <button
             type="button"
             class={ghostBtn + " !size-5"}
@@ -729,7 +739,9 @@ export function SessionBrowserChrome(props: {
           >
             <div class="flex min-w-0 max-w-full items-center overflow-hidden">
               <Show when={props.host}>
-                <span class="shrink-0 truncate" style={addressTextStyle}>
+                {/* 호스트는 경로보다 우선(shrink-0)이지만 pill 을 넘어서면 말줄임 —
+                    max-w-full 이 없으면 shrink-0 때문에 truncate 가 영영 발동하지 않는다. */}
+                <span class="shrink-0 max-w-full truncate" style={addressTextStyle}>
                   {props.host}
                 </span>
               </Show>
@@ -744,8 +756,11 @@ export function SessionBrowserChrome(props: {
                 classList={{ "cursor-text": !!props.editablePath && !previewBlocked() }}
                 style={{
                   ...addressTextStyle,
-                  flex: "0 0 auto",
+                  // 0 1 auto — 폭이 모자라면 호스트보다 경로가 먼저 줄고, 넘치는 만큼 말줄임된다.
+                  // 0 0 auto 면 긴 경로가 pill 을 그대로 밀어내 양끝이 잘린 채 보인다.
+                  flex: "0 1 auto",
                   "min-width": "1ch",
+                  "text-overflow": "ellipsis",
                 }}
                 value={displayValue()}
                 readOnly={!props.editablePath || previewBlocked()}
@@ -785,17 +800,22 @@ export function SessionBrowserChrome(props: {
         </div>
       </div>
 
-      {/* 우 그룹 — 시안 SafariChrome: 외부 연동 + (에러 시)오류 + 새 탭 + 주소 복사 */}
+      {/* 우 그룹 — 시안 SafariChrome: 외부 연동 + (에러 시)오류 + 새 탭 + 주소 복사.
+          380px 미만에서는 오류 버튼만 남기고 나머지를 ⋯ 메뉴로 접는다(오류는 중요도상 항상 밖에). */}
       <div class="flex shrink-0 items-center justify-end gap-1">
         <button
           type="button"
-          class={ghostBtn + " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap"}
+          class={
+            ghostBtn +
+            " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap @max-[380px]/chrome:hidden"
+          }
           onClick={openEnvKeys}
           aria-label={language.t("command.env.keys")}
           title={language.t("command.env.keys.description")}
         >
           <Icon name="plug" size="small" />
-          {language.t("command.env.keys")}
+          {/* 라벨은 가장 넓은 요소 — 520px 미만에서 아이콘+배지만 남긴다(aria-label 로 이름은 유지). */}
+          <span class="@max-[520px]/chrome:hidden">{language.t("command.env.keys")}</span>
           <Show when={envCount() > 0}>
             <span
               class="inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full bg-surface-success-strong text-white font-mono text-[9.5px] font-bold leading-none"
@@ -821,7 +841,7 @@ export function SessionBrowserChrome(props: {
         </Show>
         <button
           type="button"
-          class={ghostBtn}
+          class={ghostBtn + " @max-[380px]/chrome:hidden"}
           disabled={previewBlocked()}
           aria-label={language.t("common.openInNewTab")}
           onClick={openInNewTab}
@@ -830,7 +850,7 @@ export function SessionBrowserChrome(props: {
         </button>
         <button
           type="button"
-          class={ghostBtn}
+          class={ghostBtn + " @max-[380px]/chrome:hidden"}
           classList={{ "text-icon-success-base": copied() }}
           disabled={previewBlocked()}
           aria-label={language.t("common.copy")}
@@ -838,6 +858,36 @@ export function SessionBrowserChrome(props: {
         >
           <Icon name={copied() ? "check-small" : "copy"} size="small" />
         </button>
+        {/* 좁을 때만 나타나는 오버플로 메뉴 — 위 세 버튼과 같은 동작을 담는다.
+            메뉴 내용은 Portal 로 빠져나가 컨테이너 쿼리가 닿지 않으므로, 트리거 쪽만 티어로 토글한다. */}
+        <div class="hidden @max-[380px]/chrome:block">
+          <DropdownMenu gutter={4} placement="bottom-end">
+            <DropdownMenu.Trigger
+              as={IconButton}
+              icon="dot-grid"
+              variant="ghost"
+              size="small"
+              class="size-6 rounded-md"
+              aria-label={language.t("common.moreOptions")}
+            />
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content>
+                <DropdownMenu.Item onSelect={openEnvKeys}>
+                  <DropdownMenu.ItemLabel>
+                    {language.t("command.env.keys")}
+                    <Show when={envCount() > 0}> ({envCount()})</Show>
+                  </DropdownMenu.ItemLabel>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item disabled={previewBlocked() || !props.url} onSelect={openInNewTab}>
+                  <DropdownMenu.ItemLabel>{language.t("common.openInNewTab")}</DropdownMenu.ItemLabel>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item disabled={previewBlocked() || !props.url} onSelect={copyAddress}>
+                  <DropdownMenu.ItemLabel>{language.t("common.copy")}</DropdownMenu.ItemLabel>
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu>
+        </div>
       </div>
     </div>
   )

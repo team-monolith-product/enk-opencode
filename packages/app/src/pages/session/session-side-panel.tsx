@@ -19,7 +19,7 @@ import { useClientEnv } from "@/context/client-env"
 import { useCommand } from "@/context/command"
 import { useFile, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
-import { useLayout } from "@/context/layout"
+import { useLayout, MIN_FILE_TREE_WIDTH, MAX_FILE_TREE_WIDTH } from "@/context/layout"
 import { usePromptDocBridge } from "@/context/prompt-doc-bridge"
 import { useSessionPreviewBridge } from "@/context/session-preview-bridge"
 import { useSync } from "@/context/sync"
@@ -266,9 +266,15 @@ export function SessionSidePanel(props: {
         aria-label={language.t("session.panel.reviewAndFiles")}
         aria-hidden={!open()}
         inert={!open()}
-        class="relative min-w-0 h-full flex shrink-0 overflow-hidden"
+        class="relative h-full flex shrink-0 overflow-hidden"
         classList={{
           "pointer-events-none": !open(),
+          // 같은 min-width 유틸을 겹쳐 쓰면 순서에 의존하므로 상호배타로 건다.
+          "min-w-0": !open(),
+          // 리뷰 모드 폭은 calc(100% - 컴포저 폭)이라 컴포저를 넓게 끌면 이 패널이 주소창 최소치보다
+          // 좁아진다(핸들 max 는 window 기준이라 사이드바 폭을 모른다). 열려 있을 때만 하한을 건다 —
+          // 닫힘 상태(0px)에 걸면 패널이 다시 열려버린다.
+          "min-w-[240px]": open(),
           "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
             !props.size.active() && !props.reviewSnap,
         }}
@@ -589,8 +595,8 @@ export function SessionSidePanel(props: {
                     direction="horizontal"
                     edge="end"
                     size={layout.fileTree.width()}
-                    min={200}
-                    max={360}
+                    min={MIN_FILE_TREE_WIDTH}
+                    max={MAX_FILE_TREE_WIDTH}
                     onResize={(width) => {
                       props.size.touch()
                       layout.fileTree.resize(width)
