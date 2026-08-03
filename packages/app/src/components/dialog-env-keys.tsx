@@ -8,25 +8,28 @@ import { useMutation } from "@tanstack/solid-query"
 import { createMemo, createSignal, For, onMount, Show } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { useLanguage } from "@/context/language"
+import { readonlyViewer } from "@/context/parent-params"
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
-import { deleteEnvKey, listEnvKeys, restartDevServer, saveEnvKeys } from "@/utils/server"
+import { deleteEnvKey, listEnvKeys, restartDevServer, revealEnvKey, saveEnvKeys } from "@/utils/server"
 import {
   buildEnvPatch,
   envKeysChanged,
+  envKeysSummary,
+  envRowStatus,
   focusMounted,
-  formatSavedAt,
   type EnvErr,
   type EnvPatch,
   type EnvRow,
 } from "./dialog-env-keys-form"
 
-// 서버는 값 write-only. 목록은 이름·등록시각만. filled 줄은 시각 + [값 교체].
+// 목록은 이름만 받는다. 등록된 줄은 잠금칩으로 두고, 칩을 눌러야 그 줄의 값을 한 건 받아와
+// 입력칸에 펼친다 — 값 보기와 교체가 같은 동작이고, 포커스가 빠지면 다시 잠긴다.
 // 값 교체·등록된 줄 삭제는 로컬 표시만 바꾸고, 푸터 [저장]에서만 반영한다.
 // 직접 추가(fresh) 줄 삭제는 목록에서 바로 제거한다.
 
-type Row = EnvRow & { err?: EnvErr }
+type Row = EnvRow & { err?: EnvErr; revealing?: boolean }
 
 export function DialogEnvKeys() {
   const dialog = useDialog()
@@ -43,6 +46,8 @@ export function DialogEnvKeys() {
 
   const [rows, setRows] = createStore<Row[]>([])
   const [loadError, setLoadError] = createSignal(false)
+  // 관전자는 남의 키를 열어 볼 이유가 없다. 칩이 값 보기 겸 교체 진입점이라 칩 자체를 잠근다.
+  const spectator = readonlyViewer()
   let uid = 0
 
   const refetch = async () => {
@@ -54,7 +59,8 @@ export function DialogEnvKeys() {
         keys.map((entry) => ({
           id: entry.name,
           name: entry.name,
-          filled: true,
+          // 이름만 있고 값이 빈 키는 「값 필요」줄로 — 입력칸이 처음부터 열려 있다.
+          filled: !entry.empty,
           updated_at: entry.updated_at,
         })),
       )
@@ -64,6 +70,28 @@ export function DialogEnvKeys() {
     }
   }
   onMount(() => void refetch())
+
+  // 잠금칩 클릭 — 값을 받아와 입력칸으로 펼친다. 한 번 받아온 값은 다이얼로그가 사는 동안 재요청하지 않는다.
+  const openValue = async (index: number) => {
+    const row = rows[index]
+    if (!row || spectator) return
+    if (row.value !== undefined) {
+      setRows(index, "editing", true)
+      return
+    }
+    const o = opts()
+    if (!o) return
+    setRows(index, "revealing", true)
+    try {
+      const value = await revealEnvKey(o, row.name)
+      setRows(index, "value", value)
+      setRows(index, "editing", true)
+    } catch {
+      showToast({ title: language.t("common.requestFailed") })
+    } finally {
+      setRows(index, "revealing", false)
+    }
+  }
 
   const add = () => {
     const id = `new-${uid++}`
@@ -146,6 +174,15 @@ export function DialogEnvKeys() {
   const hasChanges = createMemo(() => envKeysChanged(rows))
   const empty = createMemo(() => rows.length === 0)
 
+  // 시안 푸터: "저장하면 [교체 1건 · 삭제 1건] 반영돼요". 바뀐 게 없으면 줄 자체를 감춘다.
+  const summaryText = createMemo(() => {
+    const { replace, drop } = envKeysSummary(rows)
+    const parts: string[] = []
+    if (replace > 0) parts.push(language.t("envKeys.summary.replace", { count: replace }))
+    if (drop > 0) parts.push(language.t("envKeys.summary.drop", { count: drop }))
+    return parts.join(" · ")
+  })
+
   return (
     <Dialog
       title={language.t("envKeys.title")}
@@ -182,35 +219,47 @@ export function DialogEnvKeys() {
                 </div>
               }
             >
-              <div class="rounded-md border border-border-weaker-base bg-background-base overflow-hidden">
+              <div class="env-keys-list">
                 <For each={rows}>
                   {(row, i) => {
                     // For 콜백은 한 번만 돌아가므로, 분기는 JSX 안에서 store 필드를 읽어야 반응한다.
-                    const input = () => (!row.filled || !!row.editing) && !row.drop
-                    const pending = () => !row.filled && !row.editing && !row.drop
+                    const status = () => envRowStatus(row)
+                    const input = () => {
+                      const s = status()
+                      return s === "fresh" || s === "editing" || s === "needsValue"
+                    }
                     return (
                       <div
                         data-env-row={row.id}
-                        class="flex items-center gap-2.5 px-3 py-2.5"
-                        classList={{
-                          "border-t border-border-weaker-base": i() > 0,
-                          "bg-surface-warning-weak": pending(),
-                          "opacity-60": !!row.drop,
+                        data-status={status()}
+                        class="env-keys-row"
+                        onFocusOut={(e) => {
+                          // 줄 밖으로 포커스가 나가면 다시 잠근다. TextField 의 onBlur 는 Kobalte Input
+                          // 을 못 넘어와서 컨테이너의 focusout 으로 잡는다.
+                          const current = rows[i()]
+                          if (!current?.editing || !current.filled) return
+                          // relatedTarget 으로 바로 판단하면 안 된다 — 포커스를 쥔 칩이 입력칸으로 교체되는
+                          // 순간에도 relatedTarget 이 null 인 focusout 이 뜨고, 그걸 "밖으로 나갔다"로 읽으면
+                          // 열자마자 도로 잠긴다. 다음 틱에 포커스가 실제로 어디 있는지 보고 정한다
+                          // (입력칸 자동 포커스는 마이크로태스크라 이 시점엔 이미 끝나 있다).
+                          const rowEl = e.currentTarget
+                          setTimeout(() => {
+                            const now = rows[i()]
+                            if (!now?.editing || !now.filled) return
+                            if (rowEl.contains(document.activeElement)) return
+                            stopEdit(i())
+                          }, 0)
                         }}
                       >
                         <Show
                           when={row.fresh && !row.drop}
                           fallback={
-                            <span
-                              class="basis-[40%] shrink-0 min-w-0 truncate font-mono text-13-medium text-text-strong"
-                              classList={{ "line-through text-text-weaker": !!row.drop }}
-                              title={row.name || undefined}
-                            >
+                            <span class="env-keys-name" title={row.name || undefined}>
                               {row.name || "—"}
                             </span>
                           }
                         >
-                          <div class="basis-[40%] shrink-0 min-w-0">
+                          <div class="env-keys-name">
                             <TextField
                               class="font-mono"
                               autofocus
@@ -231,29 +280,37 @@ export function DialogEnvKeys() {
                         <Show
                           when={input()}
                           fallback={
-                            <div class="flex-1 min-w-0 flex items-center justify-end gap-2">
-                              <span
-                                class="min-w-0 inline-flex items-center gap-1.5 text-12-regular text-text-weaker truncate"
-                                classList={{ "line-through": !!row.drop }}
+                            <div class="env-keys-value">
+                              <Show
+                                when={status() !== "drop" && !spectator}
+                                fallback={
+                                  <span class="env-keys-chip">
+                                    <Icon name={status() === "drop" ? "trash" : "lock"} class="size-3 shrink-0" />
+                                    {language.t(
+                                      status() === "drop" ? "envKeys.status.drop" : "envKeys.status.registered",
+                                    )}
+                                  </span>
+                                }
                               >
-                                <Icon name="clock" class="size-3 shrink-0" />
-                                {formatSavedAt(row.updated_at, (key, vars) => language.t(key, vars))}
-                              </span>
-                              <Show when={!row.drop}>
-                                <Button
+                                <button
                                   type="button"
-                                  size="small"
-                                  variant="secondary"
-                                  class="shrink-0"
-                                  onClick={() => setRows(i(), "editing", true)}
+                                  class="env-keys-chip"
+                                  disabled={saveMutation.isPending || !!row.revealing}
+                                  onClick={() => void openValue(i())}
                                 >
-                                  {language.t("envKeys.replace")}
-                                </Button>
+                                  <Icon
+                                    name={status() === "replace" ? "refresh" : "lock"}
+                                    class="size-3 shrink-0"
+                                  />
+                                  {language.t(
+                                    status() === "replace" ? "envKeys.status.replace" : "envKeys.status.registered",
+                                  )}
+                                </button>
                               </Show>
                             </div>
                           }
                         >
-                          <div class="flex-1 min-w-0">
+                          <div class="env-keys-value">
                             <TextField
                               class="font-mono"
                               autofocus={!!row.editing}
@@ -269,20 +326,8 @@ export function DialogEnvKeys() {
                                   ? language.t("envKeys.field.value.replacePlaceholder")
                                   : language.t("envKeys.field.value.placeholder")
                               }
-                              value={row.draft ?? ""}
+                              value={row.draft ?? row.value ?? ""}
                               onChange={(v) => setRows(i(), "draft", v)}
-                              onBlur={() => {
-                                // filled 줄은 포커스가 빠지면 「등록됨」으로 돌리고 초안은 남긴다.
-                                // 같은 줄을 다시 누르면 계속 교체할 수 있다.
-                                if (!row.filled) return
-                                const id = row.id
-                                setTimeout(() => {
-                                  if (!rows[i()]?.editing) return
-                                  const root = document.querySelector(`[data-env-row="${CSS.escape(id)}"]`)
-                                  if (root?.contains(document.activeElement)) return
-                                  stopEdit(i())
-                                }, 0)
-                              }}
                               onKeyDown={(e: KeyboardEvent) => {
                                 if (e.key !== "Enter") return
                                 e.preventDefault()
@@ -297,12 +342,8 @@ export function DialogEnvKeys() {
                         <Button
                           type="button"
                           size="small"
-                          variant="ghost"
-                          class={
-                            row.drop
-                              ? "shrink-0"
-                              : "text-text-diff-remove-base hover:text-text-diff-remove-base shrink-0"
-                          }
+                          variant="secondary"
+                          class="env-keys-action shrink-0"
                           onClick={() => toggleDrop(i())}
                           disabled={saveMutation.isPending}
                         >
@@ -321,7 +362,13 @@ export function DialogEnvKeys() {
           </Show>
         </div>
 
-        <div class="flex items-center justify-end gap-2.5 px-7 py-3.5 pb-5 w-full">
+        <div class="env-keys-footer">
+          <Show when={!loadError() && summaryText()}>
+            <span class="env-keys-summary">
+              {language.t("envKeys.summary.prefix")} <b>{summaryText()}</b> {language.t("envKeys.summary.suffix")}
+            </span>
+          </Show>
+          <div class="flex-1" />
           <Show
             when={!loadError()}
             fallback={
@@ -330,7 +377,13 @@ export function DialogEnvKeys() {
               </Button>
             }
           >
-            <Button type="button" size="normal" variant="secondary" onClick={() => dialog.close()}>
+            <Button
+              type="button"
+              size="normal"
+              variant="secondary"
+              disabled={saveMutation.isPending}
+              onClick={() => dialog.close()}
+            >
               {language.t("common.cancel")}
             </Button>
             <Button type="submit" size="normal" variant="primary" disabled={saveMutation.isPending || !hasChanges()}>

@@ -39,6 +39,8 @@ import type {
   EnvFileRemoveResponses,
   EnvFileSetErrors,
   EnvFileSetResponses,
+  EnvFileValueErrors,
+  EnvFileValueResponses,
   EnvGetResponses,
   EnvRequestListResponses,
   EnvRequestRejectErrors,
@@ -1075,7 +1077,7 @@ export class EnvFile extends HeyApiClient {
   /**
    * List env file keys
    *
-   * List the key names stored in the project root .env file. Values are never returned.
+   * List the key names stored in the project root .env file, with optional updated_at timestamps. Values are never included here — read one with GET /env-file/{name}/value.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1138,6 +1140,38 @@ export class EnvFile extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Read one env file value
+   *
+   * Read a single stored value so a person can check it in the opencode UI. Agent tools are denied this path by Permission.ENV_FILE_GUARD, the same guard that blocks reading .env directly.
+   */
+  public value<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<EnvFileValueResponses, EnvFileValueErrors, ThrowOnError>({
+      url: "/env-file/{name}/value",
+      ...options,
+      ...params,
     })
   }
 

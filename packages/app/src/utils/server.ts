@@ -74,10 +74,10 @@ export function restartDevServer(opts: {
 }
 
 // /env-file/* 도 SDK 코드젠 미포함이라 devServerClient 와 같은 방식으로 호출한다.
-// 서버는 키 이름·등록시각만 반환한다(값은 write-only — 어떤 응답에도 값이 실리지 않음).
+// 목록에는 값이 실리지 않는다 — 값은 revealEnvKey 로 한 건씩만 가져온다.
 type EnvFileOpts = { server: ServerConnection.HttpBase; directory: string; fetch?: typeof fetch }
-type EnvFileKeys = { keys: string[]; updated_at?: Record<string, number> }
-export type EnvKeyEntry = { name: string; updated_at?: number }
+type EnvFileKeys = { keys: string[]; updated_at?: Record<string, number>; empty?: string[] }
+export type EnvKeyEntry = { name: string; updated_at?: number; empty?: boolean }
 
 export function listEnvKeys(opts: EnvFileOpts): Promise<EnvKeyEntry[]> {
   return devServerClient(opts)
@@ -85,8 +85,15 @@ export function listEnvKeys(opts: EnvFileOpts): Promise<EnvKeyEntry[]> {
     .then((res) => {
       const data = res.data as EnvFileKeys
       const stamp = data.updated_at ?? {}
-      return data.keys.map((name) => ({ name, updated_at: stamp[name] }))
+      const empty = new Set(data.empty ?? [])
+      return data.keys.map((name) => ({ name, updated_at: stamp[name], empty: empty.has(name) }))
     })
+}
+
+export function revealEnvKey(opts: EnvFileOpts, name: string): Promise<string> {
+  return devServerClient(opts)
+    .get({ url: `/env-file/${name}/value` })
+    .then((res) => (res.data as { value: string }).value)
 }
 
 export function saveEnvKeys(opts: EnvFileOpts, values: Record<string, string>): Promise<string[]> {

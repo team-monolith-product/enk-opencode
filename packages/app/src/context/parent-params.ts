@@ -69,6 +69,12 @@ const capture = (): ParentParams => {
 
 const captured = capture()
 
+/**
+ * 관전자 여부. 모듈 로드 시 확정되는 값이라 컨텍스트 없이 읽는다 — 다이얼로그처럼 Portal 로
+ * 빠져 나가 provider 아래인지 보장되지 않는 곳에서 쓴다(use() 는 provider 가 없으면 throw).
+ */
+export const readonlyViewer = (): boolean => captured.readonly
+
 export const { use: useParentParams, provider: ParentParamsProvider } = createSimpleContext({
   name: "ClientEnv",
   init: (): ParentParams => captured,

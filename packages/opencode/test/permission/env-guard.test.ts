@@ -75,6 +75,19 @@ describe("ENV_FILE_GUARD", () => {
     expect(Permission.evaluate("bash", "bun run dev", guard).action).not.toBe("deny")
   })
 
+  // 파일만 막으면 서버 API 로 우회해 같은 값을 읽을 수 있다 — 값 조회 경로도 같은 가드가 덮는다.
+  test("value read API is denied for bash and webfetch", () => {
+    const guard = Permission.ENV_FILE_GUARD
+    const url = "http://localhost:4096/env-file/API_KEY/value"
+    expect(Permission.evaluate("bash", `curl -s ${url}`, guard).action).toBe("deny")
+    expect(Permission.evaluate("bash", `curl -u opencode:pw ${url} | jq .value`, guard).action).toBe("deny")
+    expect(Permission.evaluate("webfetch", url, guard).action).toBe("deny")
+    // 이 저장소의 env-file 소스를 다루는 작업은 걸리지 않는다 — 경로에 슬래시가 뒤따르지 않는다.
+    expect(Permission.evaluate("bash", "bun test test/server/env-file.test.ts", guard).action).not.toBe("deny")
+    expect(Permission.evaluate("bash", "cat src/server/routes/env-file.ts", guard).action).not.toBe("deny")
+    expect(Permission.evaluate("webfetch", "https://example.com/docs", guard).action).not.toBe("deny")
+  })
+
   test("grep tool never returns .env contents", async () => {
     await using tmp = await tmpdir({
       git: true,

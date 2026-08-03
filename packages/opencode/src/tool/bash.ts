@@ -320,6 +320,10 @@ async function shellEnv(ctx: Tool.Context, cwd: string) {
   // 없어도 `env`/`echo $KEY` 로 시크릿이 새어나갈 수 있다. 프로젝트 .env 계열 파일에 정의된
   // 키는 자식 프로세스 환경에서 제거한다.
   for (const name of await projectEnvFileKeys()) delete env[name]
+  // 서버 자격 증명도 지운다. ENV_FILE_GUARD 가 값 조회 경로를 이미 deny 하지만 그건 명령 문자열
+  // 패턴이라 표기를 비틀면 빠져나갈 수 있다. 인증이 걸린 배포에서는 자격 증명이 없는 셸이 서버 API
+  // 자체에 닿지 못하므로, 패턴에 기대지 않는 두 번째 층이 된다.
+  delete env["OPENCODE_SERVER_PASSWORD"]
   return env
 }
 

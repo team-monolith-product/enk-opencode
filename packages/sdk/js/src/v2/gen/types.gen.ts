@@ -286,7 +286,7 @@ export type EnvRequest = {
    */
   docsUrl?: string
   /**
-   * Ask again even though a value is already stored, so the user can replace it
+   * Hint that the user is replacing an existing value. Optional — the tool opens the input even when a value is already stored
    */
   replace?: boolean
   id: string
@@ -1822,6 +1822,15 @@ export type Env = {
 
 export type EnvFileKeys = {
   keys: Array<string>
+  updated_at?: {
+    [key: string]: number
+  }
+  empty: Array<string>
+}
+
+export type EnvFileValue = {
+  name: string
+  value: string
 }
 
 export type DevServerStatus = {
@@ -2872,7 +2881,7 @@ export type EnvFileListData = {
 
 export type EnvFileListResponses = {
   /**
-   * Key names
+   * Key names and update times
    */
   200: EnvFileKeys
 }
@@ -2910,6 +2919,40 @@ export type EnvFileSetResponses = {
 }
 
 export type EnvFileSetResponse = EnvFileSetResponses[keyof EnvFileSetResponses]
+
+export type EnvFileValueData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/env-file/{name}/value"
+}
+
+export type EnvFileValueErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type EnvFileValueError = EnvFileValueErrors[keyof EnvFileValueErrors]
+
+export type EnvFileValueResponses = {
+  /**
+   * The stored value
+   */
+  200: EnvFileValue
+}
+
+export type EnvFileValueResponse = EnvFileValueResponses[keyof EnvFileValueResponses]
 
 export type EnvFileRemoveData = {
   body?: never

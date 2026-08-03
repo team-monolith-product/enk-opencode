@@ -1528,13 +1528,22 @@
 [data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog {
   --env-hazard-mark: #ffce2b;
   --env-hazard-ink: #17171c;
+  /* 시안 env-keys-list 팔레트 */
+  --env-surface: #f4f2ec;
+  --env-line: #d9d5c9;
+  --env-pending: #fbeacf;
+  --env-text-muted: #8a8779;
+  --env-text-weak: #69675c;
+  --env-text-ink: #14130f;
+  --env-accent: #cc4a0a;
+  --env-danger: #ff6b1f;
   position: relative;
   align-self: center;
   width: 100%;
   max-width: 560px;
   border-radius: 10px;
   overflow: hidden;
-  padding-top: 8px;
+  padding-top: 12px;
 }
 
 [data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog::before {
@@ -1542,13 +1551,30 @@
   position: absolute;
   inset-inline: 0;
   top: 0;
-  height: 8px;
+  height: 12px;
   background-image: repeating-linear-gradient(
     -45deg,
     var(--env-hazard-mark) 0 14.1421356px,
     var(--env-hazard-ink) 14.1421356px 28.2842712px
   );
   pointer-events: none;
+  /* 시안과 같은 속도(40px / 1.6s = 25px/s). 줄무늬가 -45deg 라 가로로 40px 밀면 정확히 한 주기라
+     이음매 없이 반복된다. 시안은 background-size 로 타일을 잘라 쓰는데, 여기선 그라디언트를
+     끊지 않고 그대로 흘려 경계 아티팩트를 피한다. */
+  animation: env-hazard-scroll 1.6s linear infinite;
+  will-change: background-position;
+}
+
+@keyframes env-hazard-scroll {
+  to {
+    background-position: 40px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog::before {
+    animation: none;
+  }
 }
 
 [data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-header"] {
@@ -1562,11 +1588,12 @@
   line-height: 1.25;
 }
 
+/* 시안: 헤더 아래 구분선 없음. 설명까지가 24/28/18 한 덩어리다. */
 [data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-description"] {
   padding: 0 28px 18px;
   margin: 0;
-  border-bottom: 1px solid var(--border-weaker-base);
-  color: var(--text-weak);
+  border-bottom: none;
+  color: var(--env-text-weak);
   font-size: 13px;
   line-height: 1.55;
   align-items: flex-start;
@@ -1575,6 +1602,122 @@
 [data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-body"] {
   padding: 0;
   width: 100%;
+}
+
+/* 목록 — 시안: 배경 #F4F2EC · 1px #D9D5C9 · radius 4, 줄 사이 1px 구분선. */
+.env-keys-dialog .env-keys-list {
+  border: 1px solid var(--env-line);
+  border-radius: 4px;
+  background: var(--env-surface);
+  overflow: hidden;
+}
+
+.env-keys-dialog .env-keys-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.env-keys-dialog .env-keys-row + .env-keys-row {
+  border-top: 1px solid var(--env-line);
+}
+
+/* 저장하면 실제로 바뀔 줄만 강조 배경 — 「등록됨」과 열어만 본 줄은 그대로 둔다. */
+.env-keys-dialog .env-keys-row[data-status="replace"],
+.env-keys-dialog .env-keys-row[data-status="needsValue"],
+.env-keys-dialog .env-keys-row[data-status="fresh"] {
+  background: var(--env-pending);
+}
+
+.env-keys-dialog .env-keys-name {
+  flex: 0 0 38%;
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--env-text-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-keys-dialog .env-keys-row[data-status="drop"] .env-keys-name {
+  color: var(--env-text-muted);
+}
+
+.env-keys-dialog .env-keys-value {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 상태칩 — 등록됨/저장하면 적용은 버튼(값 보기 겸 교체 진입점), 삭제 예정은 표시 전용.
+   높이는 입력칸(28)과 같게 고정한다. 다르면 칩↔입력칸을 오갈 때마다 줄 높이가 바뀌어
+   모달 세로 크기가 흔들린다. */
+.env-keys-dialog .env-keys-chip {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  /* 좌우 12 는 입력칸과 같은 값 — 칩↔입력칸을 오가도 글자 시작 위치가 안 밀린다. */
+  padding: 0 12px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--env-text-muted);
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.env-keys-dialog button.env-keys-chip:hover:not(:disabled) {
+  background: rgb(0 0 0 / 0.04);
+}
+
+.env-keys-dialog button.env-keys-chip:disabled {
+  opacity: 0.6;
+}
+
+.env-keys-dialog .env-keys-row[data-status="replace"] .env-keys-chip {
+  color: var(--env-accent);
+}
+
+.env-keys-dialog .env-keys-row[data-status="drop"] .env-keys-chip {
+  font-weight: 400;
+}
+
+/* 삭제는 외곽선형 danger, 삭제 취소는 흰 배경 secondary. */
+.env-keys-dialog [data-component="button"].env-keys-action {
+  height: 28px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.env-keys-dialog .env-keys-row:not([data-status="drop"]) [data-component="button"].env-keys-action {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--env-danger) 45%, transparent);
+  color: var(--env-danger);
+}
+
+.env-keys-dialog .env-keys-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 28px 22px;
+}
+
+.env-keys-dialog .env-keys-summary {
+  font-size: 11.5px;
+  color: var(--env-text-muted);
+}
+
+.env-keys-dialog .env-keys-summary b {
+  font-weight: 600;
+  color: #2a2823;
 }
 
 /* 시안 jt-input: height 28 · padding 0 12 · font 13. Affine 전역 input 리셋이 패딩을 0으로 밀어 이겨 둔다. */
