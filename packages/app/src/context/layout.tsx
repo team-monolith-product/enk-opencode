@@ -14,7 +14,11 @@ import { createPathHelpers } from "./file/path"
 
 const AVATAR_COLOR_KEYS = ["pink", "mint", "orange", "purple", "cyan", "lime"] as const
 const DEFAULT_SIDEBAR_WIDTH = 344
-const DEFAULT_FILE_TREE_WIDTH = 200
+// 파일 트리 폭은 그대로 사이드 패널 폭이고, 그 위 브라우저 chrome 바(주소창)의 폭이기도 하다.
+// 가장 좁은 티어에서도 chrome 바가 요구하는 최소치가 약 230px 이라 하한을 그 위로 잡는다.
+export const MIN_FILE_TREE_WIDTH = 240
+export const MAX_FILE_TREE_WIDTH = 360
+const DEFAULT_FILE_TREE_WIDTH = MIN_FILE_TREE_WIDTH
 const DEFAULT_SESSION_WIDTH = 600
 const DEFAULT_TERMINAL_HEIGHT = 280
 export type AvatarColorKey = (typeof AVATAR_COLOR_KEYS)[number]
@@ -653,7 +657,10 @@ export const { use: useLayout, provider: LayoutProvider } = createSimpleContext(
       },
       fileTree: {
         opened: createMemo(() => store.fileTree?.opened ?? false),
-        width: createMemo(() => store.fileTree?.width ?? DEFAULT_FILE_TREE_WIDTH),
+        // 하한을 올리기 전에 저장된 폭(예: 200)이 그대로 살아나 주소창이 다시 깨지지 않도록 읽을 때 clamp 한다.
+        width: createMemo(() =>
+          Math.min(MAX_FILE_TREE_WIDTH, Math.max(MIN_FILE_TREE_WIDTH, store.fileTree?.width ?? DEFAULT_FILE_TREE_WIDTH)),
+        ),
         tab: createMemo(() => store.fileTree?.tab ?? "changes"),
         setTab(tab: "changes" | "all") {
           if (!store.fileTree) {
