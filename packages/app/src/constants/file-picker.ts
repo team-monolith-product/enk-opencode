@@ -5,6 +5,13 @@
 // read, so an oversized file never crashes the tab.
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
+// Per-prompt attachment budget. Size alone is not the cost driver — every attachment rides along in
+// the session history and is re-billed as input on every step of every turn, and a text attachment
+// expands to its Read output (see ATTACHMENT_READ_LIMIT server-side). Ten covers real use
+// (a handful of screenshots plus a couple of documents) while keeping the worst case bounded.
+export const MAX_ATTACHMENT_COUNT = 10
+export const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024
+
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 
 export const ACCEPTED_FILE_TYPES = [

@@ -7,7 +7,7 @@ import type { LineRefInput } from "@/components/blocksuite/line-reference-url"
 import type { DocSyncOpts } from "@/components/blocksuite/opencode-doc-source"
 import { label } from "@/components/blocksuite/actor"
 import { clearActor, loadActor, saveActor } from "./doc-actor"
-import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
 
 type DocHandle = Awaited<ReturnType<typeof createPage>>
 
@@ -367,13 +367,32 @@ export function createPromptDoc(input: PromptDocInput) {
 
   const empty = () => (handle ? handle.empty() : true)
 
+  const assets = () => handle?.assets() ?? { count: 0, bytes: 0 }
+
   const addFiles = async (files: File[]) => {
     // Pre-filter on file.size (synchronous, no read) so an oversized file never
     // reaches blobSync. tooLarge lets callers show the size-specific toast.
     const tooLarge = files.some((file) => file.size > MAX_ATTACHMENT_BYTES)
     const eligible = files.filter((file) => file.size <= MAX_ATTACHMENT_BYTES)
-    const result = await Promise.all(eligible.map((file) => handle?.addFile(file) ?? false))
-    return { added: result.some(Boolean), tooLarge }
+    // The per-prompt budget counts what the doc already holds, and the running total is computed up
+    // front rather than re-read per file: the adds below run concurrently, so re-reading would let a
+    // batch race past the limit. Files that don't fit are dropped and reported via `overflow`.
+    const current = assets()
+    let count = current.count
+    let bytes = current.bytes
+    let overflow = false
+    const accepted: File[] = []
+    for (const file of eligible) {
+      if (count + 1 > MAX_ATTACHMENT_COUNT || bytes + file.size > MAX_ATTACHMENT_TOTAL_BYTES) {
+        overflow = true
+        continue
+      }
+      count += 1
+      bytes += file.size
+      accepted.push(file)
+    }
+    const result = await Promise.all(accepted.map((file) => handle?.addFile(file) ?? false))
+    return { added: result.some(Boolean), tooLarge, overflow }
   }
 
   const addReference = (path: string, nodeType?: FileNodeType) => handle?.addReference(path, nodeType) ?? false
@@ -430,6 +449,7 @@ export function createPromptDoc(input: PromptDocInput) {
     guard,
     refocus,
     commitMarkdown,
+    assets,
     addFiles,
     addReference,
     addLineReference,
