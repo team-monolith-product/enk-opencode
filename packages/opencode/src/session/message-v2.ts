@@ -15,6 +15,7 @@ import { errorMessage } from "@/util/error"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
+import { Log } from "@/util/log"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -24,6 +25,8 @@ interface FetchDecompressionError extends Error {
 }
 
 export namespace MessageV2 {
+  const log = Log.create({ service: "session.message-v2" })
+
   export function isMedia(mime: string) {
     return mime.startsWith("image/") || mime === "application/pdf"
   }
@@ -35,6 +38,17 @@ export namespace MessageV2 {
 
   export function stripTextPlaceholder(length: number) {
     return `[Large text content omitted during compaction: ${length} characters]`
+  }
+
+  // Media the request deliberately does NOT inline (see inlineMedia in toModelMessages). Every media
+  // part is accompanied by a synthetic note carrying its path — the saved copy for an upload, the
+  // Read call for a workspace file — so the model still knows what it has and how to reach it,
+  // without the bytes being re-billed on every step of every turn.
+  export function mediaOmittedPlaceholder(input: { mime: string; filename?: string }) {
+    return [
+      `[Attached ${input.mime}: ${input.filename ?? "file"} — contents not inlined.`,
+      `Use the Read tool on the file path in the adjacent note if you need them.]`,
+    ].join(" ")
   }
 
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
@@ -610,6 +624,27 @@ export namespace MessageV2 {
       return false
     })()
 
+    // Whether this model can actually consume image/pdf blocks. Attaching media a model cannot read
+    // is pure waste: the bytes are billed as input on every step of the turn, and an upstream that
+    // rejects them sends the whole prompt back through the fallback chain, re-billing it per model.
+    const supportsMedia = model.capabilities.attachment === true || model.capabilities.input.image === true
+
+    // PDFs are never inlined, even on a model that supports them: one document expands to thousands
+    // of tokens per page and then rides along in history for the rest of the session. The saved path
+    // is in the prompt, so a model that needs the contents reads it deliberately, once.
+    const inlineMedia = (mime: string) => supportsMedia && mime !== "application/pdf"
+
+    // Dropping media leaves no trace in the request, so a routing gap (the image-model router
+    // disabled, or its target missing) looks to the user like "the model just ignored my image".
+    // Counted here and reported once per request rather than per part.
+    const omitted = { unsupported: 0, pdf: 0 }
+    // A model that reads media can only be dropping the pdf; anything else means the model itself
+    // cannot take it.
+    const countOmitted = () => {
+      if (supportsMedia) omitted.pdf += 1
+      else omitted.unsupported += 1
+    }
+
     const toModelOutput = (options: { toolCallId: string; input: unknown; output: unknown }) => {
       const output = options.output
       if (typeof output === "string") {
@@ -665,10 +700,13 @@ export namespace MessageV2 {
             })
           // text/plain and directory files are converted into text parts, ignore them
           if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
-            if (options?.stripMedia && isMedia(part.mime)) {
+            if (isMedia(part.mime) && (options?.stripMedia || !inlineMedia(part.mime))) {
+              if (!options?.stripMedia) countOmitted()
               userMessage.parts.push({
                 type: "text",
-                text: `[Attached ${part.mime}: ${part.filename ?? "file"}]`,
+                text: options?.stripMedia
+                  ? `[Attached ${part.mime}: ${part.filename ?? "file"}]`
+                  : mediaOmittedPlaceholder(part),
               })
             } else {
               userMessage.parts.push({
@@ -728,7 +766,14 @@ export namespace MessageV2 {
             toolNames.add(part.tool)
             if (part.state.status === "completed") {
               const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
-              const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
+              const stored = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
+              // A model that cannot read media gets none of it, wherever it came from. Tool results
+              // keep their PDFs though — Read over the saved path is exactly the escape hatch the
+              // user-message side points at, so blocking it here would make PDFs unreachable.
+              const attachments = supportsMedia ? stored : stored.filter((a) => !isMedia(a.mime))
+              // Only the !supportsMedia branch above can drop anything here, so whatever the filter
+              // removed was media the model cannot read.
+              omitted.unsupported += stored.length - attachments.length
 
               // For providers that don't support media in tool results, extract media files
               // (images, PDFs) to be sent as a separate user message
@@ -809,6 +854,16 @@ export namespace MessageV2 {
         }
       }
     }
+
+    if (omitted.unsupported > 0)
+      // Actionable: either the model is wrong for this turn (image-model router disabled or its
+      // target missing) or its `attachment` capability is missing from the deployment's config.
+      log.warn("omitted media the model cannot read", {
+        model: `${model.providerID}/${model.id}`,
+        count: omitted.unsupported,
+      })
+    else if (omitted.pdf > 0)
+      log.info("omitted pdf attachments", { model: `${model.providerID}/${model.id}`, count: omitted.pdf })
 
     const tools = Object.fromEntries(Array.from(toolNames).map((toolName) => [toolName, { toModelOutput }]))
 

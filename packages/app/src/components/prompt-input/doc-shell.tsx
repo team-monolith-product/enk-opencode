@@ -9,7 +9,7 @@ import { showToast } from "@opencode-ai/ui/toast"
 import { useClientEnv } from "@/context/client-env"
 import { useLanguage } from "@/context/language"
 import { ACCEPTED_FILE_TYPES } from "./files"
-import { ACCEPTED_IMAGE_TYPES } from "@/constants/file-picker"
+import { ACCEPTED_IMAGE_TYPES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
 import { PromptDocPanel } from "./doc-panel"
 import type { createPromptDoc } from "./doc"
 
@@ -91,11 +91,23 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
   }
   const closeAttach = () => { setAttachOpen(false); setAttachPos(null) }
   const pickFiles = async (list: File[]) => {
-    const { tooLarge } = await props.doc.addFiles(list)
+    const { tooLarge, overflow } = await props.doc.addFiles(list)
     if (tooLarge) {
       showToast({
         title: language.t("prompt.toast.fileTooLarge.title"),
         description: language.t("prompt.toast.fileTooLarge.description"),
+      })
+      return
+    }
+    // Files silently dropped for the per-prompt budget. Without this the picker just closes and
+    // nothing appears, which reads as the attach button being broken.
+    if (overflow) {
+      showToast({
+        title: language.t("prompt.toast.tooManyAttachments.title"),
+        description: language.t("prompt.toast.tooManyAttachments.description", {
+          count: MAX_ATTACHMENT_COUNT.toLocaleString(),
+          size: Math.round(MAX_ATTACHMENT_TOTAL_BYTES / (1024 * 1024)).toLocaleString(),
+        }),
       })
     }
   }

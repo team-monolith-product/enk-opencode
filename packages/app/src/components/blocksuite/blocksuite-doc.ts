@@ -569,6 +569,20 @@ export async function createPage(input: DocMountInput) {
     return true
   }
 
+  // What this doc currently carries as attachments. Counts every image/attachment block, including
+  // ones BlockSuite created itself (native paste inside the editor never goes through addFile), so
+  // the caller's budget check cannot be walked around. A block without a usable size counts toward
+  // the number but contributes nothing to the byte total.
+  const assets = () => {
+    const blocks = [...doc.getBlockByFlavour("affine:image"), ...doc.getBlockByFlavour("affine:attachment")]
+    let bytes = 0
+    for (const block of blocks) {
+      const size = (block as unknown as { size?: unknown }).size
+      if (typeof size === "number" && size > 0) bytes += size
+    }
+    return { count: blocks.length, bytes }
+  }
+
   const addReference = (path: string, nodeType: FileNodeType = "file") => {
     if (input.readonly) return false
     ensureEditable(doc)
@@ -654,6 +668,7 @@ export async function createPage(input: DocMountInput) {
     guard,
     refocus,
     addFile,
+    assets,
     addReference,
     addLineReference,
     onHistory,
