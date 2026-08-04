@@ -5,8 +5,9 @@ import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { createEffect, createMemo, type ParentProps, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { LocalProvider } from "@/context/local"
-import { SDKProvider } from "@/context/sdk"
+import { SDKProvider, useSDK } from "@/context/sdk"
 import { SyncProvider, useSync } from "@/context/sync"
+import { attachmentSrc } from "@/utils/attachment-src"
 import { decode64 } from "@/utils/base64"
 import { DocMessage } from "@/components/blocksuite/doc-message"
 
@@ -15,6 +16,7 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
   const navigate = useNavigate()
   const params = useParams()
   const sync = useSync()
+  const sdk = useSDK()
   const slug = createMemo(() => base64Encode(props.directory))
 
   createEffect(() => {
@@ -55,6 +57,7 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
         navigate(`/${slug()}/session/${sessionID}${location.search}${location.hash}`)
       }
       onSessionHref={(sessionID: string) => `/${slug()}/session/${sessionID}${location.search}`}
+      onAssetUrl={(url: string) => attachmentSrc({ baseUrl: sdk.url, directory: sdk.directory, url })}
       doc={(props) => <DocMessage id={props.id} fallback={props.fallback} />}
     >
       <LocalProvider>{props.children}</LocalProvider>

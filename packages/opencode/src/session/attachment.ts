@@ -30,10 +30,16 @@ export namespace Attachment {
   export interface Interface {
     readonly cleanup: () => Effect.Effect<void>
     /**
-     * Writes a data-url attachment to disk so the agent can reference the original bytes
-     * by path. Returns the absolute path, or undefined when the write fails.
+     * Writes an attachment to disk so the agent can reference the original bytes by path.
+     * Accepts either a data url or already-decoded bytes (an upload that lives in the doc
+     * asset store). Returns the absolute path, or undefined when the write fails.
      */
-    readonly save: (input: { url: string; mime: string; filename?: string }) => Effect.Effect<string | undefined>
+    readonly save: (input: {
+      url?: string
+      bytes?: Uint8Array
+      mime: string
+      filename?: string
+    }) => Effect.Effect<string | undefined>
   }
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Attachment") {}
@@ -55,8 +61,13 @@ export namespace Attachment {
         }
       })
 
-      const save = Effect.fn("Attachment.save")(function* (input: { url: string; mime: string; filename?: string }) {
-        const bytes = decodeDataUrlBytes(input.url)
+      const save = Effect.fn("Attachment.save")(function* (input: {
+        url?: string
+        bytes?: Uint8Array
+        mime: string
+        filename?: string
+      }) {
+        const bytes = input.bytes ?? (input.url ? decodeDataUrlBytes(input.url) : new Uint8Array())
         if (bytes.length === 0) return undefined
         const file = path.join(ATTACHMENT_DIR, filename(input.filename, input.mime))
         const written = yield* fs.writeWithDirs(file, bytes).pipe(

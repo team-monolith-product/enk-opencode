@@ -50,6 +50,8 @@ import { createOpenDiffTab, createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
 import { createPromptAttachments } from "./prompt-input/attachments"
+import { uploadAttachment } from "./prompt-input/upload"
+import { attachmentSrc as resolveAttachmentSrc } from "@/utils/attachment-src"
 import { dataUrlToPngFile } from "./prompt-input/capture"
 import { CaptureEditDialog } from "./prompt-input/capture-edit-dialog"
 import { ACCEPTED_FILE_TYPES } from "./prompt-input/files"
@@ -321,6 +323,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const imageAttachments = createMemo(() =>
     prompt.current().filter((part): part is ImageAttachmentPart => part.type === "image"),
   )
+  const attachmentSrc = (attachment: ImageAttachmentPart) =>
+    resolveAttachmentSrc({ baseUrl: sdk.url, directory: sdk.directory, url: attachment.url })
 
   const [store, setStore] = createStore<{
     popover: "at" | "slash" | null
@@ -1557,6 +1561,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       setCursorPosition(editorRef, promptLength(prompt.current()))
     },
     addPart,
+    // The composer's own attachments go to the session prompt doc's asset store, the same place
+    // doc-mode uploads land, so the prompt part only ever carries a reference. A composer with no
+    // session yet has no doc to hold the bytes, so the session is created first (doc mode does the
+    // same when it needs a doc).
+    upload: async (file, mime) => {
+      const sessionID = params.id ?? (await ensure())
+      if (!sessionID) return undefined
+      const docID = doc.docID() ?? (await doc.refresh(sessionID).catch(() => undefined))
+      if (!docID) return undefined
+      return uploadAttachment({ client: sdk.client, directory: sdk.directory, docID, file, mime })
+    },
     dropPath: async (path) => {
       if (docMode() !== "doc") return false
       const dir = sdk.directory.replace(/\/+$/, "")
@@ -1743,7 +1758,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           id: asset.id,
           filename: asset.filename,
           mime: asset.mime,
-          dataUrl: asset.dataUrl,
+          url: asset.url,
         })) ?? []),
       ]
       session.setApprovalSession(undefined)
@@ -2067,8 +2082,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         />
         <PromptImageAttachments
           attachments={imageAttachments()}
+          src={attachmentSrc}
           onOpen={(attachment) =>
-            dialog.show(() => <ImagePreview src={attachment.dataUrl} alt={attachment.filename} />)
+            dialog.show(() => <ImagePreview src={attachmentSrc(attachment)} alt={attachment.filename} />)
           }
           onRemove={removeAttachment}
           removeLabel={language.t("prompt.attachment.remove")}

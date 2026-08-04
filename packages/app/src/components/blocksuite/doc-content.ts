@@ -1,5 +1,6 @@
 import type { BlockModel, Doc } from "@blocksuite/store"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { assetRefUrl } from "@opencode-ai/util/attachment-ref"
 import { formatCommentNote, formatFolderReferenceNote, formatReferenceNote } from "@/utils/comment-note"
 import type { FileSelection } from "@/context/file/types"
 import { textBytes, textMime } from "@/components/prompt-input/files"
@@ -9,7 +10,12 @@ export type DocExportAsset = {
   id: string
   mime: string
   filename: string
-  dataUrl: string
+  /**
+   * Reference to the asset the doc already stores server-side (`/doc/{docID}/asset/{assetID}`).
+   * The bytes never travel back through the prompt — inlining them as base64 would copy every
+   * upload into the message part and from there into every client's sync stream.
+   */
+  url: string
 }
 
 export type DocExport = {
@@ -173,20 +179,18 @@ function fence(type: string, value: string) {
   return ["```" + type, value.replace(/```/g, "\\`\\`\\`"), "```"].join("\n")
 }
 
-async function dataUrl(opts: ExportOpts, id: string) {
+async function asset(opts: ExportOpts, id: string) {
   const res = await opts.client.doc.asset.get(
     { docID: opts.docID, assetID: id, directory: opts.directory },
     { cache: "no-store", parseAs: "blob", throwOnError: false },
   )
   if (res.error || !res.data) return
   const blob = res.data as Blob
-  const buf = await blob.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-  const bin = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("")
-  const mime = media(bytes, blob.type || res.response.headers.get("content-type") || "application/octet-stream")
+  // The bytes are read for the mime sniff below only — the prompt gets the reference url.
+  const bytes = new Uint8Array(await blob.arrayBuffer())
   return {
-    mime,
-    dataUrl: `data:${mime};base64,${btoa(bin)}`,
+    mime: media(bytes, blob.type || res.response.headers.get("content-type") || "application/octet-stream"),
+    url: assetRefUrl(opts.docID, id),
   }
 }
 
@@ -369,10 +373,10 @@ async function block(model: BlockModel, opts: ExportOpts, assets: DocExportAsset
     const id = source(model)
     const nested = await children()
     if (!id) return nested
-    const asset = await dataUrl(opts, id)
-    if (!asset) return [`![${caption(model) || id}](attachment://${encodeURIComponent(id)})`, ...nested]
+    const found = await asset(opts, id)
+    if (!found) return [`![${caption(model) || id}](attachment://${encodeURIComponent(id)})`, ...nested]
     const name = caption(model) || id
-    if (exportable(asset.mime)) assets.push({ id, mime: asset.mime, filename: id, dataUrl: asset.dataUrl })
+    if (exportable(found.mime)) assets.push({ id, mime: found.mime, filename: id, url: found.url })
     return [`![${name}](attachment://${encodeURIComponent(id)})`, ...nested]
   }
 
@@ -384,8 +388,8 @@ async function block(model: BlockModel, opts: ExportOpts, assets: DocExportAsset
     )
     const nested = await children()
     if (!id) return [`[${label(name)}]`, ...meta, ...nested]
-    const asset = await dataUrl(opts, id)
-    if (asset && exportable(asset.mime)) assets.push({ id, mime: asset.mime, filename: name, dataUrl: asset.dataUrl })
+    const found = await asset(opts, id)
+    if (found && exportable(found.mime)) assets.push({ id, mime: found.mime, filename: name, url: found.url })
     // The chat view hides an exported file part's standalone chip only when the markdown
     // references it by the part's filename. Images export filename=id so they key the link
     // by id; attachments must keep their real filename (the server names the on-disk copy

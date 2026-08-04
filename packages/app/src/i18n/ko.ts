@@ -342,6 +342,8 @@ export const dict = {
   "prompt.toast.pasteUnsupported.description": "이미지, PDF 또는 텍스트 파일만 첨부할 수 있습니다.",
   "prompt.toast.fileTooLarge.title": "파일이 너무 큼",
   "prompt.toast.fileTooLarge.description": "첨부 파일은 10MB 이하여야 합니다.",
+  "prompt.toast.attachmentUploadFailed.title": "첨부 업로드 실패",
+  "prompt.toast.attachmentUploadFailed.description": "파일을 저장하지 못했습니다. 다시 첨부해 주세요.",
   "prompt.toast.docEmpty.title": "보낼 내용 없음",
   "prompt.toast.docEmpty.description": "문서에 텍스트를 추가한 뒤 전송하세요.",
   "prompt.toast.docTooLong.title": "프롬프트가 너무 김",

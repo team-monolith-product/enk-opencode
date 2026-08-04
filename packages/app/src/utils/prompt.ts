@@ -1,4 +1,5 @@
 import type { AgentPart as MessageAgentPart, FilePart, Part, TextPart } from "@opencode-ai/sdk/v2"
+import { isAssetRef } from "@opencode-ai/util/attachment-ref"
 import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt } from "@/context/prompt"
 
 type Inline =
@@ -101,13 +102,16 @@ export function extractPromptFromParts(parts: Part[], opts?: { directory?: strin
         continue
       }
 
-      if (filePart.url.startsWith("data:")) {
+      // An upload: either an asset reference (current) or an inline data url (messages sent
+      // before uploads moved to the asset store). Both are carried over verbatim so re-sending
+      // an edited message reuses the stored bytes instead of re-inlining them.
+      if (filePart.url.startsWith("data:") || isAssetRef(filePart.url)) {
         images.push({
           type: "image",
           id: filePart.id,
           filename: filePart.filename ?? attachmentName,
           mime: filePart.mime,
-          dataUrl: filePart.url,
+          url: filePart.url,
         })
       }
     }

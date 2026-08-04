@@ -2,6 +2,8 @@ import { BusEvent } from "@/bus/bus-event"
 import { SessionID, MessageID, PartID } from "./schema"
 import z from "zod"
 import { NamedError } from "@opencode-ai/util/error"
+import { isAssetRef } from "@opencode-ai/util/attachment-ref"
+import { loadAssetRef } from "./attachment-ref"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
 import { LSP } from "../lsp"
 import { Snapshot } from "@/snapshot"
@@ -670,6 +672,24 @@ export namespace MessageV2 {
                 type: "text",
                 text: `[Attached ${part.mime}: ${part.filename ?? "file"}]`,
               })
+            } else if (isAssetRef(part.url)) {
+              // Uploaded attachments are stored as `/doc/{docID}/asset/{assetID}` references, so
+              // the bytes exist once instead of once per message part. Providers need the bytes
+              // themselves, and that path is not reachable from them — inline them here, which
+              // leaves the payload identical to what an inline data url produced.
+              const asset = loadAssetRef(part.url)
+              if (asset)
+                userMessage.parts.push({
+                  type: "file",
+                  url: `data:${part.mime};base64,${Buffer.from(asset.data).toString("base64")}`,
+                  mediaType: part.mime,
+                  filename: part.filename,
+                })
+              else
+                userMessage.parts.push({
+                  type: "text",
+                  text: `ERROR: Cannot read ${part.filename ? `"${part.filename}"` : part.mime} (the stored attachment is gone). Inform the user.`,
+                })
             } else {
               userMessage.parts.push({
                 type: "file",

@@ -2,7 +2,9 @@ import path from "path"
 import { describe, expect, test } from "bun:test"
 import { NamedError } from "@opencode-ai/util/error"
 import { fileURLToPath } from "url"
+import { Doc } from "../../src/doc"
 import { Instance } from "../../src/project/instance"
+import type { Provider } from "../../src/provider/provider"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
@@ -246,6 +248,102 @@ describe("session.prompt uploaded text attachments", () => {
     const inlined = texts.reduce((total, text) => total + text.length, 0)
     expect(inlined).toBeLessThan(content.length / 2)
     expect(texts.some((text) => text.includes("Output capped at 50 KB"))).toBe(true)
+  })
+})
+
+describe("session.prompt uploads stored as doc assets", () => {
+  // 1x1 transparent png
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+    "base64",
+  )
+
+  const visionModel = {
+    id: ModelID.make("test-model"),
+    providerID: ProviderID.make("test"),
+    api: { id: "test-model", url: "https://example.com", npm: "@ai-sdk/openai" },
+    name: "Test Model",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 0, input: 0, output: 0 },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "2026-01-01",
+  } as unknown as Provider.Model
+
+  async function promptWithAsset(input: { mime: string; filename: string; data: Uint8Array }) {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { agent: { build: { model: "openai/gpt-5.2" } } },
+    })
+
+    return await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const asset = Doc.assetCreate({ docID, mime: input.mime, data: new Uint8Array(input.data) })
+        const msg = await SessionPrompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          noReply: true,
+          parts: [
+            { type: "text", text: "look at this" },
+            { type: "file", mime: input.mime, url: asset.url, filename: input.filename },
+          ],
+        })
+        if (msg.info.role !== "user") throw new Error("expected user message")
+        const stored = await MessageV2.get({ sessionID: session.id, messageID: msg.info.id })
+        const modelMessages = await MessageV2.toModelMessages([stored], visionModel)
+        await Session.remove(session.id)
+        return { assetURL: asset.url, parts: stored.parts, modelMessages }
+      },
+    })
+  }
+
+  test("stores a reference instead of the bytes and still hands the model the image", async () => {
+    const result = await promptWithAsset({ mime: "image/png", filename: "shot.png", data: png })
+
+    const file = result.parts.find((part) => part.type === "file")
+    expect(file?.url).toBe(result.assetURL)
+    // The whole stored message must be free of inlined bytes — that is the point of the reference.
+    expect(JSON.stringify(result.parts)).not.toContain("base64")
+    expect(
+      result.parts.some((part) => part.type === "text" && part.text.includes("is saved on disk at")),
+    ).toBe(true)
+
+    const content = result.modelMessages.find((msg) => msg.role === "user")?.content
+    const sent = Array.isArray(content) ? content.find((part) => part.type === "file") : undefined
+    expect(sent).toBeDefined()
+    const data = sent && "data" in sent ? sent.data : undefined
+    const bytes =
+      data instanceof Uint8Array
+        ? Buffer.from(data)
+        : Buffer.from(String(data).split(",")[1] ?? "", "base64")
+    expect(bytes.equals(png)).toBe(true)
+  })
+
+  test("reads an uploaded text asset through the Read tool", async () => {
+    const body = "col1,col2\nalpha,1\n"
+    const result = await promptWithAsset({
+      mime: "text/plain",
+      filename: "data.csv",
+      data: new TextEncoder().encode(body),
+    })
+
+    const texts = result.parts.filter((part) => part.type === "text").map((part) => part.text)
+    expect(texts.some((text) => text.includes("col1,col2"))).toBe(true)
+    expect(texts.some((text) => text.includes("is saved on disk at"))).toBe(true)
+    expect(result.parts.find((part) => part.type === "file")?.url).toBe(result.assetURL)
   })
 })
 
