@@ -20,12 +20,12 @@ const model: Provider.Model = {
   capabilities: {
     temperature: true,
     reasoning: false,
-    attachment: false,
+    attachment: true,
     toolcall: true,
     input: {
       text: true,
       audio: false,
-      image: false,
+      image: true,
       video: false,
       pdf: false,
     },
@@ -309,6 +309,139 @@ describe("session.message-v2.toModelMessage", () => {
         ],
       },
     ])
+  })
+
+  test("never inlines a pdf attachment, even on a model that supports media", async () => {
+    const messageID = "m-user"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(messageID),
+        parts: [
+          {
+            ...basePart(messageID, "p1"),
+            type: "file",
+            mime: "application/pdf",
+            filename: "spec.pdf",
+            url: "data:application/pdf;base64,Zm9v",
+          },
+          {
+            ...basePart(messageID, "p2"),
+            type: "file",
+            mime: "image/png",
+            filename: "img.png",
+            url: "data:image/png;base64,Zm9v",
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: MessageV2.mediaOmittedPlaceholder({ mime: "application/pdf", filename: "spec.pdf" }) },
+          { type: "file", mediaType: "image/png", filename: "img.png", data: "data:image/png;base64,Zm9v" },
+        ],
+      },
+    ])
+  })
+
+  test("omits media entirely for a model that cannot read it", async () => {
+    const textOnly: Provider.Model = {
+      ...model,
+      capabilities: {
+        ...model.capabilities,
+        attachment: false,
+        input: { ...model.capabilities.input, image: false },
+      },
+    }
+    const messageID = "m-user"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(messageID),
+        parts: [
+          {
+            ...basePart(messageID, "p1"),
+            type: "text",
+            text: "look",
+          },
+          {
+            ...basePart(messageID, "p2"),
+            type: "file",
+            mime: "image/png",
+            filename: "img.png",
+            url: "data:image/png;base64,Zm9v",
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    expect(await MessageV2.toModelMessages(input, textOnly)).toStrictEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "look" },
+          { type: "text", text: MessageV2.mediaOmittedPlaceholder({ mime: "image/png", filename: "img.png" }) },
+        ],
+      },
+    ])
+  })
+
+  test("drops tool-result media for a model that cannot read it", async () => {
+    const textOnly: Provider.Model = {
+      ...model,
+      capabilities: {
+        ...model.capabilities,
+        attachment: false,
+        input: { ...model.capabilities.input, image: false },
+      },
+    }
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [{ ...basePart(userID, "p1"), type: "text", text: "run tool" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1"),
+            type: "tool",
+            callID: "call-1",
+            tool: "read",
+            state: {
+              status: "completed",
+              input: { filePath: "img.png" },
+              output: "Image read successfully",
+              title: "Read",
+              metadata: {},
+              time: { start: 0, end: 1 },
+              attachments: [
+                {
+                  ...basePart(assistantID, "file-1"),
+                  type: "file",
+                  mime: "image/png",
+                  filename: "img.png",
+                  url: "data:image/png;base64,Zm9v",
+                },
+              ],
+            },
+            metadata: {},
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const result = await MessageV2.toModelMessages(input, textOnly)
+    const toolMessage = result.find((msg) => msg.role === "tool")
+    expect(toolMessage).toBeDefined()
+    // The image is gone; the tool's own text output is all that survives.
+    expect(JSON.stringify(toolMessage)).not.toContain("Zm9v")
+    // And no separate user message is injected to carry it either.
+    expect(result.filter((msg) => msg.role === "user")).toHaveLength(1)
   })
 
   test("converts assistant tool completion into tool-call + tool-result messages with attachments", async () => {
