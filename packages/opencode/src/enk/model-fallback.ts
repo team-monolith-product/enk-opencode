@@ -20,10 +20,10 @@ export namespace ModelFallback {
   }
 
   export const DEFAULT_POOL: readonly PoolEntry[] = [
+    { providerID: "google", modelID: "gemini-3.5-flash", variant: "high" },
     // MiniMax gets no auto-generated variants; "adaptive" comes from the deployment's provider
     // config, and is dropped at resolve time wherever that config is absent.
     { providerID: "minimax", modelID: "MiniMax-M3", variant: "adaptive" },
-    { providerID: "google", modelID: "gemini-3.5-flash", variant: "high" },
   ]
 
   /**

@@ -6,6 +6,12 @@
     ["./image-model-router-plugin.js", { "model": "minimax/MiniMax-M3", "variant": "adaptive" }],
   ],
   "provider": {
+    "anthropic": {
+      "options": {
+        "baseURL": "${ANTHROPIC_BASE_URL}",
+        "apiKey": "proxy-auth",
+      },
+    },
     "google": {
       "options": {
         "baseURL": "${GEMINI_BASE_URL}",
