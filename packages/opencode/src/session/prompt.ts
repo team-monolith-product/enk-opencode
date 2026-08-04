@@ -80,6 +80,12 @@ export namespace SessionPrompt {
   // read back through the Read tool. Roughly mirrors the Read tool's own output cap.
   const INLINE_TEXT_ATTACHMENT_LIMIT = 50_000
 
+  // How much of an uploaded text attachment is read into the prompt. Deliberately below the Read
+  // tool's own default: an attachment is reference material the user parked, not a file the model
+  // asked for, and whatever lands here is re-billed as input on every step of every later turn. The
+  // saved path travels with it, so a model that needs the rest reads on from there.
+  const ATTACHMENT_READ_LIMIT = 500
+
   export interface Interface {
     readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
     readonly runnerState: (sessionID: SessionID) => Effect.Effect<Runner.State<MessageV2.WithParts, never>["_tag"]>
@@ -1132,7 +1138,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // path" notice instead of inlined wholesale, which would permanently overflow the
               // context window (compaction included, since text parts are never stripped).
               if (saved) {
-                const args = { filePath: saved }
+                const args = { filePath: saved, limit: ATTACHMENT_READ_LIMIT }
                 const read = yield* Effect.promise(() => ReadTool.init()).pipe(
                   Effect.flatMap((t) =>
                     Effect.promise(() =>

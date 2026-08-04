@@ -39,6 +39,9 @@
       },
       "models": {
         "MiniMax-M3": {
+          // 비전 라우팅의 목적지다. toModelMessages 가 이 값으로 이미지 전달 여부를 정하는데,
+          // models.dev 를 못 받아오면 false 로 떨어져 비전이 조용히 죽는다. 명시적으로 못 박는다.
+          "attachment": true,
           "variants": {
             "adaptive": {
               "thinking": { "type": "adaptive" },

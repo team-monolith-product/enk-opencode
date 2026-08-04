@@ -280,7 +280,21 @@ describe("session.prompt uploads stored as doc assets", () => {
     release_date: "2026-01-01",
   } as unknown as Provider.Model
 
-  async function promptWithAsset(input: { mime: string; filename: string; data: Uint8Array }) {
+  const plainModel = {
+    ...visionModel,
+    capabilities: {
+      ...visionModel.capabilities,
+      attachment: false,
+      input: { ...visionModel.capabilities.input, image: false, pdf: false },
+    },
+  } as unknown as Provider.Model
+
+  async function promptWithAsset(input: {
+    mime: string
+    filename: string
+    data: Uint8Array
+    model?: Provider.Model
+  }) {
     await using tmp = await tmpdir({
       git: true,
       config: { agent: { build: { model: "openai/gpt-5.2" } } },
@@ -303,11 +317,16 @@ describe("session.prompt uploads stored as doc assets", () => {
         })
         if (msg.info.role !== "user") throw new Error("expected user message")
         const stored = await MessageV2.get({ sessionID: session.id, messageID: msg.info.id })
-        const modelMessages = await MessageV2.toModelMessages([stored], visionModel)
+        const modelMessages = await MessageV2.toModelMessages([stored], input.model ?? visionModel)
         await Session.remove(session.id)
         return { assetURL: asset.url, parts: stored.parts, modelMessages }
       },
     })
+  }
+
+  function userContent(messages: Awaited<ReturnType<typeof promptWithAsset>>["modelMessages"]) {
+    const content = messages.find((msg) => msg.role === "user")?.content
+    return Array.isArray(content) ? content : []
   }
 
   test("stores a reference instead of the bytes and still hands the model the image", async () => {
@@ -321,8 +340,7 @@ describe("session.prompt uploads stored as doc assets", () => {
       result.parts.some((part) => part.type === "text" && part.text.includes("is saved on disk at")),
     ).toBe(true)
 
-    const content = result.modelMessages.find((msg) => msg.role === "user")?.content
-    const sent = Array.isArray(content) ? content.find((part) => part.type === "file") : undefined
+    const sent = userContent(result.modelMessages).find((part) => part.type === "file")
     expect(sent).toBeDefined()
     const data = sent && "data" in sent ? sent.data : undefined
     const bytes =
@@ -330,6 +348,33 @@ describe("session.prompt uploads stored as doc assets", () => {
         ? Buffer.from(data)
         : Buffer.from(String(data).split(",")[1] ?? "", "base64")
     expect(bytes.equals(png)).toBe(true)
+  })
+
+  test("leaves a reference unresolved when the model cannot read media", async () => {
+    const result = await promptWithAsset({
+      mime: "image/png",
+      filename: "shot.png",
+      data: png,
+      model: plainModel,
+    })
+
+    // The media gate runs before the reference is resolved, so the bytes are never even loaded —
+    // the model gets the placeholder plus the saved path that the placeholder points at.
+    const content = userContent(result.modelMessages)
+    expect(content.some((part) => part.type === "file")).toBe(false)
+    const texts = content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+    expect(texts.some((text) => text.includes("contents not inlined"))).toBe(true)
+    expect(texts.some((text) => text.includes("is saved on disk at"))).toBe(true)
+    expect(JSON.stringify(content)).not.toContain(png.toString("base64"))
+  })
+
+  test("never inlines an uploaded pdf, even for a model that reads pdfs", async () => {
+    const pdf = Buffer.from("%PDF-1.7\n%stub\n", "utf8")
+    const result = await promptWithAsset({ mime: "application/pdf", filename: "brief.pdf", data: pdf })
+
+    const content = userContent(result.modelMessages)
+    expect(content.some((part) => part.type === "file")).toBe(false)
+    expect(JSON.stringify(content)).not.toContain(pdf.toString("base64"))
   })
 
   test("reads an uploaded text asset through the Read tool", async () => {

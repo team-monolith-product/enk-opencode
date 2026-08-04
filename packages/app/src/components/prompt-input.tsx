@@ -81,6 +81,7 @@ import { promptPlaceholder } from "./prompt-input/placeholder"
 import { promptFromDocMarkdown } from "@/components/prompt-input/prompt-plain"
 import { PromptDocShell } from "./prompt-input/doc-shell"
 import { MAX_PROMPT_DOC_CHARS } from "@/constants/prompt"
+import { MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
 import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
@@ -176,6 +177,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
+  // Same wording whether the budget was hit while attaching or caught at send — the user needs the
+  // two numbers either way.
+  const attachmentLimitMessage = () =>
+    language.t("prompt.toast.tooManyAttachments.description", {
+      count: MAX_ATTACHMENT_COUNT.toLocaleString(),
+      size: Math.round(MAX_ATTACHMENT_TOTAL_BYTES / (1024 * 1024)).toLocaleString(),
+    })
   const { params, tabs, view } = useSessionLayout()
   let editorRef!: HTMLDivElement
   let fileInputRef: HTMLInputElement | undefined
@@ -838,8 +846,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           file={file!}
           onAdd={async (edited) => {
             try {
-              if (docMode() === "doc") await doc.addFiles([edited])
-              else await addAttachments([edited])
+              if (docMode() === "doc") {
+                const { overflow } = await doc.addFiles([edited])
+                if (overflow) {
+                  showToast({
+                    title: language.t("prompt.toast.tooManyAttachments.title"),
+                    description: attachmentLimitMessage(),
+                  })
+                }
+              } else await addAttachments([edited])
             } catch {
               showToast({ title: language.t("common.requestFailed") })
             }
@@ -1585,11 +1600,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     },
     dropFiles: async (list) => {
       if (docMode() !== "doc") return false
-      const { added, tooLarge } = await doc.addFiles(list)
+      const { added, tooLarge, overflow } = await doc.addFiles(list)
       if (tooLarge) {
         showToast({
           title: language.t("prompt.toast.fileTooLarge.title"),
           description: language.t("prompt.toast.fileTooLarge.description"),
+        })
+      } else if (overflow) {
+        showToast({
+          title: language.t("prompt.toast.tooManyAttachments.title"),
+          description: attachmentLimitMessage(),
         })
       } else if (!added && list.length > 0) {
         showToast({
@@ -1735,6 +1755,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           description: language.t("prompt.toast.docTooLong.description", {
             max: MAX_PROMPT_DOC_CHARS.toLocaleString(),
           }),
+        })
+        return
+      }
+      // Last line of defense for the attachment budget. addFiles already refuses over-budget adds,
+      // but BlockSuite's own paste/drag inside the editor creates blocks without going through it.
+      const usage = doc.assets()
+      if (usage.count > MAX_ATTACHMENT_COUNT || usage.bytes > MAX_ATTACHMENT_TOTAL_BYTES) {
+        showToast({
+          title: language.t("prompt.toast.tooManyAttachments.title"),
+          description: attachmentLimitMessage(),
         })
         return
       }

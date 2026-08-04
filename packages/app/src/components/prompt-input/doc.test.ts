@@ -2,12 +2,17 @@ import { beforeAll, describe, expect, mock, test } from "bun:test"
 import { createStore } from "solid-js/store"
 import type { DocMountInput } from "@/components/blocksuite/blocksuite-doc"
 import type { PromptDocConfig } from "./doc"
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
 
 const mounts: DocMountInput[] = []
 const promptDocs: Array<{ sessionID: string; directory: string }> = []
 let onSubmit: (() => void) | undefined
 
+let assetUsage = { count: 0, bytes: 0 }
+
 const handle = {
+  addFile: mock(async () => true),
+  assets: () => assetUsage,
   attach: mock(async () => {}),
   detach: mock(() => {}),
   dispose: mock(async () => {}),
@@ -144,5 +149,64 @@ describe("createPromptDoc plain props", () => {
     // the `act` prefix so it passes ActorID.zod on the observer-only submit socket.
     expect(upsert).not.toHaveBeenCalled()
     expect(doc.actorID()?.startsWith("act")).toBe(true)
+  })
+})
+
+describe("createPromptDoc attachment budget", () => {
+  // File.size is a getter, so a fake size beats allocating tens of megabytes per case.
+  const file = (name: string, size: number) => {
+    const value = new File(["x"], name)
+    Object.defineProperty(value, "size", { value: size })
+    return value
+  }
+
+  const mounted = async () => {
+    assetUsage = { count: 0, bytes: 0 }
+    handle.addFile.mockClear()
+    const [store] = createStore(config())
+    const doc = createPromptDoc({ config: store, client, onSubmit: () => {} })
+    await doc.mount({ el: document.createElement("div"), theme: "light" })
+    return doc
+  }
+
+  test("adds every file while the prompt is within budget", async () => {
+    const doc = await mounted()
+    const result = await doc.addFiles([file("a.png", 1), file("b.png", 1)])
+    expect(result).toEqual({ added: true, tooLarge: false, overflow: false })
+    expect(handle.addFile).toHaveBeenCalledTimes(2)
+  })
+
+  test("drops the files past the count limit and reports overflow", async () => {
+    const doc = await mounted()
+    const files = Array.from({ length: MAX_ATTACHMENT_COUNT + 3 }, (_, i) => file(`f${i}.png`, 1))
+    const result = await doc.addFiles(files)
+    expect(result.overflow).toBe(true)
+    expect(handle.addFile).toHaveBeenCalledTimes(MAX_ATTACHMENT_COUNT)
+  })
+
+  test("counts what the doc already holds, not just this batch", async () => {
+    const doc = await mounted()
+    assetUsage = { count: MAX_ATTACHMENT_COUNT - 1, bytes: 0 }
+    const result = await doc.addFiles([file("a.png", 1), file("b.png", 1)])
+    expect(result.overflow).toBe(true)
+    expect(handle.addFile).toHaveBeenCalledTimes(1)
+  })
+
+  test("stops at the total byte budget", async () => {
+    const doc = await mounted()
+    // Each file is exactly at the per-file cap, so only the total budget can reject them: two fit
+    // under 25 MB, the third does not.
+    const size = MAX_ATTACHMENT_BYTES
+    expect(size * 2).toBeLessThanOrEqual(MAX_ATTACHMENT_TOTAL_BYTES)
+    const result = await doc.addFiles([file("a.png", size), file("b.png", size), file("c.png", size)])
+    expect(result.overflow).toBe(true)
+    expect(handle.addFile).toHaveBeenCalledTimes(2)
+  })
+
+  test("oversized single files are still reported separately", async () => {
+    const doc = await mounted()
+    const result = await doc.addFiles([file("big.png", MAX_ATTACHMENT_BYTES + 1)])
+    expect(result).toEqual({ added: false, tooLarge: true, overflow: false })
+    expect(handle.addFile).not.toHaveBeenCalled()
   })
 })
