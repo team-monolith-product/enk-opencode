@@ -179,6 +179,27 @@ export function createPromptDocSession(): PromptDocSession {
     onCleanup(stop)
   })
 
+  /**
+   * Wipe everything the composer carried into the send that just landed.
+   *
+   * The solo path does this in submit.ts (clearContext + clearInput). The consent path returns early
+   * there — approve() owns the send — so the same clearing has to happen here instead, and it is
+   * driven by the send actually landing rather than by the local request: a cancelled or expired vote
+   * must leave the typed prompt and its attachments exactly where they were.
+   *
+   * prompt.reset() matters as much as clearContext(): in doc mode the text lives in the doc, but
+   * prompt.current() still holds the non-text parts a drop adds (prompt-input's dropPath writes a
+   * file part alongside the doc reference). Left behind, those parts ride along on every later send,
+   * and a file part is inlined by the server on each one — so the same file's contents get re-sent,
+   * and re-billed, forever.
+   */
+  const clearComposer = () => {
+    for (const item of prompt.context.items()) {
+      prompt.context.remove(item.key)
+    }
+    prompt.reset()
+  }
+
   createEffect(() => {
     const id = params.id
     if (!id) return
@@ -192,6 +213,13 @@ export function createPromptDocSession(): PromptDocSession {
       const props = item.properties
       if (props.sessionID !== id) return
       if (props.clientID === doc.clientID) return
+      // The prompt doc only ever rotates right after a prompt was sent, so this doubles as the
+      // backstop for a 'sent' cast we never saw: the server's replay is keyed by the submit's docID,
+      // so a client whose socket was down at cast time reconnects onto the *rotated* doc and misses
+      // it. Idempotent with the cast path — clearing an already-cleared composer is a no-op. Only in
+      // doc mode: someone who stepped out to the plain composer never had a submit socket to miss a
+      // cast on, and their own draft there is not part of the send that just landed.
+      if (mode() === "doc") clearComposer()
       void doc.pivot(props.sessionID, props.docID, { init: props.init ?? false }).then(() => {
         if (mode() === "doc") return
         setMode("doc")
@@ -205,11 +233,6 @@ export function createPromptDocSession(): PromptDocSession {
   let approvalID: string | undefined
   let finalizedID: string | undefined
 
-  const clearContext = () => {
-    for (const item of prompt.context.items()) {
-      prompt.context.remove(item.key)
-    }
-  }
   const closeApproval = () => {
     dialog.close()
     approvalID = undefined
@@ -236,7 +259,9 @@ export function createPromptDocSession(): PromptDocSession {
       }
     }
     if (state.status === "sent") {
-      clearContext()
+      // Only a doc send reaches this — a 'stop' vote returned above, and question votes run on their
+      // own socket (session-question-dock) — so the composer is safe to clear wholesale.
+      clearComposer()
       if (approvalID === state.submitID) closeApproval()
       return
     }
