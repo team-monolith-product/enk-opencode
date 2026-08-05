@@ -1021,7 +1021,7 @@ export function UserMessageDisplay(props: {
 
   const docText = createMemo(() => {
     if (!markdown()) return text()
-    const refs = new Map(files().map((file) => [file.filename ?? "", file.url]))
+    const refs = new Map(files().map((file) => [file.filename ?? "", data.assetUrl(file.url)]))
     return text().replace(/attachment:\/\/([^\s)]+)/g, (value, raw: string) => refs.get(decodeAttachment(raw)) ?? value)
   })
 
@@ -1101,21 +1101,25 @@ export function UserMessageDisplay(props: {
         <div data-slot="user-message-attachments">
           <For each={attachments()}>
             {(file) => {
-              const type = kind(file)
               const name = file.filename ?? i18n.t("ui.message.attachment.alt")
+              const src = createMemo(() => data.assetUrl(file.url))
+              // The stored asset can be gone (a pruned workspace, a session copied elsewhere).
+              // Fall back to the file chip rather than leaving a broken image in the bubble.
+              const [broken, setBroken] = createSignal(false)
+              const type = createMemo(() => (kind(file) === "image" && !broken() ? "image" : "file"))
 
               return (
                 <div
                   data-slot="user-message-attachment"
-                  data-type={type}
-                  data-clickable={type === "image" ? "true" : undefined}
-                  title={type === "file" ? name : undefined}
+                  data-type={type()}
+                  data-clickable={type() === "image" ? "true" : undefined}
+                  title={type() === "file" ? name : undefined}
                   onClick={() => {
-                    if (type === "image") openImagePreview(file.url, name)
+                    if (type() === "image") openImagePreview(src(), name)
                   }}
                 >
                   <Show
-                    when={type === "image"}
+                    when={type() === "image"}
                     fallback={
                       <div data-slot="user-message-attachment-file">
                         <FileIcon node={{ path: name, type: "file" }} />
@@ -1123,7 +1127,12 @@ export function UserMessageDisplay(props: {
                       </div>
                     }
                   >
-                    <img data-slot="user-message-attachment-image" src={file.url} alt={name} />
+                    <img
+                      data-slot="user-message-attachment-image"
+                      src={src()}
+                      alt={name}
+                      onError={() => setBroken(true)}
+                    />
                   </Show>
                 </div>
               )

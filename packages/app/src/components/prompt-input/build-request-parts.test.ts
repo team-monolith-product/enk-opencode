@@ -21,7 +21,7 @@ describe("buildRequestParts", () => {
       prompt,
       context: [{ key: "ctx:1", type: "file", path: "src/bar.ts", comment: "check this" }],
       images: [
-        { type: "image", id: "img_1", filename: "a.png", mime: "image/png", dataUrl: "data:image/png;base64,AAA" },
+        { type: "image", id: "img_1", filename: "a.png", mime: "image/png", url: "data:image/png;base64,AAA" },
       ],
       text: "hello @src/foo.ts @planner",
       messageID: "msg_1",
@@ -54,13 +54,13 @@ describe("buildRequestParts", () => {
       prompt: [{ type: "text", content: "check these", start: 0, end: 11 }],
       context: [],
       images: [
-        { type: "image", id: "img_1", filename: "a.png", mime: "image/png", dataUrl: "data:image/png;base64,AAA" },
+        { type: "image", id: "img_1", filename: "a.png", mime: "image/png", url: "data:image/png;base64,AAA" },
         {
           type: "image",
           id: "img_2",
           filename: "b.pdf",
           mime: "application/pdf",
-          dataUrl: "data:application/pdf;base64,BBB",
+          url: "data:application/pdf;base64,BBB",
         },
       ],
       text: "check these",

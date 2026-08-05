@@ -12,6 +12,28 @@ export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 export const MAX_ATTACHMENT_COUNT = 10
 export const MAX_ATTACHMENT_TOTAL_BYTES = 25 * 1024 * 1024
 
+// Interpolation for `prompt.toast.tooManyAttachments.description`. The budget is enforced in three
+// places (doc adds, doc send, composer adds) and the user needs the same two numbers in all of
+// them, so the formatting lives next to the limits rather than at each call site.
+export function attachmentBudgetParams() {
+  return {
+    count: MAX_ATTACHMENT_COUNT.toLocaleString(),
+    size: Math.round(MAX_ATTACHMENT_TOTAL_BYTES / (1024 * 1024)).toLocaleString(),
+  }
+}
+
+export type AttachmentUsage = { count: number; bytes: number }
+
+/**
+ * Whether one more attachment of `size` fits the per-prompt budget. An attachment whose size is
+ * unknown (restored from a sent message, where the part carries only a reference) still takes a
+ * slot but adds no bytes — the same convention the doc-side block count uses.
+ */
+export function fitsAttachmentBudget(usage: AttachmentUsage, size = 0) {
+  if (usage.count + 1 > MAX_ATTACHMENT_COUNT) return false
+  return usage.bytes + size <= MAX_ATTACHMENT_TOTAL_BYTES
+}
+
 export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 
 export const ACCEPTED_FILE_TYPES = [

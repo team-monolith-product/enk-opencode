@@ -39,6 +39,7 @@ import { ModelID, ProviderID } from "../provider/schema"
 import { Agent as AgentModule } from "../agent/agent"
 import { Installation } from "@/installation"
 import { MessageV2 } from "@/session/message-v2"
+import { loadAssetRef } from "@/session/attachment-ref"
 import { Config } from "@/config/config"
 import { Todo } from "@/session/todo"
 import { z } from "zod"
@@ -989,7 +990,10 @@ export namespace ACP {
           // - data: URLs with image/* → image block
           // - data: URLs with text/* or application/json → resource with text
           // - data: URLs with other types → resource with blob
-          const url = part.url
+          // An uploaded attachment is stored as a reference to the doc asset that holds its bytes;
+          // ACP clients only understand file:// and data:, so inline it back into a data url.
+          const asset = loadAssetRef(part.url)
+          const url = asset ? `data:${part.mime};base64,${Buffer.from(asset.data).toString("base64")}` : part.url
           const filename = part.filename ?? "file"
           const mime = part.mime || "application/octet-stream"
           const messageChunk = message.info.role === "user" ? "user_message_chunk" : "agent_message_chunk"

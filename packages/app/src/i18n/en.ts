@@ -364,6 +364,8 @@ export const dict = {
   "prompt.toast.pasteUnsupported.description": "Only images, PDFs, or text files can be attached here.",
   "prompt.toast.fileTooLarge.title": "File too large",
   "prompt.toast.fileTooLarge.description": "Attachments must be 10 MB or smaller.",
+  "prompt.toast.attachmentUploadFailed.title": "Attachment upload failed",
+  "prompt.toast.attachmentUploadFailed.description": "The file could not be stored. Try attaching it again.",
   "prompt.toast.docEmpty.title": "Nothing to send",
   "prompt.toast.docEmpty.description": "Add text to the document before sending.",
   "prompt.toast.docTooLong.title": "Prompt too long",
