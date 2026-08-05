@@ -21,6 +21,12 @@ describe("message-file", () => {
     expect(attached(file())).toBe(false)
   })
 
+  test("treats stored asset references as attachments", () => {
+    expect(attached(file({ url: "/doc/doc_1/asset/asset_1" }))).toBe(true)
+    expect(attached(file({ url: "http://localhost:4096/doc/doc_1/asset/asset_1?directory=%2Ftmp" }))).toBe(true)
+    expect(attached(file({ url: "file:///repo/doc/notes.md" }))).toBe(false)
+  })
+
   test("treats only non-attachment source ranges as inline references", () => {
     expect(
       inline(
