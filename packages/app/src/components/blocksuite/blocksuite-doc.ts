@@ -10,6 +10,7 @@ import { ensureEffects } from "./effects"
 import { frame, settled } from "./frame"
 import { inlineReady } from "./inline-editor"
 import { OpencodeAwarenessSource, OpencodeBlobSource, OpencodeDocSource, type DocSyncOpts } from "./opencode-doc-source"
+import { createUploadTracker, paintUploads, type DocUpload } from "./doc-upload"
 import { scheme } from "./theme"
 import { FileReferenceBlockSpec, withFileReferenceSchema, type FileNodeType } from "./file-reference-block"
 import { LineReferenceBlockSpec, withLineReferenceSchema } from "./line-reference-block"
@@ -43,6 +44,8 @@ export type DocMountInput = {
   /** Stop shortcut in parseKeybind format. Defaults to `escape`. */
   stopKey?: string
   onDraftChange?: () => void
+  /** Fired whenever an attachment upload starts, progresses, finishes, fails or is cancelled. */
+  onUploadsChange?: (uploads: DocUpload[]) => void
 }
 
 type TextProp = {
@@ -92,6 +95,25 @@ const kind = (file: File) => {
 
 const image = (file: File) => kind(file).startsWith("image/")
 
+// Content-addressed asset id, matching what BlockSuite's own blob engine derives (sha-256, base64url)
+// so the same file attached twice reuses one asset. crypto.subtle is missing outside a secure
+// context; a random id is fine there — the id only has to be unique within the doc.
+const assetKey = async (file: File) => {
+  try {
+    const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
+    let binary = ""
+    for (const byte of new Uint8Array(hash)) binary += String.fromCharCode(byte)
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_")
+  } catch {
+    return crypto.randomUUID().replace(/-/g, "")
+  }
+}
+
+const sourceId = (model: BlockModel) => {
+  const value = (model as unknown as { sourceId?: unknown }).sourceId
+  return typeof value === "string" && value ? value : undefined
+}
+
 export async function createPage(input: DocMountInput) {
   await ensureEffects()
   const [
@@ -117,6 +139,7 @@ export async function createPage(input: DocMountInput) {
   let direct: OpencodeDocSource | undefined
   let channel: Awaited<ReturnType<typeof link>> | undefined
   let awareness: OpencodeAwarenessSource | undefined
+  let blobs: OpencodeBlobSource | undefined
   let aware = false
 
   // Live, mutable copy of the local actor's display identity. The awareness "user" field is set once
@@ -138,10 +161,11 @@ export async function createPage(input: DocMountInput) {
   if (input.sync) {
     direct = new OpencodeDocSource(input.sync)
     awareness = input.readonly ? undefined : new OpencodeAwarenessSource(input.sync)
+    blobs = new OpencodeBlobSource(input.sync)
     collection = new DocCollection({
       schema,
       id: input.sync.docID,
-      blobSources: { main: new OpencodeBlobSource(input.sync) },
+      blobSources: { main: blobs },
       awarenessSources: awareness ? [awareness] : [],
     })
     collection.meta.initialize()
@@ -259,6 +283,62 @@ export async function createPage(input: DocMountInput) {
     })
   }
 
+  let uploadFrame: ReturnType<typeof setTimeout> | undefined
+  // Progress events fire many times a second; coalesce the DOM writes. A timer rather than
+  // requestAnimationFrame: rAF is suspended while the tab is in the background, which is exactly
+  // when a long upload is likely to be running, and the bar would then be frozen on return.
+  const paint = () => {
+    if (uploadFrame) return
+    uploadFrame = setTimeout(() => {
+      uploadFrame = undefined
+      paintUploads(editor, uploads.list())
+    }, 60)
+  }
+
+  // Re-write the block's own sourceId once the bytes are up. A collaborator receives the block over
+  // the doc socket before the asset exists on the server, so their image/attachment has already
+  // failed to fetch and cached that failure; the write emits a sourceId update on every client,
+  // which is exactly what those blocks re-fetch on. withoutTransact keeps it out of the undo stack.
+  const settleAsset = (key: string) => {
+    const model = [...doc.getBlockByFlavour("affine:image"), ...doc.getBlockByFlavour("affine:attachment")].find(
+      (item) => sourceId(item) === key,
+    )
+    if (!model) return
+    doc.withoutTransact(() => doc.updateBlock(model, { sourceId: key }))
+  }
+
+  const uploads = createUploadTracker({
+    upload: async (key, blob, opts) => {
+      if (!blobs) throw new Error("doc has no blob source")
+      await blobs.upload(key, blob, opts)
+      settleAsset(key)
+    },
+    onChange: () => {
+      paint()
+      input.onUploadsChange?.(uploads.list())
+    },
+  })
+
+  // The block IS the upload's handle: removing it (delete, or undo of the add) cancels, and undoing
+  // that removal puts it back. `doc` is swapped on rebind(), so this re-subscribes with it.
+  let offBlocks: (() => void) | undefined
+  const watchBlocks = () => {
+    offBlocks?.()
+    offBlocks = undefined
+    if (input.readonly || !blobs) return
+    const sub = doc.slots.blockUpdated.on((event) => {
+      if (event.type === "delete") {
+        uploads.cancel(event.id)
+        return
+      }
+      if (event.type !== "add") return
+      const key = sourceId(event.model)
+      if (!key) return
+      uploads.resume(event.id, key)
+    })
+    offBlocks = () => sub.dispose()
+  }
+
   // IME 조합(한글 등) 중에는 문서 교체(rebind)/원격 업데이트 적용/포커스 재설정이 조합을 취소시켜
   // 입력이 유실된다. 두 경로가 있다:
   //  1) 최초 다중 접속 시 desynced가 true인 동안 rebind가 매 프레임 돌며 조합을 끊는다.
@@ -319,6 +399,7 @@ export async function createPage(input: DocMountInput) {
     doc = fresh
     editor.doc = fresh
     if (fresh !== current) current.dispose()
+    watchBlocks()
     editor.requestUpdate()
     const el = editor.parentElement
     if (!(el instanceof HTMLElement)) return
@@ -326,6 +407,7 @@ export async function createPage(input: DocMountInput) {
       cursors?.()
       cursors = input.readonly ? undefined : watchCursorLabels(editor, el)
       fit(el)
+      paint()
       if (restore) void focus()
     })
   }
@@ -356,6 +438,8 @@ export async function createPage(input: DocMountInput) {
       tick = 0
     }
   }
+
+  watchBlocks()
 
   // A sent doc message grows to its full content height (no max cap, no inner scroll).
   const clamp = (height: number) => Math.max(40, Math.ceil(height))
@@ -457,6 +541,9 @@ export async function createPage(input: DocMountInput) {
         : new MutationObserver(() => {
             fit(el)
             notifyDraft()
+            // Lit re-creates block elements on doc changes, so the progress marks have to be
+            // re-applied. paintUploads is idempotent and a no-op with nothing in flight.
+            paint()
           })
       mutate?.observe(editor, { childList: true, characterData: true, subtree: true })
       unload?.()
@@ -492,6 +579,7 @@ export async function createPage(input: DocMountInput) {
       await frame()
       fit(el)
       notifyDraft()
+      paint()
       if (!input.readonly && document.activeElement === editor.querySelector("affine-page-root")) await focus(ready)
     } finally {
       el.removeAttribute("aria-busy")
@@ -546,23 +634,34 @@ export async function createPage(input: DocMountInput) {
     void focus()
   }
 
+  const insert = (id: string, file: File, parent: string) =>
+    image(file)
+      ? doc.addBlock("affine:image", { sourceId: id, caption: file.name, size: file.size }, parent)
+      : doc.addBlock(
+          "affine:attachment",
+          { sourceId: id, name: file.name, size: file.size, type: kind(file), embed: false },
+          parent,
+        )
+
   const addFile = async (file: File) => {
     if (input.readonly) return false
-    // Reject oversized files before blobSync.set reads the whole blob (arrayBuffer
-    // + base64) into memory, which would crash the tab. Callers surface the toast.
+    // Reject oversized files before we read the whole blob (arrayBuffer + base64)
+    // into memory, which would crash the tab. Callers surface the toast.
     if (file.size > MAX_ATTACHMENT_BYTES) return false
     ensureEditable(doc)
     const parent = doc.getBlockByFlavour("affine:note")[0]
     if (!parent) return false
-    const id = await doc.blobSync.set(file)
-    if (image(file)) {
-      doc.addBlock("affine:image", { sourceId: id, caption: file.name, size: file.size }, parent.id)
+    if (!blobs) {
+      // No sync layer (message bubble, tests): no upload lane either, so keep the direct path.
+      insert(await doc.blobSync.set(file), file, parent.id)
     } else {
-      doc.addBlock(
-        "affine:attachment",
-        { sourceId: id, name: file.name, size: file.size, type: kind(file), embed: false },
-        parent.id,
-      )
+      // Cache first, insert second, upload third. The block renders from the local blob right away
+      // and carries a progress bar until the bytes land — instead of the editor sitting empty for
+      // the whole upload and then flashing a block that looks already finished.
+      const id = await assetKey(file)
+      blobs.remember(id, file)
+      const blockId = insert(id, file, parent.id)
+      if (blockId) uploads.start({ blockId, key: id, name: file.name, blob: file })
     }
     onHistory()
     requestAnimationFrame(() => void focus())
@@ -669,6 +768,8 @@ export async function createPage(input: DocMountInput) {
     refocus,
     addFile,
     assets,
+    uploads: () => uploads.list(),
+    uploading: () => uploads.active(),
     addReference,
     addLineReference,
     onHistory,
@@ -701,6 +802,11 @@ export async function createPage(input: DocMountInput) {
       reload = undefined
       offComposition?.()
       offComposition = undefined
+      offBlocks?.()
+      offBlocks = undefined
+      uploads.dispose()
+      if (uploadFrame) clearTimeout(uploadFrame)
+      uploadFrame = undefined
       if (draftFrame) cancelAnimationFrame(draftFrame)
       draftFrame = undefined
       offY?.()

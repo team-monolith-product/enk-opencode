@@ -2,6 +2,7 @@ import { createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { OpencodeClient, SessionActor } from "@opencode-ai/sdk/v2/client"
 import { createPage, type DocActor } from "@/components/blocksuite/blocksuite-doc"
+import type { DocUpload } from "@/components/blocksuite/doc-upload"
 import type { FileNodeType } from "@/components/blocksuite/file-reference-block"
 import type { LineRefInput } from "@/components/blocksuite/line-reference-url"
 import type { DocSyncOpts } from "@/components/blocksuite/opencode-doc-source"
@@ -33,6 +34,9 @@ export type PromptDocInput = {
   // Fired when the stop shortcut is pressed inside the doc editor. The parent decides whether to
   // actually stop (only while a run is in flight); the keypress is always swallowed regardless.
   onStop?: () => void
+  /** An attachment upload failed. The block keeps its error mark and submit stays blocked until it
+   *  is deleted (or deleted and undone, which retries). */
+  onUploadFailed?: (name: string) => void
 }
 
 // Bootstrap requests (actor registration + prompt doc lookup) run before the sync layer exists, so a
@@ -113,6 +117,7 @@ export function createPromptDoc(input: PromptDocInput) {
   }
 
   const [ready, setReady] = createSignal(false)
+  const [uploads, setUploads] = createSignal<DocUpload[]>([])
   const [filled, setFilled] = createSignal(false)
   const [length, setLength] = createSignal(0)
   const [docID, setDocID] = createSignal<string | undefined>()
@@ -156,6 +161,9 @@ export function createPromptDoc(input: PromptDocInput) {
     setReady(false)
     setFilled(false)
     setLength(0)
+    // dispose() aborts whatever was still uploading, so nothing is left in flight for a doc that
+    // no longer exists.
+    setUploads([])
     await current?.dispose()
   }
 
@@ -217,6 +225,15 @@ export function createPromptDoc(input: PromptDocInput) {
       onDraftChange: () => {
         syncContent()
         syncHistory()
+      },
+      onUploadsChange: (list) => {
+        const before = uploads()
+        setUploads(list)
+        for (const item of list) {
+          if (item.status !== "error") continue
+          if (before.some((prev) => prev.blockId === item.blockId && prev.status === "error")) continue
+          input.onUploadFailed?.(item.name)
+        }
       },
     })
     if (!alive()) {
@@ -339,6 +356,7 @@ export function createPromptDoc(input: PromptDocInput) {
     setHistory({ undo: false, redo: false })
     setFilled(false)
     setLength(0)
+    setUploads([])
     void serialize(async () => {
       await drop()
     })
@@ -391,6 +409,8 @@ export function createPromptDoc(input: PromptDocInput) {
       bytes += file.size
       accepted.push(file)
     }
+    // addFile resolves once the block exists; the bytes keep uploading in the background under
+    // `uploads`. Callers get their toast decision immediately instead of after the transfer.
     const result = await Promise.all(accepted.map((file) => handle?.addFile(file) ?? false))
     return { added: result.some(Boolean), tooLarge, overflow }
   }
@@ -450,6 +470,10 @@ export function createPromptDoc(input: PromptDocInput) {
     refocus,
     commitMarkdown,
     assets,
+    uploads,
+    // Attachments still on the wire (or failed). commitMarkdown() re-reads every asset from the
+    // server, so sending now would drop or break them — the composer blocks submit on this.
+    uploading: () => uploads().length > 0,
     addFiles,
     addReference,
     addLineReference,

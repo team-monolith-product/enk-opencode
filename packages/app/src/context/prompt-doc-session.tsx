@@ -130,6 +130,12 @@ export function createPromptDocSession(): PromptDocSession {
     onStop: () => {
       if (working()) void requestStop()
     },
+    onUploadFailed: (name) => {
+      showToast({
+        title: language.t("prompt.toast.docUploadFailed.title"),
+        description: language.t("prompt.toast.docUploadFailed.description", { name }),
+      })
+    },
   })
   // The session owns the final teardown; the composer only mounts/detaches the editor DOM.
   onCleanup(() => doc.dispose())
