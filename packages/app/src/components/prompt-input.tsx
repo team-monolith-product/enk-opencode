@@ -1766,22 +1766,25 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         })
         return
       }
-      const base = [
-        ...promptFromDocMarkdown(text, prompt.current(), doc.docID(), doc.actorID()),
-        ...(next?.assets.map((asset) => ({
+      // Image parts for the assets living in the doc itself. Kept separate from `base` because
+      // prepare() rebuilds the prompt from scratch: appending `base`'s images back would re-append
+      // the ones promptFromDocMarkdown already carried over from prompt.current(), sending the same
+      // image twice.
+      const assetParts =
+        next?.assets.map((asset) => ({
           type: "image" as const,
           id: asset.id,
           filename: asset.filename,
           mime: asset.mime,
           dataUrl: asset.dataUrl,
-        })) ?? []),
-      ]
+        })) ?? []
+      const base = [...promptFromDocMarkdown(text, prompt.current(), doc.docID(), doc.actorID()), ...assetParts]
       session.setApprovalSession(undefined)
       const sessionID = await handleSubmit(undefined, {
         prompt: base,
         prepare: async (id) => [
           ...promptFromDocMarkdown(text, prompt.current(), await doc.refresh(id), doc.actorID()),
-          ...base.filter((part) => part.type === "image"),
+          ...assetParts,
         ],
       })
       if (!sessionID) return
