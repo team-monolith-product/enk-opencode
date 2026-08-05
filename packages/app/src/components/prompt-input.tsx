@@ -844,8 +844,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           onAdd={async (edited) => {
             try {
               if (docMode() === "doc") {
-                const { overflow } = await doc.addFiles([edited])
-                if (overflow) {
+                // 드롭 경로와 같은 순서로 거절 사유를 알린다 — 크기 초과가 먼저,
+                // 그 다음 예산 초과. 둘 다 아니면 조용히 추가된 것.
+                const { tooLarge, overflow } = await doc.addFiles([edited])
+                if (tooLarge) {
+                  showToast({
+                    title: language.t("prompt.toast.fileTooLarge.title"),
+                    description: language.t("prompt.toast.fileTooLarge.description"),
+                  })
+                } else if (overflow) {
                   showToast({
                     title: language.t("prompt.toast.tooManyAttachments.title"),
                     description: attachmentLimitMessage(),
