@@ -42,6 +42,8 @@ export interface ImageAttachmentPart {
    * url here, so both forms have to render and re-send.
    */
   url: string
+  /** Byte size, for the per-prompt attachment budget. Unknown for parts restored from a message. */
+  size?: number
 }
 
 export type ContentPart = TextPart | FileAttachmentPart | AgentPart | ImageAttachmentPart

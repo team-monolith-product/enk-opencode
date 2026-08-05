@@ -1,8 +1,13 @@
 import { onCleanup, onMount } from "solid-js"
 import { showToast } from "@opencode-ai/ui/toast"
-import { usePrompt, type ContentPart, type ImageAttachmentPart } from "@/context/prompt"
+import { usePrompt, type ContentPart, type ImageAttachmentPart, type Prompt } from "@/context/prompt"
 import { useLanguage } from "@/context/language"
-import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
+import {
+  attachmentBudgetParams,
+  fitsAttachmentBudget,
+  MAX_ATTACHMENT_BYTES,
+  type AttachmentUsage,
+} from "@/constants/file-picker"
 import { uuid } from "@/utils/uuid"
 import { getCursorPosition } from "./editor-dom"
 import { attachmentMime } from "./files"
@@ -24,6 +29,19 @@ type PromptAttachmentsInput = {
   dropPath?: (path: string) => Promise<boolean> | boolean
   dropFiles?: (files: File[]) => Promise<boolean>
   readClipboardImage?: () => Promise<File | null>
+}
+
+/**
+ * What the composer currently carries against the per-prompt attachment budget. The doc side counts
+ * its image/attachment blocks; here the prompt's own image parts are the equivalent — the two modes
+ * never send together, so each counts only its own.
+ */
+export function attachmentUsage(prompt: Prompt): AttachmentUsage {
+  const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+  return {
+    count: images.length,
+    bytes: images.reduce((total, part) => total + (part.size ?? 0), 0),
+  }
 }
 
 export function createPromptAttachments(input: PromptAttachmentsInput) {
@@ -51,7 +69,16 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     })
   }
 
-  const add = async (file: File, toast = true) => {
+  const warnOverBudget = () => {
+    showToast({
+      title: language.t("prompt.toast.tooManyAttachments.title"),
+      description: language.t("prompt.toast.tooManyAttachments.description", attachmentBudgetParams()),
+    })
+  }
+
+  // `usage` lets a batch keep its running total across files: the check has to happen before the
+  // upload await, so re-reading the prompt per file would let a batch walk past the budget.
+  const add = async (file: File, toast = true, usage = attachmentUsage(prompt.current())) => {
     // Guard on file.size (synchronous, no read) before any read so an oversized file
     // never gets pulled into memory and crashes the tab.
     if (file.size > MAX_ATTACHMENT_BYTES) {
@@ -65,6 +92,12 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
       return "type" as const
     }
 
+    // Checked before the upload so a file that cannot be attached never reaches the asset store.
+    if (!fitsAttachmentBudget(usage, file.size)) {
+      if (toast) warnOverBudget()
+      return "overflow" as const
+    }
+
     const editor = input.editor()
     const url = await input.upload(file, mime)
     if (!url) {
@@ -72,12 +105,16 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
       return "upload" as const
     }
 
+    usage.count += 1
+    usage.bytes += file.size
+
     const attachment: ImageAttachmentPart = {
       type: "image",
       id: uuid(),
       filename: file.name,
       mime,
       url,
+      size: file.size,
     }
     const cursor = prompt.cursor() ?? (editor ? getCursorPosition(editor) : undefined)
     prompt.set([...prompt.current(), attachment], cursor)
@@ -91,15 +128,18 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     let rejectedForSize = false
     let rejectedForType = false
     let rejectedForUpload = false
+    let rejectedForBudget = false
+    const usage = attachmentUsage(prompt.current())
 
     for (const file of files) {
       if (file.size > MAX_ATTACHMENT_BYTES) {
         rejectedForSize = true
         continue
       }
-      const result = await add(file, false)
+      const result = await add(file, false, usage)
       if (result === "ok") found = true
       else if (result === "upload") rejectedForUpload = true
+      else if (result === "overflow") rejectedForBudget = true
       else rejectedForType = true
     }
 
@@ -107,6 +147,7 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
       // Surface the size rejection once for the batch (valid files still attach).
       // Only fall back to the unsupported-type warning when nothing else fired.
       if (rejectedForSize) warnTooLarge()
+      else if (rejectedForBudget) warnOverBudget()
       else if (rejectedForUpload) warnUploadFailed()
       else if (rejectedForType && !found) warn()
     }

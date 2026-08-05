@@ -49,7 +49,7 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { createOpenDiffTab, createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
-import { createPromptAttachments } from "./prompt-input/attachments"
+import { attachmentUsage, createPromptAttachments } from "./prompt-input/attachments"
 import { uploadAttachment } from "./prompt-input/upload"
 import { attachmentSrc as resolveAttachmentSrc } from "@/utils/attachment-src"
 import { dataUrlToPngFile } from "./prompt-input/capture"
@@ -81,7 +81,7 @@ import { promptPlaceholder } from "./prompt-input/placeholder"
 import { promptFromDocMarkdown } from "@/components/prompt-input/prompt-plain"
 import { PromptDocShell } from "./prompt-input/doc-shell"
 import { MAX_PROMPT_DOC_CHARS } from "@/constants/prompt"
-import { MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
+import { attachmentBudgetParams, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
 import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
@@ -180,10 +180,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // Same wording whether the budget was hit while attaching or caught at send — the user needs the
   // two numbers either way.
   const attachmentLimitMessage = () =>
-    language.t("prompt.toast.tooManyAttachments.description", {
-      count: MAX_ATTACHMENT_COUNT.toLocaleString(),
-      size: Math.round(MAX_ATTACHMENT_TOTAL_BYTES / (1024 * 1024)).toLocaleString(),
-    })
+    language.t("prompt.toast.tooManyAttachments.description", attachmentBudgetParams())
   const { params, tabs, view } = useSessionLayout()
   let editorRef!: HTMLDivElement
   let fileInputRef: HTMLInputElement | undefined
@@ -1809,6 +1806,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           description: language.t("prompt.toast.docAdvanceFailed.description"),
         })
       }
+      return
+    }
+
+    // Same last line of defense as the doc branch. Adds are refused over budget, but a prompt
+    // restored from history or from an edited message brings its attachments back without passing
+    // through them.
+    const usage = attachmentUsage(prompt.current())
+    if (usage.count > MAX_ATTACHMENT_COUNT || usage.bytes > MAX_ATTACHMENT_TOTAL_BYTES) {
+      showToast({
+        title: language.t("prompt.toast.tooManyAttachments.title"),
+        description: attachmentLimitMessage(),
+      })
       return
     }
 
