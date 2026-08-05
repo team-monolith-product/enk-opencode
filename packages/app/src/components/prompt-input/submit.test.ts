@@ -73,13 +73,12 @@ beforeAll(async () => {
     useParams: () => params,
   }))
 
-  mock.module("@opencode-ai/sdk/v2/client", () => ({
-    createOpencodeClient: (input: { directory: string }) => {
-      createdClients.push(input.directory)
-      return clientFor(input.directory)
-    },
-  }))
-
+  // NOTE: do not add a module mock for "@opencode-ai/sdk/v2/client" here. Module mocks patch the
+  // registry for the whole `bun test` process, so a stub client would also be handed to every file
+  // that runs after this one — and the blocksuite doc tests build a real client from it. submit.ts
+  // imports only types from that module anyway; the client this suite exercises comes from the
+  // "@/context/sdk" mock below, whose createClient() returns clientFor().
+  // See src/module-mock-allowlist.test.ts.
   mock.module("@opencode-ai/ui/toast", () => ({
     showToast: () => 0,
   }))
