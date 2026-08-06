@@ -4,7 +4,7 @@ import { existsSync } from "node:fs"
 import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DevServerReplay } from "../../src/enk/dev-server-replay"
+import { DevServerReplay, probePort } from "../../src/enk/dev-server-replay"
 
 const ORIGINAL_ENV = process.env["ENK_PROJECT_DIRECTORY"]
 const cleanups: (() => Promise<void>)[] = []
@@ -54,6 +54,29 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<bool
     await new Promise((r) => setTimeout(r, 50))
   }
   return predicate()
+}
+
+async function waitForAsync(predicate: () => Promise<boolean>, timeoutMs = 5000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await predicate()) return true
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  return predicate()
+}
+
+/** 별도 프로세스에서 포트를 잡는 더미 서버. launch 와 동일하게 detached 로 떠 pgid == pid. */
+async function spawnListener(dir: string, port: number) {
+  const child = DevServerReplay.launch(
+    `${process.execPath} -e 'require("net").createServer().listen(${port}, "127.0.0.1"); setInterval(() => {}, 1000)'`,
+    dir,
+  )
+  cleanups.push(async () => {
+    try {
+      process.kill(-child.pid!, "SIGKILL")
+    } catch {}
+  })
+  return child
 }
 
 async function writeState(projectDir: string, state: DevServerReplay.State) {
@@ -133,6 +156,23 @@ describe("DevServerReplay", () => {
       expect(existsSync(marker)).toBe(false)
     })
 
+    test("records the pid of the replayed process so it can be stopped later", async () => {
+      const dir = await tempProjectDir()
+      const port = await freePort()
+      await writeState(dir, { cmd: `sleep 30`, cwd: dir, port })
+
+      process.env["ENK_PROJECT_DIRECTORY"] = dir
+      await DevServerReplay.replay()
+
+      const recorded = await DevServerReplay.loadRecord()
+      expect(recorded?.pid).toBeGreaterThan(0)
+      cleanups.push(async () => {
+        try {
+          process.kill(-recorded!.pid!, "SIGKILL")
+        } catch {}
+      })
+    })
+
     test("skips replay when the recorded cwd no longer exists", async () => {
       const dir = await tempProjectDir()
       const marker = join(dir, "marker")
@@ -143,6 +183,32 @@ describe("DevServerReplay", () => {
 
       await new Promise((r) => setTimeout(r, 200))
       expect(existsSync(marker)).toBe(false)
+    })
+  })
+
+  describe("stop", () => {
+    test("succeeds trivially when nothing is listening", async () => {
+      expect(await DevServerReplay.stop(await freePort(), undefined, 500)).toBe(true)
+    })
+
+    test("kills the recorded process group and frees the port", async () => {
+      const dir = await tempProjectDir()
+      const port = await freePort()
+      // 셸(/bin/sh -lc)이 부모, 실제 listener 가 자식 — 그룹째 죽어야 포트가 풀린다.
+      const child = await spawnListener(dir, port)
+      expect(await waitForAsync(() => probePort(port))).toBe(true)
+
+      expect(await DevServerReplay.stop(port, child.pid, 3000)).toBe(true)
+      expect(await probePort(port)).toBe(false)
+    })
+
+    test("reports failure when the port holder cannot be identified", async () => {
+      // 이 테스트 프로세스가 직접 잡은 포트 — 기록된 pid 도 없고, /proc 폴백은 자기 자신을 건너뛴다.
+      const { server, port } = await listen()
+      cleanups.push(() => close(server))
+
+      expect(await DevServerReplay.stop(port, undefined, 500)).toBe(false)
+      expect(await probePort(port)).toBe(true)
     })
   })
 })
