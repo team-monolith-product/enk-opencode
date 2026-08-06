@@ -11,12 +11,22 @@ import { Instance } from "../project/instance"
 import { assertExternalDirectory } from "./external-directory"
 import { InstructionPrompt } from "../session/instruction"
 import { Filesystem } from "../util/filesystem"
+import { MediaTokens } from "../session/media-tokens"
+import { Log } from "../util/log"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
 const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
 const MAX_BYTES = 50 * 1024
 const MAX_BYTES_LABEL = `${MAX_BYTES / 1024} KB`
+// How much of a PDF one Read may put in the prompt. PDF tokens scale with pages, not bytes
+// (MediaTokens.PDF_PER_PAGE ≈ 2,700/page, measured; an 8.8MB one-pager and a 0.3MB one-pager cost
+// the same), so the cap is in pages: 20 ≈ 54k tokens, about a whole session's typical context, and
+// it is re-sent on every step of the turn. Real documents cluster far below this — in a sample of
+// 24 the only files over the limit were 55 and 165 pages, i.e. 148k and 445k tokens.
+const MAX_PDF_PAGES = 20
+
+const log = Log.create({ service: "tool.read" })
 
 export const ReadTool = Tool.define("read", {
   description: DESCRIPTION,
@@ -125,6 +135,31 @@ export const ReadTool = Tool.define("read", {
     const isImage = mime.startsWith("image/") && mime !== "image/svg+xml" && mime !== "image/vnd.fastbidsheet"
     const isPdf = mime === "application/pdf"
     if (isImage || isPdf) {
+      const bytes = Buffer.from(await Filesystem.readBytes(filepath))
+      const pages = isPdf ? MediaTokens.pdfPageCount(bytes) : undefined
+      if (pages !== undefined && pages > MAX_PDF_PAGES) {
+        // Refusing here is friendlier than attaching: the pages would land in the prompt and be
+        // re-sent on every step of the turn, and the turn can overflow the context outright.
+        const msg = [
+          `PDF not attached: ${pages} pages exceeds the ${MAX_PDF_PAGES}-page limit for inline reading`,
+          `(a PDF costs roughly ${MediaTokens.PDF_PER_PAGE} tokens per page, and the whole document rides along for the rest of the turn).`,
+          `Split out the pages you need — at most ${MAX_PDF_PAGES} at a time — and read those instead.`,
+        ].join(" ")
+        log.info("pdf too large to inline", { pages, limit: MAX_PDF_PAGES, path: filepath })
+        return {
+          title,
+          output: msg,
+          metadata: {
+            preview: msg,
+            truncated: true,
+            loaded: instructions.map((i) => i.filepath),
+          },
+        }
+      }
+      // A page count we cannot read (page objects packed into compressed object streams) is rare
+      // in practice but real. Attach anyway rather than blocking on ignorance, and leave a trace
+      // so an overflow traced back here isn't a mystery.
+      if (isPdf && pages === undefined) log.warn("pdf page count unknown, attaching uncapped", { path: filepath })
       const msg = `${isImage ? "Image" : "PDF"} read successfully`
       return {
         title,
@@ -138,7 +173,7 @@ export const ReadTool = Tool.define("read", {
           {
             type: "file",
             mime,
-            url: `data:${mime};base64,${Buffer.from(await Filesystem.readBytes(filepath)).toString("base64")}`,
+            url: `data:${mime};base64,${bytes.toString("base64")}`,
           },
         ],
       }
