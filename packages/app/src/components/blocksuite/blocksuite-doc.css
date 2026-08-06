@@ -88,6 +88,68 @@
   margin: 0;
 }
 
+/* Attachment upload progress.
+   The block is inserted the moment a file is picked and its bytes go up afterwards, so it needs to
+   say so. BlockSuite (Lit) owns the inside of the block, so the indicator hangs off the block host:
+   doc-upload.ts sets data-oc-upload + --oc-upload and everything below is drawn by pseudo-elements,
+   which no re-render can clobber. */
+[data-component="prompt-doc"] [data-block-id][data-oc-upload] {
+  position: relative;
+  isolation: isolate;
+}
+
+[data-component="prompt-doc"] [data-block-id][data-oc-upload="uploading"] > * {
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) var(--ease-standard);
+}
+
+/* Percentage pill, top-left of the block, just under the bar. Fixed dark chip rather than theme
+   tokens — it sits on top of arbitrary image content, where only a hard scrim stays legible. */
+[data-component="prompt-doc"] [data-block-id][data-oc-upload]::before {
+  content: attr(data-oc-upload-label);
+  position: absolute;
+  z-index: 2;
+  top: 9px;
+  left: 6px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.72);
+  color: #ffffff;
+  font-family: var(--font-family-sans);
+  font-size: 11px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+[data-component="prompt-doc"] [data-block-id][data-oc-upload="error"]::before {
+  background: var(--icon-critical-base);
+}
+
+/* The bar itself, pinned to the TOP edge of the block — a tall image can easily run past the bottom
+   of the composer's scroll area, and the top is what the editor scrolls to when the block lands. */
+[data-component="prompt-doc"] [data-block-id][data-oc-upload]::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  top: 0;
+  height: 3px;
+  width: var(--oc-upload, 0%);
+  min-width: 3px;
+  max-width: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--icon-strong-base);
+  box-shadow: 0 0 0 9999px transparent;
+  transition: width var(--dur-fast) var(--ease-decelerate);
+  pointer-events: none;
+}
+
+[data-component="prompt-doc"] [data-block-id][data-oc-upload="error"]::after {
+  background: var(--icon-critical-base);
+  transition: none;
+}
+
 [data-component="prompt-doc-viewer"] {
   display: block;
   width: 100%;
