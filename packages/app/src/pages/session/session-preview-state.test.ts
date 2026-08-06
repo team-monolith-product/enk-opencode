@@ -43,6 +43,15 @@ describe("resolvePreviewState", () => {
     expect(resolvePreviewState(errored, false)).toEqual(errored)
   })
 
+  test("carries loopbackOnly through untouched — only the server can make that call", () => {
+    // 루프백 전용 바인드(--host 0.0.0.0 누락). 클라의 cors 프로브는 CORS 헤더 없는 정상 서버에서도
+    // throw 하므로 여기서 reachable 을 믿고 ready 로 올리면 안 되고, 플래그도 잃으면 안 된다.
+    const loopbackOnly: DevServerStatusResult = { state: "errored", port: 3000, loopbackOnly: true }
+    expect(resolvePreviewState(loopbackOnly, true)).toEqual(loopbackOnly)
+    expect(resolvePreviewState(loopbackOnly, false)).toEqual(loopbackOnly)
+    expect(needsReachabilityProbe(loopbackOnly)).toBe(false)
+  })
+
   test("upgrades startable to ready only when the client can actually reach the preview", () => {
     const startable: DevServerStatusResult = { state: "startable", port: 4321 }
     expect(resolvePreviewState(startable, true)).toEqual({ state: "ready", port: 4321 })

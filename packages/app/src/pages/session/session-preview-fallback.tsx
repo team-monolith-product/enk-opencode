@@ -122,6 +122,7 @@ function DigBurst(props: { x: number; y: number }) {
 export function SessionPreviewFallback(props: {
   state?: DevServerState
   httpStatus?: number
+  loopbackOnly?: boolean
   onRetry?: () => void
   retrying?: boolean
 }) {
@@ -129,11 +130,19 @@ export function SessionPreviewFallback(props: {
 
   // 미리보기 상태 5분기 UI. ready 는 iframe 이 뜨므로 여기 안 옴 — 나머지 4개(+기본 starting)를 렌더.
   const state = () => props.state ?? "starting"
+  // errored 의 하위 갈래: 루프백에만 바인드된 dev 서버(`--host 0.0.0.0` 누락). HTTP 오류가 아니라
+  // 바인딩 문제라 안내 문구도, 고치는 방법도 다르다.
+  const loopbackOnly = () => state() === "errored" && !!props.loopbackOnly
   // 재시도가 의미 있는 상태에서만 버튼 노출: startable(뜰 수 있는데 안 뜸) · errored(실행됐지만 오류).
   // starting(기동 중)·none(서버 자체 없음)에서는 재시도해도 소용없어 숨긴다.
-  const showRetry = () => state() === "startable" || state() === "errored"
+  // loopbackOnly 도 숨긴다 — 포트는 이미 LISTEN 중이라 재시작 요청이 already_running 으로 되돌아올
+  // 뿐이고, 실제 해결은 AI 가 커맨드에 --host 를 붙여 다시 띄우는 것뿐이다.
+  const showRetry = () => !loopbackOnly() && (state() === "startable" || state() === "errored")
+  // AI 요청 문구는 loopbackOnly 에서도 보여야 한다 — 여기서는 그게 유일한 해결 경로다.
+  const showAskAi = () => showRetry() || loopbackOnly()
 
   const title = () => {
+    if (loopbackOnly()) return language.t("session.preview.loopbackOnly.title")
     switch (state()) {
       case "none":
         return language.t("session.preview.none.title")
@@ -146,6 +155,7 @@ export function SessionPreviewFallback(props: {
     }
   }
   const hint = () => {
+    if (loopbackOnly()) return language.t("session.preview.loopbackOnly.hint")
     switch (state()) {
       case "none":
         return language.t("session.preview.none.hint")
@@ -159,10 +169,12 @@ export function SessionPreviewFallback(props: {
   }
 
   // startable·errored 에서 AI 에게 보낼 수정 요청 문장 — 칩 클릭 또는 복사 버튼으로 클립보드 복사.
-  const promptText = () =>
-    state() === "errored"
+  const promptText = () => {
+    if (loopbackOnly()) return language.t("session.preview.loopbackOnly.prompt")
+    return state() === "errored"
       ? language.t("session.preview.errored.prompt")
       : language.t("session.preview.startable.prompt")
+  }
 
   const [copied, setCopied] = createSignal(false)
   let copyTimer: ReturnType<typeof setTimeout> | undefined
@@ -273,9 +285,12 @@ export function SessionPreviewFallback(props: {
         </Show>
 
         {/* 또는 AI 에게 수정 요청 — 문장 칩을 누르면 복사, 옆 버튼도 복사. */}
-        <Show when={showRetry()}>
+        <Show when={showAskAi()}>
           <div class="mt-1 flex w-full max-w-100 flex-col items-center gap-1">
-            <span style={HINT_TEXT_STYLE}>{language.t("session.preview.askAi.label")}</span>
+            {/* 재시도 버튼이 없는 갈래(loopbackOnly)에서는 "또는" 이 가리킬 앞 선택지가 없다. */}
+            <span style={HINT_TEXT_STYLE}>
+              {showRetry() ? language.t("session.preview.askAi.label") : language.t("session.preview.askAi.labelOnly")}
+            </span>
             <div class="flex w-full items-stretch gap-1">
               <button
                 type="button"

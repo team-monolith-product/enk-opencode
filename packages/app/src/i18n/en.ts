@@ -630,11 +630,16 @@ export const dict = {
   "session.preview.none.hint": "It'll show up here once the AI sets up a preview",
   "session.preview.errored.title": "The preview hit an error",
   "session.preview.errored.hint": "HTTP {{status}} · try again",
+  "session.preview.loopbackOnly.title": "The preview address can't connect",
+  "session.preview.loopbackOnly.hint": "The server is running, but only reachable from inside",
   "session.preview.askAi.label": "Or ask the AI:",
+  "session.preview.askAi.labelOnly": "Ask the AI:",
   "session.preview.askAi.copy": "Copy message",
   "session.preview.startable.prompt": "The preview isn't running. Please find out why and fix it so it runs.",
   "session.preview.errored.prompt":
     "The preview is throwing an error. Please find out why and fix it so it runs correctly.",
+  "session.preview.loopbackOnly.prompt":
+    "The dev server is bound to 127.0.0.1 only, so the preview can't reach it. Please stop the running server and restart it with --host 0.0.0.0 (--hostname 0.0.0.0 for Next.js).",
   "session.preview.clientError.title": "{{count}} error(s) in the preview",
   "session.preview.clientError.dismiss": "Dismiss",
   "session.preview.clientError.reopen": "Show preview error",
