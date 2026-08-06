@@ -109,7 +109,13 @@ async function assistant(sessionID: SessionID, parentID: MessageID, root: string
   return msg
 }
 
-async function tool(sessionID: SessionID, messageID: MessageID, tool: string, output: string) {
+async function tool(
+  sessionID: SessionID,
+  messageID: MessageID,
+  tool: string,
+  output: string,
+  attachments?: MessageV2.ToolStateCompleted["attachments"],
+) {
   return Session.updatePart({
     id: PartID.ascending(),
     messageID,
@@ -124,8 +130,26 @@ async function tool(sessionID: SessionID, messageID: MessageID, tool: string, ou
       title: "done",
       metadata: {},
       time: { start: Date.now(), end: Date.now() },
+      ...(attachments ? { attachments } : {}),
     },
   })
+}
+
+/** 페이지 오브젝트가 평문으로 보이는 최소 PDF. 페이지 수만 정확하면 되는 픽스처다. */
+function pdfAttachment(sessionID: SessionID, messageID: MessageID, pages: number): MessageV2.FilePart {
+  const body =
+    `%PDF-1.4\n` +
+    Array.from({ length: pages }, (_, i) => `${i + 1} 0 obj\n<< /Type /Page >>\nendobj\n`).join("") +
+    `%%EOF\n`
+  return {
+    id: PartID.ascending(),
+    sessionID,
+    messageID,
+    type: "file",
+    mime: "application/pdf",
+    filename: `scan-${pages}p.pdf`,
+    url: `data:application/pdf;base64,${Buffer.from(body, "latin1").toString("base64")}`,
+  }
 }
 
 function fake(
@@ -478,6 +502,60 @@ describe("session.compaction.prune", () => {
         expect(part?.state.status).toBe("completed")
         if (part?.type === "tool" && part.state.status === "completed") {
           expect(part.state.time.compacted).toBeNumber()
+        }
+      },
+    })
+  })
+
+  // Read 가 스캔본을 돌려주면 output 은 "PDF read successfully" 한 줄이고 무게는 전부 첨부에 있다.
+  // 텍스트만 세던 시절엔 이 파트가 PRUNE_MINIMUM 을 못 넘겨 prune 이 통째로 no-op 이었다.
+  test("첨부만 무거운 툴 결과도 prune 대상이 된다", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        // 20페이지 ≈ 54k 토큰 — PRUNE_PROTECT(40k)와 PRUNE_MINIMUM(20k)을 모두 넘긴다.
+        await tool(session.id, b.id, "read", "PDF read successfully", [pdfAttachment(session.id, b.id, 20)])
+        await user(session.id, "second")
+        await user(session.id, "third")
+
+        await SessionCompaction.prune({ sessionID: session.id })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+        if (part?.type === "tool" && part.state.status === "completed") {
+          expect(part.state.time.compacted).toBeNumber()
+        } else {
+          throw new Error("completed tool part not found")
+        }
+      },
+    })
+  })
+
+  test("작은 첨부는 여전히 보호 구간에 남는다", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const a = await user(session.id, "first")
+        const b = await assistant(session.id, a.id, tmp.path)
+        // 1페이지 ≈ 2.7k 토큰. 회계에는 잡히지만 게이트를 넘길 만큼은 아니다.
+        await tool(session.id, b.id, "read", "PDF read successfully", [pdfAttachment(session.id, b.id, 1)])
+        await user(session.id, "second")
+        await user(session.id, "third")
+
+        await SessionCompaction.prune({ sessionID: session.id })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+        if (part?.type === "tool" && part.state.status === "completed") {
+          expect(part.state.time.compacted).toBeUndefined()
+        } else {
+          throw new Error("completed tool part not found")
         }
       },
     })

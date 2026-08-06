@@ -5,6 +5,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 import { Instance } from "../project/instance"
 import { Provider } from "../provider/provider"
 import { MessageV2 } from "./message-v2"
+import { MediaTokens } from "./media-tokens"
 import z from "zod"
 import { Token } from "../util/token"
 import { Log } from "../util/log"
@@ -81,7 +82,14 @@ export namespace SessionCompaction {
       })
 
       // goes backwards through parts until there are PRUNE_PROTECT tokens worth of tool
-      // calls, then erases output of older tool calls to free context space
+      // calls, then erases output of older tool calls to free context space.
+      //
+      // A tool result's weight is its text plus its attachments. Sizing it by text alone made
+      // media invisible here: a Read of a 20-page scan is "PDF read successfully" (~5 tokens)
+      // next to ~54k tokens of pages, so it never consumed the protect window and never counted
+      // toward PRUNE_MINIMUM — in a session's worth of local history, prune had cleared 0 of 149
+      // tool parts. Pruning does drop the attachments (toModelMessages clears them once
+      // `compacted` is set), so counting them here is what makes that reachable.
       const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID }) {
         const cfg = yield* config.get()
         if (cfg.compaction?.prune === false) return
@@ -108,7 +116,8 @@ export namespace SessionCompaction {
               if (part.state.status === "completed") {
                 if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
                 if (part.state.time.compacted) break loop
-                const estimate = Token.estimate(part.state.output)
+                const estimate =
+                  Token.estimate(part.state.output) + MediaTokens.estimateAll(part.state.attachments)
                 total += estimate
                 if (total > PRUNE_PROTECT) {
                   pruned += estimate
