@@ -8,7 +8,7 @@
   "scripts": {
     "prepare": "effect-language-service patch || true",
     "typecheck": "tsgo --noEmit",
-    "test": "bun test --timeout 30000",
+    "test": "bun ./script/test.ts",
     "build": "bun run script/build.ts",
     "upgrade-opentui": "bun run script/upgrade-opentui.ts",
     "dev": "bun run --conditions=browser ./src/index.ts",
