@@ -1894,7 +1894,13 @@ it.effect(
             yield* user(chat.id, "hello")
 
             const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-            yield* Effect.sleep(200)
+            // Wait for the turn to actually reach the model rather than assuming a fixed delay gets
+            // it there. `calls` ticks the moment LLM.stream is entered, and the scripted stream hangs
+            // from then on, so this is exactly the "in flight" state the cancel below is about. On a
+            // loaded CI runner 200ms was not always enough: cancel landed before the call and the
+            // turn ended with calls still at 0.
+            while ((yield* test.calls) === 0) yield* Effect.sleep(5)
+            yield* Effect.sleep(50)
             yield* prompt.cancel(chat.id)
             yield* Fiber.await(fiber)
 
