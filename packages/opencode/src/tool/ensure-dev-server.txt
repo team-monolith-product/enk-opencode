@@ -6,6 +6,7 @@
 
 - 이미 LISTEN 중이면 서버를 재시작하지 않고 `already_running` 으로 즉시 반환.
 - LISTEN 중이 아니면 detached 백그라운드 프로세스로 launch 한 뒤 포트가 LISTEN 될 때까지만 폴링. `sleep 8` 같은 고정 대기 없음.
+- LISTEN 확인 후 포트가 루프백(127.0.0.1) 밖에서도 열려 있는지 한 번 더 확인한다. 루프백에만 바인드돼 있으면 `loopback_only`.
 - stdio 는 도구가 내부에서 ignore 처리하므로 학생 응답이 hang 되지 않는다. 학생이 "서버 로그 보여줘" 라고 명시적으로 요청할 때만 별도로 로그 파일에 띄워 `tail` 로 확인한다.
 
 ## 인자
@@ -39,5 +40,11 @@ JSON 문자열. `status` 필드:
 - `already_running`: 호출 시점에 이미 LISTEN 중이었음. `url` · `port` · `ms` 가 함께 온다.
 - `started`: 새로 띄워 LISTEN 까지 확인됨. `url` · `port` · `ms` 가 함께 온다.
 - `failed`: 띄우는 데 실패. `reason` 을 읽고 명령어를 고친 뒤 다시 호출한다.
+- `loopback_only`: LISTEN 은 됐지만 127.0.0.1 에만 바인드됨. **미리보기가 안 뜨는 상태이므로 성공으로 보고하지 말 것.** `url` 이 오지 않는다.
 
-성공 시 `url` 을 학생에게 그대로 안내한다.
+`loopback_only` 는 `--host 0.0.0.0`(Next.js 는 `--hostname 0.0.0.0`)을 빠뜨렸을 때 나온다. 미리보기는 외부 프록시가 `pod:포트` 로 라우팅하므로 루프백 전용 서버에는 닿지 못한다. 복구 순서:
+
+1. 포트를 잡고 있는 프로세스를 종료한다: `kill $(lsof -t -i:3000)`. 재바인딩하려면 반드시 먼저 죽여야 하며, 안 죽이면 다음 호출도 계속 `loopback_only` 다.
+2. 호스트 바인딩을 붙인 `cmd` 로 이 도구를 다시 호출한다.
+
+성공(`already_running` · `started`) 시 `url` 을 학생에게 그대로 안내한다.

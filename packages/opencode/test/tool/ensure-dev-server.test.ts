@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createServer, type Server } from "node:net"
-import { probePort, serveUrl } from "../../src/tool/ensure-dev-server"
+import { networkInterfaces } from "node:os"
+import { probePort, reachableExternally, serveUrl } from "../../src/tool/ensure-dev-server"
 
-function listen(): Promise<{ server: Server; port: number }> {
+function listen(host = "127.0.0.1"): Promise<{ server: Server; port: number }> {
   return new Promise((resolve, reject) => {
     const server = createServer()
     server.once("error", reject)
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, host, () => {
       const addr = server.address()
       if (!addr || typeof addr === "string") {
         server.close()
@@ -17,6 +18,12 @@ function listen(): Promise<{ server: Server; port: number }> {
     })
   })
 }
+
+// reachableExternally 는 비루프백 IPv4 가 하나도 없으면 판정을 포기하고 true 를 돌려준다.
+// 그 환경(격리된 CI 컨테이너 등)에서는 아래 두 케이스가 구분되지 않으므로 건너뛴다.
+const hasExternalIPv4 = Object.values(networkInterfaces())
+  .flatMap((infos) => infos ?? [])
+  .some((info) => !info.internal && info.family === "IPv4")
 
 function close(server: Server): Promise<void> {
   return new Promise((resolve) => server.close(() => resolve()))
@@ -38,6 +45,36 @@ describe("ensure-dev-server", () => {
       } finally {
         await close(server)
       }
+    })
+  })
+
+  describe("reachableExternally", () => {
+    test.if(hasExternalIPv4)("is false for a loopback-only bind — the --host 0.0.0.0 case", async () => {
+      // `npm run dev` 를 --host 없이 띄운 상태. probePort(127.0.0.1) 는 true 지만 CHP 는 못 닿는다.
+      const { server, port } = await listen("127.0.0.1")
+      try {
+        expect(await probePort(port, "127.0.0.1")).toBe(true)
+        expect(await reachableExternally(port)).toBe(false)
+      } finally {
+        await close(server)
+      }
+    })
+
+    test.if(hasExternalIPv4)("is true when bound to all interfaces", async () => {
+      const { server, port } = await listen("0.0.0.0")
+      try {
+        expect(await reachableExternally(port)).toBe(true)
+      } finally {
+        await close(server)
+      }
+    })
+
+    test("is false when nothing is listening at all", async () => {
+      const { server, port } = await listen("0.0.0.0")
+      await close(server)
+      // 후보 주소가 없는 환경에서는 판정을 포기해 true 가 나오므로, 그때는 검사하지 않는다.
+      if (!hasExternalIPv4) return
+      expect(await reachableExternally(port)).toBe(false)
     })
   })
 

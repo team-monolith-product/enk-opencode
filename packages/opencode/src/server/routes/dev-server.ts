@@ -4,7 +4,7 @@ import z from "zod"
 import { lazy } from "../../util/lazy"
 import { Instance } from "../../project/instance"
 import { DevServerReplay, probePort } from "../../enk/dev-server-replay"
-import { serveUrl } from "../../tool/ensure-dev-server"
+import { reachableExternally, serveUrl } from "../../tool/ensure-dev-server"
 
 const RESTART_READY_TIMEOUT_MS = 15000
 
@@ -75,14 +75,21 @@ async function selfProbeHttp(port: number): Promise<number | undefined> {
 }
 
 type PreviewState = "none" | "starting" | "startable" | "ready" | "errored"
-type StatusResult = { state: PreviewState; port?: number; httpStatus?: number }
+type StatusResult = { state: PreviewState; port?: number; httpStatus?: number; loopbackOnly?: boolean }
 
 // 미리보기 상태 5분기 — 클라이언트가 이 판정으로 fallback UI 를 고른다.
 // - none:      기록 없고 포트도 안 열림 → 아직 미리보기 서버가 없음(재시도 무의미)
 // - starting:  launch 진행 중이거나, 포트는 열렸는데 아직 응답 없음(기동 중)
 // - startable: 기록은 있는데 포트가 안 열림 → 재시작하면 뜰 수 있음(다시 시도)
-// - ready:     포트 열림 + HTTP <500
-// - errored:   포트 열림 + HTTP >=500 → 실행됐지만 오류
+// - ready:     포트 열림 + HTTP <500 + 파드 외부 주소로도 도달 가능
+// - errored:   포트 열림인데 못 쓰는 두 경우. httpStatus 유무로 구분한다.
+//     · httpStatus >= 500        → 실행됐지만 서버가 오류를 뱉음
+//     · loopbackOnly: true       → 루프백 응답은 정상인데 외부 주소로는 안 닿음(--host 0.0.0.0 누락)
+//
+// loopbackOnly 를 굳이 errored 로 접는 이유: 클라이언트는 이 둘을 스스로 구분할 수 없다. 클라의
+// cross-origin 도달 체크는 mode:"cors" 라 CORS 헤더가 없는 정상 dev 서버에서도 throw 하고(학생
+// 결과물에 CORS 헤더를 넣어주는 장치는 없다), CHP 는 pod:PORT 연결 실패 시 자기 502 페이지를
+// 돌려주므로 no-cors 로 바꿔도 "응답 있음"으로 새어 나간다. 그래서 이 판정은 서버만 내릴 수 있다.
 async function status(): Promise<StatusResult> {
   const record = await DevServerReplay.loadRecord(Instance.directory)
   const port = record?.port ?? 3000
@@ -93,6 +100,9 @@ async function status(): Promise<StatusResult> {
   const httpStatus = await selfProbeHttp(port)
   if (httpStatus === undefined) return { state: "starting", port }
   if (httpStatus >= 500) return { state: "errored", port, httpStatus }
+  // 루프백으로는 멀쩡히 응답하는데 파드 외부 주소로는 안 닿는 경우 — 미리보기(CHP → pod:PORT)는
+  // 실패하므로 ready 로 내리면 학생이 빈 iframe 을 본다. httpStatus 는 싣지 않는다(HTTP 오류가 아님).
+  if (!(await reachableExternally(port))) return { state: "errored", port, loopbackOnly: true }
   return { state: "ready", port, httpStatus }
 }
 
@@ -104,7 +114,10 @@ export const DevServerRoutes = lazy(() =>
         summary: "Preview dev server status",
         description:
           "Report the preview dev server state so the client can pick the right fallback UI: " +
-          "none | starting | startable | ready | errored. The server self-probes http://127.0.0.1:PORT to get an authoritative HTTP status.",
+          "none | starting | startable | ready | errored. The server self-probes http://127.0.0.1:PORT to get an authoritative HTTP status, " +
+          "then probes the port on a non-loopback address to catch dev servers bound to loopback only " +
+          "(started without --host 0.0.0.0), which the preview proxy cannot reach. Those report " +
+          "state=errored with loopbackOnly=true and no httpStatus.",
         operationId: "devServer.status",
         responses: {
           200: {
@@ -117,6 +130,7 @@ export const DevServerRoutes = lazy(() =>
                       state: z.enum(["none", "starting", "startable", "ready", "errored"]),
                       port: z.number().optional(),
                       httpStatus: z.number().optional(),
+                      loopbackOnly: z.boolean().optional(),
                     })
                     .meta({ ref: "DevServerStatus" }),
                 ),
