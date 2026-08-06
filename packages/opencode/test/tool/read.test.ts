@@ -544,3 +544,95 @@ describe("tool.read binary detection", () => {
     })
   })
 })
+
+/** 페이지 오브젝트가 평문으로 보이는 최소 PDF. 페이지 수만 정확하면 되는 픽스처다. */
+function pdfBytes(pages: number) {
+  return Buffer.from(
+    `%PDF-1.4\n` +
+      Array.from({ length: pages }, (_, i) => `${i + 1} 0 obj\n<< /Type /Page >>\nendobj\n`).join("") +
+      `%%EOF\n`,
+    "latin1",
+  )
+}
+
+describe("tool.read pdf page cap", () => {
+  test("상한 이하의 PDF 는 그대로 첨부한다", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "small.pdf"), pdfBytes(5))
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const read = await ReadTool.init()
+        const result = await read.execute({ filePath: path.join(tmp.path, "small.pdf") }, ctx)
+        expect(result.output).toBe("PDF read successfully")
+        expect(result.attachments?.[0]?.mime).toBe("application/pdf")
+      },
+    })
+  })
+
+  // 페이지당 ~2.7k 토큰이 턴 내내 매 스텝 재전송된다. 실제로 이 상한에 걸릴 만한 문서는
+  // 55페이지(148k) / 165페이지(445k)급이고, 그건 컨텍스트를 통째로 날린다.
+  test("상한을 넘는 PDF 는 첨부하지 않고 이유와 페이지 수를 알려준다", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "huge.pdf"), pdfBytes(165))
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const read = await ReadTool.init()
+        const result = await read.execute({ filePath: path.join(tmp.path, "huge.pdf") }, ctx)
+        expect(result.attachments).toBeUndefined()
+        expect(result.output).toContain("165 pages")
+        expect(result.output).toContain("20-page limit")
+        expect(result.metadata.truncated).toBe(true)
+      },
+    })
+  })
+
+  // 페이지 수를 못 읽는다고 막으면 멀쩡한 PDF 를 통째로 못 읽게 된다. 첨부하되 로그를 남긴다.
+  test("페이지 수를 못 읽어도 막지 않는다", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "opaque.pdf"), Buffer.from("%PDF-1.7\ncompressed\n%%EOF\n", "latin1"))
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const read = await ReadTool.init()
+        const result = await read.execute({ filePath: path.join(tmp.path, "opaque.pdf") }, ctx)
+        expect(result.output).toBe("PDF read successfully")
+        expect(result.attachments?.[0]?.mime).toBe("application/pdf")
+      },
+    })
+  })
+
+  test("이미지는 페이지 상한과 무관하게 첨부된다", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        // 1x1 PNG
+        await Bun.write(
+          path.join(dir, "dot.png"),
+          Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+            "base64",
+          ),
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const read = await ReadTool.init()
+        const result = await read.execute({ filePath: path.join(tmp.path, "dot.png") }, ctx)
+        expect(result.output).toBe("Image read successfully")
+        expect(result.attachments?.[0]?.mime).toBe("image/png")
+      },
+    })
+  })
+})
