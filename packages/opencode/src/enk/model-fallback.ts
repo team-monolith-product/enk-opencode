@@ -32,9 +32,10 @@ export namespace ModelFallback {
 
   /**
    * Directional exclusion pairs: a vision model never falls back to its text partner.
-   * Image-carrying turns are routed to the vision model (docker/image-model-router-plugin.js),
-   * so falling back from it to the text partner would land the image on a model that cannot
-   * see it. The reverse direction is safe and allowed — the text model falling back to its
+   * Media-carrying turns (images and PDFs) are routed to the vision model
+   * (docker/image-model-router-plugin.js), so falling back from it to the text partner would
+   * land the attachment on a model that cannot see it.
+   * The reverse direction is safe and allowed — the text model falling back to its
    * vision partner just reaches a model that handles text too, which is exactly what a
    * deployment pairing the two wants as its first fallback.
    *

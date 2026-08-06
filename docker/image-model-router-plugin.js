@@ -1,8 +1,8 @@
-// 이미지 첨부 메시지 모델 라우터 플러그인 (opencode).
+// 미디어(이미지/PDF) 첨부 메시지 모델 라우터 플러그인 (opencode).
 //
-// 동작: 사용자 메시지에 이미지 파일 파트가 있는데 선택된 모델이 이미지 입력을
+// 동작: 사용자 메시지에 미디어 파일 파트가 있는데 선택된 모델이 미디어 입력을
 // 지원하지 않으면(deepseek 등), 그 메시지의 모델을 비전 지원 모델(기본
-// minimax/MiniMax-M3)로 바꿔치기한다. 메시지 단위 전환이므로 이미지가 없는
+// minimax/MiniMax-M3)로 바꿔치기한다. 메시지 단위 전환이므로 미디어가 없는
 // 다음 메시지는 UI 가 보내는 원래 모델로 돌아간다.
 //
 // 원리: chat.message 훅은 사용자 메시지가 저장되기 직전에 호출되고
@@ -17,8 +17,12 @@
 //          방향의 팰백 배제가 자동 유도된다. 반대 방향(텍스트 → 비전)은 허용 —
 //          packages/opencode/src/enk/model-fallback.ts)
 //   옵션: ["./image-model-router-plugin.js", { "model": "minimax/MiniMax-M3", "variant": "adaptive" }]
-//   - model: 이미지 메시지를 처리할 모델 (providerID/modelID)
+//   - model: 미디어 메시지를 처리할 모델 (providerID/modelID)
 //   - variant: 전환 시 사용할 variant. 대상 모델에 존재할 때만 적용.
+//
+// 참고: PDF 는 전환 후에도 유저 메시지에 인라인되지 않는다(비용 정책 —
+// message-v2.ts 의 inlineMedia). 저장 경로 안내가 프롬프트에 함께 가고, 대상 모델이
+// Read 로 가져오면 툴 결과로 들어온다. 전환의 값어치는 그 Read 결과를 읽을 수 있다는 것.
 
 const DEFAULT_MODEL = "minimax/MiniMax-M3"
 const MODEL_ENV = "ENK_AI_IMAGE_MODEL"
@@ -33,7 +37,14 @@ export function parseModelRef(ref) {
   return { providerID: ref.slice(0, index), modelID: ref.slice(index + 1) }
 }
 
-export function supportsImageInput(model) {
+// 라우팅 대상이 되는 미디어. packages/opencode/src/session/message-v2.ts 의 MessageV2.isMedia 와
+// 같은 정의여야 한다. 서버는 여기 해당하는 파트를 "모델이 못 읽으면 프롬프트에서 뺀다"로 처리하므로,
+// 이 판정이 서버보다 좁으면 그 틈으로 첨부가 샌다 — 라우터가 image/* 만 보던 시절 PDF 가 그랬다.
+export function isMedia(mime) {
+  return typeof mime === "string" && (mime.startsWith("image/") || mime === "application/pdf")
+}
+
+export function supportsMediaInput(model) {
   // /provider 응답(Provider.Model)은 capabilities 아래에, 레거시
   // /config/providers 응답(ModelsDev.Model)은 최상위에 attachment 가 있다. 둘 다 수용.
   const caps = model.capabilities
@@ -94,10 +105,8 @@ async function server({ client }, options = {}) {
       if (!model) return
       if (model.providerID === target.providerID && model.modelID === target.modelID) return
 
-      const hasImage = (output.parts ?? []).some(
-        (part) => part.type === "file" && typeof part.mime === "string" && part.mime.startsWith("image/"),
-      )
-      if (!hasImage) return
+      const hasMedia = (output.parts ?? []).some((part) => part.type === "file" && isMedia(part.mime))
+      if (!hasMedia) return
 
       try {
         const current = await findModel(model)
@@ -106,8 +115,8 @@ async function server({ client }, options = {}) {
           log("현재 모델 정보를 provider 목록에서 찾지 못해 전환하지 않습니다:", `${model.providerID}/${model.modelID}`)
           return
         }
-        if (supportsImageInput(current)) {
-          log("현재 모델이 이미지 입력을 지원하므로 전환하지 않습니다:", `${model.providerID}/${model.modelID}`)
+        if (supportsMediaInput(current)) {
+          log("현재 모델이 미디어 입력을 지원하므로 전환하지 않습니다:", `${model.providerID}/${model.modelID}`)
           return
         }
 
@@ -124,7 +133,7 @@ async function server({ client }, options = {}) {
         const preferred = targetVariant && variants[targetVariant] ? targetVariant : message.variant
         message.variant = preferred && variants[preferred] ? preferred : undefined
         log(
-          "이미지 첨부 감지, 모델 전환:",
+          "미디어 첨부 감지, 모델 전환:",
           `${model.providerID}/${model.modelID}`,
           "→",
           `${message.model.providerID}/${message.model.modelID}`,

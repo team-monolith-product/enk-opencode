@@ -1,7 +1,7 @@
 // image-model-router-plugin 유닛 테스트 (bun test).
 // 가짜 opencode client 로 chat.message 훅의 모델 전환 로직을 검증한다.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import plugin, { parseModelRef, resolveTarget, supportsImageInput } from "./image-model-router-plugin.js"
+import plugin, { isMedia, parseModelRef, resolveTarget, supportsMediaInput } from "./image-model-router-plugin.js"
 
 const imageModelRouterPlugin = plugin.server
 
@@ -45,6 +45,8 @@ const PROVIDERS = [
 const OPTIONS = { model: "minimax/MiniMax-M3", variant: "adaptive" }
 
 const imagePart = { type: "file", mime: "image/png", url: "data:image/png;base64,xxx" }
+const pdfPart = { type: "file", mime: "application/pdf", url: "data:application/pdf;base64,xxx" }
+const textFilePart = { type: "file", mime: "text/plain", url: "data:text/plain;base64,xxx" }
 const textPart = { type: "text", text: "안녕" }
 
 function userMessage(providerID, modelID, variant) {
@@ -83,13 +85,25 @@ describe("parseModelRef", () => {
   })
 })
 
-describe("supportsImageInput", () => {
+describe("supportsMediaInput", () => {
   test("capabilities.attachment / input.image / 레거시 attachment 모두 인식", () => {
-    expect(supportsImageInput({ capabilities: { attachment: true } })).toBe(true)
-    expect(supportsImageInput({ capabilities: { attachment: false, input: { image: true } } })).toBe(true)
-    expect(supportsImageInput({ capabilities: { attachment: false, input: { image: false } } })).toBe(false)
-    expect(supportsImageInput({ attachment: true })).toBe(true)
-    expect(supportsImageInput({ attachment: false })).toBe(false)
+    expect(supportsMediaInput({ capabilities: { attachment: true } })).toBe(true)
+    expect(supportsMediaInput({ capabilities: { attachment: false, input: { image: true } } })).toBe(true)
+    expect(supportsMediaInput({ capabilities: { attachment: false, input: { image: false } } })).toBe(false)
+    expect(supportsMediaInput({ attachment: true })).toBe(true)
+    expect(supportsMediaInput({ attachment: false })).toBe(false)
+  })
+})
+
+describe("isMedia", () => {
+  // MessageV2.isMedia(packages/opencode/src/session/message-v2.ts)와 같은 집합이어야 한다.
+  test("이미지와 PDF 는 미디어, 나머지는 아니다", () => {
+    expect(isMedia("image/png")).toBe(true)
+    expect(isMedia("image/svg+xml")).toBe(true)
+    expect(isMedia("application/pdf")).toBe(true)
+    expect(isMedia("text/plain")).toBe(false)
+    expect(isMedia("application/x-directory")).toBe(false)
+    expect(isMedia(undefined)).toBe(false)
   })
 })
 
@@ -101,12 +115,36 @@ describe("chat.message 모델 전환", () => {
     expect(message.variant).toBe("adaptive")
   })
 
-  test("이미지가 없으면 전환하지 않는다", async () => {
+  // 라우터가 image/* 만 보던 시절, PDF 는 이 훅을 그대로 통과해 비전 미지원 모델에서
+  // 조용히 프롬프트에서 빠졌다(message-v2 의 isMedia 는 PDF 를 미디어로 센다).
+  test("PDF + 비전 미지원 모델 → 대상 모델로 전환", async () => {
+    const plugin = await imageModelRouterPlugin({ client: fakeClient(PROVIDERS) }, OPTIONS)
+    const message = await run(plugin, userMessage("deepseek", "deepseek-v4-pro"), [textPart, pdfPart])
+    expect(message.model).toEqual({ providerID: "minimax", modelID: "MiniMax-M3" })
+    expect(message.variant).toBe("adaptive")
+  })
+
+  test("이미지 + PDF 혼합도 한 번만 전환한다", async () => {
+    const plugin = await imageModelRouterPlugin({ client: fakeClient(PROVIDERS) }, OPTIONS)
+    const message = await run(plugin, userMessage("deepseek", "deepseek-v4-pro"), [imagePart, pdfPart])
+    expect(message.model).toEqual({ providerID: "minimax", modelID: "MiniMax-M3" })
+  })
+
+  test("미디어가 없으면 전환하지 않는다", async () => {
     const calls = { count: 0 }
     const plugin = await imageModelRouterPlugin({ client: fakeClient(PROVIDERS, calls) }, OPTIONS)
     const message = await run(plugin, userMessage("deepseek", "deepseek-v4-pro"), [textPart])
     expect(message.model).toEqual({ providerID: "deepseek", modelID: "deepseek-v4-pro" })
-    expect(calls.count).toBe(0) // 이미지 없으면 provider 조회도 없다
+    expect(calls.count).toBe(0) // 미디어 없으면 provider 조회도 없다
+  })
+
+  // 텍스트 첨부는 프롬프트에 텍스트로 실려 어느 모델이든 읽는다. 전환할 이유가 없다.
+  test("텍스트 파일 첨부는 미디어가 아니다", async () => {
+    const calls = { count: 0 }
+    const plugin = await imageModelRouterPlugin({ client: fakeClient(PROVIDERS, calls) }, OPTIONS)
+    const message = await run(plugin, userMessage("deepseek", "deepseek-v4-pro"), [textFilePart])
+    expect(message.model).toEqual({ providerID: "deepseek", modelID: "deepseek-v4-pro" })
+    expect(calls.count).toBe(0)
   })
 
   test("비전 지원 모델은 전환하지 않는다", async () => {
