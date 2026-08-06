@@ -1,29 +1,17 @@
 import { onCleanup, onMount } from "solid-js"
 import { showToast } from "@opencode-ai/ui/toast"
-import { usePrompt, type ContentPart, type ImageAttachmentPart } from "@/context/prompt"
+import { usePrompt, type ContentPart, type ImageAttachmentPart, type Prompt } from "@/context/prompt"
 import { useLanguage } from "@/context/language"
-import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
+import {
+  attachmentBudgetParams,
+  fitsAttachmentBudget,
+  MAX_ATTACHMENT_BYTES,
+  type AttachmentUsage,
+} from "@/constants/file-picker"
 import { uuid } from "@/utils/uuid"
 import { getCursorPosition } from "./editor-dom"
 import { attachmentMime } from "./files"
 import { normalizePaste, pasteMode } from "./paste"
-
-function dataUrl(file: File, mime: string) {
-  return new Promise<string>((resolve) => {
-    const reader = new FileReader()
-    reader.addEventListener("error", () => resolve(""))
-    reader.addEventListener("load", () => {
-      const value = typeof reader.result === "string" ? reader.result : ""
-      const idx = value.indexOf(",")
-      if (idx === -1) {
-        resolve(value)
-        return
-      }
-      resolve(`data:${mime};base64,${value.slice(idx + 1)}`)
-    })
-    reader.readAsDataURL(file)
-  })
-}
 
 type PromptAttachmentsInput = {
   enabled: () => boolean
@@ -32,9 +20,28 @@ type PromptAttachmentsInput = {
   setDraggingType: (type: "image" | "@mention" | null) => void
   focusEditor: () => void
   addPart: (part: ContentPart) => boolean
+  /**
+   * Stores the bytes server-side and returns the reference url the prompt part carries. Uploading
+   * up front is what keeps base64 out of the message part (and out of every client's sync stream);
+   * an attachment that cannot be stored is not attached at all.
+   */
+  upload: (file: File, mime: string) => Promise<string | undefined>
   dropPath?: (path: string) => Promise<boolean> | boolean
   dropFiles?: (files: File[]) => Promise<boolean>
   readClipboardImage?: () => Promise<File | null>
+}
+
+/**
+ * What the composer currently carries against the per-prompt attachment budget. The doc side counts
+ * its image/attachment blocks; here the prompt's own image parts are the equivalent — the two modes
+ * never send together, so each counts only its own.
+ */
+export function attachmentUsage(prompt: Prompt): AttachmentUsage {
+  const images = prompt.filter((part): part is ImageAttachmentPart => part.type === "image")
+  return {
+    count: images.length,
+    bytes: images.reduce((total, part) => total + (part.size ?? 0), 0),
+  }
 }
 
 export function createPromptAttachments(input: PromptAttachmentsInput) {
@@ -55,50 +62,84 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
     })
   }
 
-  const add = async (file: File, toast = true) => {
-    // Guard on file.size (synchronous, no read) before any FileReader read so an
-    // oversized file never gets base64-encoded into memory and crashes the tab.
+  const warnUploadFailed = () => {
+    showToast({
+      title: language.t("prompt.toast.attachmentUploadFailed.title"),
+      description: language.t("prompt.toast.attachmentUploadFailed.description"),
+    })
+  }
+
+  const warnOverBudget = () => {
+    showToast({
+      title: language.t("prompt.toast.tooManyAttachments.title"),
+      description: language.t("prompt.toast.tooManyAttachments.description", attachmentBudgetParams()),
+    })
+  }
+
+  // `usage` lets a batch keep its running total across files: the check has to happen before the
+  // upload await, so re-reading the prompt per file would let a batch walk past the budget.
+  const add = async (file: File, toast = true, usage = attachmentUsage(prompt.current())) => {
+    // Guard on file.size (synchronous, no read) before any read so an oversized file
+    // never gets pulled into memory and crashes the tab.
     if (file.size > MAX_ATTACHMENT_BYTES) {
       if (toast) warnTooLarge()
-      return false
+      return "size" as const
     }
 
     const mime = await attachmentMime(file)
     if (!mime) {
       if (toast) warn()
-      return false
+      return "type" as const
+    }
+
+    // Checked before the upload so a file that cannot be attached never reaches the asset store.
+    if (!fitsAttachmentBudget(usage, file.size)) {
+      if (toast) warnOverBudget()
+      return "overflow" as const
     }
 
     const editor = input.editor()
-    const url = await dataUrl(file, mime)
-    if (!url) return false
+    const url = await input.upload(file, mime)
+    if (!url) {
+      if (toast) warnUploadFailed()
+      return "upload" as const
+    }
+
+    usage.count += 1
+    usage.bytes += file.size
 
     const attachment: ImageAttachmentPart = {
       type: "image",
       id: uuid(),
       filename: file.name,
       mime,
-      dataUrl: url,
+      url,
+      size: file.size,
     }
     const cursor = prompt.cursor() ?? (editor ? getCursorPosition(editor) : undefined)
     prompt.set([...prompt.current(), attachment], cursor)
-    return true
+    return "ok" as const
   }
 
-  const addAttachment = (file: File) => add(file)
+  const addAttachment = async (file: File) => (await add(file)) === "ok"
 
   const addAttachments = async (files: File[], toast = true) => {
     let found = false
     let rejectedForSize = false
     let rejectedForType = false
+    let rejectedForUpload = false
+    let rejectedForBudget = false
+    const usage = attachmentUsage(prompt.current())
 
     for (const file of files) {
       if (file.size > MAX_ATTACHMENT_BYTES) {
         rejectedForSize = true
         continue
       }
-      const ok = await add(file, false)
-      if (ok) found = true
+      const result = await add(file, false, usage)
+      if (result === "ok") found = true
+      else if (result === "upload") rejectedForUpload = true
+      else if (result === "overflow") rejectedForBudget = true
       else rejectedForType = true
     }
 
@@ -106,6 +147,8 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
       // Surface the size rejection once for the batch (valid files still attach).
       // Only fall back to the unsupported-type warning when nothing else fired.
       if (rejectedForSize) warnTooLarge()
+      else if (rejectedForBudget) warnOverBudget()
+      else if (rejectedForUpload) warnUploadFailed()
       else if (rejectedForType && !found) warn()
     }
     return found

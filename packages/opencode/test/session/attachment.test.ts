@@ -13,7 +13,7 @@ function run<A>(program: Effect.Effect<A, unknown, Attachment.Service>) {
   return Effect.runPromise(Effect.scoped(program.pipe(Effect.provide(layer))))
 }
 
-const save = (input: { url: string; mime: string; filename?: string }) =>
+const save = (input: { url?: string; bytes?: Uint8Array; mime: string; filename?: string }) =>
   run(
     Effect.gen(function* () {
       const attachment = yield* Attachment.Service
@@ -65,6 +65,18 @@ describe("Attachment.save", () => {
 
   test("returns undefined for a non data url", async () => {
     const saved = await save({ url: "not-a-data-url", mime: "text/plain", filename: "x.txt" })
+    expect(saved).toBeUndefined()
+  })
+
+  test("writes bytes handed over directly (an upload stored as a doc asset)", async () => {
+    const bytes = new Uint8Array(decodeDataUrlBytes(PNG))
+    const saved = await save({ bytes, mime: "image/png", filename: "shot.png" })
+    expect(saved).toBeTruthy()
+    expect(new Uint8Array(fs.readFileSync(saved!))).toEqual(bytes)
+  })
+
+  test("returns undefined when neither a url nor bytes are given", async () => {
+    const saved = await save({ mime: "image/png", filename: "shot.png" })
     expect(saved).toBeUndefined()
   })
 })

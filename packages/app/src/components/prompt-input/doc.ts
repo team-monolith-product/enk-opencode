@@ -37,6 +37,15 @@ export type PromptDocInput = {
   /** An attachment upload failed. The block keeps its error mark and submit stays blocked until it
    *  is deleted (or deleted and undone, which retries). */
   onUploadFailed?: (name: string) => void
+  /**
+   * Editor factory, injectable so tests can stand in a fake handle — a real BlockSuite editor cannot
+   * be built under happy-dom. It is a parameter rather than a `mock.module("…/blocksuite-doc")`
+   * because module mocks are global to the whole `bun test` process: stubbing createPage here would
+   * also hand the stub to blocksuite-doc.test.ts, which needs the real one. Whether that breaks the
+   * suite comes down to which file the runner happens to reach first, so it passed on macOS and
+   * failed on CI's Linux box.
+   */
+  createPage?: typeof createPage
 }
 
 // Bootstrap requests (actor registration + prompt doc lookup) run before the sync layer exists, so a
@@ -88,6 +97,7 @@ async function promptDoc(input: PromptDocInput, sessionID: string, alive?: () =>
 }
 
 export function createPromptDoc(input: PromptDocInput) {
+  const buildPage = input.createPage ?? createPage
   const clientID = crypto.randomUUID()
   // Stable local-only identity for a readonly viewer. Never sent to the server (no actor.upsert) and
   // never broadcast. It fills the local sync object's actorID and is used to open the observer-only
@@ -213,7 +223,7 @@ export function createPromptDoc(input: PromptDocInput) {
     if (!el || !scheme || !next) return
     if (!opts?.keep) await drop()
     const current = handle
-    const fresh = await createPage({
+    const fresh = await buildPage({
       theme: scheme,
       sync: next,
       init: opts?.init ?? init,

@@ -306,9 +306,9 @@ describe("docMarkdown", () => {
       id: "doc_asset_1",
       mime: "text/plain",
       filename: "notes.md",
+      // The bytes stay server-side: the prompt carries only the reference to the stored asset.
+      url: "/doc/doc_1/asset/doc_asset_1",
     })
-    const b64 = out.assets[0]!.dataUrl.split(",")[1] ?? ""
-    expect(new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))).toBe(body)
   })
 
   test("keeps binary attachments served as octet-stream out of assets", async () => {

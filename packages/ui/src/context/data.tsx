@@ -27,6 +27,8 @@ export type NavigateToSessionFn = (sessionID: string) => void
 
 export type SessionHrefFn = (sessionID: string) => string
 
+export type AssetUrlFn = (url: string) => string
+
 export const { use: useData, provider: DataProvider } = createSimpleContext({
   name: "Data",
   init: (props: {
@@ -35,6 +37,12 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
     onNavigateToSession?: NavigateToSessionFn
     onSessionHref?: SessionHrefFn
     doc?: (props: { id: string; fallback?: JSX.Element }) => JSX.Element
+    /**
+     * Resolves an attachment part's url to something the browser can load. Uploads are stored as
+     * `/doc/{docID}/asset/{assetID}` references relative to the opencode server, which only the
+     * host knows how to reach; without a resolver the url is used as-is.
+     */
+    onAssetUrl?: AssetUrlFn
   }) => {
     return {
       get store() {
@@ -46,6 +54,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       navigateToSession: props.onNavigateToSession,
       sessionHref: props.onSessionHref,
       doc: props.doc,
+      assetUrl: (url: string) => props.onAssetUrl?.(url) ?? url,
     }
   },
 })

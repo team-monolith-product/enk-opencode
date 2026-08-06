@@ -84,7 +84,7 @@ describe("promptHasDraft", () => {
           id: "img-1",
           filename: "a.png",
           mime: "image/png",
-          dataUrl: "data:image/png;base64,AA==",
+          url: "data:image/png;base64,AA==",
         },
       ]),
     ).toBe(true)

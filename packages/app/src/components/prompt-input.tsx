@@ -49,7 +49,9 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { createOpenDiffTab, createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
 import { createTextFragment, getCursorPosition, setCursorPosition, setRangeEdge } from "./prompt-input/editor-dom"
-import { createPromptAttachments } from "./prompt-input/attachments"
+import { attachmentUsage, createPromptAttachments } from "./prompt-input/attachments"
+import { uploadAttachment } from "./prompt-input/upload"
+import { attachmentSrc as resolveAttachmentSrc } from "@/utils/attachment-src"
 import { dataUrlToPngFile } from "./prompt-input/capture"
 import { CaptureEditDialog } from "./prompt-input/capture-edit-dialog"
 import { ACCEPTED_FILE_TYPES } from "./prompt-input/files"
@@ -79,7 +81,7 @@ import { promptPlaceholder } from "./prompt-input/placeholder"
 import { promptFromDocMarkdown } from "@/components/prompt-input/prompt-plain"
 import { PromptDocShell } from "./prompt-input/doc-shell"
 import { MAX_PROMPT_DOC_CHARS } from "@/constants/prompt"
-import { MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
+import { attachmentBudgetParams, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
 import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
@@ -178,10 +180,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // Same wording whether the budget was hit while attaching or caught at send — the user needs the
   // two numbers either way.
   const attachmentLimitMessage = () =>
-    language.t("prompt.toast.tooManyAttachments.description", {
-      count: MAX_ATTACHMENT_COUNT.toLocaleString(),
-      size: Math.round(MAX_ATTACHMENT_TOTAL_BYTES / (1024 * 1024)).toLocaleString(),
-    })
+    language.t("prompt.toast.tooManyAttachments.description", attachmentBudgetParams())
   const { params, tabs, view } = useSessionLayout()
   let editorRef!: HTMLDivElement
   let fileInputRef: HTMLInputElement | undefined
@@ -329,6 +328,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const imageAttachments = createMemo(() =>
     prompt.current().filter((part): part is ImageAttachmentPart => part.type === "image"),
   )
+  const attachmentSrc = (attachment: ImageAttachmentPart) =>
+    resolveAttachmentSrc({ baseUrl: sdk.url, directory: sdk.directory, url: attachment.url })
 
   const [store, setStore] = createStore<{
     popover: "at" | "slash" | null
@@ -847,8 +848,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           onAdd={async (edited) => {
             try {
               if (docMode() === "doc") {
-                const { overflow } = await doc.addFiles([edited])
-                if (overflow) {
+                // 드롭 경로와 같은 순서로 거절 사유를 알린다 — 크기 초과가 먼저,
+                // 그 다음 예산 초과. 둘 다 아니면 조용히 추가된 것.
+                const { tooLarge, overflow } = await doc.addFiles([edited])
+                if (tooLarge) {
+                  showToast({
+                    title: language.t("prompt.toast.fileTooLarge.title"),
+                    description: language.t("prompt.toast.fileTooLarge.description"),
+                  })
+                } else if (overflow) {
                   showToast({
                     title: language.t("prompt.toast.tooManyAttachments.title"),
                     description: attachmentLimitMessage(),
@@ -1576,6 +1584,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       setCursorPosition(editorRef, promptLength(prompt.current()))
     },
     addPart,
+    // The composer's own attachments go to the session prompt doc's asset store, the same place
+    // doc-mode uploads land, so the prompt part only ever carries a reference. A composer with no
+    // session yet has no doc to hold the bytes, so the session is created first (doc mode does the
+    // same when it needs a doc).
+    upload: async (file, mime) => {
+      const sessionID = params.id ?? (await ensure())
+      if (!sessionID) return undefined
+      const docID = doc.docID() ?? (await doc.refresh(sessionID).catch(() => undefined))
+      if (!docID) return undefined
+      return uploadAttachment({ client: sdk.client, directory: sdk.directory, docID, file, mime })
+    },
     dropPath: async (path) => {
       if (docMode() !== "doc") return false
       const dir = sdk.directory.replace(/\/+$/, "")
@@ -1780,22 +1799,25 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         })
         return
       }
-      const base = [
-        ...promptFromDocMarkdown(text, prompt.current(), doc.docID(), doc.actorID()),
-        ...(next?.assets.map((asset) => ({
+      // Image parts for the assets living in the doc itself. Kept separate from `base` because
+      // prepare() rebuilds the prompt from scratch: appending `base`'s images back would re-append
+      // the ones promptFromDocMarkdown already carried over from prompt.current(), sending the same
+      // image twice.
+      const assetParts =
+        next?.assets.map((asset) => ({
           type: "image" as const,
           id: asset.id,
           filename: asset.filename,
           mime: asset.mime,
-          dataUrl: asset.dataUrl,
-        })) ?? []),
-      ]
+          url: asset.url,
+        })) ?? []
+      const base = [...promptFromDocMarkdown(text, prompt.current(), doc.docID(), doc.actorID()), ...assetParts]
       session.setApprovalSession(undefined)
       const sessionID = await handleSubmit(undefined, {
         prompt: base,
         prepare: async (id) => [
           ...promptFromDocMarkdown(text, prompt.current(), await doc.refresh(id), doc.actorID()),
-          ...base.filter((part) => part.type === "image"),
+          ...assetParts,
         ],
       })
       if (!sessionID) return
@@ -1808,6 +1830,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           description: language.t("prompt.toast.docAdvanceFailed.description"),
         })
       }
+      return
+    }
+
+    // Same last line of defense as the doc branch. Adds are refused over budget, but a prompt
+    // restored from history or from an edited message brings its attachments back without passing
+    // through them.
+    const usage = attachmentUsage(prompt.current())
+    if (usage.count > MAX_ATTACHMENT_COUNT || usage.bytes > MAX_ATTACHMENT_TOTAL_BYTES) {
+      showToast({
+        title: language.t("prompt.toast.tooManyAttachments.title"),
+        description: attachmentLimitMessage(),
+      })
       return
     }
 
@@ -2111,8 +2145,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         />
         <PromptImageAttachments
           attachments={imageAttachments()}
+          src={attachmentSrc}
           onOpen={(attachment) =>
-            dialog.show(() => <ImagePreview src={attachment.dataUrl} alt={attachment.filename} />)
+            dialog.show(() => <ImagePreview src={attachmentSrc(attachment)} alt={attachment.filename} />)
           }
           onRemove={removeAttachment}
           removeLabel={language.t("prompt.attachment.remove")}

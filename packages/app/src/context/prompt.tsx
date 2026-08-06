@@ -36,7 +36,14 @@ export interface ImageAttachmentPart {
   id: string
   filename: string
   mime: string
-  dataUrl: string
+  /**
+   * Where the bytes live: a `/doc/{docID}/asset/{assetID}` reference for anything uploaded from
+   * this client. Messages sent before attachments moved to the asset store still carry a data
+   * url here, so both forms have to render and re-send.
+   */
+  url: string
+  /** Byte size, for the per-prompt attachment budget. Unknown for parts restored from a message. */
+  size?: number
 }
 
 export type ContentPart = TextPart | FileAttachmentPart | AgentPart | ImageAttachmentPart

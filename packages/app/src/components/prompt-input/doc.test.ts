@@ -35,13 +35,16 @@ const handle = {
   collection: { id: "doc_1" },
 }
 
-mock.module("@/components/blocksuite/blocksuite-doc", () => ({
-  createPage: mock(async (input: DocMountInput) => {
-    mounts.push(input)
-    onSubmit = input.onSubmit
-    return handle
-  }),
-}))
+// Injected per-instance rather than registered as a module mock for blocksuite-doc. Module mocks are
+// global to the whole `bun test` process, so stubbing createPage there would also hand the stub to
+// blocksuite-doc.test.ts, which exercises the real one — and whether that broke the suite came down
+// to which file the runner reached first (fine on macOS, 6 failures on CI's Linux box).
+// See src/module-mock-allowlist.test.ts.
+const createPage = mock(async (input: DocMountInput) => {
+  mounts.push(input)
+  onSubmit = input.onSubmit
+  return handle
+}) as never
 
 let createPromptDoc: typeof import("./doc").createPromptDoc
 
@@ -81,7 +84,7 @@ describe("createPromptDoc plain props", () => {
   test("mount passes plain theme to createPage", async () => {
     mounts.length = 0
     const [store] = createStore(config())
-    const doc = createPromptDoc({ config: store, client, onSubmit: () => {} })
+    const doc = createPromptDoc({ createPage, config: store, client, onSubmit: () => {} })
     const el = document.createElement("div")
     await doc.mount({ el, theme: "light" })
     expect(mounts[0]?.theme).toBe("light")
@@ -90,7 +93,7 @@ describe("createPromptDoc plain props", () => {
   test("setTheme updates stored theme before remount", async () => {
     mounts.length = 0
     const [store] = createStore(config())
-    const doc = createPromptDoc({ config: store, client, onSubmit: () => {} })
+    const doc = createPromptDoc({ createPage, config: store, client, onSubmit: () => {} })
     const el = document.createElement("div")
     await doc.mount({ el, theme: "light" })
     doc.setTheme("dark")
@@ -101,7 +104,7 @@ describe("createPromptDoc plain props", () => {
   test("remount reads submitKey from config store", async () => {
     mounts.length = 0
     const [store, setStore] = createStore(config({ submitKey: "enter" }))
-    const doc = createPromptDoc({ config: store, client, onSubmit: () => {} })
+    const doc = createPromptDoc({ createPage, config: store, client, onSubmit: () => {} })
     const el = document.createElement("div")
     await doc.mount({ el, theme: "light" })
     setStore("submitKey", "mod+enter")
@@ -113,7 +116,7 @@ describe("createPromptDoc plain props", () => {
     mounts.length = 0
     let sent = 0
     const [store] = createStore(config())
-    const doc = createPromptDoc({ config: store, client, onSubmit: () => sent++ })
+    const doc = createPromptDoc({ createPage, config: store, client, onSubmit: () => sent++ })
     const el = document.createElement("div")
     await doc.mount({ el, theme: "light" })
     onSubmit?.()
@@ -123,7 +126,7 @@ describe("createPromptDoc plain props", () => {
   test("config store sessionID read after await", async () => {
     promptDocs.length = 0
     const [store, setStore] = createStore(config({ sessionID: "session_1" }))
-    const doc = createPromptDoc({ config: store, client, onSubmit: () => {} })
+    const doc = createPromptDoc({ createPage, config: store, client, onSubmit: () => {} })
     const el = document.createElement("div")
     await doc.mount({ el, theme: "light" })
     setStore("sessionID", "session_2")
@@ -141,7 +144,7 @@ describe("createPromptDoc plain props", () => {
       },
     } as never
     const [store] = createStore(config({ readonly: true }))
-    const doc = createPromptDoc({ config: store, client: readonlyClient, onSubmit: () => {} })
+    const doc = createPromptDoc({ createPage, config: store, client: readonlyClient, onSubmit: () => {} })
     const el = document.createElement("div")
     await doc.mount({ el, theme: "light" })
     expect(mounts.at(-1)?.readonly).toBe(true)
@@ -164,7 +167,7 @@ describe("createPromptDoc attachment budget", () => {
     assetUsage = { count: 0, bytes: 0 }
     handle.addFile.mockClear()
     const [store] = createStore(config())
-    const doc = createPromptDoc({ config: store, client, onSubmit: () => {} })
+    const doc = createPromptDoc({ createPage, config: store, client, onSubmit: () => {} })
     await doc.mount({ el: document.createElement("div"), theme: "light" })
     return doc
   }

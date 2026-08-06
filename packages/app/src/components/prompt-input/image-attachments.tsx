@@ -4,6 +4,8 @@ import type { ImageAttachmentPart } from "@/context/prompt"
 
 type PromptImageAttachmentsProps = {
   attachments: ImageAttachmentPart[]
+  /** Resolves the part's stored url (an asset reference) to something an <img> can load. */
+  src: (attachment: ImageAttachmentPart) => string
   onOpen: (attachment: ImageAttachmentPart) => void
   onRemove: (id: string) => void
   removeLabel: string
@@ -32,7 +34,7 @@ export const PromptImageAttachments: Component<PromptImageAttachmentsProps> = (p
                 }
               >
                 <img
-                  src={attachment.dataUrl}
+                  src={props.src(attachment)}
                   alt={attachment.filename}
                   class={imageClass}
                   onClick={() => props.onOpen(attachment)}
