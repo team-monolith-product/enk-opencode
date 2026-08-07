@@ -127,7 +127,19 @@ const LOG_LINE_HEIGHT = 17
  * dev 서버 출력 tail — 기다리는 동안 "뭐가 돌고 있는지"를 보여 준다.
  * 새 줄이 오면 항상 맨 아래로 따라붙고(사용자가 위로 올려 읽는 중이면 그대로 둔다), 로그가 없으면 렌더 자체를 건너뛴다.
  */
-function PreviewLogs(props: { lines: string[]; cmd?: string }) {
+/** 커맨드 끝에서 도는 작은 스피너 — 로그가 잠잠한 구간에도 서버가 아직 붙잡고 있다는 신호. */
+function CommandSpinner() {
+  return (
+    <span class="jt-spin-fast inline-flex shrink-0" style={{ color: "var(--app-muted)" }} aria-hidden="true">
+      <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+        <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="2.5" opacity="0.25" />
+        <path d="M17.5 10A7.5 7.5 0 0 0 10 2.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+      </svg>
+    </span>
+  )
+}
+
+function PreviewLogs(props: { lines: string[]; cmd?: string; running?: boolean }) {
   const language = useLanguage()
   let box: HTMLDivElement | undefined
   // 바닥 근처(한 줄 여유)에 있을 때만 자동 스크롤 — 위로 올려 읽는 중이면 방해하지 않는다.
@@ -160,9 +172,15 @@ function PreviewLogs(props: { lines: string[]; cmd?: string }) {
         <span class="inline-flex shrink-0 text-icon-weak-base">
           <Icon name="terminal" size="small" />
         </span>
-        <span class="min-w-0 flex-1 truncate font-mono" style={HINT_TEXT_STYLE} title={props.cmd}>
+        {/* 커맨드는 남는 폭만큼만 쓰고(길면 말줄임), 스피너가 바로 그 끝에 붙는다. 남은 공간은
+            스페이서가 먹어 복사 버튼만 오른쪽 끝에 남는다. */}
+        <span class="min-w-0 truncate font-mono" style={HINT_TEXT_STYLE} title={props.cmd}>
           {props.cmd ?? language.t("session.preview.logs.label")}
         </span>
+        <Show when={props.running}>
+          <CommandSpinner />
+        </Show>
+        <span class="flex-1" />
         <button
           type="button"
           onClick={copyLog}
@@ -348,7 +366,8 @@ export function SessionPreviewFallback(props: {
         {/* dev 서버가 뱉는 내용 — 기다리는 동안 진행 상황이 보이고, errored 면 원인이 바로 드러난다.
             로그가 아직 없으면(none 이거나 방금 시작) 아무것도 그리지 않는다. */}
         <Show when={(props.logs?.length ?? 0) > 0}>
-          <PreviewLogs lines={props.logs!} cmd={props.logCmd} />
+          {/* 스피너는 기동 중(starting)일 때만 — startable·errored 에서 돌면 뭔가 진행 중인 것처럼 보인다. */}
+          <PreviewLogs lines={props.logs!} cmd={props.logCmd} running={state() === "starting"} />
         </Show>
 
         {/* 수동 재시도 — startable·errored 에서만 노출(starting/none 은 소용없어 숨김).
