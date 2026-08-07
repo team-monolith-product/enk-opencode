@@ -15,7 +15,11 @@ export type DocUpload = {
 
 type Entry = DocUpload & {
   blob: Blob
-  controller: AbortController
+  /**
+   * The request carrying these bytes. Undefined on a *follower* — a block that attached a file
+   * another block is already uploading, and so rides that request instead of sending it twice.
+   */
+  controller?: AbortController
 }
 
 export type UploadTrackerInput = {
@@ -30,6 +34,11 @@ export type UploadTrackerInput = {
  * prompt cannot be sent without: `active()` gates submit. Deleting the block cancels the upload
  * (abort, not "upload anyway and throw the result away"), and undoing that deletion resumes it from
  * the blob we kept.
+ *
+ * Asset ids are content hashes, so the same file attached twice is the same asset: its bytes are
+ * sent once. A second block whose asset is already stored has nothing to upload at all, and one
+ * whose asset is still on the wire follows that request — sharing its progress, and taking it over
+ * if the block that started it is deleted mid-flight.
  */
 export function createUploadTracker(input: UploadTrackerInput) {
   const entries = new Map<string, Entry>()
@@ -37,48 +46,86 @@ export function createUploadTracker(input: UploadTrackerInput) {
   // without asking the user to pick the file again. Keyed by asset id: undo may restore the block
   // under a fresh id, but the sourceId it carries is the one we uploaded under.
   const blobs = new Map<string, { name: string; blob: Blob }>()
+  // Assets whose bytes reached the server. Nothing removes them: the asset store is per doc and
+  // never deletes, so re-attaching one of these files is a no-op upload.
+  const stored = new Set<string>()
 
   const emit = () => input.onChange()
 
+  const sharing = (key: string) => Array.from(entries.values()).filter((entry) => entry.key === key)
+
+  /** The entry actually sending `key`'s bytes right now, if any. */
+  const sender = (key: string) =>
+    sharing(key).find((entry) => entry.controller && entry.status === "uploading")
+
   const run = (entry: Entry) => {
+    const controller = new AbortController()
+    entry.controller = controller
     entries.set(entry.blockId, entry)
     emit()
     input
       .upload(entry.key, entry.blob, {
-        signal: entry.controller.signal,
+        signal: controller.signal,
         onProgress: (loaded, total) => {
           if (entries.get(entry.blockId) !== entry) return
-          entry.loaded = loaded
-          if (total > 0) entry.total = total
+          // Followers show the same bar: it is their bytes too, on one request.
+          for (const item of sharing(entry.key)) {
+            item.loaded = loaded
+            if (total > 0) item.total = total
+          }
           emit()
         },
       })
       .then(() => {
+        stored.add(entry.key)
         if (entries.get(entry.blockId) !== entry) return
-        entries.delete(entry.blockId)
+        // One landed upload settles every block that attached the same file.
+        for (const item of sharing(entry.key)) entries.delete(item.blockId)
         emit()
       })
       .catch(() => {
         // A cancelled upload is not a failure — the block (and this entry) is already gone.
         if (entries.get(entry.blockId) !== entry) return
-        if (entry.controller.signal.aborted) {
+        if (controller.signal.aborted) {
           entries.delete(entry.blockId)
           emit()
           return
         }
-        entry.status = "error"
+        // Nothing landed, so every block waiting on these bytes is stuck, not just this one.
+        for (const item of sharing(entry.key)) item.status = "error"
         emit()
       })
+  }
+
+  /** Abort this entry's request; a block that was riding it takes the bytes over instead. */
+  const drop = (entry: Entry) => {
+    const controller = entry.controller
+    if (!controller) return
+    const next = sharing(entry.key).find((item) => item !== entry && !item.controller)
+    entry.controller = undefined
+    controller.abort()
+    if (!next) return
+    next.loaded = 0
+    next.status = "uploading"
+    run(next)
   }
 
   const start = (item: { blockId: string; key: string; name: string; blob: Blob }) => {
     const current = entries.get(item.blockId)
     if (current) {
       if (current.key === item.key) return
-      current.controller.abort()
+      entries.delete(item.blockId)
+      drop(current)
     }
     blobs.set(item.key, { name: item.name, blob: item.blob })
-    run({
+
+    // Already on the server — the block can render from the asset store as it stands.
+    if (stored.has(item.key)) {
+      emit()
+      return
+    }
+
+    const entry: Entry = {
       blockId: item.blockId,
       key: item.key,
       name: item.name,
@@ -86,8 +133,19 @@ export function createUploadTracker(input: UploadTrackerInput) {
       total: item.blob.size,
       status: "uploading",
       blob: item.blob,
-      controller: new AbortController(),
-    })
+    }
+
+    // Same bytes already going up: follow that request rather than sending a second copy.
+    const live = sender(item.key)
+    if (live) {
+      entry.loaded = live.loaded
+      entry.total = live.total
+      entries.set(entry.blockId, entry)
+      emit()
+      return
+    }
+
+    run(entry)
   }
 
   /** Block removed (delete or undo) — stop uploading rather than finishing a file nobody will send. */
@@ -95,7 +153,7 @@ export function createUploadTracker(input: UploadTrackerInput) {
     const entry = entries.get(blockId)
     if (!entry) return false
     entries.delete(blockId)
-    entry.controller.abort()
+    drop(entry)
     emit()
     return true
   }
@@ -103,6 +161,7 @@ export function createUploadTracker(input: UploadTrackerInput) {
   /** Block came back (undo of a delete): re-upload from the blob we kept, if it never landed. */
   const resume = (blockId: string, key: string) => {
     if (entries.has(blockId)) return false
+    if (stored.has(key)) return false
     const kept = blobs.get(key)
     if (!kept) return false
     start({ blockId, key, name: kept.name, blob: kept.blob })
@@ -127,9 +186,10 @@ export function createUploadTracker(input: UploadTrackerInput) {
     /** True while any upload is still in flight or failed — the prompt must not be sent yet. */
     active: () => entries.size > 0,
     dispose: () => {
-      for (const entry of entries.values()) entry.controller.abort()
+      for (const entry of entries.values()) entry.controller?.abort()
       entries.clear()
       blobs.clear()
+      stored.clear()
     },
   }
 }

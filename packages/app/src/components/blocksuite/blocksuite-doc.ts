@@ -95,18 +95,29 @@ const kind = (file: File) => {
 
 const image = (file: File) => kind(file).startsWith("image/")
 
+// Memoized per File: the budget check asks for a file's id before handing that same file to
+// addFile, and hashing a 25 MB blob twice means reading it twice. It also keeps the non-secure
+// fallback below stable — the two callers must agree on the id, random or not.
+const keys = new WeakMap<File, Promise<string>>()
+
 // Content-addressed asset id, matching what BlockSuite's own blob engine derives (sha-256, base64url)
 // so the same file attached twice reuses one asset. crypto.subtle is missing outside a secure
 // context; a random id is fine there — the id only has to be unique within the doc.
-const assetKey = async (file: File) => {
-  try {
-    const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
-    let binary = ""
-    for (const byte of new Uint8Array(hash)) binary += String.fromCharCode(byte)
-    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_")
-  } catch {
-    return crypto.randomUUID().replace(/-/g, "")
-  }
+export const assetKey = (file: File) => {
+  const cached = keys.get(file)
+  if (cached) return cached
+  const pending = (async () => {
+    try {
+      const hash = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
+      let binary = ""
+      for (const byte of new Uint8Array(hash)) binary += String.fromCharCode(byte)
+      return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_")
+    } catch {
+      return crypto.randomUUID().replace(/-/g, "")
+    }
+  })()
+  keys.set(file, pending)
+  return pending
 }
 
 const sourceId = (model: BlockModel) => {
@@ -299,12 +310,16 @@ export async function createPage(input: DocMountInput) {
   // the doc socket before the asset exists on the server, so their image/attachment has already
   // failed to fetch and cached that failure; the write emits a sourceId update on every client,
   // which is exactly what those blocks re-fetch on. withoutTransact keeps it out of the undo stack.
+  // Every block carrying the asset, not just the first: the same file attached twice is one asset
+  // under two blocks, and each of them cached its own failed fetch.
   const settleAsset = (key: string) => {
-    const model = [...doc.getBlockByFlavour("affine:image"), ...doc.getBlockByFlavour("affine:attachment")].find(
+    const models = [...doc.getBlockByFlavour("affine:image"), ...doc.getBlockByFlavour("affine:attachment")].filter(
       (item) => sourceId(item) === key,
     )
-    if (!model) return
-    doc.withoutTransact(() => doc.updateBlock(model, { sourceId: key }))
+    if (models.length === 0) return
+    doc.withoutTransact(() => {
+      for (const model of models) doc.updateBlock(model, { sourceId: key })
+    })
   }
 
   const uploads = createUploadTracker({
@@ -672,14 +687,27 @@ export async function createPage(input: DocMountInput) {
   // ones BlockSuite created itself (native paste inside the editor never goes through addFile), so
   // the caller's budget check cannot be walked around. A block without a usable size counts toward
   // the number but contributes nothing to the byte total.
+  //
+  // Counted per ASSET, not per block: ids are content hashes, so the same file in two blocks is one
+  // stored asset uploaded once and costs the budget once. `keys` is what the caller matches an
+  // incoming file against to decide whether it is free.
   const assets = () => {
     const blocks = [...doc.getBlockByFlavour("affine:image"), ...doc.getBlockByFlavour("affine:attachment")]
+    const seen = new Set<string>()
+    let count = 0
     let bytes = 0
     for (const block of blocks) {
+      const key = sourceId(block)
+      // A block with no asset id yet matches nothing, so it can only count for itself.
+      if (key) {
+        if (seen.has(key)) continue
+        seen.add(key)
+      }
+      count += 1
       const size = (block as unknown as { size?: unknown }).size
       if (typeof size === "number" && size > 0) bytes += size
     }
-    return { count: blocks.length, bytes }
+    return { count, bytes, keys: [...seen] }
   }
 
   const addReference = (path: string, nodeType: FileNodeType = "file") => {
