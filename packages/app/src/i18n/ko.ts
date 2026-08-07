@@ -559,11 +559,16 @@ export const dict = {
   "session.preview.none.hint": "AI가 미리보기를 준비하면 여기에 표시돼요",
   "session.preview.errored.title": "미리보기 실행 중 오류가 났어요",
   "session.preview.errored.hint": "HTTP {{status}} · 다시 시도해 보세요",
+  "session.preview.loopbackOnly.title": "미리보기 주소로 연결되지 않아요",
+  "session.preview.loopbackOnly.hint": "서버는 켜져 있지만 바깥에서 접속할 수 없게 실행됐어요",
   "session.preview.askAi.label": "또는 AI에게 요청:",
+  "session.preview.askAi.labelOnly": "AI에게 요청:",
   "session.preview.askAi.copy": "메시지 복사",
   "session.preview.startable.prompt": "미리보기가 실행되지 않습니다. 원인을 확인하고 실행되도록 수정해 주세요.",
   "session.preview.errored.prompt":
     "미리보기 실행 중 오류가 발생합니다. 원인을 확인하고 정상 실행되도록 수정해 주세요.",
+  "session.preview.loopbackOnly.prompt":
+    "미리보기가 열리지 않습니다. dev 서버가 컨테이너 안(127.0.0.1)에서만 열려 있어요. 모든 주소에 바인딩되도록 dev 서버를 다시 띄워 주세요.",
   "session.preview.clientError.title": "미리보기에서 오류 {{count}}개",
   "session.preview.clientError.dismiss": "닫기",
   "session.preview.clientError.reopen": "미리보기 오류 보기",

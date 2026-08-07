@@ -1837,6 +1837,7 @@ export type DevServerStatus = {
   state: "none" | "starting" | "startable" | "ready" | "errored"
   port?: number
   httpStatus?: number
+  loopbackOnly?: boolean
 }
 
 export type DevServerRestart = {

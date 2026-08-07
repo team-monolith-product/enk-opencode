@@ -1349,7 +1349,7 @@ export class DevServer extends HeyApiClient {
   /**
    * Preview dev server status
    *
-   * Report the preview dev server state so the client can pick the right fallback UI: none | starting | startable | ready | errored. The server self-probes http://127.0.0.1:PORT to get an authoritative HTTP status.
+   * Report the preview dev server state so the client can pick the right fallback UI: none | starting | startable | ready | errored. The server self-probes http://127.0.0.1:PORT to get an authoritative HTTP status, then probes the port on a non-loopback address to catch dev servers bound to loopback only (started without --host 0.0.0.0), which the preview proxy cannot reach. Those report state=errored with loopbackOnly=true and no httpStatus.
    */
   public status<ThrowOnError extends boolean = false>(
     parameters?: {

@@ -41,13 +41,18 @@ const HOST_HINT =
  * `--host` 없이 띄운 Vite/Nuxt 계열은 127.0.0.1 에만 바인딩되는데, probePort 는 루프백을 보므로
  * "떠 있음"으로 통과하고 정작 CHP 를 거치는 실제 미리보기는 실패한다. 이 괴리를 도구가 직접 알려주지
  * 않으면 학생이 매번 "안 열려요" 를 반복하게 된다. 비루프백 주소가 없는 로컬 개발에서는 undefined.
+ *
+ * 후보 주소가 여럿이면 전부 찔러 하나라도 닿으면 true 다. 첫 주소만 보면 인터페이스가 둘 이상인
+ * 파드에서 엉뚱한 쪽을 집어 "루프백 전용" 오탐이 날 수 있는데, /dev-server/status 가 이 신호로
+ * 미리보기를 아예 막으므로(errored) 오탐 비용이 hint 를 붙이던 때보다 크다.
  */
-async function reachableExternally(port: number): Promise<boolean | undefined> {
-  const host = Object.values(networkInterfaces())
+export async function reachableExternally(port: number): Promise<boolean | undefined> {
+  const hosts = Object.values(networkInterfaces())
     .flat()
-    .find((info) => info?.family === "IPv4" && !info.internal)?.address
-  if (!host) return undefined
-  return probePort(port, host)
+    .flatMap((info) => (info && info.family === "IPv4" && !info.internal ? [info.address] : []))
+  if (!hosts.length) return undefined
+  const reached = await Promise.all(hosts.map((host) => probePort(port, host)))
+  return reached.some(Boolean)
 }
 
 export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => ({
