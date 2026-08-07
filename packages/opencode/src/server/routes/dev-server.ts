@@ -54,7 +54,7 @@ async function restart(abort: AbortSignal): Promise<RestartResult> {
     if (await probePort(port)) {
       return { status: "already_running", url: serveUrl(port, target?.kind), port, ms: ms() }
     }
-    const child = DevServerReplay.launch(record.cmd, record.cwd, { dir: Instance.directory })
+    const child = await DevServerReplay.launch(record.cmd, record.cwd, { dir: Instance.directory })
     // 기록의 pid 는 지금 포트를 잡은 프로세스를 가리켜야 한다 — 나중에 ensure_dev_server 가
     // restart 로 이 서버를 교체할 때 죽일 대상이 된다.
     if (child.pid) await DevServerReplay.record(Instance.directory, { ...record, pid: child.pid })

@@ -154,6 +154,35 @@ export namespace Permission {
     // 읽는 길이 열린다. `/env-file/` 로 슬래시를 붙여 이 저장소의 env-file.ts 소스 작업은 안 걸리게 한다.
     { permission: "bash", pattern: "*/env-file/*", action: "deny" },
     { permission: "webfetch", pattern: "*/env-file/*", action: "deny" },
+
+    // 프로세스 환경 자체를 읽는 경로. ChildEnv 가 자식 환경을 allowlist 로 걸러도 리눅스의
+    // /proc/<pid>/environ 은 exec 시점 값이라 그대로 남으므로 여기서 따로 막는다.
+    { permission: "read", pattern: "*/proc/*/environ", action: "deny" },
+    { permission: "bash", pattern: "*/proc/*/environ*", action: "deny" },
+
+    // 환경을 통째로 덤프하는 커맨드. bash 툴은 파이프라인의 커맨드 노드마다 패턴을 만들어 보내므로
+    // `env | grep TOKEN` 처럼 뒤에 붙는 형태도 "env" 로 걸린다. 인자를 받는 형태(`env FOO=1 cmd`,
+    // `export FOO=1`)는 정상 사용이라 통과시킨다.
+    { permission: "bash", pattern: "env", action: "deny" },
+    { permission: "bash", pattern: "env -*", action: "deny" },
+    { permission: "bash", pattern: "*/bin/env", action: "deny" },
+    { permission: "bash", pattern: "*/bin/env -*", action: "deny" },
+    { permission: "bash", pattern: "printenv*", action: "deny" },
+    { permission: "bash", pattern: "*/bin/printenv*", action: "deny" },
+    { permission: "bash", pattern: "export", action: "deny" },
+    { permission: "bash", pattern: "export -p*", action: "deny" },
+    { permission: "bash", pattern: "declare", action: "deny" },
+    { permission: "bash", pattern: "declare -p*", action: "deny" },
+    { permission: "bash", pattern: "declare -x*", action: "deny" },
+    { permission: "bash", pattern: "typeset", action: "deny" },
+    { permission: "bash", pattern: "typeset -p*", action: "deny" },
+    { permission: "bash", pattern: "typeset -x*", action: "deny" },
+    { permission: "bash", pattern: "set", action: "deny" },
+    // PowerShell 의 환경 드라이브. 윈도우에서는 Wildcard 매칭이 대소문자를 무시한다.
+    { permission: "bash", pattern: "Get-ChildItem Env:*", action: "deny" },
+    { permission: "bash", pattern: "gci Env:*", action: "deny" },
+    { permission: "bash", pattern: "ls Env:*", action: "deny" },
+    { permission: "bash", pattern: "dir Env:*", action: "deny" },
   ]
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Permission") {}

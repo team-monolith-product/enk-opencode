@@ -16,6 +16,7 @@ import z from "zod/v4"
 import { Instance } from "../project/instance"
 import { Installation } from "../installation"
 import { withTimeout } from "@/util/timeout"
+import { ChildEnv } from "@/util/child-env"
 import { AppFileSystem } from "@/filesystem"
 import { McpOAuthProvider } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
@@ -385,11 +386,14 @@ export namespace MCP {
           command: cmd,
           args,
           cwd,
-          env: {
-            ...process.env,
-            ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
-            ...mcp.environment,
-          },
+          // 상속은 ChildEnv allowlist 로만. MCP 서버에 시크릿을 주려면 설정의 `environment` 에
+          // 명시해야 한다 — 그 값은 필터 뒤에 얹히므로 그대로 전달된다.
+          env: ChildEnv.sanitize({
+            extend: {
+              ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
+              ...mcp.environment,
+            },
+          }) as Record<string, string>,
         })
         transport.stderr?.on("data", (chunk: Buffer) => {
           log.info(`mcp stderr: ${chunk.toString()}`, { key })

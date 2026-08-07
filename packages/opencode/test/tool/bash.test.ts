@@ -6,7 +6,7 @@ import { BashTool } from "../../src/tool/bash"
 import { Instance } from "../../src/project/instance"
 import { Filesystem } from "../../src/util/filesystem"
 import { tmpdir } from "../fixture/fixture"
-import type { Permission } from "../../src/permission"
+import { Permission } from "../../src/permission"
 import { Truncate } from "../../src/tool/truncate"
 import { SessionID, MessageID } from "../../src/session/schema"
 
@@ -954,6 +954,90 @@ describe("tool.bash truncation", () => {
       },
     })
   })
+
+  // 이 저장소가 지키려는 계약: 배포가 주입한 시크릿은 에이전트가 실행하는 셸에 존재하지 않는다.
+  each("injected secrets are absent from the child shell", async () => {
+    const secrets = {
+      JUPYTERHUB_API_TOKEN: "hub-secret-value",
+      ENK_AI_USAGE_TOKEN: "rails-secret-value",
+      OPENCODE_CONSOLE_TOKEN: "console-secret-value",
+      GITHUB_TOKEN: "gh-secret-value",
+    }
+    // 대조군: allowlist 를 통과하는 이름은 그대로 보여야 한다. 없으면 셸이 아무것도 못 읽어서
+    // 통과하는 가짜 성공을 구분할 수 없다.
+    const control = { NODE_ENV: "child-env-control" }
+    const prev = Object.fromEntries(
+      [...Object.keys(secrets), ...Object.keys(control)].map((name) => [name, process.env[name]]),
+    )
+    Object.assign(process.env, secrets, control)
+    try {
+      await Instance.provide({
+        directory: projectRoot,
+        fn: async () => {
+          const bash = await BashTool.init()
+          const read = (name: string) => (PS.has(sh()) ? `$env:${name}` : `"$${name}"`)
+          const command = [...Object.keys(secrets), ...Object.keys(control)]
+            .map((name) => `echo ${read(name)}`)
+            .join(sh() === "cmd" ? " & " : "; ")
+          const result = await bash.execute({ command, description: "Print env values" }, ctx)
+          for (const value of Object.values(secrets)) expect(result.output).not.toContain(value)
+          expect(result.output).toContain(control.NODE_ENV)
+        },
+      })
+    } finally {
+      for (const [name, value] of Object.entries(prev)) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+    }
+  })
+
+  each("environment dump commands are routed to a denied bash permission", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const err = new Error("stop after permission")
+        for (const [command, want] of [
+          ["env | grep TOKEN", "env"],
+          ["printenv", "printenv"],
+          ["export -p", "export -p"],
+        ] as const) {
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          await expect(bash.execute({ command, description: "Dump env" }, capture(requests, err))).rejects.toThrow(
+            err.message,
+          )
+          const req = requests.find((r) => r.permission === "bash")
+          expect(req).toBeDefined()
+          expect(req!.patterns).toContain(want)
+          expect(Permission.evaluate("bash", want, Permission.ENV_FILE_GUARD).action).toBe("deny")
+        }
+      },
+    })
+  })
+
+  if (process.platform !== "win32") {
+    each("reading a process environ file is routed to a denied read permission", async () => {
+      await Instance.provide({
+        directory: projectRoot,
+        fn: async () => {
+          const bash = await BashTool.init()
+          const err = new Error("stop after permission")
+          const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
+          await expect(
+            bash.execute(
+              { command: "cat /proc/self/environ", description: "Read process environ" },
+              capture(requests, err),
+            ),
+          ).rejects.toThrow(err.message)
+          const req = requests.find((r) => r.permission === "read")
+          expect(req).toBeDefined()
+          expect(req!.patterns).toContain("/proc/self/environ")
+          expect(Permission.evaluate("read", "/proc/self/environ", Permission.ENV_FILE_GUARD).action).toBe("deny")
+        },
+      })
+    })
+  }
 
   test("full output is saved to file when truncated", async () => {
     await Instance.provide({

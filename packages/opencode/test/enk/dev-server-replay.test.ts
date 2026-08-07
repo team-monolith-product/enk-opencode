@@ -67,7 +67,7 @@ async function waitForAsync(predicate: () => Promise<boolean>, timeoutMs = 5000)
 
 /** 별도 프로세스에서 포트를 잡는 더미 서버. launch 와 동일하게 detached 로 떠 pgid == pid. */
 async function spawnListener(dir: string, port: number) {
-  const child = DevServerReplay.launch(
+  const child = await DevServerReplay.launch(
     `${process.execPath} -e 'require("net").createServer().listen(${port}, "127.0.0.1"); setInterval(() => {}, 1000)'`,
     dir,
   )

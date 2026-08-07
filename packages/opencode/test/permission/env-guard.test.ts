@@ -88,6 +88,51 @@ describe("ENV_FILE_GUARD", () => {
     expect(Permission.evaluate("webfetch", "https://example.com/docs", guard).action).not.toBe("deny")
   })
 
+  // ChildEnv 는 자식 프로세스의 환경만 바꾼다. exec 시점 environ 을 파일로 읽는 이 경로는
+  // 필터로 못 막으므로 권한 계층이 덮어야 한다.
+  test("process environ paths are denied", () => {
+    const guard = Permission.ENV_FILE_GUARD
+    expect(Permission.evaluate("read", "/proc/self/environ", guard).action).toBe("deny")
+    expect(Permission.evaluate("read", "/proc/1/environ", guard).action).toBe("deny")
+    expect(Permission.evaluate("bash", "cat /proc/self/environ", guard).action).toBe("deny")
+    expect(Permission.evaluate("bash", "tr '\\0' '\\n' < /proc/1/environ", guard).action).toBe("deny")
+    expect(Permission.evaluate("read", "/proc/self/status", guard).action).not.toBe("deny")
+  })
+
+  test("environment dump commands are denied", () => {
+    const guard = Permission.ENV_FILE_GUARD
+    for (const command of [
+      "env",
+      "printenv",
+      "printenv JUPYTERHUB_API_TOKEN",
+      "/usr/bin/env",
+      "/usr/bin/printenv",
+      "env -0",
+      "export",
+      "export -p",
+      "declare",
+      "declare -x",
+      "typeset -p",
+      "set",
+      "Get-ChildItem Env:",
+    ]) {
+      expect([command, Permission.evaluate("bash", command, guard).action]).toEqual([command, "deny"])
+    }
+    // 환경을 덤프하지 않는 정상 사용은 걸리지 않는다
+    for (const command of [
+      "env FOO=1 npm run dev",
+      "export FOO=1",
+      "declare -a items",
+      "set -e",
+      "set -euo pipefail",
+      "node -e 'console.log(1)'",
+      "ls packages/opencode/src/env",
+      "cat src/env/index.ts",
+    ]) {
+      expect([command, Permission.evaluate("bash", command, guard).action]).not.toEqual([command, "deny"])
+    }
+  })
+
   test("grep tool never returns .env contents", async () => {
     await using tmp = await tmpdir({
       git: true,
