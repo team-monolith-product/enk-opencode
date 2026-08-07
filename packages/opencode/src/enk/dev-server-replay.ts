@@ -2,7 +2,7 @@ import z from "zod"
 import { spawn } from "node:child_process"
 import { createConnection } from "node:net"
 import { existsSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 import { Log } from "@/util/log"
 
 /**
@@ -43,6 +43,10 @@ export namespace DevServerReplay {
   const log = Log.create({ service: "enk.dev-server-replay" })
 
   const FILE = ".opencode/dev-server.json"
+  const LOG_FILE = ".opencode/dev-server.log"
+
+  /** 로그 tail 로 읽어 올 최대 바이트. 파일이 아무리 커져도 이 뒤쪽만 읽는다. */
+  const LOG_TAIL_BYTES = 64 * 1024
 
   const State = z.object({
     cmd: z.string(),
@@ -56,15 +60,35 @@ export namespace DevServerReplay {
     return process.env["ENK_PROJECT_DIRECTORY"] ?? fallback
   }
 
+  /** 셸 인자용 작은따옴표 이스케이프. 경로에 공백·따옴표가 있어도 리다이렉트가 깨지지 않게 한다. */
+  function sq(value: string): string {
+    return `'${value.replaceAll("'", `'\\''`)}'`
+  }
+
+  /** dev 서버 출력이 쌓이는 로그 파일 경로. 기록 파일과 같은 stateDir 을 쓴다. */
+  export function logFile(fallback?: string): string | undefined {
+    const dir = stateDir(fallback)
+    return dir ? resolve(dir, LOG_FILE) : undefined
+  }
+
   /**
    * 백그라운드 launch. detached + stdio:ignore + unref 로 OpenCode 프로세스가 stdout 파이프를
    * 잡지 않게 한다. 이게 빠지면 도구 호출이 반환되지 않고 응답 턴이 hang 된다.
    *
+   * 출력은 Node 파이프 대신 셸 리다이렉트로 로그 파일에 남긴다(파이프를 안 잡으므로 hang 위험 없음).
+   * 미리보기 대기/오류 화면이 이 파일을 tail 해서 보여준다. 커맨드가 `a && b` 같은 복합문일 수 있어
+   * 중괄호 그룹으로 감싸 리다이렉트가 전체에 걸리게 하고, 매 launch 마다 파일을 비워 이번 실행의
+   * 로그만 남긴다(무한 증가 방지). 로그 경로를 못 정하면 예전처럼 그냥 버린다.
+   *
    * 'error' 리스너가 없으면 비동기 spawn 실패(ENOENT/EAGAIN 등)가 uncaught 예외가 되는데,
    * replay 는 부팅 경로에서 fire-and-forget 로 돌아 프로세스를 죽이므로 반드시 처리한다.
    */
-  export function launch(cmd: string, cwd: string) {
-    const child = spawn("/bin/sh", ["-lc", cmd], {
+  export function launch(cmd: string, cwd: string, opts?: { dir?: string }) {
+    const file = logFile(opts?.dir ?? cwd)
+    const script = file
+      ? `mkdir -p ${sq(dirname(file))} 2>/dev/null; : > ${sq(file)} 2>/dev/null; {\n${cmd}\n} >> ${sq(file)} 2>&1`
+      : cmd
+    const child = spawn("/bin/sh", ["-lc", script], {
       cwd,
       detached: true,
       stdio: "ignore",
@@ -110,8 +134,39 @@ export namespace DevServerReplay {
       return
     }
 
-    const child = launch(state.cmd, state.cwd)
+    const child = launch(state.cmd, state.cwd, { dir })
     log.info("replayed dev server", { pid: child.pid, port: state.port, cwd: state.cwd })
+  }
+
+  // ANSI 이스케이프(색/커서 제어). vite 등 dev 서버 출력은 색이 섞여 오는데, 웹에서 그대로 그리면
+  // 제어문자가 노출되므로 읽는 쪽에서 벗겨낸다.
+  const ANSI = new RegExp("\\u001b\\[[0-9;?]*[ -\/]*[@-~]|\\u001b[@-Z\\\\-_]", "g")
+
+  /**
+   * dev 서버 로그의 마지막 N 줄. 진행률 표시(\r 로 덮어쓰는 줄)는 마지막 조각만 남기고,
+   * ANSI 색코드는 벗긴다. 파일이 없거나 읽기 실패면 빈 배열.
+   */
+  export async function readLog(opts?: { dir?: string; lines?: number }): Promise<string[]> {
+    const file = logFile(opts?.dir)
+    if (!file) return []
+    const limit = Math.max(1, Math.min(opts?.lines ?? 40, 500))
+    try {
+      const handle = Bun.file(file)
+      const size = handle.size
+      if (!size) return []
+      const text = await handle.slice(Math.max(0, size - LOG_TAIL_BYTES)).text()
+      const rows = text
+        .split("\n")
+        // \r 로 같은 줄을 덮어쓰는 진행률 출력은 마지막 상태만 의미가 있다.
+        .map((line) => (line.includes("\r") ? (line.split("\r").at(-1) ?? "") : line))
+        .map((line) => line.replace(ANSI, "").trimEnd())
+      // 앞쪽 잘림(64KB 경계)으로 반쪽짜리가 된 첫 줄은 버린다.
+      if (size > LOG_TAIL_BYTES) rows.shift()
+      const trimmed = rows.filter((line) => line.length > 0)
+      return trimmed.slice(-limit)
+    } catch {
+      return []
+    }
   }
 
   /** 기록된 dev 서버 커맨드를 반환한다. 없거나 파싱 실패면 undefined. UI 재시작 등에서 재사용. */

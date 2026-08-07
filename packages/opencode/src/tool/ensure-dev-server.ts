@@ -90,7 +90,7 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       metadata: {},
     })
 
-    const child = DevServerReplay.launch(params.cmd, cwd)
+    const child = DevServerReplay.launch(params.cmd, cwd, { dir: Instance.directory })
     log.info("spawned dev server", { pid: child.pid, port: params.port, cwd })
 
     const ready = await waitForPort(params.port, params.ready_timeout_ms, ctx.abort)

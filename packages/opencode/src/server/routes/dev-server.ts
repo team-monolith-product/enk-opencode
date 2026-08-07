@@ -8,6 +8,9 @@ import { serveUrl } from "../../tool/ensure-dev-server"
 
 const RESTART_READY_TIMEOUT_MS = 15000
 
+// /logs 기본 tail 줄 수 — 대기 화면이 보여 주는 양보다 넉넉하게.
+const DEFAULT_LOG_LINES = 40
+
 async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -48,7 +51,7 @@ async function restart(abort: AbortSignal): Promise<RestartResult> {
     if (await probePort(record.port)) {
       return { status: "already_running", url: serveUrl(record.port), port: record.port, ms: ms() }
     }
-    DevServerReplay.launch(record.cmd, record.cwd)
+    DevServerReplay.launch(record.cmd, record.cwd, { dir: Instance.directory })
     const ready = await waitForPort(record.port, RESTART_READY_TIMEOUT_MS, abort)
     if (!ready) {
       return {
@@ -160,6 +163,44 @@ export const DevServerRoutes = lazy(() =>
       }),
       async (c) => {
         return c.json(await restart(c.req.raw.signal))
+      },
+    )
+    .get(
+      "/logs",
+      describeRoute({
+        summary: "Preview dev server logs",
+        description:
+          "Tail the preview dev server output captured by the launcher (.opencode/dev-server.log). " +
+          "Returns the last `tail` non-empty lines with ANSI escapes stripped, plus the command that produced them. " +
+          "Empty when no dev server has been launched yet.",
+        operationId: "devServer.logs",
+        responses: {
+          200: {
+            description: "Dev server log tail",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z
+                    .object({
+                      lines: z.array(z.string()),
+                      cmd: z.string().optional(),
+                      port: z.number().optional(),
+                    })
+                    .meta({ ref: "DevServerLogs" }),
+                ),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        const raw = Number(c.req.query("tail"))
+        const lines = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : DEFAULT_LOG_LINES
+        const [tail, record] = await Promise.all([
+          DevServerReplay.readLog({ dir: Instance.directory, lines }),
+          DevServerReplay.loadRecord(Instance.directory),
+        ])
+        return c.json({ lines: tail, cmd: record?.cmd, port: record?.port })
       },
     ),
 )

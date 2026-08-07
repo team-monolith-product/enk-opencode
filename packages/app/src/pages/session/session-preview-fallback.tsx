@@ -119,9 +119,84 @@ function DigBurst(props: { x: number; y: number }) {
   )
 }
 
+// 로그 박스에 한 번에 보이는 줄 수(넘치면 스크롤). 대기 화면이 로그판이 되지 않을 만큼만.
+const LOG_VISIBLE_LINES = 8
+const LOG_LINE_HEIGHT = 17
+
+/**
+ * dev 서버 출력 tail — 기다리는 동안 "뭐가 돌고 있는지"를 보여 준다.
+ * 새 줄이 오면 항상 맨 아래로 따라붙고(사용자가 위로 올려 읽는 중이면 그대로 둔다), 로그가 없으면 렌더 자체를 건너뛴다.
+ */
+function PreviewLogs(props: { lines: string[]; cmd?: string }) {
+  const language = useLanguage()
+  let box: HTMLDivElement | undefined
+  // 바닥 근처(한 줄 여유)에 있을 때만 자동 스크롤 — 위로 올려 읽는 중이면 방해하지 않는다.
+  let stick = true
+
+  const [copied, setCopied] = createSignal(false)
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
+  const copyLog = () => {
+    void writeClipboard([props.cmd, ...props.lines].filter(Boolean).join("\n"))
+    setCopied(true)
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => setCopied(false), 1500)
+  }
+  onCleanup(() => copyTimer && clearTimeout(copyTimer))
+
+  const onScroll = () => {
+    if (!box) return
+    stick = box.scrollHeight - box.scrollTop - box.clientHeight < LOG_LINE_HEIGHT * 1.5
+  }
+
+  createEffect(() => {
+    props.lines.length
+    if (!box || !stick) return
+    queueMicrotask(() => box && (box.scrollTop = box.scrollHeight))
+  })
+
+  return (
+    <div class="mt-1 flex w-full max-w-140 flex-col gap-1 text-left">
+      <div class="flex items-center gap-1.5">
+        <span class="inline-flex shrink-0 text-icon-weak-base">
+          <Icon name="terminal" size="small" />
+        </span>
+        <span class="min-w-0 flex-1 truncate font-mono" style={HINT_TEXT_STYLE} title={props.cmd}>
+          {props.cmd ?? language.t("session.preview.logs.label")}
+        </span>
+        <button
+          type="button"
+          onClick={copyLog}
+          aria-label={language.t("session.preview.logs.copy")}
+          classList={{ "text-icon-success-base": copied() }}
+          class="inline-flex size-6 shrink-0 items-center justify-center rounded text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+        >
+          <Icon name={copied() ? "check-small" : "copy"} size="small" />
+        </button>
+      </div>
+      {/* 세로 패딩을 두면 바닥까지 스크롤했을 때 맨 윗줄이 패딩만큼 잘려 보인다. 줄 높이의 배수로만
+          높이를 잡아 어느 위치에서나 줄이 딱 맞게 끊기도록 한다(터미널과 같은 룩). */}
+      <div
+        ref={(el) => (box = el)}
+        onScroll={onScroll}
+        class="w-full overflow-y-auto overflow-x-hidden rounded-md border border-border-weak-base bg-background-stronger px-2.5 font-mono text-left"
+        style={{
+          "max-height": `${LOG_VISIBLE_LINES * LOG_LINE_HEIGHT}px`,
+          "font-size": "11px",
+          "line-height": `${LOG_LINE_HEIGHT}px`,
+          color: "var(--app-muted)",
+        }}
+      >
+        <For each={props.lines}>{(line) => <div class="whitespace-pre-wrap break-words">{line}</div>}</For>
+      </div>
+    </div>
+  )
+}
+
 export function SessionPreviewFallback(props: {
   state?: DevServerState
   httpStatus?: number
+  logs?: string[]
+  logCmd?: string
   onRetry?: () => void
   retrying?: boolean
 }) {
@@ -258,6 +333,12 @@ export function SessionPreviewFallback(props: {
           <span style={{ "font-size": "13.5px", "font-weight": "600", color: "var(--app-ink)" }}>{title()}</span>
           <span style={HINT_TEXT_STYLE}>{hint()}</span>
         </div>
+        {/* dev 서버가 뱉는 내용 — 기다리는 동안 진행 상황이 보이고, errored 면 원인이 바로 드러난다.
+            로그가 아직 없으면(none 이거나 방금 시작) 아무것도 그리지 않는다. */}
+        <Show when={(props.logs?.length ?? 0) > 0}>
+          <PreviewLogs lines={props.logs!} cmd={props.logCmd} />
+        </Show>
+
         {/* 수동 재시도 — startable·errored 에서만 노출(starting/none 은 소용없어 숨김).
             연타는 상위 restart() 의 in-flight 잠금+쿨다운이 막는다. */}
         <Show when={showRetry() && props.onRetry}>

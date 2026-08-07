@@ -640,6 +640,8 @@ export const dict = {
   "session.preview.startable.prompt": "The preview isn't running. Please find out why and fix it so it runs.",
   "session.preview.errored.prompt":
     "The preview is throwing an error. Please find out why and fix it so it runs correctly.",
+  "session.preview.logs.label": "Server log",
+  "session.preview.logs.copy": "Copy log",
   "session.preview.clientError.title": "{{count}} error(s) in the preview",
   "session.preview.clientError.dismiss": "Dismiss",
   "session.preview.clientError.reopen": "Show preview error",

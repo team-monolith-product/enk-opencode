@@ -145,4 +145,78 @@ describe("DevServerReplay", () => {
       expect(existsSync(marker)).toBe(false)
     })
   })
+
+  describe("launch log capture", () => {
+    // 로그가 파일에 닿을 때까지(=readLog 가 기대 줄을 볼 때까지) 기다린다. launch 는 fire-and-forget 이라
+    // 쓰기 시점이 비동기다.
+    async function waitForLog(dir: string, predicate: (lines: string[]) => boolean, timeoutMs = 5000) {
+      const deadline = Date.now() + timeoutMs
+      let lines = await DevServerReplay.readLog({ dir })
+      while (!predicate(lines) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50))
+        lines = await DevServerReplay.readLog({ dir })
+      }
+      return lines
+    }
+
+    test("captures stdout and stderr into the log file", async () => {
+      const dir = await tempProjectDir()
+
+      DevServerReplay.launch("echo out; echo err 1>&2", dir, { dir })
+
+      expect(await waitForLog(dir, (l) => l.includes("out") && l.includes("err"))).toEqual(["out", "err"])
+    })
+
+    test("redirects the whole command when it is compound", async () => {
+      const dir = await tempProjectDir()
+
+      DevServerReplay.launch("echo first && echo second", dir, { dir })
+
+      expect(await waitForLog(dir, (l) => l.length >= 2)).toEqual(["first", "second"])
+    })
+
+    test("truncates the log on each launch so only the current run shows", async () => {
+      const dir = await tempProjectDir()
+
+      DevServerReplay.launch("echo old", dir, { dir })
+      await waitForLog(dir, (l) => l.includes("old"))
+      DevServerReplay.launch("echo new", dir, { dir })
+
+      expect(await waitForLog(dir, (l) => l.includes("new"))).toEqual(["new"])
+    })
+
+    test("strips ANSI colors and collapses carriage-return progress lines", async () => {
+      const dir = await tempProjectDir()
+
+      DevServerReplay.launch(`printf '\\033[32mready\\033[0m\\n10%%\\r90%%\\rdone\\n'`, dir, { dir })
+
+      expect(await waitForLog(dir, (l) => l.includes("done"))).toEqual(["ready", "done"])
+    })
+
+    test("keeps only the last requested lines", async () => {
+      const dir = await tempProjectDir()
+
+      DevServerReplay.launch("for i in 1 2 3 4 5; do echo line$i; done", dir, { dir })
+
+      expect(await waitForLog(dir, (l) => l.includes("line5"))).toHaveLength(5)
+      expect(await DevServerReplay.readLog({ dir, lines: 2 })).toEqual(["line4", "line5"])
+    })
+
+    test("returns nothing when no log exists", async () => {
+      const dir = await tempProjectDir()
+
+      expect(await DevServerReplay.readLog({ dir })).toEqual([])
+    })
+
+    test("writes the log next to the record under ENK_PROJECT_DIRECTORY, not the cwd", async () => {
+      const canonical = await tempProjectDir()
+      const session = await tempProjectDir()
+
+      process.env["ENK_PROJECT_DIRECTORY"] = canonical
+      DevServerReplay.launch("echo ok", session)
+
+      expect(await waitForLog(canonical, (l) => l.includes("ok"))).toEqual(["ok"])
+      expect(existsSync(join(session, ".opencode", "dev-server.log"))).toBe(false)
+    })
+  })
 })
