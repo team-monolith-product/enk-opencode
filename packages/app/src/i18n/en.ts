@@ -351,6 +351,7 @@ export const dict = {
   "prompt.action.docToText": "Back to text",
   "prompt.action.docUndo": "Undo",
   "prompt.action.docRedo": "Redo",
+  "prompt.action.docUploading": "Uploading attachments…",
   "prompt.attachment.remove": "Remove attachment",
   "prompt.action.send": "Send",
   "prompt.action.stop": "Stop",
@@ -372,6 +373,10 @@ export const dict = {
   "prompt.toast.docTooLong.description": "Keep the document under {{max}} characters before sending.",
   "prompt.toast.tooManyAttachments.title": "Too many attachments",
   "prompt.toast.tooManyAttachments.description": "Up to {{count}} attachments and {{size}} MB in total per prompt.",
+  "prompt.toast.docUploading.title": "Attachments still uploading",
+  "prompt.toast.docUploading.description": "Wait for the upload to finish, or delete the block to cancel it.",
+  "prompt.toast.docUploadFailed.title": "Upload failed",
+  "prompt.toast.docUploadFailed.description": "{{name}} could not be uploaded. Delete the block and attach it again.",
   "prompt.toast.docRotated.title": "New collaboration document",
   "prompt.toast.docRotated.description": "Prompt sent. Open doc mode to edit {docID}.",
   "prompt.toast.docAdvanceFailed.title": "Could not start new document",
@@ -639,7 +644,7 @@ export const dict = {
   "session.preview.errored.prompt":
     "The preview is throwing an error. Please find out why and fix it so it runs correctly.",
   "session.preview.loopbackOnly.prompt":
-    "The dev server is bound to 127.0.0.1 only, so the preview can't reach it. Please stop the running server and restart it with --host 0.0.0.0 (--hostname 0.0.0.0 for Next.js).",
+    "The preview won't open. The dev server is only listening inside the container (127.0.0.1). Please restart it bound to all addresses.",
   "session.preview.clientError.title": "{{count}} error(s) in the preview",
   "session.preview.clientError.dismiss": "Dismiss",
   "session.preview.clientError.reopen": "Show preview error",

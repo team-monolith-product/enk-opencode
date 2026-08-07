@@ -263,13 +263,89 @@ export class OpencodeDocSource implements DocSource {
   }
 }
 
+export type BlobUploadOpts = {
+  /** Bytes put on the wire so far / in total. Reported only on the XHR path (see progressFetch). */
+  onProgress?: (loaded: number, total: number) => void
+  signal?: AbortSignal
+}
+
+function headers(raw: string) {
+  const out = new Headers()
+  for (const line of raw.split(/\r?\n/)) {
+    const idx = line.indexOf(":")
+    if (idx <= 0) continue
+    try {
+      out.append(line.slice(0, idx).trim(), line.slice(idx + 1).trim())
+    } catch {}
+  }
+  return out
+}
+
+// fetch() cannot report request-body progress, so an upload that takes 30s on a slow line looks
+// identical to one that never started. XHR does report it — hand this to the SDK as a one-off
+// `fetch` for the asset POST and the client's own Request (auth headers, directory rewrite,
+// interceptors) is preserved; only the transport changes.
+function progressFetch(onProgress: (loaded: number, total: number) => void): typeof fetch {
+  const send = (input: URL | RequestInfo) =>
+    new Promise<Response>((resolve, reject) => {
+      const req = input as Request
+      const xhr = new XMLHttpRequest()
+      xhr.open(req.method, req.url, true)
+      xhr.responseType = "text"
+      req.headers.forEach((value, name) => {
+        try {
+          xhr.setRequestHeader(name, value)
+        } catch {}
+      })
+      xhr.upload.addEventListener("progress", (event) => {
+        onProgress(event.loaded, event.lengthComputable ? event.total : 0)
+      })
+      xhr.addEventListener("load", () => {
+        resolve(
+          new Response(xhr.responseText, {
+            status: xhr.status,
+            statusText: xhr.statusText,
+            headers: headers(xhr.getAllResponseHeaders()),
+          }),
+        )
+      })
+      // A transport-level failure (offline, CORS — desktop shells route fetch through the platform
+      // and reject a raw XHR) is a TypeError, exactly what fetch() throws. The caller retries once
+      // on the client's own fetch, so this stays a progress upgrade rather than a hard dependency.
+      xhr.addEventListener("error", () => reject(new TypeError("doc asset upload failed")))
+      xhr.addEventListener("timeout", () => reject(new TypeError("doc asset upload timed out")))
+      xhr.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))
+      const signal = req.signal
+      if (signal) {
+        if (signal.aborted) {
+          reject(new DOMException("aborted", "AbortError"))
+          return
+        }
+        signal.addEventListener("abort", () => xhr.abort(), { once: true })
+      }
+      req
+        .text()
+        .then((body) => xhr.send(body))
+        .catch(reject)
+    })
+  // The SDK only ever calls its `fetch` with a Request; the extra statics on the runtime's fetch
+  // type (preconnect) are never touched.
+  return send as unknown as typeof fetch
+}
+
 export class OpencodeBlobSource implements BlobSource {
   name = "opencode-blob"
   readonly = false
+  // Blobs this client attached. The block references its asset the moment it is added — before the
+  // bytes reach the server — so our own get() would 404 on a file we just picked. Keeping the blob
+  // here is what lets the author see their own image while it is still uploading.
+  private local = new Map<string, Blob>()
 
   constructor(private opts: DocSyncOpts) {}
 
   async get(key: string): Promise<Blob | null> {
+    const own = this.local.get(key)
+    if (own) return own
     const res = await this.opts.client.doc.asset.get(
       {
         docID: this.opts.docID,
@@ -286,13 +362,42 @@ export class OpencodeBlobSource implements BlobSource {
   }
 
   async set(key: string, value: Blob) {
-    await this.opts.client.doc.asset.create({
+    await this.upload(key, value)
+    return key
+  }
+
+  /** Cache the blob locally without uploading — for a block that renders before its upload starts. */
+  remember(key: string, value: Blob) {
+    this.local.set(key, value)
+  }
+
+  async upload(key: string, value: Blob, opts: BlobUploadOpts = {}) {
+    this.local.set(key, value)
+    const data = await blobB64(value)
+    const body = {
       docID: this.opts.docID,
       directory: this.opts.directory,
       id: key,
       mime: value.type || "application/octet-stream",
-      data: await blobB64(value),
-    })
+      data,
+    }
+    const send = (transport?: typeof fetch) =>
+      this.opts.client.doc.asset.create(body, {
+        throwOnError: true,
+        ...(transport ? { fetch: transport } : {}),
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      })
+    // `data` is what actually travels, so its length — not the raw file size — is the byte total.
+    const total = data.length
+    try {
+      await send(progressFetch((loaded, size) => opts.onProgress?.(loaded, size || total)))
+    } catch (err) {
+      if (opts.signal?.aborted) throw err
+      // XHR is unreachable in shells that proxy fetch (Tauri/Electron). Retry once on the client's
+      // own transport; the upload still completes, just without a percentage.
+      await send()
+    }
+    opts.onProgress?.(total, total)
     return key
   }
 

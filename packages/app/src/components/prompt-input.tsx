@@ -644,6 +644,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
   const tip = createMemo(() => {
     const action = submitAction()
+    // Says why the button is dead rather than leaving a disabled "Send" with no explanation.
+    if (action !== "stop" && docMode() === "doc" && doc.uploading()) {
+      return <span>{language.t("prompt.action.docUploading")}</span>
+    }
     if (action === "stop") {
       return (
         <div class="flex items-center gap-2">
@@ -1762,6 +1766,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         })
         return
       }
+      // An attachment still on the wire would be re-read from the server by commitMarkdown() and
+      // come back empty. The submit button is disabled while this is true, so this covers the
+      // submit-key path and the moment between the last progress event and the button re-render.
+      if (doc.uploading()) {
+        showToast({
+          title: language.t("prompt.toast.docUploading.title"),
+          description: language.t("prompt.toast.docUploading.description"),
+        })
+        return
+      }
       // Last line of defense for the attachment budget. addFiles already refuses over-budget adds,
       // but BlockSuite's own paste/drag inside the editor creates blocks without going through it.
       const usage = doc.assets()
@@ -2219,7 +2233,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               length={doc.length()}
               maxLength={MAX_PROMPT_DOC_CHARS}
               shake={countShake()}
-              submitDisabled={readonly || (submitAction() === "send" && !hasDraft())}
+              submitDisabled={
+                readonly || (submitAction() === "send" && (!hasDraft() || doc.uploading()))
+              }
               tip={tip()}
               onExit={exitDoc}
               modes={modeButtons()}

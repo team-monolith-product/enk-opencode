@@ -69,12 +69,20 @@ describe("ensure-dev-server", () => {
       }
     })
 
-    test("is false when nothing is listening at all", async () => {
+    test.if(hasExternalIPv4)("is false when nothing is listening at all", async () => {
       const { server, port } = await listen("0.0.0.0")
       await close(server)
-      // 후보 주소가 없는 환경에서는 판정을 포기해 true 가 나오므로, 그때는 검사하지 않는다.
-      if (!hasExternalIPv4) return
       expect(await reachableExternally(port)).toBe(false)
+    })
+
+    test.if(!hasExternalIPv4)("is undefined when there is no non-loopback address to probe", async () => {
+      // 판정 불가 — 호출자(/dev-server/status)는 이걸 "루프백 전용"으로 오해하면 안 된다.
+      const { server, port } = await listen("127.0.0.1")
+      try {
+        expect(await reachableExternally(port)).toBeUndefined()
+      } finally {
+        await close(server)
+      }
     })
   })
 

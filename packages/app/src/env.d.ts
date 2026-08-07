@@ -48,6 +48,13 @@ interface ImportMetaEnv {
    */
   readonly VITE_DISABLE_CHAT_INTRO?: string
   /**
+   * Hide errors the session recovers from on its own: file tool failures (read/write/edit/...)
+   * and the rate-limit retry banner. The final error card, shown once every fallback model has
+   * failed, is never hidden. Ignored while devMode is on.
+   * @example VITE_DISABLE_MINOR_ERRORS=true
+   */
+  readonly VITE_DISABLE_MINOR_ERRORS?: string
+  /**
    * Prompt submit shortcut (parseKeybind format). Defaults to `enter`.
    * @example VITE_PROMPT_SUBMIT_KEY=mod+enter
    */

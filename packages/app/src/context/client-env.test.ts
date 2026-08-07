@@ -11,6 +11,7 @@ const keys = [
   "VITE_DISABLE_PROMPT_TRIGGERS",
   "VITE_DISABLE_WYSIWYG_ONLY",
   "VITE_DISABLE_CHAT_INTRO",
+  "VITE_DISABLE_MINOR_ERRORS",
 ]
 
 function put(key: string, value?: string) {
@@ -38,6 +39,7 @@ describe("client env", () => {
       expect(env.disablePromptTriggers()).toBe(false)
       expect(env.disableWysiwygOnly()).toBe(false)
       expect(env.disableChatIntro()).toBe(false)
+      expect(env.disableMinorErrors()).toBe(false)
       expect(localStorage.getItem("devMode")).toBeNull()
 
       dispose()
@@ -57,6 +59,7 @@ describe("client env", () => {
       expect(env.disablePromptTriggers()).toBe(true)
       expect(env.disableWysiwygOnly()).toBe(true)
       expect(env.disableChatIntro()).toBe(true)
+      expect(env.disableMinorErrors()).toBe(true)
 
       dispose()
     })
@@ -76,6 +79,7 @@ describe("client env", () => {
       expect(env.disablePromptTriggers()).toBe(false)
       expect(env.disableWysiwygOnly()).toBe(false)
       expect(env.disableChatIntro()).toBe(false)
+      expect(env.disableMinorErrors()).toBe(false)
 
       dispose()
     })
@@ -94,6 +98,7 @@ describe("client env", () => {
       expect(env.disablePromptTriggers()).toBe(false)
       expect(env.disableWysiwygOnly()).toBe(false)
       expect(env.disableChatIntro()).toBe(false)
+      expect(env.disableMinorErrors()).toBe(false)
 
       dispose()
     })

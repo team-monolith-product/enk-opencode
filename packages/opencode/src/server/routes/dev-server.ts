@@ -48,7 +48,10 @@ async function restart(abort: AbortSignal): Promise<RestartResult> {
     if (await probePort(record.port)) {
       return { status: "already_running", url: serveUrl(record.port), port: record.port, ms: ms() }
     }
-    DevServerReplay.launch(record.cmd, record.cwd)
+    const child = DevServerReplay.launch(record.cmd, record.cwd)
+    // 기록의 pid 는 지금 포트를 잡은 프로세스를 가리켜야 한다 — 나중에 ensure_dev_server 가
+    // restart 로 이 서버를 교체할 때 죽일 대상이 된다.
+    if (child.pid) await DevServerReplay.record(Instance.directory, { ...record, pid: child.pid })
     const ready = await waitForPort(record.port, RESTART_READY_TIMEOUT_MS, abort)
     if (!ready) {
       return {
@@ -102,7 +105,8 @@ async function status(): Promise<StatusResult> {
   if (httpStatus >= 500) return { state: "errored", port, httpStatus }
   // 루프백으로는 멀쩡히 응답하는데 파드 외부 주소로는 안 닿는 경우 — 미리보기(CHP → pod:PORT)는
   // 실패하므로 ready 로 내리면 학생이 빈 iframe 을 본다. httpStatus 는 싣지 않는다(HTTP 오류가 아님).
-  if (!(await reachableExternally(port))) return { state: "errored", port, loopbackOnly: true }
+  // undefined(비루프백 주소 자체가 없는 로컬 개발)는 판정 불가라 막지 않는다 — false 일 때만 걸러낸다.
+  if ((await reachableExternally(port)) === false) return { state: "errored", port, loopbackOnly: true }
   return { state: "ready", port, httpStatus }
 }
 

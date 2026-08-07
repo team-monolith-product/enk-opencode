@@ -12,50 +12,6 @@ export { probePort }
 
 const log = Log.create({ service: "ensure-dev-server" })
 
-/**
- * 이 프로세스가 보는 비루프백 IPv4 주소들 — 파드 밖에서 이 포트로 들어올 때 쓰이는 주소.
- *
- * cli/cmd/web.ts 의 getNetworkIPs 와 달리 172.x 를 거르지 않는다. 거기서는 Docker 브리지를
- * 접속 안내에서 빼려는 것이지만, EKS 파드 IP 는 VPC CIDR(대개 172.16–31.x)에서 나오므로
- * 같은 필터를 쓰면 학생 환경에서 후보가 0개가 돼 판정 자체가 불가능해진다.
- */
-function externalAddresses(): string[] {
-  const out: string[] = []
-  for (const infos of Object.values(networkInterfaces())) {
-    for (const info of infos ?? []) {
-      if (info.internal || info.family !== "IPv4") continue
-      out.push(info.address)
-    }
-  }
-  return out
-}
-
-/**
- * 포트가 루프백 말고 외부 주소로도 열려 있는지.
- *
- * 미리보기는 CHP 서브도메인이 pod:3000 으로 라우팅하므로, `--host 0.0.0.0` 없이 띄운 Vite/Nuxt 처럼
- * 127.0.0.1 에만 바인드된 서버는 LISTEN 중이어도 학생 화면에는 안 뜬다. probePort(127.0.0.1) 로는
- * 구분이 안 되니 비루프백 주소로 한 번 더 찔러 본다.
- *
- * 후보 주소가 하나도 없으면(네트워크가 격리된 로컬/CI 등) 판정을 포기하고 true 를 돌려준다 —
- * 오탐으로 정상 서버를 막는 쪽이 놓치는 쪽보다 나쁘다.
- */
-export async function reachableExternally(port: number): Promise<boolean> {
-  const addresses = externalAddresses()
-  if (addresses.length === 0) return true
-  const reached = await Promise.all(addresses.map((host) => probePort(port, host)))
-  return reached.some(Boolean)
-}
-
-function loopbackOnlyReason(port: number, cmd: string): string {
-  return (
-    `포트 ${port} 가 LISTEN 중이지만 루프백(127.0.0.1)에만 바인드돼 있어 미리보기 주소로는 닿지 않습니다. ` +
-    `학생 화면에는 빈 iframe 만 보입니다. 커맨드에 호스트 바인딩을 추가해 다시 띄우세요 ` +
-    `(Vite/CRA 는 --host 0.0.0.0, Next.js 는 --hostname 0.0.0.0): ${cmd}. ` +
-    `이미 떠 있는 프로세스를 먼저 종료해야 새 바인딩이 적용됩니다: kill $(lsof -t -i:${port})`
-  )
-}
-
 async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -75,6 +31,30 @@ export function serveUrl(port: number): string {
   return `http://localhost:${port}/`
 }
 
+const HOST_HINT =
+  "서버가 루프백(127.0.0.1)에만 바인딩돼 있어 미리보기 주소로는 열리지 않습니다. " +
+  "쓰는 프레임워크에서 모든 주소(0.0.0.0)에 바인딩하는 옵션을 찾아 cmd 에 넣고 restart: true 로 다시 호출하세요."
+
+/**
+ * 컨테이너 밖에서 닿는 주소로도 LISTEN 중인지 본다.
+ *
+ * `--host` 없이 띄운 Vite/Nuxt 계열은 127.0.0.1 에만 바인딩되는데, probePort 는 루프백을 보므로
+ * "떠 있음"으로 통과하고 정작 CHP 를 거치는 실제 미리보기는 실패한다. 이 괴리를 도구가 직접 알려주지
+ * 않으면 학생이 매번 "안 열려요" 를 반복하게 된다. 비루프백 주소가 없는 로컬 개발에서는 undefined.
+ *
+ * 후보 주소가 여럿이면 전부 찔러 하나라도 닿으면 true 다. 첫 주소만 보면 인터페이스가 둘 이상인
+ * 파드에서 엉뚱한 쪽을 집어 "루프백 전용" 오탐이 날 수 있는데, /dev-server/status 가 이 신호로
+ * 미리보기를 아예 막으므로(errored) 오탐 비용이 hint 를 붙이던 때보다 크다.
+ */
+export async function reachableExternally(port: number): Promise<boolean | undefined> {
+  const hosts = Object.values(networkInterfaces())
+    .flat()
+    .flatMap((info) => (info && info.family === "IPv4" && !info.internal ? [info.address] : []))
+  if (!hosts.length) return undefined
+  const reached = await Promise.all(hosts.map((host) => probePort(port, host)))
+  return reached.some(Boolean)
+}
+
 export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => ({
   description: DESCRIPTION,
   parameters: z.object({
@@ -86,6 +66,13 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       ),
     port: z.number().describe("서버가 LISTEN 할 포트. OpenCode 환경에서는 3000 고정.").default(3000),
     ready_timeout_ms: z.number().describe("새로 띄울 때 LISTEN 시작을 기다리는 최대 시간(ms).").default(15000),
+    restart: z
+      .boolean()
+      .describe(
+        "true 면 포트를 잡고 있는 기존 서버를 종료하고 cmd 로 새로 띄운다. " +
+          "cmd 를 고쳤거나 미리보기가 오류일 때 사용. bash 로 직접 죽이고 띄우지 말고 이 인자를 쓴다.",
+      )
+      .default(false),
   }),
   async execute(params, ctx) {
     const startedAt = Date.now()
@@ -93,11 +80,13 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     const cwd = resolve(params.cwd ?? Instance.directory)
 
     type Payload = {
-      status: "already_running" | "started" | "failed" | "loopback_only"
+      status: "already_running" | "started" | "failed"
       url?: string
       port: number
       ms: number
       reason?: string
+      recorded_cmd?: string
+      hint?: string
     }
 
     const result = (title: string, payload: Payload) => ({
@@ -115,24 +104,31 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       })
     }
 
-    if (await probePort(params.port)) {
-      // 이미 떠 있어도 기록은 갱신한다. 서버를 bash 로 먼저 띄웠거나 부팅 replay 로
-      // 살아난 경우에도 재스폰 시 replay 가 동작하도록, 그리고 커맨드가 바뀌었으면 최신화한다.
-      await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port })
-      // 남이 띄운 서버일 수도 있으니(부팅 replay·bash) 여기서도 바인딩을 확인한다.
-      if (!(await reachableExternally(params.port))) {
-        return result(`ensure_dev_server: loopback_only (:${params.port})`, {
-          status: "loopback_only",
-          port: params.port,
-          ms: Date.now() - startedAt,
-          reason: loopbackOnlyReason(params.port, params.cmd),
-        })
-      }
+    const existing = await DevServerReplay.loadRecord(Instance.directory)
+    const running = await probePort(params.port)
+
+    if (running && !params.restart) {
+      // 기록은 "재기동하면 이대로 뜬다" 는 약속이므로 검증된 커맨드만 담는다. 지금 떠 있는 서버가
+      // params.cmd 로 떴다는 보장이 없어 덮어쓰지 않고, 기록이 아예 없을 때만 백필한다.
+      // 대신 어긋난 사실을 그대로 돌려줘 restart 로 정리하도록 유도한다 — 조용히 덮어쓰면
+      // 기록만 바뀌고 실제 프로세스는 옛 커맨드 그대로여서 재스폰 때 같은 실패가 되돌아온다.
+      if (!existing) await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port })
+
+      const hints: string[] = []
+      if (existing && existing.cmd !== params.cmd)
+        hints.push(
+          "실행 중인 서버는 기록된 명령으로 떠 있어 이번 cmd 는 반영되지 않았습니다. " +
+            "이 cmd 로 바꾸려면 restart: true 로 다시 호출하세요.",
+        )
+      if ((await reachableExternally(params.port)) === false) hints.push(HOST_HINT)
+
       return result(`ensure_dev_server: already_running (:${params.port})`, {
         status: "already_running",
         url: serveUrl(params.port),
         port: params.port,
         ms: Date.now() - startedAt,
+        ...(existing && existing.cmd !== params.cmd ? { recorded_cmd: existing.cmd } : {}),
+        ...(hints.length ? { hint: hints.join(" ") } : {}),
       })
     }
 
@@ -143,6 +139,19 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       always: [`ensure_dev_server :${params.port}`],
       metadata: {},
     })
+
+    if (running) {
+      const stopped = await DevServerReplay.stop(params.port, existing?.pid)
+      if (!stopped) {
+        return result("ensure_dev_server: failed", {
+          status: "failed",
+          port: params.port,
+          ms: Date.now() - startedAt,
+          reason: `포트 ${params.port} 를 점유한 기존 프로세스를 종료하지 못했습니다. 학생에게 어떤 프로세스가 포트를 쓰고 있는지 확인이 필요하다고 안내하세요.`,
+        })
+      }
+      log.info("stopped previous dev server for restart", { port: params.port })
+    }
 
     const child = DevServerReplay.launch(params.cmd, cwd)
     log.info("spawned dev server", { pid: child.pid, port: params.port, cwd })
@@ -159,24 +168,15 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       })
     }
 
-    await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port })
-
-    // LISTEN 은 됐지만 루프백 전용이면 미리보기로는 못 쓴다 — started 로 보고하면 AI 가 성공으로
-    // 착각하고, 학생만 빈 화면을 본다. 여기서 바로 원인과 고칠 커맨드를 돌려준다.
-    if (!(await reachableExternally(params.port))) {
-      return result(`ensure_dev_server: loopback_only (:${params.port}, ${ms}ms)`, {
-        status: "loopback_only",
-        port: params.port,
-        ms,
-        reason: loopbackOnlyReason(params.port, params.cmd),
-      })
-    }
+    // 여기까지 왔으면 이 커맨드로 실제 LISTEN 까지 확인됐다 — 기록을 갱신할 자격이 있는 유일한 지점.
+    await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port, pid: child.pid })
 
     return result(`ensure_dev_server: started (:${params.port}, ${ms}ms)`, {
       status: "started",
       url: serveUrl(params.port),
       port: params.port,
       ms,
+      ...((await reachableExternally(params.port)) === false ? { hint: HOST_HINT } : {}),
     })
   },
 }))

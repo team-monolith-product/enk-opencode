@@ -330,6 +330,7 @@ export const dict = {
   "prompt.action.docToText": "텍스트로",
   "prompt.action.docUndo": "실행 취소",
   "prompt.action.docRedo": "다시 실행",
+  "prompt.action.docUploading": "첨부 업로드 중…",
   "prompt.attachment.remove": "첨부 파일 제거",
   "prompt.action.send": "전송",
   "prompt.action.stop": "중지",
@@ -350,6 +351,10 @@ export const dict = {
   "prompt.toast.docTooLong.description": "전송하려면 문서를 {{max}}자 이내로 줄이세요.",
   "prompt.toast.tooManyAttachments.title": "첨부가 너무 많음",
   "prompt.toast.tooManyAttachments.description": "프롬프트 하나에 첨부는 {{count}}개, 합계 {{size}}MB까지예요.",
+  "prompt.toast.docUploading.title": "첨부 업로드 중",
+  "prompt.toast.docUploading.description": "업로드가 끝나길 기다리거나, 블럭을 삭제해 취소하세요.",
+  "prompt.toast.docUploadFailed.title": "첨부 업로드 실패",
+  "prompt.toast.docUploadFailed.description": "{{name}} 을(를) 올리지 못했어요. 블럭을 삭제하고 다시 첨부하세요.",
   "prompt.toast.docRotated.title": "새 협업 문서",
   "prompt.toast.docRotated.description": "프롬프트가 전송되었습니다. 문서 모드에서 {docID}를 편집하세요.",
   "prompt.toast.docAdvanceFailed.title": "새 문서로 전환하지 못함",
@@ -563,7 +568,7 @@ export const dict = {
   "session.preview.errored.prompt":
     "미리보기 실행 중 오류가 발생합니다. 원인을 확인하고 정상 실행되도록 수정해 주세요.",
   "session.preview.loopbackOnly.prompt":
-    "dev 서버가 127.0.0.1 에만 바인드돼 미리보기가 열리지 않습니다. 실행 중인 서버를 종료한 뒤 --host 0.0.0.0 (Next.js 는 --hostname 0.0.0.0) 을 붙여 다시 띄워 주세요.",
+    "미리보기가 열리지 않습니다. dev 서버가 컨테이너 안(127.0.0.1)에서만 열려 있어요. 모든 주소에 바인딩되도록 dev 서버를 다시 띄워 주세요.",
   "session.preview.clientError.title": "미리보기에서 오류 {{count}}개",
   "session.preview.clientError.dismiss": "닫기",
   "session.preview.clientError.reopen": "미리보기 오류 보기",
