@@ -3,7 +3,9 @@ import path from "path"
 import { Permission } from "../../src/permission"
 import { Instance } from "../../src/project/instance"
 import { GrepTool } from "../../src/tool/grep"
+import { BashTool } from "../../src/tool/bash"
 import { Log } from "../../src/util/log"
+import { Secret } from "../../src/util/secret"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { tmpdir } from "../fixture/fixture"
 
@@ -131,6 +133,43 @@ describe("ENV_FILE_GUARD", () => {
     ]) {
       expect([command, Permission.evaluate("bash", command, guard).action]).not.toEqual([command, "deny"])
     }
+  })
+
+  // 앱은 .env 값으로 동작하는데 그 앱 코드를 쓰는 게 에이전트다. `process.env` 를 뱉는 라우트를
+  // 만들고 curl 로 되읽으면 ChildEnv 필터를 우회하므로, 도구 출력에서 값을 지우는 관문을 둔다.
+  test("tool output never carries a .env value back to the model", async () => {
+    const secret = "sk-proj-e2e-6d1a9c4f2b"
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => Bun.write(path.join(dir, ".env"), `OPENAI_API_KEY=${secret}\nPORT=3000\n`),
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        Secret.reset()
+        const ctx = {
+          sessionID: SessionID.make("ses_test"),
+          messageID: MessageID.make(""),
+          callID: "",
+          agent: "build",
+          abort: AbortSignal.any([]),
+          messages: [],
+          metadata: () => {},
+          ask: async () => {},
+        }
+        const bash = await BashTool.init()
+        // 에이전트가 자기 앱에서 값을 되읽어 오는 상황
+        const result = await bash.execute(
+          { command: `echo '{"key":"${secret}","port":3000}'`, description: "Read app response" },
+          ctx,
+        )
+        expect(result.output).not.toContain(secret)
+        expect(result.output).toContain("[redacted]")
+        // 시크릿이 아닌 값은 멀쩡히 남는다
+        expect(result.output).toContain("3000")
+      },
+    })
+    Secret.reset()
   })
 
   test("grep tool never returns .env contents", async () => {

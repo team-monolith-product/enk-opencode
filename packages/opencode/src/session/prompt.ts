@@ -52,6 +52,7 @@ import { loadAssetRef } from "./attachment-ref"
 import { decodeDataUrlBytes } from "@/util/data-url"
 import { isAssetRef } from "@opencode-ai/util/attachment-ref"
 import { Process } from "@/util/process"
+import { Secret } from "@/util/secret"
 import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
@@ -512,6 +513,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   const result = yield* Effect.promise(() => item.execute(args, ctx))
                   const output = {
                     ...result,
+                    // 도구가 무엇을 읽었든 프로젝트 .env 값은 모델로 돌아가지 않는다. 앱은 그 값으로
+                    // 동작하는데 앱 코드를 쓰는 게 에이전트라, 앱을 거쳐 되읽는 길이 여기서 막힌다.
+                    // Truncate 를 거치지 않는 도구(스스로 자르는 glob/ls/grep/read)를 위한 마지막 관문.
+                    output: yield* Effect.promise(() => Secret.redact(result.output, Instance.directory)),
                     attachments: result.attachments?.map((attachment) => ({
                       ...attachment,
                       id: PartID.ascending(),

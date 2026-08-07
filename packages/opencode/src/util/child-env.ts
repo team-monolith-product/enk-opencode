@@ -1,5 +1,3 @@
-import path from "path"
-import { readdir } from "fs/promises"
 import { EnvFile } from "./env-file"
 
 /**
@@ -216,14 +214,6 @@ export namespace ChildEnv {
    * 반대로 통과시킨다(앱은 그 값으로 동작해야 하므로) — 방향이 반대라 목록만 여기서 공유한다.
    */
   export async function envFileKeys(dir: string) {
-    const keys = new Set<string>()
-    try {
-      const entries = await readdir(dir)
-      for (const entry of entries) {
-        if (!EnvFile.isSecretFile(entry)) continue
-        for (const name of await EnvFile.names(path.join(dir, entry))) keys.add(name)
-      }
-    } catch {}
-    return keys
+    return new Set(Object.keys(await EnvFile.load(dir)))
   }
 }

@@ -331,6 +331,45 @@ describe("DevServerReplay", () => {
     })
   })
 
+  describe("launch env", () => {
+    // 앱은 .env 값으로 동작해야 하고, opencode 운영 시크릿은 앱도 보면 안 된다.
+    test("gives the app the project .env values but not opencode secrets", async () => {
+      const dir = await tempProjectDir()
+      const out = join(dir, "env.txt")
+      await writeFile(join(dir, ".env"), 'OPENAI_API_KEY=sk-from-env-file\nGREETING="hello there"\n')
+      await writeFile(join(dir, ".env.local"), "OPENAI_API_KEY=sk-from-local\n")
+
+      const prev = {
+        JUPYTERHUB_API_TOKEN: process.env["JUPYTERHUB_API_TOKEN"],
+        ENK_AI_USAGE_TOKEN: process.env["ENK_AI_USAGE_TOKEN"],
+      }
+      process.env["JUPYTERHUB_API_TOKEN"] = "hub-secret-value"
+      process.env["ENK_AI_USAGE_TOKEN"] = "rails-secret-value"
+      cleanups.push(async () => {
+        for (const [name, value] of Object.entries(prev)) {
+          if (value === undefined) delete process.env[name]
+          else process.env[name] = value
+        }
+      })
+
+      const child = await DevServerReplay.launch(`printenv > ${out}`, dir)
+      cleanups.push(async () => {
+        try {
+          process.kill(-child.pid!, "SIGKILL")
+        } catch {}
+      })
+
+      expect(await waitFor(() => existsSync(out))).toBe(true)
+      const text = await readFile(out, "utf8")
+      // .env.local 이 .env 를 덮는다
+      expect(text).toContain("OPENAI_API_KEY=sk-from-local")
+      expect(text).toContain("GREETING=hello there")
+      expect(text).toContain("PATH=")
+      expect(text).not.toContain("hub-secret-value")
+      expect(text).not.toContain("rails-secret-value")
+    })
+  })
+
   describe("stop", () => {
     test("succeeds trivially when nothing is listening", async () => {
       expect(await DevServerReplay.stop(await freePort(), undefined, 500)).toBe(true)

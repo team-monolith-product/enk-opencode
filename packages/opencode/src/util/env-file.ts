@@ -1,4 +1,4 @@
-import { chmod, stat } from "fs/promises"
+import { chmod, readdir, stat } from "fs/promises"
 import path from "path"
 import { Filesystem } from "@/util/filesystem"
 
@@ -32,6 +32,39 @@ export namespace EnvFile {
         return `${match[1]}=••••••••`
       })
       .join("\n")
+  }
+
+  /** 이름 -> 값. 중복 키는 value() 와 같게 첫 줄을 따른다. */
+  export function parseValues(content: string): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const line of content.split("\n")) {
+      const match = ENTRY_RE.exec(line)
+      if (match && !(match[1] in out)) out[match[1]] = deserialize(match[2])
+    }
+    return out
+  }
+
+  /** 디렉토리 안의 시크릿 env 파일 경로. `.env` 를 먼저 두고 나머지는 이름순. */
+  export async function files(dir: string): Promise<string[]> {
+    const entries = await readdir(dir).catch(() => [] as string[])
+    return entries
+      .filter(isSecretFile)
+      .sort((a, b) => (a === ".env" ? -1 : b === ".env" ? 1 : a.localeCompare(b)))
+      .map((entry) => path.join(dir, entry))
+  }
+
+  /**
+   * 디렉토리의 시크릿 env 파일을 모두 읽어 합친 이름 -> 값. 뒤에 오는 파일이 앞을 덮는다
+   * (`.env` 를 `.env.local` 이 덮는 통상 규칙).
+   */
+  export async function load(dir: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {}
+    for (const file of await files(dir)) {
+      const content = await read(file)
+      if (content === undefined) continue
+      Object.assign(out, parseValues(content))
+    }
+    return out
   }
 
   export function parseNames(content: string): string[] {

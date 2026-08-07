@@ -95,7 +95,7 @@ describe("ChildEnv", () => {
     expect(masked).toHaveProperty("JUPYTERHUB_API_TOKEN", undefined)
     expect("PATH" in masked).toBe(false)
     // node 의 spawn 은 값이 undefined 인 항목을 환경에서 뺀다 — 병합 결과가 sanitize 와 같아야 한다
-    const merged = { ...base, ...masked }
+    const merged: Record<string, string | undefined> = { ...base, ...masked }
     const kept = Object.entries(merged).filter(([, value]) => value !== undefined)
     expect(Object.fromEntries(kept)).toEqual(ChildEnv.sanitize({ base }))
   })
