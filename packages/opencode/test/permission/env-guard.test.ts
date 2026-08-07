@@ -101,6 +101,27 @@ describe("ENV_FILE_GUARD", () => {
     expect(Permission.evaluate("read", "/proc/self/status", guard).action).not.toBe("deny")
   })
 
+  // 환경을 아무리 걸러도 opencode 힙과 auth.json 에는 값이 그대로 있다. 같은 uid 라 커널이
+  // 막아 주지 않으므로(Sandbox 가 켜져야 진짜로 막힌다) 도구 계층에서라도 끊는다.
+  test("opencode's own memory and credential store are denied", () => {
+    const guard = Permission.ENV_FILE_GUARD
+    for (const [permission, pattern] of [
+      ["read", "/proc/self/mem"],
+      ["read", "/proc/1/maps"],
+      ["bash", "dd if=/proc/1/mem bs=1 count=100"],
+      ["read", "/home/jovyan/.local/share/opencode/auth.json"],
+      ["edit", "/home/jovyan/.local/share/opencode/auth.json"],
+      ["bash", "cat ~/.local/share/opencode/auth.json"],
+      ["read", "/home/jovyan/.local/share/opencode/opencode.db"],
+      ["bash", "sqlite3 /home/jovyan/.local/share/opencode/opencode.db-wal .dump"],
+    ] as const) {
+      expect([pattern, Permission.evaluate(permission, pattern, guard).action]).toEqual([pattern, "deny"])
+    }
+    // 인접한 멀쩡한 경로는 안 걸린다 — 설치된 LSP 바이너리는 cache 아래에 있다
+    expect(Permission.evaluate("bash", "ls ~/.cache/opencode/bin", guard).action).not.toBe("deny")
+    expect(Permission.evaluate("read", "/proc/self/status", guard).action).not.toBe("deny")
+  })
+
   test("environment dump commands are denied", () => {
     const guard = Permission.ENV_FILE_GUARD
     for (const command of [

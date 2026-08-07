@@ -8,6 +8,7 @@ import { Filesystem } from "../../src/util/filesystem"
 import { tmpdir } from "../fixture/fixture"
 import { Permission } from "../../src/permission"
 import { Truncate } from "../../src/tool/truncate"
+import { Sandbox } from "../../src/sandbox"
 import { SessionID, MessageID } from "../../src/session/schema"
 
 const ctx = {
@@ -1036,6 +1037,37 @@ describe("tool.bash truncation", () => {
           expect(Permission.evaluate("read", "/proc/self/environ", Permission.ENV_FILE_GUARD).action).toBe("deny")
         },
       })
+    })
+  }
+
+  if (process.platform !== "win32") {
+    // 격리는 실행 경로를 통째로 바꾼다(셸을 직접 spawn 하지 않고 bwrap/sandbox-exec 로 감싼다).
+    // 켠 상태에서 평범한 명령이 그대로 돌고 opencode 자격 증명은 안 보이는지 확인한다.
+    test("runs inside the sandbox when one is available", async () => {
+      const prev = process.env["OPENCODE_SANDBOX"]
+      process.env["OPENCODE_SANDBOX"] = "auto"
+      Sandbox.reset()
+      try {
+        await Instance.provide({
+          directory: projectRoot,
+          fn: async () => {
+            if ((await Sandbox.backend()) === "none") return
+            const file = path.join(Sandbox.hidden()[0], "auth.json")
+            await Bun.write(file, '{"probe":"bash-sandbox"}')
+            const bash = await BashTool.init()
+            const result = await bash.execute(
+              { command: `echo alive; cat ${JSON.stringify(file)} 2>&1 || true`, description: "Read auth store" },
+              ctx,
+            )
+            expect(result.output).toContain("alive")
+            expect(result.output).not.toContain("bash-sandbox")
+          },
+        })
+      } finally {
+        if (prev === undefined) delete process.env["OPENCODE_SANDBOX"]
+        else process.env["OPENCODE_SANDBOX"] = prev
+        Sandbox.reset()
+      }
     })
   }
 

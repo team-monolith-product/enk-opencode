@@ -19,9 +19,11 @@ FROM node:22-slim AS dev
 
 ARG PYTHON_VERSION=3.11.2-1+b1
 
+# bubblewrap: 에이전트 셸을 PID 네임스페이스에 가두는 데 쓴다(Sandbox). 커널/seccomp 가 막으면
+# opencode 가 부팅 때 실측해서 백엔드 none 으로 떨어지므로, 설치만 해 두고 판단은 런타임에 맡긴다.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git ca-certificates python3=${PYTHON_VERSION} \
-    curl wget procps jq make zip unzip less \
+    curl wget procps jq make zip unzip less bubblewrap \
     && rm -rf /var/lib/apt/lists/* \
     && git config --system core.excludesFile /etc/opencode/.gitignore
 
@@ -41,7 +43,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 ARG NB_USER="jovyan"
 RUN userdel -r node && useradd -l -m -s /bin/bash -N -u 1000 "${NB_USER}"
 
-ENV OPENCODE_CONFIG_DIR=/etc/opencode HOME="/home/${NB_USER}"
+# auto: 쓸 수 있는 격리 백엔드가 있으면 에이전트 셸을 그 안에서 돌리고, 없으면 예전처럼 돈다.
+# 부팅 로그의 "sandbox backend" 줄로 실제로 걸렸는지 확인할 수 있다.
+ENV OPENCODE_CONFIG_DIR=/etc/opencode HOME="/home/${NB_USER}" OPENCODE_SANDBOX=auto
 WORKDIR /home/${NB_USER}/project
 
 # 런타임 UID가 빌드 시와 다를 수 있으므로 모두에게 권한을 부여한다.

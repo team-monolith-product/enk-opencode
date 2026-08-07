@@ -14,6 +14,7 @@ import { Process } from "@/util/process"
 import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag"
 import { Shell } from "@/shell/shell"
+import { Sandbox } from "@/sandbox"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncate"
@@ -65,13 +66,17 @@ type Scan = {
   guarded: Set<string>
 }
 
-// exec 시점 environ 은 자식 환경을 걸러도 그대로 남는다 — 프로세스 환경을 파일로 읽는 이 경로는
-// ChildEnv 로 못 막으므로 권한 계층에서 따로 잡는다.
-const PROC_ENVIRON_RE = /^\/proc\/[^/]+\/environ$/
+// exec 시점 environ 과 프로세스 메모리는 자식 환경을 걸러도 그대로 남는다 — ChildEnv 로 못 막는
+// 이 경로들은 권한 계층에서 따로 잡는다.
+const PROC_RE = /^\/proc\/[^/]+\/(environ|mem|maps)$/
+// opencode 자신의 자격 증명/세션 저장소. ENV_FILE_GUARD 의 deny 패턴과 같은 대상만 잡는다 —
+// 더 넓게 잡으면 deny 되지 않는 경로에까지 권한 프롬프트가 새로 생긴다.
+const DATA_RE = /\/opencode\/(auth\.json|opencode\.db(-wal|-shm)?)$/
 
 // .env(.local 등) 는 UI 로 저장한 시크릿이라 내용 접근을 막는다. .env.example 은 예외.
 function isGuardedPath(file: string) {
-  if (PROC_ENVIRON_RE.test(file.replaceAll("\\", "/"))) return true
+  const posix = file.replaceAll("\\", "/")
+  if (PROC_RE.test(posix) || DATA_RE.test(posix)) return true
   return EnvFile.isSecretFile(path.basename(file))
 }
 
@@ -349,7 +354,7 @@ async function shellEnv(ctx: Tool.Context, cwd: string) {
   return env
 }
 
-function launch(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
+async function launch(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
   if (process.platform === "win32" && PS.has(name)) {
     return spawn(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
       cwd,
@@ -357,6 +362,17 @@ function launch(shell: string, name: string, command: string, cwd: string, env: 
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
       windowsHide: true,
+    })
+  }
+
+  // 격리 백엔드가 있으면 셸을 그 안에서 띄운다. 없으면 undefined 라 예전 경로 그대로.
+  const sandboxed = await Sandbox.wrap({ shell, command, cwd })
+  if (sandboxed) {
+    return spawn(sandboxed[0], sandboxed.slice(1), {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     })
   }
 
@@ -382,7 +398,7 @@ async function run(
   },
   ctx: Tool.Context,
 ) {
-  const proc = launch(input.shell, input.name, input.command, input.cwd, input.env)
+  const proc = await launch(input.shell, input.name, input.command, input.cwd, input.env)
   let output = ""
 
   ctx.metadata({

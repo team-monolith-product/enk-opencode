@@ -11,9 +11,7 @@ import { testEffect } from "../lib/effect"
 import { tmpdir } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 import { writeFileStringScoped } from "../lib/filesystem"
-import { Instance } from "../../src/project/instance"
 import { Secret } from "../../src/util/secret"
-import { tmpdir } from "../fixture/fixture"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "fixtures")
 const ROOT = path.resolve(import.meta.dir, "..", "..")
