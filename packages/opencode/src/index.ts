@@ -1,3 +1,6 @@
+// 반드시 첫 import 여야 한다 — flag.ts 처럼 모듈 로드 시점에 process.env 를 상수로 굳히는
+// 코드보다 먼저 부팅 환경을 복원해야 한다. 자세한 배경은 이 모듈 주석 참고.
+import "./boot/env"
 import { SentryReporter } from "./util/sentry"
 
 SentryReporter.init()

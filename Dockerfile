@@ -49,6 +49,8 @@ RUN chmod -R 777 ${HOME} \
     && chmod -R 777 ${PLAYWRIGHT_BROWSERS_PATH}
 
 COPY --from=build /app/packages/opencode/dist/opencode-linux-x64/bin/opencode /usr/local/bin/opencode
+COPY docker/entrypoint.sh /usr/local/bin/opencode-entrypoint.sh
+RUN chmod 755 /usr/local/bin/opencode-entrypoint.sh
 COPY docker/AGENTS.md /etc/opencode/AGENTS.md
 COPY docker/.gitignore /etc/opencode/.gitignore
 COPY docker/opencode.jsonc /etc/opencode/opencode.jsonc
@@ -58,4 +60,7 @@ COPY docker/image-model-router-plugin.js /etc/opencode/image-model-router-plugin
 
 EXPOSE 8888
 
+# 스포너가 주입한 시크릿을 exec 시점 environ 에서 걷어낸 뒤 opencode 를 exec 한다.
+# 이게 없으면 에이전트가 `cat /proc/1/environ` 으로 주입된 토큰을 통째로 읽는다.
+ENTRYPOINT ["/usr/local/bin/opencode-entrypoint.sh"]
 CMD ["opencode", "web", "--port", "8888", "--hostname", "0.0.0.0"]
