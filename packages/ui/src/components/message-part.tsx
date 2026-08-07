@@ -44,6 +44,7 @@ import { Collapsible } from "./collapsible"
 import { FileIcon } from "./file-icon"
 import { Icon } from "./icon"
 import { ToolErrorCard } from "./tool-error-card"
+import { minorToolError } from "./minor-error"
 import { Checkbox } from "./checkbox"
 import { DiffChanges } from "./diff-changes"
 import { Markdown } from "./markdown"
@@ -507,9 +508,10 @@ function index<T extends { id: string }>(items: readonly T[]) {
   return new Map(items.map((item) => [item.id, item] as const))
 }
 
-function renderable(part: PartType, showReasoningSummaries = true) {
+function renderable(part: PartType, showReasoningSummaries = true, hideMinorErrors = false) {
   if (part.type === "tool") {
     if (HIDDEN_TOOLS.has(part.tool)) return false
+    if (hideMinorErrors && minorToolError(part)) return false
     if (part.tool === "question") return part.state.status !== "pending" && part.state.status !== "running"
     return true
   }
@@ -554,7 +556,7 @@ export function AssistantParts(props: {
       groupParts(
         props.messages.flatMap((message) =>
           list(data.store.part?.[message.id], emptyParts)
-            .filter((part) => renderable(part, props.showReasoningSummaries ?? true))
+            .filter((part) => renderable(part, props.showReasoningSummaries ?? true, data.hideMinorErrors))
             .map((part) => ({
               messageID: message.id,
               part,
@@ -1375,6 +1377,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const hideQuestion = createMemo(
     () => part().tool === "question" && (part().state.status === "pending" || part().state.status === "running"),
   )
+  const hidePart = createMemo(() => hideQuestion() || (data.hideMinorErrors && minorToolError(part())))
 
   const emptyInput: Record<string, any> = {}
   const emptyMetadata: Record<string, any> = {}
@@ -1416,7 +1419,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const render = createMemo(() => ToolRegistry.render(part().tool) ?? GenericTool)
 
   return (
-    <Show when={!hideQuestion()}>
+    <Show when={!hidePart()}>
       <div data-component="tool-part-wrapper">
         <Switch>
           <Match when={part().state.status === "error" && (part().state as any).error}>

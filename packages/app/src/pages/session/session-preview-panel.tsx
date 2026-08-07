@@ -417,6 +417,7 @@ export function SessionPreviewPanel(props: {
   retrying?: boolean
   state?: DevServerStatusResult["state"]
   httpStatus?: number
+  loopbackOnly?: boolean
   logs?: string[]
   logCmd?: string
   showError?: boolean
@@ -456,6 +457,7 @@ export function SessionPreviewPanel(props: {
           <SessionPreviewFallback
             state={props.state}
             httpStatus={props.httpStatus}
+            loopbackOnly={props.loopbackOnly}
             logs={props.logs}
             logCmd={props.logCmd}
             onRetry={props.onRetry}

@@ -22,8 +22,9 @@ export function createSdkForServer({
   })
 }
 
-// /dev-server/* 라우트는 아직 SDK 코드젠(sdk.gen.ts)에 포함되지 않아, SDK 가 쓰는 것과 동일한 저수준 client 로
-// 직접 호출한다. baseUrl·Basic auth·디렉토리 헤더(x-opencode-directory)를 createOpencodeClient 와 동일하게 세팅한다.
+// /dev-server/* 는 sdk.gen.ts 에도 생성돼 있지만, 여기서는 SDK 가 쓰는 것과 동일한 저수준 client 로 직접 호출한다.
+// baseUrl·Basic auth·디렉토리 헤더(x-opencode-directory)를 createOpencodeClient 와 동일하게 세팅한다.
+// 따라서 응답 타입(DevServerStatusResult 등)은 손으로 관리한다 — 서버 스키마를 바꾸면 여기도 같이 고칠 것.
 // (디렉토리는 헤더로 전달되고, 서버 WorkspaceRouterMiddleware 가 이 값으로 instance 컨텍스트를 잡는다 — GET/POST 공통.)
 function devServerClient(opts: { server: ServerConnection.HttpBase; directory: string; fetch?: typeof fetch }) {
   return createClient({
@@ -43,6 +44,9 @@ export type DevServerStatusResult = {
   state: DevServerState
   port?: number
   httpStatus?: number
+  // errored 의 하위 갈래 — 서버는 루프백으로 정상 응답하는데 파드 외부 주소로는 안 닿는다.
+  // `--host 0.0.0.0` 없이 띄운 dev 서버라 미리보기 프록시가 못 붙는 경우. httpStatus 는 오지 않는다.
+  loopbackOnly?: boolean
 }
 
 export function getDevServerStatus(opts: {

@@ -81,8 +81,7 @@ export const dict = {
   "envRequest.cancel": "Cancel",
   "envRequest.save": "Save securely",
   "envKeys.title": "Manage integrations",
-  "envKeys.description":
-    "Enter, add and remove API keys here. Saving restarts the preview so the changes take effect.",
+  "envKeys.description": "Enter, add and remove API keys here. Saving restarts the preview so the changes take effect.",
   "envKeys.empty.title": "No connections yet",
   "envKeys.empty": "Once the app starts using an external service, the names it needs show up here automatically.",
   "envKeys.field.key.label": "Name",
@@ -635,11 +634,16 @@ export const dict = {
   "session.preview.none.hint": "It'll show up here once the AI sets up a preview",
   "session.preview.errored.title": "The preview hit an error",
   "session.preview.errored.hint": "HTTP {{status}} · try again",
+  "session.preview.loopbackOnly.title": "The preview address can't connect",
+  "session.preview.loopbackOnly.hint": "The server is running, but only reachable from inside",
   "session.preview.askAi.label": "Or ask the AI:",
+  "session.preview.askAi.labelOnly": "Ask the AI:",
   "session.preview.askAi.copy": "Copy message",
   "session.preview.startable.prompt": "The preview isn't running. Please find out why and fix it so it runs.",
   "session.preview.errored.prompt":
     "The preview is throwing an error. Please find out why and fix it so it runs correctly.",
+  "session.preview.loopbackOnly.prompt":
+    "The preview won't open. The dev server is only listening inside the container (127.0.0.1). Please restart it bound to all addresses.",
   "session.preview.logs.label": "Server log",
   "session.preview.logs.copy": "Copy log",
   "session.preview.clientError.title": "{{count}} error(s) in the preview",

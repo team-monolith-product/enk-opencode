@@ -3,6 +3,7 @@ import { showToast } from "@opencode-ai/ui/toast"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { createEffect, createMemo, type ParentProps, Show } from "solid-js"
+import { useClientEnv } from "@/context/client-env"
 import { useLanguage } from "@/context/language"
 import { LocalProvider } from "@/context/local"
 import { SDKProvider, useSDK } from "@/context/sdk"
@@ -17,6 +18,7 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
   const params = useParams()
   const sync = useSync()
   const sdk = useSDK()
+  const env = useClientEnv()
   const slug = createMemo(() => base64Encode(props.directory))
 
   createEffect(() => {
@@ -58,6 +60,7 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
       }
       onSessionHref={(sessionID: string) => `/${slug()}/session/${sessionID}${location.search}`}
       onAssetUrl={(url: string) => attachmentSrc({ baseUrl: sdk.url, directory: sdk.directory, url })}
+      hideMinorErrors={env.disableMinorErrors()}
       doc={(props) => <DocMessage id={props.id} fallback={props.fallback} />}
     >
       <LocalProvider>{props.children}</LocalProvider>

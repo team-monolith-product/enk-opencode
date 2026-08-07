@@ -2,6 +2,7 @@ import z from "zod"
 import { spawn } from "node:child_process"
 import { createConnection } from "node:net"
 import { existsSync } from "node:fs"
+import { readdir, readlink, readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { Log } from "@/util/log"
 
@@ -52,6 +53,10 @@ export namespace DevServerReplay {
     cmd: z.string(),
     cwd: z.string(),
     port: z.number().int().positive(),
+    // 우리가 띄운 프로세스의 pid. detached spawn 이라 pgid 와 같아 그룹째 종료할 때 쓴다.
+    // 커맨드를 바꿔 재기동하려면 포트를 잡은 프로세스를 먼저 내려야 하는데, 학생 런타임에는
+    // lsof/fuser 가 없어 이 값이 사실상 유일하게 확실한 단서다. 옛 기록에는 없어 optional.
+    pid: z.number().int().positive().optional(),
   })
   export type State = z.infer<typeof State>
 
@@ -99,6 +104,139 @@ export namespace DevServerReplay {
     return child
   }
 
+  /** 프로세스가 살아있는지. signal 0 은 시그널을 보내지 않고 존재/권한만 확인한다. */
+  function alive(pid: number): boolean {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** 프로세스 그룹째 종료한다. launch 가 detached 라 pgid == pid — npm 이 띄운 손자 프로세스까지 함께 내려간다. */
+  function killGroup(pid: number, signal: NodeJS.Signals) {
+    try {
+      process.kill(-pid, signal)
+    } catch {
+      try {
+        process.kill(pid, signal)
+      } catch {}
+    }
+  }
+
+  /**
+   * 포트를 LISTEN 중인 프로세스 pid 를 /proc 로 찾는다. 기록에 pid 가 없는 경우
+   * (옛 기록이거나, AI 가 bash 로 직접 띄운 서버)의 폴백이다.
+   *
+   * 학생 런타임 이미지(node:22-slim + procps)에는 lsof 도 fuser 도 없어 셸 도구를 쓸 수 없다.
+   * Linux 가 아니거나 권한이 없으면 빈 배열 — 호출부는 "못 찾음"으로만 다룬다.
+   */
+  async function pidsListeningOn(port: number): Promise<number[]> {
+    const inodes = new Set<string>()
+    for (const table of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+      let raw: string
+      try {
+        raw = await readFile(table, "utf8")
+      } catch {
+        continue
+      }
+      for (const line of raw.split("\n").slice(1)) {
+        // 컬럼: sl(0) local_address(1) rem_address(2) st(3) ... inode(9). st 0A 가 LISTEN.
+        const cols = line.trim().split(/\s+/)
+        if (cols.length < 10 || cols[3] !== "0A") continue
+        if (parseInt(cols[1]!.split(":")[1] ?? "", 16) !== port) continue
+        inodes.add(cols[9]!)
+      }
+    }
+    if (inodes.size === 0) return []
+
+    let entries: string[]
+    try {
+      entries = await readdir("/proc")
+    } catch {
+      return []
+    }
+    const pids: number[] = []
+    for (const entry of entries) {
+      const pid = Number(entry)
+      // 자기 자신은 절대 죽이지 않는다. OpenCode 서버가 그 포트를 잡은 경우라면 재기동 대상이 아니다.
+      if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue
+      let fds: string[]
+      try {
+        fds = await readdir(`/proc/${pid}/fd`)
+      } catch {
+        continue
+      }
+      for (const fd of fds) {
+        let link: string
+        try {
+          link = await readlink(`/proc/${pid}/fd/${fd}`)
+        } catch {
+          continue
+        }
+        const inode = link.match(/^socket:\[(\d+)\]$/)?.[1]
+        if (inode && inodes.has(inode)) {
+          pids.push(pid)
+          break
+        }
+      }
+    }
+    return pids
+  }
+
+  /** 프로세스의 pgid. /proc 이 없으면 undefined. */
+  async function pgidOf(pid: number): Promise<number | undefined> {
+    try {
+      const stat = await readFile(`/proc/${pid}/stat`, "utf8")
+      // comm 에 공백·괄호가 들어갈 수 있어 마지막 ')' 뒤부터 자른다. 그 뒤 필드는 state, ppid, pgrp 순.
+      const pgrp = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2])
+      return Number.isInteger(pgrp) && pgrp > 0 ? pgrp : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * 포트를 잡고 있는 dev 서버를 종료한다. 커맨드를 바꿔 다시 띄우려면 먼저 자리를 비워야 한다.
+   *
+   * 죽일 대상은 보수적으로 고른다. 기록된 pid 는 pod 재스폰 뒤 무관한 프로세스에 재사용됐을 수
+   * 있어, /proc 이 그 pid 를 점유 프로세스의 그룹 리더로 확인해 줄 때만 그룹째 죽인다(그래야 npm 이
+   * 띄운 자식까지 정리된다). 확인이 안 되면 /proc 이 짚어준 점유 프로세스만 건드리고, /proc 자체가
+   * 없으면(로컬 개발) 기록된 pid 로 폴백한다.
+   *
+   * 성공 판정 기준은 "포트가 실제로 닫혔는가" 하나 — 시그널 전달 여부가 아니다.
+   */
+  export async function stop(port: number, pid?: number, timeoutMs = 5000): Promise<boolean> {
+    if (!(await probePort(port))) return true
+
+    const holders = await pidsListeningOn(port)
+    const recorded = pid && pid !== process.pid && alive(pid) ? pid : undefined
+    const leadsHolders = recorded !== undefined && (await Promise.all(holders.map(pgidOf))).includes(recorded)
+    const targets = holders.length === 0 ? (recorded ? [recorded] : []) : leadsHolders ? [recorded!] : holders
+
+    if (targets.length === 0) {
+      log.warn("no killable process found for port", { port })
+      return false
+    }
+
+    for (const [signal, budget] of [
+      ["SIGTERM", timeoutMs],
+      ["SIGKILL", 2000],
+    ] as const) {
+      for (const target of targets) killGroup(target, signal)
+      const deadline = Date.now() + budget
+      while (Date.now() < deadline) {
+        if (!(await probePort(port))) {
+          log.info("stopped dev server", { port, targets, signal })
+          return true
+        }
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    }
+    return !(await probePort(port))
+  }
+
   /** 성공한 dev 서버 커맨드를 기록한다. 실패해도 도구 호출을 막지 않는다(로그만). */
   export async function record(dir: string, state: State) {
     const target = stateDir(dir)
@@ -136,6 +274,9 @@ export namespace DevServerReplay {
 
     const child = launch(state.cmd, state.cwd, { dir })
     log.info("replayed dev server", { pid: child.pid, port: state.port, cwd: state.cwd })
+    // 기록의 pid 는 항상 "지금 포트를 잡고 있는 프로세스" 여야 한다. 여기서 갱신하지 않으면
+    // 재스폰 뒤 stop() 이 죽은 옛 pid 를 들고 폴백으로 새는 일이 생긴다.
+    if (child.pid) await record(dir, { ...state, pid: child.pid })
   }
 
   // ANSI 이스케이프(색/커서 제어). vite 등 dev 서버 출력은 색이 섞여 오는데, 웹에서 그대로 그리면
