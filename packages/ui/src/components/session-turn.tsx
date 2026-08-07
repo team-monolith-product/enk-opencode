@@ -9,6 +9,7 @@ import { createEffect, createMemo, createSignal, For, on, ParentProps, Show } fr
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { AssistantParts, Message, MessageDivider, PART_MAPPING, type UserActions } from "./message-part"
+import { minorToolError } from "./minor-error"
 import { Card } from "./card"
 import { Accordion } from "./accordion"
 import { StickyAccordionHeader } from "./sticky-accordion-header"
@@ -88,10 +89,11 @@ function list<T>(value: T[] | undefined | null, fallback: T[]) {
 
 const hidden = new Set(["todowrite"])
 
-function partState(part: PartType, showReasoningSummaries: boolean) {
+function partState(part: PartType, showReasoningSummaries: boolean, hideMinorErrors: boolean) {
   if (part.type === "tool") {
     if (hidden.has(part.tool)) return
     if (part.tool === "question" && (part.state.status === "pending" || part.state.status === "running")) return
+    if (hideMinorErrors && minorToolError(part)) return
     return "visible" as const
   }
   if (part.type === "text") return part.text?.trim() ? ("visible" as const) : undefined
@@ -289,9 +291,18 @@ export function SessionTurn(
     if (interrupted()) return i18n.t("ui.message.interrupted")
     return ""
   })
-  const error = createMemo(
-    () => assistantMessages().find((m) => m.error && m.error.name !== "MessageAbortedError")?.error,
-  )
+  // Falling back to another model leaves the failed attempt without an error (processor.ts only
+  // records one when no fallback remains), so a turn with an error on a non-final message either
+  // recovered later or was superseded. Under hideMinorErrors only the turn's last word counts.
+  const error = createMemo(() => {
+    const messages = assistantMessages()
+    if (data.hideMinorErrors) {
+      const last = messages.at(-1)
+      const err = last?.error
+      return err && err.name !== "MessageAbortedError" ? err : undefined
+    }
+    return messages.find((m) => m.error && m.error.name !== "MessageAbortedError")?.error
+  })
   const showAssistantCopyPartID = createMemo(() => {
     const messages = assistantMessages()
 
@@ -350,7 +361,7 @@ export function SessionTurn(
     const show = showReasoningSummaries()
     for (const message of assistantMessages()) {
       for (const part of list(data.store.part?.[message.id], emptyParts)) {
-        if (partState(part, show) === "visible") {
+        if (partState(part, show, data.hideMinorErrors) === "visible") {
           visible++
           tail = part.type === "text" ? "text" : "other"
         }
@@ -367,7 +378,9 @@ export function SessionTurn(
   const reasoningHeading = createMemo(() => assistantDerived().reason)
   const showThinking = createMemo(() => {
     if (!working() || !!error()) return false
-    if (status().type === "retry") return false
+    // A hidden retry banner would otherwise leave the turn with no sign of life during backoff,
+    // so the thinking indicator stays up instead.
+    if (status().type === "retry" && !data.hideMinorErrors) return false
     if (showReasoningSummaries()) return assistantVisible() === 0
     return true
   })
@@ -435,7 +448,7 @@ export function SessionTurn(
                   </Show>
                 </div>
               </Show>
-              <SessionRetry status={status()} show={active()} />
+              <SessionRetry status={status()} show={active() && !data.hideMinorErrors} />
               <Show when={edited() > 0 && !working()}>
                 <div data-slot="session-turn-diffs">
                   <Collapsible open={open()} onOpenChange={(value) => setState("open", value)} variant="ghost">

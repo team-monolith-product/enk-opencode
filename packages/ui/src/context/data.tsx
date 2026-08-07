@@ -43,6 +43,12 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
      * host knows how to reach; without a resolver the url is used as-is.
      */
     onAssetUrl?: AssetUrlFn
+    /**
+     * Hides errors the session recovers from on its own — file tool failures and the rate-limit
+     * retry banner. The turn's final error card (every fallback model exhausted) always renders.
+     * The host decides; the ui package only obeys.
+     */
+    hideMinorErrors?: boolean
   }) => {
     return {
       get store() {
@@ -50,6 +56,9 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       },
       get directory() {
         return props.directory
+      },
+      get hideMinorErrors() {
+        return props.hideMinorErrors ?? false
       },
       navigateToSession: props.onNavigateToSession,
       sessionHref: props.onSessionHref,
