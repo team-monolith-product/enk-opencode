@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, mock, test } from "bun:test"
 import { createStore } from "solid-js/store"
-import type { DocMountInput } from "@/components/blocksuite/blocksuite-doc"
+import { assetKey, type DocMountInput } from "@/components/blocksuite/blocksuite-doc"
 import type { PromptDocConfig } from "./doc"
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
 
@@ -8,10 +8,10 @@ const mounts: DocMountInput[] = []
 const promptDocs: Array<{ sessionID: string; directory: string }> = []
 let onSubmit: (() => void) | undefined
 
-let assetUsage = { count: 0, bytes: 0 }
+let assetUsage: { count: number; bytes: number; keys: string[] } = { count: 0, bytes: 0, keys: [] }
 
 const handle = {
-  addFile: mock(async () => true),
+  addFile: mock(async (_file: File) => true),
   assets: () => assetUsage,
   attach: mock(async () => {}),
   detach: mock(() => {}),
@@ -156,15 +156,16 @@ describe("createPromptDoc plain props", () => {
 })
 
 describe("createPromptDoc attachment budget", () => {
-  // File.size is a getter, so a fake size beats allocating tens of megabytes per case.
-  const file = (name: string, size: number) => {
-    const value = new File(["x"], name)
+  // File.size is a getter, so a fake size beats allocating tens of megabytes per case. The bytes
+  // are the name: the budget is counted per content hash, so distinct files must differ in content.
+  const file = (name: string, size: number, content = name) => {
+    const value = new File([content], name)
     Object.defineProperty(value, "size", { value: size })
     return value
   }
 
   const mounted = async () => {
-    assetUsage = { count: 0, bytes: 0 }
+    assetUsage = { count: 0, bytes: 0, keys: [] }
     handle.addFile.mockClear()
     const [store] = createStore(config())
     const doc = createPromptDoc({ createPage, config: store, client, onSubmit: () => {} })
@@ -189,7 +190,7 @@ describe("createPromptDoc attachment budget", () => {
 
   test("counts what the doc already holds, not just this batch", async () => {
     const doc = await mounted()
-    assetUsage = { count: MAX_ATTACHMENT_COUNT - 1, bytes: 0 }
+    assetUsage = { count: MAX_ATTACHMENT_COUNT - 1, bytes: 0, keys: [] }
     const result = await doc.addFiles([file("a.png", 1), file("b.png", 1)])
     expect(result.overflow).toBe(true)
     expect(handle.addFile).toHaveBeenCalledTimes(1)
@@ -204,6 +205,31 @@ describe("createPromptDoc attachment budget", () => {
     const result = await doc.addFiles([file("a.png", size), file("b.png", size), file("c.png", size)])
     expect(result.overflow).toBe(true)
     expect(handle.addFile).toHaveBeenCalledTimes(2)
+  })
+
+  test("the same file twice in one batch spends the budget once", async () => {
+    const doc = await mounted()
+    const size = MAX_ATTACHMENT_BYTES
+    // Three copies of one file: identical bytes, so identical asset id. Counted per block their
+    // sizes would blow the total budget; counted per asset it is one file, stored once.
+    expect(size * 3).toBeGreaterThan(MAX_ATTACHMENT_TOTAL_BYTES)
+    const copies = ["a.png", "copy.png", "copy2.png"].map((name) => file(name, size, "same"))
+    const result = await doc.addFiles(copies)
+    expect(result).toEqual({ added: true, tooLarge: false, overflow: false })
+    expect(handle.addFile).toHaveBeenCalledTimes(3)
+  })
+
+  test("a file the doc already carries is free, even at the limit", async () => {
+    const doc = await mounted()
+    const existing = file("a.png", 1)
+    // Whatever id the doc reports for its blocks is the one an incoming copy hashes to.
+    assetUsage = { count: MAX_ATTACHMENT_COUNT, bytes: MAX_ATTACHMENT_TOTAL_BYTES, keys: [await assetKey(existing)] }
+
+    const result = await doc.addFiles([existing, file("b.png", 1)])
+    // The copy goes in; the genuinely new file is what overflows.
+    expect(result).toEqual({ added: true, tooLarge: false, overflow: true })
+    expect(handle.addFile).toHaveBeenCalledTimes(1)
+    expect(handle.addFile.mock.calls[0]![0]).toBe(existing)
   })
 
   test("oversized single files are still reported separately", async () => {
