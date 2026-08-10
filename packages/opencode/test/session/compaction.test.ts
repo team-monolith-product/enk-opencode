@@ -1398,4 +1398,165 @@ describe("session.compaction.process request", () => {
       },
     })
   })
+
+  test("summarizes only the head and records where the retained tail starts", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const first = await user(session.id, "first turn")
+        await assistant(session.id, first.id, tmp.path)
+        const second = await user(session.id, "second turn")
+        await assistant(session.id, second.id, tmp.path)
+        const third = await user(session.id, "third turn")
+        await assistant(session.id, third.id, tmp.path)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        // tail_turns defaults to 2, so the last two turns stay out of the summary entirely.
+        const text = JSON.stringify(calls[0].messages)
+        expect(text).toContain("first turn")
+        expect(text).not.toContain("second turn")
+        expect(text).not.toContain("third turn")
+
+        const after = await Session.messages({ sessionID: session.id })
+        const part = after.find((item) => item.info.id === parentID)!.parts.find((item) => item.type === "compaction")
+        expect(part).toMatchObject({ tail_start_id: second.id })
+      },
+    })
+  })
+
+  test("summarizes everything when no recent turn fits the preserve budget", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const first = await user(session.id, "first turn")
+        await assistant(session.id, first.id, tmp.path)
+        const second = await user(session.id, "second turn")
+        const reply = await assistant(session.id, second.id, tmp.path)
+        await tool(session.id, reply.id, "read", "C".repeat(200_000))
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        const text = JSON.stringify(calls[0].messages)
+        expect(text).toContain("first turn")
+        expect(text).toContain("second turn")
+
+        const after = await Session.messages({ sessionID: session.id })
+        const part = after.find((item) => item.info.id === parentID)!.parts.find((item) => item.type === "compaction")
+        expect(part).not.toHaveProperty("tail_start_id")
+      },
+    })
+  })
+})
+
+async function summarize(sessionID: SessionID, parentID: MessageID, root: string) {
+  const msg: MessageV2.Assistant = {
+    id: MessageID.ascending(),
+    role: "assistant",
+    sessionID,
+    mode: "compaction",
+    agent: "compaction",
+    path: { cwd: root, root },
+    cost: 0,
+    tokens: { output: 0, input: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    modelID: ref.modelID,
+    providerID: ref.providerID,
+    parentID,
+    summary: true,
+    time: { created: Date.now() },
+    finish: "end_turn",
+  }
+  await Session.updateMessage(msg)
+  await Session.updatePart({
+    id: PartID.ascending(),
+    messageID: msg.id,
+    sessionID,
+    type: "text",
+    text: "SUMMARY",
+  })
+  return msg
+}
+
+describe("session.message-v2.filterCompacted", () => {
+  test("replays the retained tail after the summary", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const first = await user(session.id, "first turn")
+        await assistant(session.id, first.id, tmp.path)
+        const second = await user(session.id, "second turn")
+        const secondReply = await assistant(session.id, second.id, tmp.path)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const compaction = msgs.at(-1)!
+        const part = compaction.parts.find((item) => item.type === "compaction")!
+        await Session.updatePart({ ...part, tail_start_id: second.id })
+        const summary = await summarize(session.id, compaction.info.id, tmp.path)
+
+        const filtered = await MessageV2.filterCompacted(MessageV2.stream(session.id))
+        // Summary first because it stands in for the head, then the turns it deliberately skipped.
+        expect(filtered.map((item) => item.info.id)).toEqual([
+          compaction.info.id,
+          summary.id,
+          second.id,
+          secondReply.id,
+        ])
+      },
+    })
+  })
+
+  test("stops at the compaction boundary when no tail was retained", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const first = await user(session.id, "first turn")
+        await assistant(session.id, first.id, tmp.path)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const compaction = msgs.at(-1)!
+        const summary = await summarize(session.id, compaction.info.id, tmp.path)
+
+        const filtered = await MessageV2.filterCompacted(MessageV2.stream(session.id))
+        expect(filtered.map((item) => item.info.id)).toEqual([compaction.info.id, summary.id])
+      },
+    })
+  })
 })

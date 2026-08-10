@@ -1594,8 +1594,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             let lastAssistant: MessageV2.Assistant | undefined
             let lastFinished: MessageV2.Assistant | undefined
             let tasks: (MessageV2.CompactionPart | MessageV2.SubtaskPart)[] = []
-            for (let i = msgs.length - 1; i >= 0; i--) {
-              const msg = msgs[i]
+            // filterCompacted orders msgs for the model, which puts a retained tail after the
+            // summary that replaced its predecessors. "Latest" has to follow the clock, not that
+            // order, so scan a chronological view; msgs itself stays as the model should read it.
+            const ordered = msgs.toSorted(
+              (a, b) => a.info.time.created - b.info.time.created || (a.info.id < b.info.id ? -1 : 1),
+            )
+            for (let i = ordered.length - 1; i >= 0; i--) {
+              const msg = ordered[i]
               if (!lastUser && msg.info.role === "user") lastUser = msg.info
               if (!lastAssistant && msg.info.role === "assistant") lastAssistant = msg.info
               if (!lastFinished && msg.info.role === "assistant" && msg.info.finish) lastFinished = msg.info
