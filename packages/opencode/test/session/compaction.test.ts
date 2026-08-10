@@ -1367,6 +1367,50 @@ describe("session.compaction.process request", () => {
     })
   })
 
+  test("carries the saved path of an attachment into the summary input", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const msg = await user(session.id, "look at this")
+        const saved = path.join(tmp.path, "shot.png")
+        await Session.updatePart({
+          id: PartID.ascending(),
+          messageID: msg.id,
+          sessionID: session.id,
+          type: "file",
+          mime: "image/png",
+          filename: "shot.png",
+          url: "data:image/png;base64,AAAA",
+          saved,
+        })
+        await assistant(session.id, msg.id, tmp.path)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        // Media is deferred to a Read of the saved copy, so dropping the path here would leave the
+        // summary describing an attachment that nothing downstream can reach.
+        const text = JSON.parse(JSON.stringify(calls[0].messages))[0].content[0].text
+        expect(text).toContain(`[Attached image/png: shot.png — saved at ${saved}]`)
+      },
+    })
+  })
+
   test("placeholders oversized text parts so the request cannot overflow on its own", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

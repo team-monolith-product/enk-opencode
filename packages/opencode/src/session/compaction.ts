@@ -70,7 +70,13 @@ export namespace SessionCompaction {
   const truncate = (value: string) =>
     value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
 
-  const attachment = (part: MessageV2.FilePart) => `[Attached ${part.mime}: ${part.filename ?? "file"}]`
+  // Carries the saved path, not just the name. Media is kept out of requests precisely because the
+  // bytes sit on disk and can be read back on demand, and this is the one place that path would
+  // otherwise be dropped — leaving the summary describing an attachment nothing can reach anymore.
+  const attachment = (part: MessageV2.FilePart) => {
+    const head = `[Attached ${part.mime}: ${part.filename ?? "file"}`
+    return part.saved ? `${head} — saved at ${part.saved}]` : `${head}]`
+  }
 
   // Carried over from toModelMessages' stripMedia path, which this serializer replaces: a legacy
   // inlined attachment or a huge paste arrives as one enormous text part, and without this the
