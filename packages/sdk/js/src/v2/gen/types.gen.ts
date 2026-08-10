@@ -768,6 +768,7 @@ export type FilePart = {
   mime: string
   filename?: string
   url: string
+  saved?: string
   source?: FilePartSource
 }
 
@@ -1959,6 +1960,7 @@ export type FilePartInput = {
   mime: string
   filename?: string
   url: string
+  saved?: string
   source?: FilePartSource
 }
 
@@ -4306,6 +4308,7 @@ export type SessionCommandData = {
       mime: string
       filename?: string
       url: string
+      saved?: string
       source?: FilePartSource
     }>
   }

@@ -1212,7 +1212,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
             if (!saved) return undefined
             return [
-              { ...part, messageID: info.id, sessionID: input.sessionID },
+              { ...part, saved, messageID: info.id, sessionID: input.sessionID },
               {
                 messageID: info.id,
                 sessionID: input.sessionID,
@@ -1467,6 +1467,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                       Buffer.from(yield* fsys.readFile(filepath).pipe(Effect.catch(Effect.die))).toString("base64"),
                     mime: part.mime,
                     filename: part.filename!,
+                    // The workspace copy *is* the saved copy, so media here is read on demand rather
+                    // than inlined — the url stays populated for clients that render a preview.
+                    saved: filepath,
                     source: part.source,
                   },
                 ]

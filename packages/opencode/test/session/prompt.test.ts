@@ -289,12 +289,7 @@ describe("session.prompt uploads stored as doc assets", () => {
     },
   } as unknown as Provider.Model
 
-  async function promptWithAsset(input: {
-    mime: string
-    filename: string
-    data: Uint8Array
-    model?: Provider.Model
-  }) {
+  async function promptWithAsset(input: { mime: string; filename: string; data: Uint8Array; model?: Provider.Model }) {
     await using tmp = await tmpdir({
       git: true,
       config: { agent: { build: { model: "openai/gpt-5.2" } } },
@@ -329,25 +324,26 @@ describe("session.prompt uploads stored as doc assets", () => {
     return Array.isArray(content) ? content : []
   }
 
-  test("stores a reference instead of the bytes and still hands the model the image", async () => {
+  test("stores a reference instead of the bytes and defers the image to the read tool", async () => {
     const result = await promptWithAsset({ mime: "image/png", filename: "shot.png", data: png })
 
     const file = result.parts.find((part) => part.type === "file")
     expect(file?.url).toBe(result.assetURL)
     // The whole stored message must be free of inlined bytes — that is the point of the reference.
     expect(JSON.stringify(result.parts)).not.toContain("base64")
+    const saved = file?.saved
+    expect(saved).toBeTruthy()
     expect(
-      result.parts.some((part) => part.type === "text" && part.text.includes("is saved on disk at")),
+      result.parts.some((part) => part.type === "text" && part.text.includes(`is saved on disk at ${saved}`)),
     ).toBe(true)
 
-    const sent = userContent(result.modelMessages).find((part) => part.type === "file")
-    expect(sent).toBeDefined()
-    const data = sent && "data" in sent ? sent.data : undefined
-    const bytes =
-      data instanceof Uint8Array
-        ? Buffer.from(data)
-        : Buffer.from(String(data).split(",")[1] ?? "", "base64")
-    expect(bytes.equals(png)).toBe(true)
+    // The request carries the path, not the pixels: a user-message image would ride along on every
+    // step of every turn until a full compaction, so the model reads it on demand instead.
+    const content = userContent(result.modelMessages)
+    expect(content.find((part) => part.type === "file")).toBeUndefined()
+    expect(content.some((part) => part.type === "text" && part.text.includes(`Call the Read tool on ${saved}`))).toBe(
+      true,
+    )
   })
 
   test("leaves a reference unresolved when the model cannot read media", async () => {

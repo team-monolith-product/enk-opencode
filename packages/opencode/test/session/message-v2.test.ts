@@ -346,6 +346,34 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("defers an image with a saved copy to the read tool", async () => {
+    const saved = "/tmp/attachment/img.png"
+    const messageID = "m-user"
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(messageID),
+        parts: [
+          {
+            ...basePart(messageID, "p1"),
+            type: "file",
+            mime: "image/png",
+            filename: "img.png",
+            url: "data:image/png;base64,Zm9v",
+            saved,
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    // The placeholder is the model's only route back to the bytes, so it has to name the path.
+    const placeholder = MessageV2.mediaOmittedPlaceholder({ mime: "image/png", filename: "img.png", saved })
+    expect(placeholder).toContain(saved)
+
+    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
+      { role: "user", content: [{ type: "text", text: placeholder }] },
+    ])
+  })
+
   test("omits media entirely for a model that cannot read it", async () => {
     const textOnly: Provider.Model = {
       ...model,

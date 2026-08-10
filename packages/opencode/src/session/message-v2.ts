@@ -42,15 +42,14 @@ export namespace MessageV2 {
     return `[Large text content omitted during compaction: ${length} characters]`
   }
 
-  // Media the request deliberately does NOT inline (see inlineMedia in toModelMessages). Every media
-  // part is accompanied by a synthetic note carrying its path — the saved copy for an upload, the
-  // Read call for a workspace file — so the model still knows what it has and how to reach it,
-  // without the bytes being re-billed on every step of every turn.
-  export function mediaOmittedPlaceholder(input: { mime: string; filename?: string }) {
-    return [
-      `[Attached ${input.mime}: ${input.filename ?? "file"} — contents not inlined.`,
-      `Use the Read tool on the file path in the adjacent note if you need them.]`,
-    ].join(" ")
+  // Media the request deliberately does NOT inline (see deferMedia in toModelMessages). A saved copy
+  // on disk is what makes deferring safe: the model reads those bytes through the Read tool, once,
+  // instead of carrying them in every request. Without one there is nothing to point at, so the note
+  // says so rather than sending the model after a path that does not exist.
+  export function mediaOmittedPlaceholder(input: { mime: string; filename?: string; saved?: string }) {
+    const head = `[Attached ${input.mime}: ${input.filename ?? "file"} — contents not inlined.`
+    if (!input.saved) return `${head} No saved copy is available, so its contents cannot be read.]`
+    return `${head} Call the Read tool on ${input.saved} whenever the answer depends on what it contains.]`
   }
 
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
@@ -208,6 +207,13 @@ export namespace MessageV2 {
     mime: z.string(),
     filename: z.string().optional(),
     url: z.string(),
+    /**
+     * Absolute path of a copy of these bytes on disk, when one exists — the persisted upload for an
+     * attachment, the file itself for a workspace drag. Media that has this can be left out of the
+     * request and read on demand instead; media that lacks it (a failed attachment write, an MCP
+     * blob) has nowhere else to be reached from, so it still travels inline.
+     */
+    saved: z.string().optional(),
     source: FilePartSource.optional(),
   }).meta({
     ref: "FilePart",
@@ -631,19 +637,26 @@ export namespace MessageV2 {
     // rejects them sends the whole prompt back through the fallback chain, re-billing it per model.
     const supportsMedia = model.capabilities.attachment === true || model.capabilities.input.image === true
 
-    // PDFs are never inlined, even on a model that supports them: one document expands to thousands
-    // of tokens per page and then rides along in history for the rest of the session. The saved path
-    // is in the prompt, so a model that needs the contents reads it deliberately, once.
-    const inlineMedia = (mime: string) => supportsMedia && mime !== "application/pdf"
+    // Media is not inlined into a user message when the same bytes sit on disk. One image or PDF page
+    // expands to thousands of tokens and then rides along in history for the rest of the session, and
+    // a user-message part is the one place nothing can reclaim it — the pruner only touches tool
+    // parts, so it takes a full compaction. The saved path goes in instead, and a model that needs
+    // the bytes reads them deliberately, once; that Read lands in a tool result, which prune clears
+    // on its own schedule. PDFs defer even without a saved copy, as they always have.
+    //
+    // Media with nowhere on disk to be read back from (a failed attachment write, an MCP blob) still
+    // inlines — a placeholder there would just make the attachment unreachable.
+    const deferMedia = (part: { mime: string; saved?: string }) =>
+      part.mime === "application/pdf" || part.saved !== undefined
 
-    // Dropping media leaves no trace in the request, so a routing gap (the image-model router
-    // disabled, or its target missing) looks to the user like "the model just ignored my image".
-    // Counted here and reported once per request rather than per part.
-    const omitted = { unsupported: 0, pdf: 0 }
-    // A model that reads media can only be dropping the pdf; anything else means the model itself
-    // cannot take it.
+    // Media that never reaches the model leaves no trace in the request, so a routing gap (the
+    // image-model router disabled, or its target missing) looks to the user like "the model just
+    // ignored my image". Counted here and reported once per request rather than per part.
+    const omitted = { unsupported: 0, deferred: 0 }
+    // A model that reads media is only deferring it to the Read tool; anything else means the model
+    // itself cannot take it.
     const countOmitted = () => {
-      if (supportsMedia) omitted.pdf += 1
+      if (supportsMedia) omitted.deferred += 1
       else omitted.unsupported += 1
     }
 
@@ -702,7 +715,7 @@ export namespace MessageV2 {
             })
           // text/plain and directory files are converted into text parts, ignore them
           if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
-            if (isMedia(part.mime) && (options?.stripMedia || !inlineMedia(part.mime))) {
+            if (isMedia(part.mime) && (options?.stripMedia || !supportsMedia || deferMedia(part))) {
               if (!options?.stripMedia) countOmitted()
               userMessage.parts.push({
                 type: "text",
@@ -882,8 +895,11 @@ export namespace MessageV2 {
         model: `${model.providerID}/${model.id}`,
         count: omitted.unsupported,
       })
-    else if (omitted.pdf > 0)
-      log.info("omitted pdf attachments", { model: `${model.providerID}/${model.id}`, count: omitted.pdf })
+    else if (omitted.deferred > 0)
+      log.info("deferred media to the read tool", {
+        model: `${model.providerID}/${model.id}`,
+        count: omitted.deferred,
+      })
 
     const tools = Object.fromEntries(Array.from(toolNames).map((toolName) => [toolName, { toModelOutput }]))
 
