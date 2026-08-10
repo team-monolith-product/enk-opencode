@@ -34,6 +34,7 @@ import { ulid } from "ulid"
 import { spawn } from "child_process"
 import { Command } from "../command"
 import { pathToFileURL, fileURLToPath } from "url"
+import { Config } from "../config/config"
 import { ConfigMarkdown } from "../config/markdown"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@opencode-ai/util/error"
@@ -1982,6 +1983,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         Layer.provide(Plugin.defaultLayer),
         Layer.provide(Session.defaultLayer),
         Layer.provide(Agent.defaultLayer),
+        Layer.provide(Config.defaultLayer),
         Layer.provide(Bus.layer),
       ),
     ),

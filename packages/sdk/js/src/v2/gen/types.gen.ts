@@ -1645,6 +1645,16 @@ export type Config = {
      */
     url?: string
   }
+  tool_output?: {
+    /**
+     * Maximum lines of tool output kept in context before truncation (default: 2000)
+     */
+    max_lines?: number
+    /**
+     * Maximum bytes of tool output kept in context before truncation (default: 51200)
+     */
+    max_bytes?: number
+  }
   compaction?: {
     /**
      * Enable automatic compaction when context is full (default: true)
