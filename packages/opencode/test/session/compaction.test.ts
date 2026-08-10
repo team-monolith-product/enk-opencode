@@ -1278,3 +1278,124 @@ describe("session.getUsage", () => {
     },
   )
 })
+
+function capturing(result: "continue" | "compact") {
+  const calls: Array<Parameters<SessionProcessorModule.SessionProcessor.Handle["process"]>[0]> = []
+  const service = Layer.succeed(
+    SessionProcessorModule.SessionProcessor.Service,
+    SessionProcessorModule.SessionProcessor.Service.of({
+      create: Effect.fn("CapturingSessionProcessor.create")((input) =>
+        Effect.succeed({
+          ...fake(input, result),
+          process: Effect.fn("CapturingSessionProcessor.process")((processInput) => {
+            calls.push(processInput)
+            return Effect.succeed(result)
+          }),
+        } satisfies SessionProcessorModule.SessionProcessor.Handle),
+      ),
+    }),
+  )
+  const bus = Bus.layer
+  return {
+    calls,
+    runtime: ManagedRuntime.make(
+      Layer.mergeAll(SessionCompaction.layer, bus).pipe(
+        Layer.provide(Session.defaultLayer),
+        Layer.provide(service),
+        Layer.provide(Agent.defaultLayer),
+        Layer.provide(Plugin.defaultLayer),
+        Layer.provide(bus),
+        Layer.provide(Config.defaultLayer),
+      ),
+    ),
+  }
+}
+
+describe("session.compaction.process request", () => {
+  test("serializes history as text with tool output capped and attachments described", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const reply = await assistant(session.id, msg.id, tmp.path)
+        const pdf = pdfAttachment(session.id, reply.id, 3)
+        const output = "A".repeat(40_000)
+        await tool(session.id, reply.id, "read", output, [pdf])
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: true,
+        })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        expect(calls).toHaveLength(1)
+        const sent = calls[0].messages
+        // The whole conversation collapses into a single user turn instead of being replayed.
+        expect(sent).toHaveLength(1)
+        expect(sent[0].role).toBe("user")
+
+        const text = JSON.stringify(sent)
+        expect(text).toContain("[User]: hello")
+        expect(text).toContain("[Tool result]:")
+        expect(text).toContain("[truncated]")
+        expect(text).toContain("[Attached application/pdf: scan-3p.pdf]")
+        // The attachment is described, never carried as bytes.
+        expect(text).not.toContain(pdf.url.slice(-64))
+        // 40k of tool output is capped near TOOL_OUTPUT_MAX_CHARS rather than resent whole.
+        expect(text).not.toContain(output)
+        expect(text.length).toBeLessThan(10_000)
+        // The compaction message itself carries no history, so it is not echoed back.
+        expect(text.split("[User]:")).toHaveLength(2)
+      },
+    })
+  })
+
+  test("placeholders oversized text parts so the request cannot overflow on its own", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const huge = "B".repeat(MessageV2.STRIP_TEXT_LIMIT + 1)
+        await user(session.id, huge)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        const text = JSON.stringify(calls[0].messages)
+        expect(text).toContain(MessageV2.stripTextPlaceholder(huge.length))
+        expect(text).not.toContain(huge)
+      },
+    })
+  })
+})

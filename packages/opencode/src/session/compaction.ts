@@ -35,6 +35,55 @@ export namespace SessionCompaction {
   export const PRUNE_MINIMUM = 20_000
   export const PRUNE_PROTECT = 40_000
   const PRUNE_PROTECTED_TOOLS = ["skill"]
+  const TOOL_OUTPUT_MAX_CHARS = 2_000
+
+  const truncate = (value: string) =>
+    value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
+
+  const attachment = (part: MessageV2.FilePart) => `[Attached ${part.mime}: ${part.filename ?? "file"}]`
+
+  // Carried over from toModelMessages' stripMedia path, which this serializer replaces: a legacy
+  // inlined attachment or a huge paste arrives as one enormous text part, and without this the
+  // compaction request overflows on its own and the session never recovers.
+  const bounded = (value: string) =>
+    value.length > MessageV2.STRIP_TEXT_LIMIT ? MessageV2.stripTextPlaceholder(value.length) : value
+
+  // Renders history as plain text for the summarizer instead of replaying it as model messages.
+  //
+  // Compaction runs precisely when the window is full, so resending the conversation verbatim
+  // made the summary request nearly as large as the request that just overflowed — which is how
+  // a session ends up stuck on "Session too large to compact". Tool output is where the bulk
+  // lives and it is also the most disposable, so it is capped; attachments collapse to a
+  // one-line descriptor rather than their bytes.
+  const serialize = (message: MessageV2.WithParts) => {
+    if (message.info.role === "user") {
+      const text = message.parts
+        .filter((part): part is MessageV2.TextPart => part.type === "text" && !part.ignored)
+        .map((part) => bounded(part.text))
+        .filter(Boolean)
+        .join("\n")
+      const files = message.parts.flatMap((part) => (part.type === "file" ? [attachment(part)] : []))
+      return [...(text ? [`[User]: ${text}`] : []), ...files].join("\n")
+    }
+    return message.parts
+      .flatMap((part) => {
+        if (part.type === "text") return part.text ? [`[Assistant]: ${bounded(part.text)}`] : []
+        if (part.type === "reasoning") return part.text ? [`[Assistant reasoning]: ${bounded(part.text)}`] : []
+        if (part.type !== "tool") return []
+        const call = `[Assistant tool call]: ${part.tool}(${JSON.stringify(part.state.input)})`
+        if (part.state.status === "completed") {
+          // Truncate before appending descriptors, not after: a Read of a large file would
+          // otherwise push "[Attached ...]" past the cap and hide that media was ever there.
+          const output = part.state.time.compacted
+            ? "[Old tool result content cleared]"
+            : [truncate(part.state.output), ...(part.state.attachments ?? []).map(attachment)].join("\n")
+          return [call, `[Tool result]: ${output}`]
+        }
+        if (part.state.status === "error") return [call, `[Tool error]: ${part.state.error}`]
+        return [call]
+      })
+      .join("\n")
+  }
 
   export interface Interface {
     readonly isOverflow: (input: {
@@ -151,6 +200,9 @@ export namespace SessionCompaction {
           throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
         }
         const userMessage = parent.info
+        const compactionPart = parent.parts.find(
+          (part): part is MessageV2.CompactionPart => part.type === "compaction",
+        )
 
         let messages = input.messages
         let replay:
@@ -219,9 +271,12 @@ When constructing the summary, try to stick to this template:
 ---`
 
         const prompt = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
-        const msgs = structuredClone(messages)
+        // The compaction message itself carries no history; summarizing it would just echo the request.
+        const history =
+          compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
+        const msgs = structuredClone(history)
         yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-        const modelMessages = yield* Effect.promise(() => MessageV2.toModelMessages(msgs, model, { stripMedia: true }))
+        const conversation = msgs.map(serialize).filter(Boolean).join("\n\n")
         const msg: MessageV2.Assistant = {
           id: MessageID.ascending(),
           role: "assistant",
@@ -264,10 +319,19 @@ When constructing the summary, try to stick to this template:
             tools: {},
             system: [],
             messages: [
-              ...modelMessages,
               {
                 role: "user",
-                content: [{ type: "text", text: prompt }],
+                content: [
+                  {
+                    type: "text",
+                    text: [
+                      conversation ? `The following is the conversation history:\n\n${conversation}` : undefined,
+                      prompt,
+                    ]
+                      .filter((part) => part !== undefined)
+                      .join("\n\n"),
+                  },
+                ],
               },
             ],
             model,
