@@ -1726,24 +1726,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
                 if (step === 1) SessionSummary.summarize({ sessionID, messageID: lastUser.id })
 
-                if (step > 1 && lastFinished) {
-                  for (const m of msgs) {
-                    if (m.info.role !== "user" || m.info.id <= lastFinished.id) continue
-                    for (const p of m.parts) {
-                      if (p.type !== "text" || p.ignored || p.synthetic) continue
-                      if (!p.text.trim()) continue
-                      p.text = [
-                        "<system-reminder>",
-                        "The user sent the following message:",
-                        p.text,
-                        "",
-                        "Please address this message and continue with your tasks.",
-                        "</system-reminder>",
-                      ].join("\n")
-                    }
-                  }
-                }
-
                 yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
                 const [skills, env, instructions, modelMsgs] = yield* Effect.promise(() =>
