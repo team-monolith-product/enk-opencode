@@ -4,6 +4,7 @@ import z from "zod"
 import { lazy } from "../../util/lazy"
 import { Instance } from "../../project/instance"
 import { DevServerReplay, probePort } from "../../enk/dev-server-replay"
+import { ServeTargets } from "../../enk/serve-targets"
 import { reachableExternally, serveUrl } from "../../tool/ensure-dev-server"
 
 const RESTART_READY_TIMEOUT_MS = 15000
@@ -36,32 +37,34 @@ async function restart(abort: AbortSignal): Promise<RestartResult> {
   const startedAt = Date.now()
   const ms = () => Date.now() - startedAt
 
+  const target = ServeTargets.forCwd(Instance.directory)
   const record = await DevServerReplay.loadRecord(Instance.directory)
   if (!record) return { status: "no_command", ms: ms() }
 
   // 원자적 check→set: 이 두 줄 사이에 await 가 없어야 동시 요청 둘째가 반드시 already_starting 으로 빠진다.
   // probePort/launch 는 플래그를 세운 뒤에 하고, finally 로 반드시 되돌린다.
+  const port = target?.port ?? record.port
   const guard = getGuard()
-  if (guard.launching) return { status: "already_starting", port: record.port, ms: ms() }
+  if (guard.launching) return { status: "already_starting", port, ms: ms() }
   guard.launching = true
   try {
-    if (await probePort(record.port)) {
-      return { status: "already_running", url: serveUrl(record.port), port: record.port, ms: ms() }
+    if (await probePort(port)) {
+      return { status: "already_running", url: serveUrl(port, target?.kind), port, ms: ms() }
     }
     const child = DevServerReplay.launch(record.cmd, record.cwd)
     // 기록의 pid 는 지금 포트를 잡은 프로세스를 가리켜야 한다 — 나중에 ensure_dev_server 가
     // restart 로 이 서버를 교체할 때 죽일 대상이 된다.
     if (child.pid) await DevServerReplay.record(Instance.directory, { ...record, pid: child.pid })
-    const ready = await waitForPort(record.port, RESTART_READY_TIMEOUT_MS, abort)
+    const ready = await waitForPort(port, RESTART_READY_TIMEOUT_MS, abort)
     if (!ready) {
       return {
         status: "failed",
-        port: record.port,
+        port,
         ms: ms(),
-        reason: `포트 ${record.port} 가 ${RESTART_READY_TIMEOUT_MS}ms 안에 LISTEN 되지 않았습니다: ${record.cmd}`,
+        reason: `포트 ${port} 가 ${RESTART_READY_TIMEOUT_MS}ms 안에 LISTEN 되지 않았습니다: ${record.cmd}`,
       }
     }
-    return { status: "started", url: serveUrl(record.port), port: record.port, ms: ms() }
+    return { status: "started", url: serveUrl(port, target?.kind), port, ms: ms() }
   } finally {
     getGuard().launching = false
   }
@@ -94,8 +97,9 @@ type StatusResult = { state: PreviewState; port?: number; httpStatus?: number; l
 // 결과물에 CORS 헤더를 넣어주는 장치는 없다), CHP 는 pod:PORT 연결 실패 시 자기 502 페이지를
 // 돌려주므로 no-cors 로 바꿔도 "응답 있음"으로 새어 나간다. 그래서 이 판정은 서버만 내릴 수 있다.
 async function status(): Promise<StatusResult> {
+  const target = ServeTargets.forCwd(Instance.directory)
   const record = await DevServerReplay.loadRecord(Instance.directory)
-  const port = record?.port ?? 3000
+  const port = target?.port ?? record?.port ?? ServeTargets.PORTS.project
   if (getGuard().launching) return { state: "starting", port }
   if (!(await probePort(port))) {
     return record ? { state: "startable", port } : { state: "none" }

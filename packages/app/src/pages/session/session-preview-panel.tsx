@@ -75,7 +75,10 @@ export function createSessionPreview() {
     const domain = env?.serveDomain
     const user = env?.jupyterhubUser
     if (!domain || !user) return undefined
-    return `https://${user}.${domain}`
+    // 튜토리얼 디렉토리 세션은 전용 서브도메인을 쓴다 — CHP 가 {user}-tutorial 을 :3001 로,
+    // 그 외를 :3000 으로 라우팅한다. 디렉토리 이름 규약은 서버의 ServeTargets 와 같다.
+    const suffix = sdk.directory.split("/").includes("tutorial-directory") ? "-tutorial" : ""
+    return `https://${user}${suffix}.${domain}`
   })
 
   // 미리보기 상태 5분기 — 서버 /dev-server/status 판정을 그대로 담는다.
