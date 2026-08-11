@@ -4,12 +4,18 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ServeTargets } from "../../src/enk/serve-targets"
 
-const ORIGINAL_ENV = process.env["ENK_PROJECT_DIRECTORY"]
+const ORIGINAL_ENV = {
+  ENK_PROJECT_DIRECTORY: process.env["ENK_PROJECT_DIRECTORY"],
+  JUPYTERHUB_USER: process.env["JUPYTERHUB_USER"],
+  OPENCODE_SERVE_DOMAIN: process.env["OPENCODE_SERVE_DOMAIN"],
+}
 const cleanups: (() => Promise<void>)[] = []
 
 afterEach(async () => {
-  if (ORIGINAL_ENV === undefined) delete process.env["ENK_PROJECT_DIRECTORY"]
-  else process.env["ENK_PROJECT_DIRECTORY"] = ORIGINAL_ENV
+  for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
   while (cleanups.length) await cleanups.pop()!()
 })
 
@@ -37,6 +43,26 @@ describe("ServeTargets", () => {
 
     expect(ServeTargets.project()).toEqual({ kind: "project", dir: project, port: 3000 })
     expect(ServeTargets.tutorial()).toEqual({ kind: "tutorial", dir: tutorial, port: 3001 })
+  })
+
+  describe("previewHost", () => {
+    // CSP frame-src 가 이 값으로 만들어진다 — 튜토리얼 호스트가 빠지면 미리보기 iframe 이
+    // "이 콘텐츠는 차단되어 있습니다" 로 통째로 막힌다.
+    test("본행사는 {user}, 튜토리얼은 {user}-tutorial 서브도메인", () => {
+      process.env["JUPYTERHUB_USER"] = "team-42"
+      process.env["OPENCODE_SERVE_DOMAIN"] = "dev.jitda.io"
+
+      expect(ServeTargets.previewHost("project")).toBe("https://team-42.dev.jitda.io")
+      expect(ServeTargets.previewHost("tutorial")).toBe("https://team-42-tutorial.dev.jitda.io")
+    })
+
+    test("스포너 env 가 없으면 undefined", () => {
+      delete process.env["JUPYTERHUB_USER"]
+      process.env["OPENCODE_SERVE_DOMAIN"] = "dev.jitda.io"
+
+      expect(ServeTargets.previewHost("project")).toBeUndefined()
+      expect(ServeTargets.previewHost("tutorial")).toBeUndefined()
+    })
   })
 
   describe("forCwd", () => {

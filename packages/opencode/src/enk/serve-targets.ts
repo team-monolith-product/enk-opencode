@@ -44,6 +44,21 @@ export namespace ServeTargets {
     return { kind: "tutorial", dir: join(dirname(base.dir), TUTORIAL_DIR_NAME), port: PORTS.tutorial }
   }
 
+  /**
+   * 타깃의 미리보기 호스트. CHP 가 `{user}` 를 :3000, `{user}-tutorial` 을 :3001 로 라우팅한다.
+   * 스포너 env 가 없는 환경(로컬 등)에서는 undefined.
+   *
+   * 이 조립 규칙은 여기 한 곳에만 둔다 — CSP frame-src 와 학생 안내 URL 이 어긋나면
+   * 미리보기 iframe 이 통째로 차단된다.
+   */
+  export function previewHost(kind: Kind): string | undefined {
+    const user = process.env["JUPYTERHUB_USER"]
+    const domain = process.env["OPENCODE_SERVE_DOMAIN"]
+    if (!user || !domain) return undefined
+
+    return `https://${user}${kind === "tutorial" ? TUTORIAL_HOST_SUFFIX : ""}.${domain}`
+  }
+
   function contains(parent: string, child: string): boolean {
     const path = resolve(child)
     return path === parent || path.startsWith(parent + sep)

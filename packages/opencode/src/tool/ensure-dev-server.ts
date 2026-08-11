@@ -23,16 +23,10 @@ async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal):
   return false
 }
 
-export function serveUrl(port: number, kind?: ServeTargets.Kind): string {
-  // 학생에게 안내할 외부 접근 주소. JUPYTERHUB_USER/OPENCODE_SERVE_DOMAIN 환경변수가 있으면 외부 URL,
-  // 없으면 로컬 URL 로 폴백. 튜토리얼은 CHP 가 :3001 로 라우팅하는 전용 서브도메인을 쓴다.
-  const user = process.env["JUPYTERHUB_USER"]
-  const domain = process.env["OPENCODE_SERVE_DOMAIN"]
-  if (user && domain) {
-    const suffix = kind === "tutorial" ? ServeTargets.TUTORIAL_HOST_SUFFIX : ""
-    return `https://${user}${suffix}.${domain}/`
-  }
-  return `http://localhost:${port}/`
+export function serveUrl(port: number, kind: ServeTargets.Kind = "project"): string {
+  // 학생에게 안내할 외부 접근 주소. 스포너 env 가 없는 환경에서는 로컬 URL 로 폴백한다.
+  const host = ServeTargets.previewHost(kind)
+  return host ? `${host}/` : `http://localhost:${port}/`
 }
 
 const HOST_HINT =
