@@ -79,6 +79,17 @@ async function spawnListener(dir: string, port: number) {
   return child
 }
 
+// teams/{id}/{project,tutorial}-directory 형태의 워크스페이스. 본행사를 env 로 주입한다.
+async function tempWorkspace(): Promise<{ project: string; tutorial: string }> {
+  const root = await tempProjectDir()
+  const project = join(root, "project-directory")
+  const tutorial = join(root, "tutorial-directory")
+  await mkdir(project, { recursive: true })
+  await mkdir(tutorial, { recursive: true })
+  process.env["ENK_PROJECT_DIRECTORY"] = project
+  return { project, tutorial }
+}
+
 async function writeState(projectDir: string, state: DevServerReplay.State) {
   const file = join(projectDir, ".opencode", "dev-server.json")
   await mkdir(join(projectDir, ".opencode"), { recursive: true })
@@ -108,6 +119,17 @@ describe("DevServerReplay", () => {
       const raw = await readFile(join(canonical, ".opencode", "dev-server.json"), "utf8")
       expect(JSON.parse(raw)).toEqual(state)
       expect(existsSync(join(session, ".opencode", "dev-server.json"))).toBe(false)
+    })
+
+    test("튜토리얼 cwd 의 기록은 본행사가 아니라 튜토리얼 폴더에 쓴다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      const state = { cmd: "npm run dev -- --port 3001", cwd: tutorial, port: 3001 }
+
+      await DevServerReplay.record(project, state)
+
+      const raw = await readFile(join(tutorial, ".opencode", "dev-server.json"), "utf8")
+      expect(JSON.parse(raw)).toEqual(state)
+      expect(existsSync(join(project, ".opencode", "dev-server.json"))).toBe(false)
     })
   })
 
@@ -173,6 +195,28 @@ describe("DevServerReplay", () => {
       })
     })
 
+    test("본행사 기록이 튜토리얼 cwd 를 가리키면 재실행하지 않는다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      const marker = join(project, "marker")
+      await writeState(project, { cmd: `echo ok > ${marker}`, cwd: tutorial, port: await freePort() })
+
+      await DevServerReplay.replay()
+
+      await new Promise((r) => setTimeout(r, 200))
+      expect(existsSync(marker)).toBe(false)
+    })
+
+    test("튜토리얼 기록은 부팅 때 되살리지 않는다", async () => {
+      const { tutorial } = await tempWorkspace()
+      const marker = join(tutorial, "marker")
+      await writeState(tutorial, { cmd: `echo ok > ${marker}`, cwd: tutorial, port: await freePort() })
+
+      await DevServerReplay.replay()
+
+      await new Promise((r) => setTimeout(r, 200))
+      expect(existsSync(marker)).toBe(false)
+    })
+
     test("skips replay when the recorded cwd no longer exists", async () => {
       const dir = await tempProjectDir()
       const marker = join(dir, "marker")
@@ -183,6 +227,18 @@ describe("DevServerReplay", () => {
 
       await new Promise((r) => setTimeout(r, 200))
       expect(existsSync(marker)).toBe(false)
+    })
+  })
+
+  describe("loadRecord", () => {
+    test("cwd 가 속한 타깃의 기록을 읽는다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      await writeState(project, { cmd: "본행사", cwd: project, port: 3000 })
+      await writeState(tutorial, { cmd: "튜토리얼", cwd: tutorial, port: 3001 })
+
+      expect((await DevServerReplay.loadRecord(join(project, "src")))?.cmd).toBe("본행사")
+      expect((await DevServerReplay.loadRecord(join(tutorial, "src")))?.cmd).toBe("튜토리얼")
+      expect((await DevServerReplay.loadRecord())?.cmd).toBe("본행사")
     })
   })
 

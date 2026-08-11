@@ -5,6 +5,7 @@ import { existsSync } from "node:fs"
 import { readdir, readlink, readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { Log } from "@/util/log"
+import { ServeTargets } from "./serve-targets"
 
 /**
  * 지정 포트가 LISTEN 중인지 빠르게 확인한다.
@@ -36,9 +37,9 @@ export function probePort(port: number, host = "127.0.0.1", timeoutMs = 250): Pr
  * 방문자가 트리거한 스폰(클라이언트 접속 없음)에서도 dev 서버가 살아나야 한다.
  * 기록 파일은 AI 가 실행을 확인한 커맨드만 담는다.
  *
- * 기록 위치는 항상 stateDir() — 스포너가 주입한 ENK_PROJECT_DIRECTORY 가 있으면 그곳으로
- * 통일한다. 세션이 하위 폴더(git 루트)나 tutorial-directory 에서 열려도 record 와 replay 가
- * 같은 파일을 보도록 하기 위함이다. 재실행 cwd 는 서버가 실제로 돌던 위치를 그대로 쓴다.
+ * 기록 위치는 cwd 가 속한 서빙 타깃 디렉토리(ServeTargets.forCwd) — 세션이 하위 폴더(git
+ * 루트)에서 열려도 타깃(본행사/튜토리얼)별로 record 와 replay 가 같은 파일을 본다.
+ * 재실행 cwd 는 서버가 실제로 돌던 위치를 그대로 쓴다.
  */
 export namespace DevServerReplay {
   const log = Log.create({ service: "enk.dev-server-replay" })
@@ -56,9 +57,9 @@ export namespace DevServerReplay {
   })
   export type State = z.infer<typeof State>
 
-  /** 기록 파일이 놓일 디렉토리. 스포너 주입 경로를 최우선으로 한다. */
-  function stateDir(fallback?: string): string | undefined {
-    return process.env["ENK_PROJECT_DIRECTORY"] ?? fallback
+  /** 기록 파일이 놓일 디렉토리. cwd 의 서빙 타깃을 우선하고, 규약 밖 경로면 fallback 을 쓴다. */
+  function stateDir(cwd: string, fallback?: string): string | undefined {
+    return ServeTargets.forCwd(cwd)?.dir ?? process.env["ENK_PROJECT_DIRECTORY"] ?? fallback
   }
 
   /**
@@ -215,7 +216,7 @@ export namespace DevServerReplay {
 
   /** 성공한 dev 서버 커맨드를 기록한다. 실패해도 도구 호출을 막지 않는다(로그만). */
   export async function record(dir: string, state: State) {
-    const target = stateDir(dir)
+    const target = stateDir(state.cwd, dir)
     if (!target) return
     const file = resolve(target, FILE)
     try {
@@ -226,12 +227,20 @@ export namespace DevServerReplay {
     }
   }
 
-  /** 부팅 시 기록된 커맨드를 재실행한다. 조건이 하나라도 어긋나면 조용히 건너뛴다. */
+  /**
+   * 부팅 시 기록된 커맨드를 재실행한다. 조건이 하나라도 어긋나면 조용히 건너뛴다.
+   *
+   * 되살리는 것은 본행사 타깃뿐이다. 부팅 replay 가 있는 이유는 방문자가 트리거한 스폰
+   * (클라이언트 접속 없음)에서도 갤러리 미리보기가 살아나야 해서인데, 갤러리가 가리키는
+   * 것은 본행사 결과물뿐이다. 튜토리얼 미리보기는 참가자가 화면을 열 때 ensure_dev_server
+   * 로 뜨면 되고, 부팅 때 함께 되살리면 본행사 파드가 쓰지도 않을 튜토리얼 서버에 자원을
+   * 계속 내주게 된다.
+   */
   export async function replay() {
-    const dir = stateDir()
-    if (!dir) return
+    const target = ServeTargets.project()
+    if (!target) return
 
-    const file = resolve(dir, FILE)
+    const file = resolve(target.dir, FILE)
     let state: State
     try {
       state = State.parse(await Bun.file(file).json())
@@ -239,6 +248,12 @@ export namespace DevServerReplay {
       return
     }
 
+    // 타깃 규약 이전에 남은 기록(본행사 파일에 튜토리얼 cwd)은 재실행하지 않는다 — 이게
+    // "튜토리얼 종료 후에도 튜토리얼 앱이 :3000 에 되살아나는" 경로였다.
+    if (ServeTargets.forCwd(state.cwd)?.kind !== target.kind) {
+      log.warn("recorded cwd belongs to another target, skipping replay", { file, cwd: state.cwd })
+      return
+    }
     if (!existsSync(state.cwd)) {
       log.warn("recorded cwd no longer exists, skipping replay", { cwd: state.cwd })
       return
@@ -252,17 +267,23 @@ export namespace DevServerReplay {
     log.info("replayed dev server", { pid: child.pid, port: state.port, cwd: state.cwd })
     // 기록의 pid 는 항상 "지금 포트를 잡고 있는 프로세스" 여야 한다. 여기서 갱신하지 않으면
     // 재스폰 뒤 stop() 이 죽은 옛 pid 를 들고 폴백으로 새는 일이 생긴다.
-    if (child.pid) await record(dir, { ...state, pid: child.pid })
+    if (child.pid) await record(target.dir, { ...state, pid: child.pid })
   }
 
-  /** 기록된 dev 서버 커맨드를 반환한다. 없거나 파싱 실패면 undefined. UI 재시작 등에서 재사용. */
-  export async function loadRecord(fallback?: string): Promise<State | undefined> {
-    const dir = stateDir(fallback)
+  /** cwd 가 속한 타깃의 기록을 반환한다. 없거나 파싱 실패면 undefined. UI 재시작 등에서 재사용. */
+  export async function loadRecord(cwd?: string): Promise<State | undefined> {
+    const dir = cwd ? stateDir(cwd, cwd) : ServeTargets.project()?.dir
     if (!dir) return undefined
     try {
       return State.parse(await Bun.file(resolve(dir, FILE)).json())
     } catch {
       return undefined
     }
+  }
+
+  /** 한 타깃의 dev 서버를 내린다. 기록된 pid 를 함께 넘겨 프로세스 그룹째 정리한다. */
+  export async function stopTarget(target: ServeTargets.Target): Promise<boolean> {
+    const state = await loadRecord(target.dir)
+    return stop(target.port, state?.pid)
   }
 }
