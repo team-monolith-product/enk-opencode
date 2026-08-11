@@ -9,15 +9,6 @@ import { reachableExternally, serveUrl } from "../../tool/ensure-dev-server"
 
 const RESTART_READY_TIMEOUT_MS = 15000
 
-// 이 세션이 서빙하는 타깃(본행사 :3000 / 튜토리얼 :3001)의 기록. 타깃 규약 이전에 남은
-// 기록(본행사 파일에 튜토리얼 cwd)은 버린다 — 되살리면 엉뚱한 앱이 그 포트를 차지한다.
-async function loadTargetRecord() {
-  const target = ServeTargets.forCwd(Instance.directory)
-  const record = await DevServerReplay.loadRecord(Instance.directory)
-  if (record && target && ServeTargets.forCwd(record.cwd)?.kind !== target.kind) return { target }
-  return { target, record }
-}
-
 async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -46,7 +37,8 @@ async function restart(abort: AbortSignal): Promise<RestartResult> {
   const startedAt = Date.now()
   const ms = () => Date.now() - startedAt
 
-  const { target, record } = await loadTargetRecord()
+  const target = ServeTargets.forCwd(Instance.directory)
+  const record = await DevServerReplay.loadRecord(Instance.directory)
   if (!record) return { status: "no_command", ms: ms() }
 
   // 원자적 check→set: 이 두 줄 사이에 await 가 없어야 동시 요청 둘째가 반드시 already_starting 으로 빠진다.
@@ -105,8 +97,9 @@ type StatusResult = { state: PreviewState; port?: number; httpStatus?: number; l
 // 결과물에 CORS 헤더를 넣어주는 장치는 없다), CHP 는 pod:PORT 연결 실패 시 자기 502 페이지를
 // 돌려주므로 no-cors 로 바꿔도 "응답 있음"으로 새어 나간다. 그래서 이 판정은 서버만 내릴 수 있다.
 async function status(): Promise<StatusResult> {
-  const { target, record } = await loadTargetRecord()
-  const port = target?.port ?? record?.port ?? 3000
+  const target = ServeTargets.forCwd(Instance.directory)
+  const record = await DevServerReplay.loadRecord(Instance.directory)
+  const port = target?.port ?? record?.port ?? ServeTargets.PORTS.project
   if (getGuard().launching) return { state: "starting", port }
   if (!(await probePort(port))) {
     return record ? { state: "startable", port } : { state: "none" }

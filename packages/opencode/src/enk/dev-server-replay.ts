@@ -57,9 +57,9 @@ export namespace DevServerReplay {
   })
   export type State = z.infer<typeof State>
 
-  /** 기록 파일이 놓일 디렉토리. cwd 의 서빙 타깃을 우선하고, 규약 밖 경로면 fallback 을 쓴다. */
-  function stateDir(cwd: string, fallback?: string): string | undefined {
-    return ServeTargets.forCwd(cwd)?.dir ?? process.env["ENK_PROJECT_DIRECTORY"] ?? fallback
+  /** 기록 파일이 놓일 디렉토리. cwd 가 속한 서빙 타깃을 쓰고, 규약 밖 경로면 fallback 을 쓴다. */
+  function stateDir(cwd: string, fallback: string): string {
+    return ServeTargets.forCwd(cwd)?.dir ?? fallback
   }
 
   /**
@@ -216,9 +216,7 @@ export namespace DevServerReplay {
 
   /** 성공한 dev 서버 커맨드를 기록한다. 실패해도 도구 호출을 막지 않는다(로그만). */
   export async function record(dir: string, state: State) {
-    const target = stateDir(state.cwd, dir)
-    if (!target) return
-    const file = resolve(target, FILE)
+    const file = resolve(stateDir(state.cwd, dir), FILE)
     try {
       await Bun.write(file, JSON.stringify(state, null, 2) + "\n")
       log.info("recorded dev server command", { file, port: state.port })
@@ -240,20 +238,9 @@ export namespace DevServerReplay {
     const target = ServeTargets.project()
     if (!target) return
 
-    const file = resolve(target.dir, FILE)
-    let state: State
-    try {
-      state = State.parse(await Bun.file(file).json())
-    } catch {
-      return
-    }
+    const state = await loadRecord(target.dir)
+    if (!state) return
 
-    // 타깃 규약 이전에 남은 기록(본행사 파일에 튜토리얼 cwd)은 재실행하지 않는다 — 이게
-    // "튜토리얼 종료 후에도 튜토리얼 앱이 :3000 에 되살아나는" 경로였다.
-    if (ServeTargets.forCwd(state.cwd)?.kind !== target.kind) {
-      log.warn("recorded cwd belongs to another target, skipping replay", { file, cwd: state.cwd })
-      return
-    }
     if (!existsSync(state.cwd)) {
       log.warn("recorded cwd no longer exists, skipping replay", { cwd: state.cwd })
       return
@@ -270,20 +257,26 @@ export namespace DevServerReplay {
     if (child.pid) await record(target.dir, { ...state, pid: child.pid })
   }
 
-  /** cwd 가 속한 타깃의 기록을 반환한다. 없거나 파싱 실패면 undefined. UI 재시작 등에서 재사용. */
-  export async function loadRecord(cwd?: string): Promise<State | undefined> {
-    const dir = cwd ? stateDir(cwd, cwd) : ServeTargets.project()?.dir
-    if (!dir) return undefined
+  /**
+   * cwd 가 속한 타깃의 기록. 없거나 파싱 실패면 undefined.
+   *
+   * 그 타깃을 서술하지 않는 기록(규약 이전에 본행사 파일로 몰려 쓰인 튜토리얼 cwd)은 없는
+   * 것으로 본다 — 되살리거나 그 pid 로 프로세스를 죽이면 엉뚱한 앱을 건드리게 된다.
+   */
+  export async function loadRecord(cwd: string): Promise<State | undefined> {
+    const target = ServeTargets.forCwd(cwd)
+    const dir = stateDir(cwd, cwd)
+    let state: State
     try {
-      return State.parse(await Bun.file(resolve(dir, FILE)).json())
+      state = State.parse(await Bun.file(resolve(dir, FILE)).json())
     } catch {
       return undefined
     }
-  }
 
-  /** 한 타깃의 dev 서버를 내린다. 기록된 pid 를 함께 넘겨 프로세스 그룹째 정리한다. */
-  export async function stopTarget(target: ServeTargets.Target): Promise<boolean> {
-    const state = await loadRecord(target.dir)
-    return stop(target.port, state?.pid)
+    if (target && ServeTargets.forCwd(state.cwd)?.kind !== target.kind) {
+      log.warn("recorded cwd belongs to another target, ignoring record", { dir, cwd: state.cwd })
+      return undefined
+    }
+    return state
   }
 }

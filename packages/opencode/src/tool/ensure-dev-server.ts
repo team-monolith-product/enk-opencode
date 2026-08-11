@@ -75,10 +75,6 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
         `실행할 셸 명령. 포트는 반드시 ${servePort()} 로 적는다. ` +
           `예: 'npm run dev -- --host 0.0.0.0 --port ${servePort()}', 'npx --yes serve -l ${servePort()} .'`,
       ),
-    port: z
-      .number()
-      .describe(`서버가 LISTEN 할 포트. 이 작업 폴더는 ${servePort()} 로 서빙한다 — 도구가 강제한다.`)
-      .default(servePort()),
     ready_timeout_ms: z.number().describe("새로 띄울 때 LISTEN 시작을 기다리는 최대 시간(ms).").default(15000),
     restart: z
       .boolean()
@@ -93,14 +89,10 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     // replay 는 부팅 프로세스(다른 cwd)에서 도므로 절대경로로 고정해 기록한다.
     const cwd = resolve(params.cwd ?? Instance.directory)
 
-    // 포트는 AI 인자가 아니라 cwd 의 서빙 타깃이 결정한다(본행사 3000 / 튜토리얼 3001).
-    // 미리보기 서브도메인·부팅 replay·CHP 라우팅이 모두 이 규약에 묶여 있으므로 모델이
-    // 다른 값을 넘겨도 여기서 교정한다.
+    // 포트는 인자가 아니라 cwd 의 서빙 타깃이 정한다(본행사 3000 / 튜토리얼 3001).
+    // 미리보기 서브도메인·부팅 replay·CHP 라우팅이 모두 이 규약에 묶여 있다.
     const target = ServeTargets.forCwd(cwd)
-    const port = target?.port ?? params.port
-    if (port !== params.port) {
-      log.info("port overridden by serve target", { requested: params.port, port, kind: target?.kind, cwd })
-    }
+    const port = target?.port ?? ServeTargets.PORTS.project
 
     type Payload = {
       status: "already_running" | "started" | "failed"
@@ -125,16 +117,6 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
         ms: Date.now() - startedAt,
         reason: `cwd 가 존재하지 않습니다: ${cwd}`,
       })
-    }
-
-    // 본행사 dev 서버를 다루는 시점은 튜토리얼이 끝난 뒤다. 파드가 재스폰되지 않고 그대로
-    // 넘어온 경우 튜토리얼 서버가 :3001 에 남아 파드 자원(1 core/2G)을 계속 먹으므로 정리한다.
-    if (target?.kind === "project") {
-      const tutorial = ServeTargets.tutorial()
-      if (tutorial && (await probePort(tutorial.port))) {
-        const stopped = await DevServerReplay.stopTarget(tutorial)
-        log.info("stopped leftover tutorial dev server", { port: tutorial.port, stopped })
-      }
     }
 
     const existing = await DevServerReplay.loadRecord(cwd)
@@ -198,8 +180,8 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
         port,
         ms,
         reason:
-          `포트 ${port} 가 ${params.ready_timeout_ms}ms 안에 LISTEN 되지 않았습니다. 명령어를 확인하세요: ${params.cmd}` +
-          (port === params.port ? "" : ` 이 작업 폴더는 ${port} 로 서빙하므로 cmd 의 포트 옵션도 ${port} 여야 합니다.`),
+          `포트 ${port} 가 ${params.ready_timeout_ms}ms 안에 LISTEN 되지 않았습니다. ` +
+          `cmd 가 ${port} 에 바인딩하는지 확인하세요: ${params.cmd}`,
       })
     }
 

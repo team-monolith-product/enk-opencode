@@ -108,15 +108,15 @@ describe("DevServerReplay", () => {
       expect(JSON.parse(raw)).toEqual(state)
     })
 
-    test("prefers ENK_PROJECT_DIRECTORY over the fallback so record and replay agree", async () => {
-      const canonical = await tempProjectDir()
-      const session = await tempProjectDir()
+    test("본행사 하위 폴더에서 띄워도 타깃 폴더 한 곳에 기록한다", async () => {
+      const { project } = await tempWorkspace()
+      const session = join(project, "app")
+      await mkdir(session, { recursive: true })
       const state = { cmd: "npm run dev -- --port 3000", cwd: session, port: 3000 }
 
-      process.env["ENK_PROJECT_DIRECTORY"] = canonical
       await DevServerReplay.record(session, state)
 
-      const raw = await readFile(join(canonical, ".opencode", "dev-server.json"), "utf8")
+      const raw = await readFile(join(project, ".opencode", "dev-server.json"), "utf8")
       expect(JSON.parse(raw)).toEqual(state)
       expect(existsSync(join(session, ".opencode", "dev-server.json"))).toBe(false)
     })
@@ -186,7 +186,7 @@ describe("DevServerReplay", () => {
       process.env["ENK_PROJECT_DIRECTORY"] = dir
       await DevServerReplay.replay()
 
-      const recorded = await DevServerReplay.loadRecord()
+      const recorded = await DevServerReplay.loadRecord(dir)
       expect(recorded?.pid).toBeGreaterThan(0)
       cleanups.push(async () => {
         try {
@@ -238,7 +238,13 @@ describe("DevServerReplay", () => {
 
       expect((await DevServerReplay.loadRecord(join(project, "src")))?.cmd).toBe("본행사")
       expect((await DevServerReplay.loadRecord(join(tutorial, "src")))?.cmd).toBe("튜토리얼")
-      expect((await DevServerReplay.loadRecord())?.cmd).toBe("본행사")
+    })
+
+    test("다른 타깃의 cwd 를 서술하는 기록은 없는 것으로 본다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      await writeState(project, { cmd: "튜토리얼", cwd: tutorial, port: 3000, pid: 1234 })
+
+      expect(await DevServerReplay.loadRecord(project)).toBeUndefined()
     })
   })
 
