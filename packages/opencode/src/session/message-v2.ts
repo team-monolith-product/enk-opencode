@@ -239,6 +239,9 @@ export namespace MessageV2 {
     type: z.literal("compaction"),
     auto: z.boolean(),
     overflow: z.boolean().optional(),
+    // First message of the turn tail that survived this compaction verbatim. Absent means the
+    // summary replaced everything before it, which is how every pre-existing compaction reads.
+    tail_start_id: MessageID.zod.optional(),
   }).meta({
     ref: "CompactionPart",
   })
@@ -1006,22 +1009,60 @@ export namespace MessageV2 {
     },
   )
 
+  // Walks newest-first and stops at the last completed compaction, so the model sees the summary
+  // instead of the history it replaced. When that compaction kept a tail, the walk continues past
+  // it to the tail's first message and the result is reordered to [compaction, summary, tail...]:
+  // the summary covers the head, and the retained turns follow it in the order they happened.
   export async function filterCompacted(stream: AsyncIterable<MessageV2.WithParts>) {
     const result = [] as MessageV2.WithParts[]
     const completed = new Set<string>()
+    let retain: MessageID | undefined
     for await (const msg of stream) {
       result.push(msg)
+      if (retain) {
+        if (msg.info.id === retain) break
+        continue
+      }
       if (
         msg.info.role === "user" &&
         completed.has(msg.info.id) &&
         msg.parts.some((part) => part.type === "compaction")
-      )
-        break
+      ) {
+        const part = msg.parts.find((item): item is CompactionPart => item.type === "compaction")
+        if (!part?.tail_start_id) break
+        retain = part.tail_start_id
+        if (msg.info.id === retain) break
+        continue
+      }
       if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish && !msg.info.error)
         completed.add(msg.info.parentID)
     }
     result.reverse()
-    return result
+
+    const compactionIndex = result.findLastIndex(
+      (msg) =>
+        msg.info.role === "user" &&
+        msg.parts.some((item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined),
+    )
+    if (compactionIndex < 0) return result
+    const compaction = result[compactionIndex]
+    const part = compaction.parts.find(
+      (item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined,
+    )!
+    const summaryIndex = result.findIndex(
+      (msg, index) =>
+        index > compactionIndex &&
+        msg.info.role === "assistant" &&
+        msg.info.summary &&
+        msg.info.parentID === compaction.info.id,
+    )
+    const tailIndex = result.findIndex((msg) => msg.info.id === part.tail_start_id)
+    if (tailIndex < 0 || tailIndex >= compactionIndex || summaryIndex <= compactionIndex) return result
+    return [
+      ...result.slice(compactionIndex, summaryIndex + 1),
+      ...result.slice(tailIndex, compactionIndex),
+      ...result.slice(summaryIndex + 1),
+    ]
   }
 
   export function fromError(

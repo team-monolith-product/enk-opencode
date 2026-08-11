@@ -497,6 +497,9 @@ const parser = lazy(async () => {
 
 // TODO: we may wanna rename this tool so it works better on other shells
 export const BashTool = Tool.define("bash", async () => {
+  // Read the resolved limits rather than the constants: telling the model 2000 lines while the
+  // truncator actually cuts at a configured 500 makes the description a lie.
+  const truncation = await Truncate.limits()
   const shell = Shell.acceptable()
   const name = Shell.name(shell)
   const chain =
@@ -510,8 +513,8 @@ export const BashTool = Tool.define("bash", async () => {
       .replaceAll("${os}", process.platform)
       .replaceAll("${shell}", name)
       .replaceAll("${chaining}", chain)
-      .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
-      .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES)),
+      .replaceAll("${maxLines}", String(truncation.maxLines))
+      .replaceAll("${maxBytes}", String(truncation.maxBytes)),
     parameters: z.object({
       command: z.string().describe("The command to execute"),
       timeout: z.number().describe("Optional timeout in milliseconds").optional(),

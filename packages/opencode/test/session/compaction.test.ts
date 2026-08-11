@@ -1278,3 +1278,329 @@ describe("session.getUsage", () => {
     },
   )
 })
+
+function capturing(result: "continue" | "compact") {
+  const calls: Array<Parameters<SessionProcessorModule.SessionProcessor.Handle["process"]>[0]> = []
+  const service = Layer.succeed(
+    SessionProcessorModule.SessionProcessor.Service,
+    SessionProcessorModule.SessionProcessor.Service.of({
+      create: Effect.fn("CapturingSessionProcessor.create")((input) =>
+        Effect.succeed({
+          ...fake(input, result),
+          process: Effect.fn("CapturingSessionProcessor.process")((processInput) => {
+            calls.push(processInput)
+            return Effect.succeed(result)
+          }),
+        } satisfies SessionProcessorModule.SessionProcessor.Handle),
+      ),
+    }),
+  )
+  const bus = Bus.layer
+  return {
+    calls,
+    runtime: ManagedRuntime.make(
+      Layer.mergeAll(SessionCompaction.layer, bus).pipe(
+        Layer.provide(Session.defaultLayer),
+        Layer.provide(service),
+        Layer.provide(Agent.defaultLayer),
+        Layer.provide(Plugin.defaultLayer),
+        Layer.provide(bus),
+        Layer.provide(Config.defaultLayer),
+      ),
+    ),
+  }
+}
+
+describe("session.compaction.process request", () => {
+  test("serializes history as text with tool output capped and attachments described", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const msg = await user(session.id, "hello")
+        const reply = await assistant(session.id, msg.id, tmp.path)
+        const pdf = pdfAttachment(session.id, reply.id, 3)
+        const output = "A".repeat(40_000)
+        await tool(session.id, reply.id, "read", output, [pdf])
+        await SessionCompaction.create({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          auto: true,
+        })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        expect(calls).toHaveLength(1)
+        const sent = calls[0].messages
+        // The whole conversation collapses into a single user turn instead of being replayed.
+        expect(sent).toHaveLength(1)
+        expect(sent[0].role).toBe("user")
+
+        const text = JSON.stringify(sent)
+        expect(text).toContain("[User]: hello")
+        expect(text).toContain("[Tool result]:")
+        expect(text).toContain("[truncated]")
+        expect(text).toContain("[Attached application/pdf: scan-3p.pdf]")
+        // The attachment is described, never carried as bytes.
+        expect(text).not.toContain(pdf.url.slice(-64))
+        // 40k of tool output is capped near TOOL_OUTPUT_MAX_CHARS rather than resent whole.
+        expect(text).not.toContain(output)
+        expect(text.length).toBeLessThan(10_000)
+        // The compaction message itself carries no history, so it is not echoed back.
+        expect(text.split("[User]:")).toHaveLength(2)
+      },
+    })
+  })
+
+  test("carries the saved path of an attachment into the summary input", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const msg = await user(session.id, "look at this")
+        const saved = path.join(tmp.path, "shot.png")
+        await Session.updatePart({
+          id: PartID.ascending(),
+          messageID: msg.id,
+          sessionID: session.id,
+          type: "file",
+          mime: "image/png",
+          filename: "shot.png",
+          url: "data:image/png;base64,AAAA",
+          saved,
+        })
+        await assistant(session.id, msg.id, tmp.path)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        // Media is deferred to a Read of the saved copy, so dropping the path here would leave the
+        // summary describing an attachment that nothing downstream can reach.
+        const text = JSON.parse(JSON.stringify(calls[0].messages))[0].content[0].text
+        expect(text).toContain(`[Attached image/png: shot.png — saved at ${saved}]`)
+      },
+    })
+  })
+
+  test("placeholders oversized text parts so the request cannot overflow on its own", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const huge = "B".repeat(MessageV2.STRIP_TEXT_LIMIT + 1)
+        await user(session.id, huge)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        const text = JSON.stringify(calls[0].messages)
+        expect(text).toContain(MessageV2.stripTextPlaceholder(huge.length))
+        expect(text).not.toContain(huge)
+      },
+    })
+  })
+
+  test("summarizes only the head and records where the retained tail starts", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const first = await user(session.id, "first turn")
+        await assistant(session.id, first.id, tmp.path)
+        const second = await user(session.id, "second turn")
+        await assistant(session.id, second.id, tmp.path)
+        const third = await user(session.id, "third turn")
+        await assistant(session.id, third.id, tmp.path)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        // tail_turns defaults to 2, so the last two turns stay out of the summary entirely.
+        const text = JSON.stringify(calls[0].messages)
+        expect(text).toContain("first turn")
+        expect(text).not.toContain("second turn")
+        expect(text).not.toContain("third turn")
+
+        const after = await Session.messages({ sessionID: session.id })
+        const part = after.find((item) => item.info.id === parentID)!.parts.find((item) => item.type === "compaction")
+        expect(part).toMatchObject({ tail_start_id: second.id })
+      },
+    })
+  })
+
+  test("summarizes everything when no recent turn fits the preserve budget", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const first = await user(session.id, "first turn")
+        await assistant(session.id, first.id, tmp.path)
+        const second = await user(session.id, "second turn")
+        const reply = await assistant(session.id, second.id, tmp.path)
+        await tool(session.id, reply.id, "read", "C".repeat(200_000))
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const parentID = msgs.at(-1)!.info.id
+        const { calls, runtime: rt } = capturing("continue")
+        try {
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+        } finally {
+          await rt.dispose()
+        }
+
+        const text = JSON.stringify(calls[0].messages)
+        expect(text).toContain("first turn")
+        expect(text).toContain("second turn")
+
+        const after = await Session.messages({ sessionID: session.id })
+        const part = after.find((item) => item.info.id === parentID)!.parts.find((item) => item.type === "compaction")
+        expect(part).not.toHaveProperty("tail_start_id")
+      },
+    })
+  })
+})
+
+async function summarize(sessionID: SessionID, parentID: MessageID, root: string) {
+  const msg: MessageV2.Assistant = {
+    id: MessageID.ascending(),
+    role: "assistant",
+    sessionID,
+    mode: "compaction",
+    agent: "compaction",
+    path: { cwd: root, root },
+    cost: 0,
+    tokens: { output: 0, input: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    modelID: ref.modelID,
+    providerID: ref.providerID,
+    parentID,
+    summary: true,
+    time: { created: Date.now() },
+    finish: "end_turn",
+  }
+  await Session.updateMessage(msg)
+  await Session.updatePart({
+    id: PartID.ascending(),
+    messageID: msg.id,
+    sessionID,
+    type: "text",
+    text: "SUMMARY",
+  })
+  return msg
+}
+
+describe("session.message-v2.filterCompacted", () => {
+  test("replays the retained tail after the summary", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const first = await user(session.id, "first turn")
+        await assistant(session.id, first.id, tmp.path)
+        const second = await user(session.id, "second turn")
+        const secondReply = await assistant(session.id, second.id, tmp.path)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const compaction = msgs.at(-1)!
+        const part = compaction.parts.find((item) => item.type === "compaction")!
+        await Session.updatePart({ ...part, tail_start_id: second.id })
+        const summary = await summarize(session.id, compaction.info.id, tmp.path)
+
+        const filtered = await MessageV2.filterCompacted(MessageV2.stream(session.id))
+        // Summary first because it stands in for the head, then the turns it deliberately skipped.
+        expect(filtered.map((item) => item.info.id)).toEqual([
+          compaction.info.id,
+          summary.id,
+          second.id,
+          secondReply.id,
+        ])
+      },
+    })
+  })
+
+  test("stops at the compaction boundary when no tail was retained", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const first = await user(session.id, "first turn")
+        await assistant(session.id, first.id, tmp.path)
+        await SessionCompaction.create({ sessionID: session.id, agent: "build", model: ref, auto: true })
+
+        const msgs = await Session.messages({ sessionID: session.id })
+        const compaction = msgs.at(-1)!
+        const summary = await summarize(session.id, compaction.info.id, tmp.path)
+
+        const filtered = await MessageV2.filterCompacted(MessageV2.stream(session.id))
+        expect(filtered.map((item) => item.info.id)).toEqual([compaction.info.id, summary.id])
+      },
+    })
+  })
+})

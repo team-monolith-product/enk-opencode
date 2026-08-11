@@ -1042,10 +1042,40 @@ export namespace Config {
           url: z.string().optional().describe("Enterprise URL"),
         })
         .optional(),
+      tool_output: z
+        .object({
+          max_lines: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("Maximum lines of tool output kept in context before truncation (default: 2000)"),
+          max_bytes: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("Maximum bytes of tool output kept in context before truncation (default: 51200)"),
+        })
+        .optional(),
       compaction: z
         .object({
           auto: z.boolean().optional().describe("Enable automatic compaction when context is full (default: true)"),
           prune: z.boolean().optional().describe("Enable pruning of old tool outputs (default: true)"),
+          tail_turns: z
+            .number()
+            .int()
+            .min(0)
+            .optional()
+            .describe(
+              "Number of recent user turns, including their following assistant/tool responses, to keep verbatim during compaction (default: 2)",
+            ),
+          preserve_recent_tokens: z
+            .number()
+            .int()
+            .min(0)
+            .optional()
+            .describe("Maximum number of tokens from recent turns to preserve verbatim after compaction"),
           reserved: z
             .number()
             .int()

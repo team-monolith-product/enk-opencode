@@ -919,6 +919,7 @@ export type CompactionPart = {
   type: "compaction"
   auto: boolean
   overflow?: boolean
+  tail_start_id?: string
 }
 
 export type Part =
@@ -1644,6 +1645,16 @@ export type Config = {
      */
     url?: string
   }
+  tool_output?: {
+    /**
+     * Maximum lines of tool output kept in context before truncation (default: 2000)
+     */
+    max_lines?: number
+    /**
+     * Maximum bytes of tool output kept in context before truncation (default: 51200)
+     */
+    max_bytes?: number
+  }
   compaction?: {
     /**
      * Enable automatic compaction when context is full (default: true)
@@ -1653,6 +1664,14 @@ export type Config = {
      * Enable pruning of old tool outputs (default: true)
      */
     prune?: boolean
+    /**
+     * Number of recent user turns, including their following assistant/tool responses, to keep verbatim during compaction (default: 2)
+     */
+    tail_turns?: number
+    /**
+     * Maximum number of tokens from recent turns to preserve verbatim after compaction
+     */
+    preserve_recent_tokens?: number
     /**
      * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
      */

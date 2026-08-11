@@ -34,6 +34,7 @@ import { ulid } from "ulid"
 import { spawn } from "child_process"
 import { Command } from "../command"
 import { pathToFileURL, fileURLToPath } from "url"
+import { Config } from "../config/config"
 import { ConfigMarkdown } from "../config/markdown"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@opencode-ai/util/error"
@@ -1594,8 +1595,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             let lastAssistant: MessageV2.Assistant | undefined
             let lastFinished: MessageV2.Assistant | undefined
             let tasks: (MessageV2.CompactionPart | MessageV2.SubtaskPart)[] = []
-            for (let i = msgs.length - 1; i >= 0; i--) {
-              const msg = msgs[i]
+            // filterCompacted orders msgs for the model, which puts a retained tail after the
+            // summary that replaced its predecessors. "Latest" has to follow the clock, not that
+            // order, so scan a chronological view; msgs itself stays as the model should read it.
+            const ordered = msgs.toSorted(
+              (a, b) => a.info.time.created - b.info.time.created || (a.info.id < b.info.id ? -1 : 1),
+            )
+            for (let i = ordered.length - 1; i >= 0; i--) {
+              const msg = ordered[i]
               if (!lastUser && msg.info.role === "user") lastUser = msg.info
               if (!lastAssistant && msg.info.role === "assistant") lastAssistant = msg.info
               if (!lastFinished && msg.info.role === "assistant" && msg.info.finish) lastFinished = msg.info
@@ -1725,24 +1732,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 }
 
                 if (step === 1) SessionSummary.summarize({ sessionID, messageID: lastUser.id })
-
-                if (step > 1 && lastFinished) {
-                  for (const m of msgs) {
-                    if (m.info.role !== "user" || m.info.id <= lastFinished.id) continue
-                    for (const p of m.parts) {
-                      if (p.type !== "text" || p.ignored || p.synthetic) continue
-                      if (!p.text.trim()) continue
-                      p.text = [
-                        "<system-reminder>",
-                        "The user sent the following message:",
-                        p.text,
-                        "",
-                        "Please address this message and continue with your tasks.",
-                        "</system-reminder>",
-                      ].join("\n")
-                    }
-                  }
-                }
 
                 yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
@@ -1994,6 +1983,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         Layer.provide(Plugin.defaultLayer),
         Layer.provide(Session.defaultLayer),
         Layer.provide(Agent.defaultLayer),
+        Layer.provide(Config.defaultLayer),
         Layer.provide(Bus.layer),
       ),
     ),

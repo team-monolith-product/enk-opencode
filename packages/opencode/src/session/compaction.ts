@@ -18,7 +18,7 @@ import { NotFoundError } from "@/storage/db"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, ServiceMap } from "effect"
 import { makeRuntime } from "@/effect/run-service"
-import { isOverflow as overflow } from "./overflow"
+import { isOverflow as overflow, usable } from "./overflow"
 
 export namespace SessionCompaction {
   const log = Log.create({ service: "session.compaction" })
@@ -35,6 +35,91 @@ export namespace SessionCompaction {
   export const PRUNE_MINIMUM = 20_000
   export const PRUNE_PROTECT = 40_000
   const PRUNE_PROTECTED_TOOLS = ["skill"]
+  const TOOL_OUTPUT_MAX_CHARS = 2_000
+  const DEFAULT_TAIL_TURNS = 2
+  const MIN_PRESERVE_RECENT_TOKENS = 2_000
+  const MAX_PRESERVE_RECENT_TOKENS = 8_000
+
+  // A user message plus everything that followed it up to the next user message.
+  type Turn = { start: number; end: number; id: MessageID }
+  type Tail = { start: number; id: MessageID }
+
+  // A summary is a lossy description of work; the turns the model is still mid-way through are
+  // better kept as themselves. Spending a quarter of the window on that is enough for the last
+  // couple of turns without eating the room compaction just freed.
+  function preserveRecentBudget(input: { cfg: Config.Info; model: Provider.Model }) {
+    return (
+      input.cfg.compaction?.preserve_recent_tokens ??
+      Math.min(MAX_PRESERVE_RECENT_TOKENS, Math.max(MIN_PRESERVE_RECENT_TOKENS, Math.floor(usable(input) * 0.25)))
+    )
+  }
+
+  function turns(messages: MessageV2.WithParts[]) {
+    const result: Turn[] = []
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i]
+      if (msg.info.role !== "user") continue
+      // Compaction markers are bookkeeping, not conversation.
+      if (msg.parts.some((part) => part.type === "compaction")) continue
+      result.push({ start: i, end: messages.length, id: msg.info.id })
+    }
+    for (let i = 0; i < result.length - 1; i++) result[i].end = result[i + 1].start
+    return result
+  }
+
+  const truncate = (value: string) =>
+    value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
+
+  // Carries the saved path, not just the name. Media is kept out of requests precisely because the
+  // bytes sit on disk and can be read back on demand, and this is the one place that path would
+  // otherwise be dropped — leaving the summary describing an attachment nothing can reach anymore.
+  const attachment = (part: MessageV2.FilePart) => {
+    const head = `[Attached ${part.mime}: ${part.filename ?? "file"}`
+    return part.saved ? `${head} — saved at ${part.saved}]` : `${head}]`
+  }
+
+  // Carried over from toModelMessages' stripMedia path, which this serializer replaces: a legacy
+  // inlined attachment or a huge paste arrives as one enormous text part, and without this the
+  // compaction request overflows on its own and the session never recovers.
+  const bounded = (value: string) =>
+    value.length > MessageV2.STRIP_TEXT_LIMIT ? MessageV2.stripTextPlaceholder(value.length) : value
+
+  // Renders history as plain text for the summarizer instead of replaying it as model messages.
+  //
+  // Compaction runs precisely when the window is full, so resending the conversation verbatim
+  // made the summary request nearly as large as the request that just overflowed — which is how
+  // a session ends up stuck on "Session too large to compact". Tool output is where the bulk
+  // lives and it is also the most disposable, so it is capped; attachments collapse to a
+  // one-line descriptor rather than their bytes.
+  const serialize = (message: MessageV2.WithParts) => {
+    if (message.info.role === "user") {
+      const text = message.parts
+        .filter((part): part is MessageV2.TextPart => part.type === "text" && !part.ignored)
+        .map((part) => bounded(part.text))
+        .filter(Boolean)
+        .join("\n")
+      const files = message.parts.flatMap((part) => (part.type === "file" ? [attachment(part)] : []))
+      return [...(text ? [`[User]: ${text}`] : []), ...files].join("\n")
+    }
+    return message.parts
+      .flatMap((part) => {
+        if (part.type === "text") return part.text ? [`[Assistant]: ${bounded(part.text)}`] : []
+        if (part.type === "reasoning") return part.text ? [`[Assistant reasoning]: ${bounded(part.text)}`] : []
+        if (part.type !== "tool") return []
+        const call = `[Assistant tool call]: ${part.tool}(${JSON.stringify(part.state.input)})`
+        if (part.state.status === "completed") {
+          // Truncate before appending descriptors, not after: a Read of a large file would
+          // otherwise push "[Attached ...]" past the cap and hide that media was ever there.
+          const output = part.state.time.compacted
+            ? "[Old tool result content cleared]"
+            : [truncate(part.state.output), ...(part.state.attachments ?? []).map(attachment)].join("\n")
+          return [call, `[Tool result]: ${output}`]
+        }
+        if (part.state.status === "error") return [call, `[Tool error]: ${part.state.error}`]
+        return [call]
+      })
+      .join("\n")
+  }
 
   export interface Interface {
     readonly isOverflow: (input: {
@@ -79,6 +164,83 @@ export namespace SessionCompaction {
         model: Provider.Model
       }) {
         return overflow({ cfg: yield* config.get(), tokens: input.tokens, model: input.model })
+      })
+
+      // Sizes messages the way they will actually be sent. Media is counted by its serialized
+      // bytes rather than its real token cost, which overshoots — that only ever keeps a shorter
+      // tail, so the budget stays honest in the direction that matters.
+      const estimate = Effect.fn("SessionCompaction.estimate")(function* (input: {
+        messages: MessageV2.WithParts[]
+        model: Provider.Model
+      }) {
+        const msgs = yield* Effect.promise(() => MessageV2.toModelMessages(input.messages, input.model))
+        return Token.estimate(JSON.stringify(msgs))
+      })
+
+      // A turn that does not fit whole may still fit from some later message onward; keeping that
+      // remainder beats dropping the turn entirely.
+      const splitTurn = Effect.fn("SessionCompaction.splitTurn")(function* (input: {
+        messages: MessageV2.WithParts[]
+        turn: Turn
+        model: Provider.Model
+        budget: number
+      }) {
+        if (input.budget <= 0) return undefined
+        if (input.turn.end - input.turn.start <= 1) return undefined
+        for (let start = input.turn.start + 1; start < input.turn.end; start++) {
+          const size = yield* estimate({
+            messages: input.messages.slice(start, input.turn.end),
+            model: input.model,
+          })
+          if (size > input.budget) continue
+          return { start, id: input.messages[start].info.id } satisfies Tail
+        }
+        return undefined
+      })
+
+      // Picks the newest run of turns that fits the budget. Returns the head to summarize and the
+      // message the retained tail starts at, or no tail when everything has to be summarized.
+      const select = Effect.fn("SessionCompaction.select")(function* (input: {
+        messages: MessageV2.WithParts[]
+        cfg: Config.Info
+        model: Provider.Model
+      }) {
+        const limit = input.cfg.compaction?.tail_turns ?? DEFAULT_TAIL_TURNS
+        if (limit <= 0) return { head: input.messages, tail_start_id: undefined }
+        const budget = preserveRecentBudget({ cfg: input.cfg, model: input.model })
+        const all = turns(input.messages)
+        if (!all.length) return { head: input.messages, tail_start_id: undefined }
+        const recent = all.slice(-limit)
+        const sizes = yield* Effect.forEach(
+          recent,
+          (turn) => estimate({ messages: input.messages.slice(turn.start, turn.end), model: input.model }),
+          { concurrency: 1 },
+        )
+
+        let total = 0
+        let keep: Tail | undefined
+        for (let i = recent.length - 1; i >= 0; i--) {
+          const turn = recent[i]
+          const size = sizes[i]
+          if (total + size <= budget) {
+            total += size
+            keep = { start: turn.start, id: turn.id }
+            continue
+          }
+          const split = yield* splitTurn({
+            messages: input.messages,
+            turn,
+            model: input.model,
+            budget: budget - total,
+          })
+          if (split) keep = split
+          else if (!keep) log.info("tail fallback", { budget, size, total })
+          break
+        }
+
+        // Keeping everything means there is nothing left to summarize, so treat it as no tail.
+        if (!keep || keep.start === 0) return { head: input.messages, tail_start_id: undefined }
+        return { head: input.messages.slice(0, keep.start), tail_start_id: keep.id }
       })
 
       // goes backwards through parts until there are PRUNE_PROTECT tokens worth of tool
@@ -151,6 +313,9 @@ export namespace SessionCompaction {
           throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
         }
         const userMessage = parent.info
+        const compactionPart = parent.parts.find(
+          (part): part is MessageV2.CompactionPart => part.type === "compaction",
+        )
 
         let messages = input.messages
         let replay:
@@ -219,9 +384,13 @@ When constructing the summary, try to stick to this template:
 ---`
 
         const prompt = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
-        const msgs = structuredClone(messages)
+        // The compaction message itself carries no history; summarizing it would just echo the request.
+        const history =
+          compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
+        const selected = yield* select({ messages: history, cfg: yield* config.get(), model })
+        const msgs = structuredClone(selected.head)
         yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
-        const modelMessages = yield* Effect.promise(() => MessageV2.toModelMessages(msgs, model, { stripMedia: true }))
+        const conversation = msgs.map(serialize).filter(Boolean).join("\n\n")
         const msg: MessageV2.Assistant = {
           id: MessageID.ascending(),
           role: "assistant",
@@ -264,10 +433,19 @@ When constructing the summary, try to stick to this template:
             tools: {},
             system: [],
             messages: [
-              ...modelMessages,
               {
                 role: "user",
-                content: [{ type: "text", text: prompt }],
+                content: [
+                  {
+                    type: "text",
+                    text: [
+                      conversation ? `The following is the conversation history:\n\n${conversation}` : undefined,
+                      prompt,
+                    ]
+                      .filter((part) => part !== undefined)
+                      .join("\n\n"),
+                  },
+                ],
               },
             ],
             model,
@@ -283,6 +461,12 @@ When constructing the summary, try to stick to this template:
           processor.message.finish = "error"
           yield* session.updateMessage(processor.message)
           return "stop"
+        }
+
+        // Recorded only once the summary exists: filterCompacted reads this to decide how far back
+        // to keep replaying, and a tail without its summary would resurrect the history instead.
+        if (compactionPart && selected.tail_start_id && compactionPart.tail_start_id !== selected.tail_start_id) {
+          yield* session.updatePart({ ...compactionPart, tail_start_id: selected.tail_start_id })
         }
 
         if (result === "continue" && input.auto) {
