@@ -6,6 +6,8 @@ import { readdir, readlink, readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { Log } from "@/util/log"
 import { ServeTargets } from "./serve-targets"
+import { ChildEnv } from "@/util/child-env"
+import { EnvFile } from "@/util/env-file"
 
 /**
  * 지정 포트가 LISTEN 중인지 빠르게 확인한다.
@@ -87,15 +89,23 @@ export namespace DevServerReplay {
    *
    * 'error' 리스너가 없으면 비동기 spawn 실패(ENOENT/EAGAIN 등)가 uncaught 예외가 되는데,
    * replay 는 부팅 경로에서 fire-and-forget 로 돌아 프로세스를 죽이므로 반드시 처리한다.
+   *
+   * 환경은 ChildEnv allowlist + 프로젝트 .env 값이다. bash 와 방향이 반대인데(bash 는 .env 키를
+   * 지운다) 앱은 그 값으로 동작해야 하기 때문이다. 반대로 opencode 운영 시크릿은 앱에도 넘기지
+   * 않는다 — 앱 코드를 쓰는 게 에이전트라 앱을 거쳐 되읽는 길이 생긴다.
+   *
+   * 값은 파일에서 직접 읽어 넣는다. process.env 에 기대면 Bun 이 부팅 때 자동 로드한 것만 잡혀서,
+   * 참가자가 나중에 UI(env_request)로 저장한 시크릿은 앱에 도달하지 못한다. dotenv 를 안 쓰는
+   * 런타임(파이썬, 순수 node 서버)에서도 이제 같은 값을 본다.
    */
-  export function launch(cmd: string, cwd: string, opts?: { dir?: string }) {
+  export async function launch(cmd: string, cwd: string, opts?: { dir?: string }) {
     const file = logFile(cwd, opts?.dir ?? cwd)
     const script = `mkdir -p ${sq(dirname(file))} 2>/dev/null; : > ${sq(file)} 2>/dev/null; {\n${cmd}\n} >> ${sq(file)} 2>&1`
     const child = spawn("/bin/sh", ["-lc", script], {
       cwd,
       detached: true,
       stdio: "ignore",
-      env: process.env,
+      env: ChildEnv.sanitize({ extend: await EnvFile.load(cwd) }),
     })
     child.on("error", (err) => log.warn("dev server spawn failed", { cwd, err: String(err) }))
     child.unref()
@@ -271,7 +281,7 @@ export namespace DevServerReplay {
       return
     }
 
-    const child = launch(state.cmd, state.cwd, { dir: target.dir })
+    const child = await launch(state.cmd, state.cwd, { dir: target.dir })
     log.info("replayed dev server", { pid: child.pid, port: state.port, cwd: state.cwd })
     // 기록의 pid 는 항상 "지금 포트를 잡고 있는 프로세스" 여야 한다. 여기서 갱신하지 않으면
     // 재스폰 뒤 stop() 이 죽은 옛 pid 를 들고 폴백으로 새는 일이 생긴다.

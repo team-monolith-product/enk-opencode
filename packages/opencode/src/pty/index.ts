@@ -6,6 +6,7 @@ import { Instance } from "@/project/instance"
 import { type IPty } from "bun-pty"
 import z from "zod"
 import { Log } from "../util/log"
+import { ChildEnv } from "@/util/child-env"
 import { lazy } from "@opencode-ai/util/lazy"
 import { Shell } from "@/shell/shell"
 import { Plugin } from "@/plugin"
@@ -182,13 +183,16 @@ export namespace Pty {
 
           const cwd = input.cwd || state.dir
           const shellEnv = await Plugin.trigger("shell.env", { cwd }, { env: {} })
-          const env = {
-            ...process.env,
-            ...input.env,
-            ...shellEnv.env,
-            TERM: "xterm-256color",
-            OPENCODE_TERMINAL: "1",
-          } as Record<string, string>
+          // 터미널은 사람이 쓰는 통로지만 서버 API 라 접근면이 넓다. bash 툴과 같은 allowlist 를 태워
+          // 운영 시크릿이 셸 환경에 남지 않게 한다.
+          const env = ChildEnv.sanitize({
+            extend: {
+              ...input.env,
+              ...shellEnv.env,
+              TERM: "xterm-256color",
+              OPENCODE_TERMINAL: "1",
+            },
+          }) as Record<string, string>
 
           if (process.platform === "win32") {
             env.LC_ALL = "C.UTF-8"

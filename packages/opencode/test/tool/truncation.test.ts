@@ -11,6 +11,7 @@ import { testEffect } from "../lib/effect"
 import { tmpdir } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 import { writeFileStringScoped } from "../lib/filesystem"
+import { Secret } from "../../src/util/secret"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "fixtures")
 const ROOT = path.resolve(import.meta.dir, "..", "..")
@@ -24,6 +25,32 @@ describe("Truncate", () => {
       expect(result.truncated).toBe(true)
       expect(result.content).toContain("truncated...")
       if (result.truncated) expect(result.outputPath).toBeDefined()
+    })
+
+    // 잘린 원문은 파일로 남고 모델이 그 경로를 읽을 수 있다 — 거기에도 시크릿이 남으면 안 된다.
+    test("removes project .env values from both the preview and the saved file", async () => {
+      const secret = "sk-proj-truncation-9f2b1c7d"
+      await using tmp = await tmpdir({
+        git: true,
+        init: async (dir) => Bun.write(path.join(dir, ".env"), `OPENAI_API_KEY=${secret}\n`),
+      })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          Secret.reset()
+          const lines = Array.from({ length: 100 }, (_, i) => `line${i} ${secret}`).join("\n")
+          const result = await Truncate.output(lines, { maxLines: 10 })
+
+          expect(result.truncated).toBe(true)
+          expect(result.content).not.toContain(secret)
+          expect(result.content).toContain("[redacted]")
+          if (result.truncated) {
+            const saved = await Filesystem.readText(result.outputPath)
+            expect(saved).not.toContain(secret)
+          }
+        },
+      })
+      Secret.reset()
     })
 
     test("returns content unchanged when under limits", async () => {

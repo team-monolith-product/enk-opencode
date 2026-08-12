@@ -3,7 +3,9 @@ import path from "path"
 import { Permission } from "../../src/permission"
 import { Instance } from "../../src/project/instance"
 import { GrepTool } from "../../src/tool/grep"
+import { BashTool } from "../../src/tool/bash"
 import { Log } from "../../src/util/log"
+import { Secret } from "../../src/util/secret"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { tmpdir } from "../fixture/fixture"
 
@@ -86,6 +88,109 @@ describe("ENV_FILE_GUARD", () => {
     expect(Permission.evaluate("bash", "bun test test/server/env-file.test.ts", guard).action).not.toBe("deny")
     expect(Permission.evaluate("bash", "cat src/server/routes/env-file.ts", guard).action).not.toBe("deny")
     expect(Permission.evaluate("webfetch", "https://example.com/docs", guard).action).not.toBe("deny")
+  })
+
+  // ChildEnv 는 자식 프로세스의 환경만 바꾼다. exec 시점 environ 을 파일로 읽는 이 경로는
+  // 필터로 못 막으므로 권한 계층이 덮어야 한다.
+  test("process environ paths are denied", () => {
+    const guard = Permission.ENV_FILE_GUARD
+    expect(Permission.evaluate("read", "/proc/self/environ", guard).action).toBe("deny")
+    expect(Permission.evaluate("read", "/proc/1/environ", guard).action).toBe("deny")
+    expect(Permission.evaluate("bash", "cat /proc/self/environ", guard).action).toBe("deny")
+    expect(Permission.evaluate("bash", "tr '\\0' '\\n' < /proc/1/environ", guard).action).toBe("deny")
+    expect(Permission.evaluate("read", "/proc/self/status", guard).action).not.toBe("deny")
+  })
+
+  // 환경을 아무리 걸러도 opencode 힙과 auth.json 에는 값이 그대로 있다. 같은 uid 라 커널이
+  // 막아 주지 않으므로(Sandbox 가 켜져야 진짜로 막힌다) 도구 계층에서라도 끊는다.
+  test("opencode's own memory and credential store are denied", () => {
+    const guard = Permission.ENV_FILE_GUARD
+    for (const [permission, pattern] of [
+      ["read", "/proc/self/mem"],
+      ["read", "/proc/1/maps"],
+      ["bash", "dd if=/proc/1/mem bs=1 count=100"],
+      ["read", "/home/jovyan/.local/share/opencode/auth.json"],
+      ["edit", "/home/jovyan/.local/share/opencode/auth.json"],
+      ["bash", "cat ~/.local/share/opencode/auth.json"],
+      ["read", "/home/jovyan/.local/share/opencode/opencode.db"],
+      ["bash", "sqlite3 /home/jovyan/.local/share/opencode/opencode.db-wal .dump"],
+    ] as const) {
+      expect([pattern, Permission.evaluate(permission, pattern, guard).action]).toEqual([pattern, "deny"])
+    }
+    // 인접한 멀쩡한 경로는 안 걸린다 — 설치된 LSP 바이너리는 cache 아래에 있다
+    expect(Permission.evaluate("bash", "ls ~/.cache/opencode/bin", guard).action).not.toBe("deny")
+    expect(Permission.evaluate("read", "/proc/self/status", guard).action).not.toBe("deny")
+  })
+
+  test("environment dump commands are denied", () => {
+    const guard = Permission.ENV_FILE_GUARD
+    for (const command of [
+      "env",
+      "printenv",
+      "printenv JUPYTERHUB_API_TOKEN",
+      "/usr/bin/env",
+      "/usr/bin/printenv",
+      "env -0",
+      "export",
+      "export -p",
+      "declare",
+      "declare -x",
+      "typeset -p",
+      "set",
+      "Get-ChildItem Env:",
+    ]) {
+      expect([command, Permission.evaluate("bash", command, guard).action]).toEqual([command, "deny"])
+    }
+    // 환경을 덤프하지 않는 정상 사용은 걸리지 않는다
+    for (const command of [
+      "env FOO=1 npm run dev",
+      "export FOO=1",
+      "declare -a items",
+      "set -e",
+      "set -euo pipefail",
+      "node -e 'console.log(1)'",
+      "ls packages/opencode/src/env",
+      "cat src/env/index.ts",
+    ]) {
+      expect([command, Permission.evaluate("bash", command, guard).action]).not.toEqual([command, "deny"])
+    }
+  })
+
+  // 앱은 .env 값으로 동작하는데 그 앱 코드를 쓰는 게 에이전트다. `process.env` 를 뱉는 라우트를
+  // 만들고 curl 로 되읽으면 ChildEnv 필터를 우회하므로, 도구 출력에서 값을 지우는 관문을 둔다.
+  test("tool output never carries a .env value back to the model", async () => {
+    const secret = "sk-proj-e2e-6d1a9c4f2b"
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => Bun.write(path.join(dir, ".env"), `OPENAI_API_KEY=${secret}\nPORT=3000\n`),
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        Secret.reset()
+        const ctx = {
+          sessionID: SessionID.make("ses_test"),
+          messageID: MessageID.make(""),
+          callID: "",
+          agent: "build",
+          abort: AbortSignal.any([]),
+          messages: [],
+          metadata: () => {},
+          ask: async () => {},
+        }
+        const bash = await BashTool.init()
+        // 에이전트가 자기 앱에서 값을 되읽어 오는 상황
+        const result = await bash.execute(
+          { command: `echo '{"key":"${secret}","port":3000}'`, description: "Read app response" },
+          ctx,
+        )
+        expect(result.output).not.toContain(secret)
+        expect(result.output).toContain("[redacted]")
+        // 시크릿이 아닌 값은 멀쩡히 남는다
+        expect(result.output).toContain("3000")
+      },
+    })
+    Secret.reset()
   })
 
   test("grep tool never returns .env contents", async () => {

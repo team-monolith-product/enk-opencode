@@ -14,12 +14,13 @@ import { Process } from "@/util/process"
 import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag"
 import { Shell } from "@/shell/shell"
+import { Sandbox } from "@/sandbox"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncate"
 import { Plugin } from "@/plugin"
 import { EnvFile } from "@/util/env-file"
-import { readdir } from "fs/promises"
+import { ChildEnv } from "@/util/child-env"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -62,14 +63,21 @@ type Scan = {
   dirs: Set<string>
   patterns: Set<string>
   always: Set<string>
-  envFiles: Set<string>
+  guarded: Set<string>
 }
 
+// exec 시점 environ 과 프로세스 메모리는 자식 환경을 걸러도 그대로 남는다 — ChildEnv 로 못 막는
+// 이 경로들은 권한 계층에서 따로 잡는다.
+const PROC_RE = /^\/proc\/[^/]+\/(environ|mem|maps)$/
+// opencode 자신의 자격 증명/세션 저장소. ENV_FILE_GUARD 의 deny 패턴과 같은 대상만 잡는다 —
+// 더 넓게 잡으면 deny 되지 않는 경로에까지 권한 프롬프트가 새로 생긴다.
+const DATA_RE = /\/opencode\/(auth\.json|opencode\.db(-wal|-shm)?)$/
+
 // .env(.local 등) 는 UI 로 저장한 시크릿이라 내용 접근을 막는다. .env.example 은 예외.
-const ENV_FILE_RE = /^\.env(\..+)?$/
-function isEnvFile(file: string) {
-  const base = path.basename(file)
-  return ENV_FILE_RE.test(base) && base !== ".env.example"
+function isGuardedPath(file: string) {
+  const posix = file.replaceAll("\\", "/")
+  if (PROC_RE.test(posix) || DATA_RE.test(posix)) return true
+  return EnvFile.isSecretFile(path.basename(file))
 }
 
 export const log = Log.create({ service: "bash-tool" })
@@ -115,6 +123,23 @@ function source(node: Node) {
 
 function commands(node: Node) {
   return node.descendantsOfType("command").filter((child): child is Node => Boolean(child))
+}
+
+// export/declare/typeset 는 tree-sitter 에서 command 가 아니라 declaration_command 라 위 스캔에
+// 잡히지 않는다. 그중 환경을 통째로 출력하는 형태(인자 없음, 또는 -p/-x 플래그만)만 골라내 같은
+// bash 패턴으로 넘긴다 — `export FOO=1` 같은 정상 선언은 그대로 두어 새 프롬프트가 생기지 않는다.
+const DUMP_NAMES = new Set(["export", "declare", "typeset"])
+function envDump(node: Node) {
+  const tokens = node.text.trim().split(/\s+/)
+  if (!DUMP_NAMES.has(tokens[0])) return
+  const rest = tokens.slice(1)
+  if (rest.length === 0) return tokens[0]
+  if (rest.every((token) => /^-[A-Za-z]*[px][A-Za-z]*$/.test(token))) return tokens.join(" ")
+  return
+}
+
+function declarations(node: Node) {
+  return node.descendantsOfType("declaration_command").filter((child): child is Node => Boolean(child))
 }
 
 function unquote(text: string) {
@@ -238,7 +263,7 @@ async function collect(root: Node, cwd: string, ps: boolean, shell: string): Pro
     dirs: new Set<string>(),
     patterns: new Set<string>(),
     always: new Set<string>(),
-    envFiles: new Set<string>(),
+    guarded: new Set<string>(),
   }
 
   for (const node of commands(root)) {
@@ -248,7 +273,7 @@ async function collect(root: Node, cwd: string, ps: boolean, shell: string): Pro
 
     for (const arg of pathArgs(command, ps)) {
       const resolved = await argPath(arg, cwd, ps, shell)
-      if (resolved && isEnvFile(resolved)) scan.envFiles.add(resolved)
+      if (resolved && isGuardedPath(resolved)) scan.guarded.add(resolved)
       if (!(cmd && FILES.has(cmd))) continue
       log.info("resolved path", { arg, resolved })
       if (!resolved || Instance.containsPath(resolved)) continue
@@ -259,6 +284,13 @@ async function collect(root: Node, cwd: string, ps: boolean, shell: string): Pro
     if (tokens.length && (!cmd || !CWD.has(cmd))) {
       scan.patterns.add(source(node))
       scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
+    }
+  }
+
+  if (!ps) {
+    for (const node of declarations(root)) {
+      const dump = envDump(node)
+      if (dump) scan.patterns.add(dump)
     }
   }
 
@@ -279,10 +311,10 @@ async function parse(command: string, ps: boolean) {
 async function ask(ctx: Tool.Context, scan: Scan) {
   // 명령 문자열 패턴 매칭(ENV_FILE_GUARD 의 bash 규칙)을 우회하는 표기( $HOME/.env 등 )도
   // 인자 경로 해석 단계에서 잡아 read 권한으로 물어본다 — 중앙 가드가 deny 한다.
-  if (scan.envFiles.size > 0) {
+  if (scan.guarded.size > 0) {
     await ctx.ask({
       permission: "read",
-      patterns: Array.from(scan.envFiles),
+      patterns: Array.from(scan.guarded),
       always: [],
       metadata: {},
     })
@@ -312,34 +344,17 @@ async function ask(ctx: Tool.Context, scan: Scan) {
 
 async function shellEnv(ctx: Tool.Context, cwd: string) {
   const extra = await Plugin.trigger("shell.env", { cwd, sessionID: ctx.sessionID, callID: ctx.callID }, { env: {} })
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    ...extra.env,
-  }
+  // 에이전트가 직접 명령을 짜는 통로라 상속은 allowlist 로만 한다. 배포가 주입한 운영 시크릿과
+  // opencode 가 런타임에 써넣는 토큰이 `env` 한 줄에 통째로 새는 걸 막는 게 목적이다.
+  const env = ChildEnv.sanitize({ extend: extra.env })
   // Bun 이 서버 시작 시 cwd 의 .env 를 process.env 로 자동 로드하므로, 명령 문자열에 ".env" 가
-  // 없어도 `env`/`echo $KEY` 로 시크릿이 새어나갈 수 있다. 프로젝트 .env 계열 파일에 정의된
-  // 키는 자식 프로세스 환경에서 제거한다.
-  for (const name of await projectEnvFileKeys()) delete env[name]
-  // 서버 자격 증명도 지운다. ENV_FILE_GUARD 가 값 조회 경로를 이미 deny 하지만 그건 명령 문자열
-  // 패턴이라 표기를 비틀면 빠져나갈 수 있다. 인증이 걸린 배포에서는 자격 증명이 없는 셸이 서버 API
-  // 자체에 닿지 못하므로, 패턴에 기대지 않는 두 번째 층이 된다.
-  delete env["OPENCODE_SERVER_PASSWORD"]
+  // 없어도 `echo $KEY` 로 시크릿이 새어나갈 수 있다. allowlist 를 통과한 이름과 겹칠 수도 있어
+  // 프로젝트 .env 계열 파일에 정의된 키는 마지막에 한 번 더 제거한다.
+  for (const name of await ChildEnv.envFileKeys(Instance.directory)) delete env[name]
   return env
 }
 
-async function projectEnvFileKeys() {
-  const keys = new Set<string>()
-  try {
-    const entries = await readdir(Instance.directory)
-    for (const entry of entries) {
-      if (!isEnvFile(entry)) continue
-      for (const name of await EnvFile.names(path.join(Instance.directory, entry))) keys.add(name)
-    }
-  } catch {}
-  return keys
-}
-
-function launch(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
+async function launch(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
   if (process.platform === "win32" && PS.has(name)) {
     return spawn(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command], {
       cwd,
@@ -347,6 +362,17 @@ function launch(shell: string, name: string, command: string, cwd: string, env: 
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
       windowsHide: true,
+    })
+  }
+
+  // 격리 백엔드가 있으면 셸을 그 안에서 띄운다. 없으면 undefined 라 예전 경로 그대로.
+  const sandboxed = await Sandbox.wrap({ shell, command, cwd })
+  if (sandboxed) {
+    return spawn(sandboxed[0], sandboxed.slice(1), {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     })
   }
 
@@ -372,7 +398,7 @@ async function run(
   },
   ctx: Tool.Context,
 ) {
-  const proc = launch(input.shell, input.name, input.command, input.cwd, input.env)
+  const proc = await launch(input.shell, input.name, input.command, input.cwd, input.env)
   let output = ""
 
   ctx.metadata({

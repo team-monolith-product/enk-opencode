@@ -191,9 +191,11 @@ export namespace LSP {
                 root: existing?.root ?? (async () => Instance.directory),
                 extensions: item.extensions ?? existing?.extensions ?? [],
                 spawn: async (root) => ({
+                  // process.env 를 직접 펼치면 lspspawn 의 ChildEnv 필터가 "호출부가 명시한 이름"
+                  // 으로 보고 전부 통과시킨다. 설정으로 들어온 값만 넘겨 필터가 살아 있게 한다.
                   process: lspspawn(item.command[0], item.command.slice(1), {
                     cwd: root,
-                    env: { ...process.env, ...item.env },
+                    env: item.env,
                   }),
                   initialization: item.initialization,
                 }),

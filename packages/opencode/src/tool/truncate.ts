@@ -7,6 +7,8 @@ import { AppFileSystem } from "@/filesystem"
 import { Config } from "@/config/config"
 import { evaluate } from "@/permission/evaluate"
 import { Log } from "../util/log"
+import { Instance } from "../project/instance"
+import { Secret } from "../util/secret"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
 
@@ -25,6 +27,15 @@ export namespace Truncate {
     maxLines?: number
     maxBytes?: number
     direction?: "head" | "tail"
+  }
+
+  // 인스턴스 컨텍스트 밖(부팅 경로, 유닛 테스트)에서는 프로젝트가 없어 지울 대상도 없다.
+  function dir() {
+    try {
+      return Instance.directory
+    } catch {
+      return undefined
+    }
   }
 
   function hasTaskTool(agent?: Agent.Info) {
@@ -81,7 +92,10 @@ export namespace Truncate {
         }
       })
 
-      const output = Effect.fn("Truncate.output")(function* (text: string, options: Options = {}, agent?: Agent.Info) {
+      const output = Effect.fn("Truncate.output")(function* (raw: string, options: Options = {}, agent?: Agent.Info) {
+        // 잘린 원문은 파일로 남고 모델이 그 경로를 읽을 수 있다. 자르기 전에 지워야 그 파일에도
+        // 시크릿이 안 남는다 — 여기가 도구 출력이 통째로 저장되는 유일한 지점이다.
+        const text = yield* Effect.promise(() => Secret.redact(raw, dir()))
         const resolved = yield* limits()
         const maxLines = options.maxLines ?? resolved.maxLines
         const maxBytes = options.maxBytes ?? resolved.maxBytes
