@@ -1519,13 +1519,9 @@
   background: var(--border-strong-base);
 }
 
-/* E · 외부 연동 관리 다이얼로그 — 시안 EEnvKeys(env-keys-list) */
-/* 기본 dialog-container 는 640px 고정이라 560 콘텐츠가 왼쪽으로 치우침 → 컨테이너도 560 에 맞춘다. */
-[data-component="dialog"]:has(.env-keys-dialog) [data-slot="dialog-container"] {
-  width: min(560px, calc(100vw - 48px));
-}
-
-[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog {
+/* 해저드 다이얼로그 공통 — 상단 경고 스트라이프 + 시안 팔레트/헤더 타이포.
+   외부 연동 관리(E·EnvKeys)에서 정한 언어를, 되돌리기 어려운 동작을 묻는 모달이 함께 쓴다. */
+[data-component="dialog"] [data-slot="dialog-content"].hazard-dialog {
   --env-hazard-mark: #ffce2b;
   --env-hazard-ink: #17171c;
   /* 시안 env-keys-list 팔레트 */
@@ -1540,13 +1536,22 @@
   position: relative;
   align-self: center;
   width: 100%;
-  max-width: 560px;
   border-radius: 10px;
   overflow: hidden;
   padding-top: 12px;
 }
 
-[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog::before {
+/* E · 외부 연동 관리 다이얼로그 — 시안 EEnvKeys(env-keys-list) */
+/* 기본 dialog-container 는 640px 고정이라 560 콘텐츠가 왼쪽으로 치우침 → 컨테이너도 560 에 맞춘다. */
+[data-component="dialog"]:has(.env-keys-dialog) [data-slot="dialog-container"] {
+  width: min(560px, calc(100vw - 48px));
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog {
+  max-width: 560px;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].hazard-dialog::before {
   content: "";
   position: absolute;
   inset-inline: 0;
@@ -1572,24 +1577,24 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog::before {
+  [data-component="dialog"] [data-slot="dialog-content"].hazard-dialog::before {
     animation: none;
   }
 }
 
-[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-header"] {
+[data-component="dialog"] [data-slot="dialog-content"].hazard-dialog [data-slot="dialog-header"] {
   padding: 24px 28px 8px;
   border-bottom: none;
 }
 
-[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-title"] {
+[data-component="dialog"] [data-slot="dialog-content"].hazard-dialog [data-slot="dialog-title"] {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.25;
 }
 
 /* 시안: 헤더 아래 구분선 없음. 설명까지가 24/28/18 한 덩어리다. */
-[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-description"] {
+[data-component="dialog"] [data-slot="dialog-content"].hazard-dialog [data-slot="dialog-description"] {
   padding: 0 28px 18px;
   margin: 0;
   border-bottom: none;
@@ -1599,9 +1604,18 @@
   align-items: flex-start;
 }
 
-[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-slot="dialog-body"] {
+[data-component="dialog"] [data-slot="dialog-content"].hazard-dialog [data-slot="dialog-body"] {
   padding: 0;
   width: 100%;
+}
+
+/* 푸터 — 시안: 좌측 요약, 우측 [취소][실행]. 28px 좌우 정렬을 헤더와 맞춘다. */
+.hazard-dialog .hazard-dialog-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 28px 22px;
 }
 
 /* 목록 — 시안: 배경 #F4F2EC · 1px #D9D5C9 · radius 4, 줄 사이 1px 구분선. */
@@ -1741,14 +1755,6 @@
   color: var(--env-danger);
 }
 
-.env-keys-dialog .env-keys-footer {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 14px 28px 22px;
-}
-
 .env-keys-dialog .env-keys-summary {
   font-size: 11.5px;
   color: var(--env-text-muted);
@@ -1786,4 +1792,72 @@
   line-height: 28px !important;
   box-sizing: border-box;
   outline: none !important;
+}
+
+/* 세션 지우기 확인 모달 — 외부 연동 관리와 같은 해저드 셸. 묻는 말 하나뿐이라 폭만 좁힌다. */
+[data-component="dialog"]:has(.session-clear-dialog) [data-slot="dialog-container"] {
+  width: min(440px, calc(100vw - 48px));
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].session-clear-dialog {
+  max-width: 440px;
+}
+
+.session-clear-dialog .session-clear-body {
+  padding: 0 28px 6px;
+  width: 100%;
+}
+
+/* 시안 EnvKeys 의 경고 카드와 같은 구성 — 아이콘 배지 + 제목 + 보조 설명. */
+.session-clear-dialog .session-clear-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid var(--env-line);
+  border-radius: 4px;
+  background: var(--env-surface);
+  padding: 14px 16px;
+}
+
+.session-clear-dialog .session-clear-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--env-pending);
+  color: var(--env-accent);
+}
+
+.session-clear-dialog .session-clear-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.session-clear-dialog .session-clear-headline {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--env-text-ink);
+}
+
+.session-clear-dialog .session-clear-note {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--env-text-weak);
+}
+
+/* 삭제 CTA — 시안의 삭제 버튼과 같은 danger 계열을 채움형으로. */
+.session-clear-dialog [data-component="button"].session-clear-confirm {
+  background: var(--env-danger);
+  border-color: var(--env-danger);
+  color: #fff;
+}
+
+.session-clear-dialog [data-component="button"].session-clear-confirm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--env-danger) 88%, #000);
+  border-color: color-mix(in srgb, var(--env-danger) 88%, #000);
 }
