@@ -432,6 +432,8 @@ export function SessionSidePanel(props: {
                           state={preview.previewStatus().state}
                           httpStatus={preview.previewStatus().httpStatus}
                           loopbackOnly={preview.previewStatus().loopbackOnly}
+                          logs={preview.previewLogs().lines}
+                          logCmd={preview.previewLogs().cmd}
                           onRetry={preview.restart}
                           retrying={preview.restarting()}
                           showError={preview.showErrorOverlay()}

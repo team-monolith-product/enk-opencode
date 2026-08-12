@@ -77,6 +77,25 @@ export function restartDevServer(opts: {
     .then((res) => res.data as DevServerRestartResult)
 }
 
+export type DevServerLogsResult = {
+  lines: string[]
+  cmd?: string
+  port?: number
+}
+
+// 미리보기 대기/오류 화면에 흘려 보여 줄 dev 서버 출력 tail. 실패는 호출부에서 빈 로그로 흡수한다.
+export function getDevServerLogs(opts: {
+  server: ServerConnection.HttpBase
+  directory: string
+  tail?: number
+  fetch?: typeof fetch
+}): Promise<DevServerLogsResult> {
+  const tail = opts.tail ? `?tail=${opts.tail}` : ""
+  return devServerClient(opts)
+    .get({ url: `/dev-server/logs${tail}` })
+    .then((res) => res.data as DevServerLogsResult)
+}
+
 // /env-file/* 도 SDK 코드젠 미포함이라 devServerClient 와 같은 방식으로 호출한다.
 // 목록에는 값이 실리지 않는다 — 값은 revealEnvKey 로 한 건씩만 가져온다.
 type EnvFileOpts = { server: ServerConnection.HttpBase; directory: string; fetch?: typeof fetch }

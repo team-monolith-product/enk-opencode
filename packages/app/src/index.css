@@ -1101,11 +1101,27 @@
     animation: jt-dirt-burst 500ms ease-out forwards;
   }
 
+  /* dev 서버 기동 중 커맨드 옆에서 도는 스피너 — 로그가 잠잠한 구간에도 살아 있다는 신호라 빠르게 돈다 */
+  @keyframes jt-spin-fast {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .jt-spin-fast {
+    animation: jt-spin-fast 400ms linear infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .jt-pickaxe-strike,
     .jt-dig-mark,
     .jt-dirt-burst {
       animation-duration: 1ms;
+    }
+
+    /* 스피너는 없애지 않고 느리게만 — 기동 중이라는 신호 자체는 남겨야 한다 */
+    .jt-spin-fast {
+      animation-duration: 2s;
     }
   }
 

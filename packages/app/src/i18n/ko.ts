@@ -103,7 +103,8 @@ export const dict = {
   "envKeys.toast.saved.title": "연결 값을 저장했어요",
   "envKeys.toast.saved.description": "미리보기를 다시 시작했어요",
   "envKeys.error.load": "연결 목록을 불러오지 못했어요",
-  "envKeys.error.load.hint": "잠시 후 다시 시도해 주세요. 저장해 둔 건 그대로 있어요. 계속 안 되면 운영자에게 알려 주세요.",
+  "envKeys.error.load.hint":
+    "잠시 후 다시 시도해 주세요. 저장해 둔 건 그대로 있어요. 계속 안 되면 운영자에게 알려 주세요.",
   "envKeys.error.retry": "다시 시도",
   "envKeys.error.invalidKey": "영문·숫자·밑줄만 사용, 숫자로 시작할 수 없습니다",
   "envKeys.error.duplicate": "이미 존재하는 이름입니다",
@@ -569,6 +570,8 @@ export const dict = {
     "미리보기 실행 중 오류가 발생합니다. 원인을 확인하고 정상 실행되도록 수정해 주세요.",
   "session.preview.loopbackOnly.prompt":
     "미리보기가 열리지 않습니다. dev 서버가 컨테이너 안(127.0.0.1)에서만 열려 있어요. 모든 주소에 바인딩되도록 dev 서버를 다시 띄워 주세요.",
+  "session.preview.logs.label": "서버 로그",
+  "session.preview.logs.copy": "로그 복사",
   "session.preview.clientError.title": "미리보기에서 오류 {{count}}개",
   "session.preview.clientError.dismiss": "닫기",
   "session.preview.clientError.reopen": "미리보기 오류 보기",

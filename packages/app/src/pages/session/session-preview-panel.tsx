@@ -14,7 +14,14 @@ import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { getDevServerStatus, listEnvKeys, restartDevServer, type DevServerStatusResult } from "@/utils/server"
+import {
+  getDevServerLogs,
+  getDevServerStatus,
+  listEnvKeys,
+  restartDevServer,
+  type DevServerLogsResult,
+  type DevServerStatusResult,
+} from "@/utils/server"
 import { SessionPreviewFallback } from "./session-preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
 import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./session-preview-address"
@@ -29,6 +36,9 @@ const RETRY_COOLDOWN_MS = 1500
 
 // 상태가 starting(기동 중)일 때 자동 재폴링 간격 — ready/errored 로 전이되면 자동 종료된다.
 const STARTING_POLL_MS = 2000
+
+// 대기/오류 화면에 흘려 보여 줄 dev 서버 로그 줄 수 — 화면에 담기는 만큼만 받아 온다.
+const PREVIEW_LOG_LINES = 24
 
 // startable(기록은 있는데 아직 안 뜸)일 때 재폴링 간격. 부팅 replay 처럼 우리가 띄우지 않은 경로로
 // dev 서버가 늦게 올라와도 사용자 조작 없이 미리보기가 뜨게 한다. 곧 전이될 starting 보다 느리게 잡는다.
@@ -85,6 +95,8 @@ export function createSessionPreview() {
   // none | starting | startable | ready | errored. ready 일 때만 iframe 을 띄운다.
   const [previewStatus, setPreviewStatus] = createSignal<DevServerStatusResult>({ state: "starting" })
   const previewReady = () => previewStatus().state === "ready"
+  // 미리보기가 안 뜬 동안 대기 화면에 흘려 줄 dev 서버 출력(tail). 상태 폴링에 얹어 같이 갱신한다.
+  const [previewLogs, setPreviewLogs] = createSignal<DevServerLogsResult>({ lines: [] })
   const [dirty, setDirty] = createSignal(false)
   const [reloadCount, setReloadCount] = createSignal(0)
 
@@ -130,6 +142,22 @@ export function createSessionPreview() {
       const next = resolvePreviewState(server, reachable)
 
       setPreviewStatus(next)
+      // iframe 이 뜨지 않는 동안에만 로그를 따라간다 — 대기 화면 말고는 쓸 데가 없고, ready 로 가면
+      // 요청도 멈추고 다음 대기 때 지난 로그가 깜빡이지 않도록 비운다. 실패는 그냥 무시(다음 폴에서 재시도).
+      if (next.state === "ready") {
+        setPreviewLogs({ lines: [] })
+      } else {
+        void getDevServerLogs({
+          server: conn.http,
+          directory: sdk.directory,
+          tail: PREVIEW_LOG_LINES,
+          fetch: platform.fetch,
+        })
+          .then((logs) => {
+            if (!disposed) setPreviewLogs(logs)
+          })
+          .catch(() => {})
+      }
       // 아직 결론이 안 난 상태(starting·startable)에서는 계속 지켜본다. startable 도 폴링을 이어가야
       // 아래 자동 재시도가 already_starting 을 받거나 부팅 replay 가 늦게 뜰 때 화면이 고착되지 않는다.
       // ready/errored/none 으로 가면 타이머가 더 안 걸려 자동 종료된다.
@@ -358,6 +386,7 @@ export function createSessionPreview() {
     previewUrl,
     previewReady,
     previewStatus,
+    previewLogs,
     previewSrc,
     reload,
     restart,
@@ -392,6 +421,8 @@ export function SessionPreviewPanel(props: {
   state?: DevServerStatusResult["state"]
   httpStatus?: number
   loopbackOnly?: boolean
+  logs?: string[]
+  logCmd?: string
   showError?: boolean
   errors?: ErrorEntry[]
   errorCount?: number
@@ -430,6 +461,8 @@ export function SessionPreviewPanel(props: {
             state={props.state}
             httpStatus={props.httpStatus}
             loopbackOnly={props.loopbackOnly}
+            logs={props.logs}
+            logCmd={props.logCmd}
             onRetry={props.onRetry}
             retrying={props.retrying}
           />

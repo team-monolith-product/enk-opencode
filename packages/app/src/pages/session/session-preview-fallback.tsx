@@ -119,10 +119,103 @@ function DigBurst(props: { x: number; y: number }) {
   )
 }
 
+// 로그 박스에 한 번에 보이는 줄 수(넘치면 스크롤). 대기 화면이 로그판이 되지 않을 만큼만.
+const LOG_VISIBLE_LINES = 8
+const LOG_LINE_HEIGHT = 17
+
+/**
+ * dev 서버 출력 tail — 기다리는 동안 "뭐가 돌고 있는지"를 보여 준다.
+ * 새 줄이 오면 항상 맨 아래로 따라붙고(사용자가 위로 올려 읽는 중이면 그대로 둔다), 로그가 없으면 렌더 자체를 건너뛴다.
+ */
+/** 커맨드 끝에서 도는 작은 스피너 — 로그가 잠잠한 구간에도 서버가 아직 붙잡고 있다는 신호. */
+function CommandSpinner() {
+  return (
+    <span class="jt-spin-fast inline-flex shrink-0" style={{ color: "var(--app-muted)" }} aria-hidden="true">
+      <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+        <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="2.5" opacity="0.25" />
+        <path d="M17.5 10A7.5 7.5 0 0 0 10 2.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+      </svg>
+    </span>
+  )
+}
+
+function PreviewLogs(props: { lines: string[]; cmd?: string; running?: boolean }) {
+  const language = useLanguage()
+  let box: HTMLDivElement | undefined
+  // 바닥 근처(한 줄 여유)에 있을 때만 자동 스크롤 — 위로 올려 읽는 중이면 방해하지 않는다.
+  let stick = true
+
+  const [copied, setCopied] = createSignal(false)
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
+  const copyLog = () => {
+    void writeClipboard([props.cmd, ...props.lines].filter(Boolean).join("\n"))
+    setCopied(true)
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => setCopied(false), 1500)
+  }
+  onCleanup(() => copyTimer && clearTimeout(copyTimer))
+
+  const onScroll = () => {
+    if (!box) return
+    stick = box.scrollHeight - box.scrollTop - box.clientHeight < LOG_LINE_HEIGHT * 1.5
+  }
+
+  createEffect(() => {
+    props.lines.length
+    if (!box || !stick) return
+    queueMicrotask(() => box && (box.scrollTop = box.scrollHeight))
+  })
+
+  return (
+    <div class="mt-1 flex w-full max-w-140 flex-col gap-1 text-left">
+      <div class="flex items-center gap-1.5">
+        <span class="inline-flex shrink-0 text-icon-weak-base">
+          <Icon name="terminal" size="small" />
+        </span>
+        {/* 커맨드는 남는 폭만큼만 쓰고(길면 말줄임), 스피너가 바로 그 끝에 붙는다. 남은 공간은
+            스페이서가 먹어 복사 버튼만 오른쪽 끝에 남는다. */}
+        <span class="min-w-0 truncate font-mono" style={HINT_TEXT_STYLE} title={props.cmd}>
+          {props.cmd ?? language.t("session.preview.logs.label")}
+        </span>
+        <Show when={props.running}>
+          <CommandSpinner />
+        </Show>
+        <span class="flex-1" />
+        <button
+          type="button"
+          onClick={copyLog}
+          aria-label={language.t("session.preview.logs.copy")}
+          classList={{ "text-icon-success-base": copied() }}
+          class="inline-flex size-6 shrink-0 items-center justify-center rounded text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+        >
+          <Icon name={copied() ? "check-small" : "copy"} size="small" />
+        </button>
+      </div>
+      {/* 세로 패딩을 두면 바닥까지 스크롤했을 때 맨 윗줄이 패딩만큼 잘려 보인다. 줄 높이의 배수로만
+          높이를 잡아 어느 위치에서나 줄이 딱 맞게 끊기도록 한다(터미널과 같은 룩). */}
+      <div
+        ref={(el) => (box = el)}
+        onScroll={onScroll}
+        class="w-full overflow-y-auto overflow-x-hidden rounded-md border border-border-weak-base bg-background-stronger px-2.5 font-mono text-left"
+        style={{
+          "max-height": `${LOG_VISIBLE_LINES * LOG_LINE_HEIGHT}px`,
+          "font-size": "11px",
+          "line-height": `${LOG_LINE_HEIGHT}px`,
+          color: "var(--app-muted)",
+        }}
+      >
+        <For each={props.lines}>{(line) => <div class="whitespace-pre-wrap break-words">{line}</div>}</For>
+      </div>
+    </div>
+  )
+}
+
 export function SessionPreviewFallback(props: {
   state?: DevServerState
   httpStatus?: number
   loopbackOnly?: boolean
+  logs?: string[]
+  logCmd?: string
   onRetry?: () => void
   retrying?: boolean
 }) {
@@ -270,6 +363,13 @@ export function SessionPreviewFallback(props: {
           <span style={{ "font-size": "13.5px", "font-weight": "600", color: "var(--app-ink)" }}>{title()}</span>
           <span style={HINT_TEXT_STYLE}>{hint()}</span>
         </div>
+        {/* dev 서버가 뱉는 내용 — 기다리는 동안 진행 상황이 보이고, errored 면 원인이 바로 드러난다.
+            로그가 아직 없으면(none 이거나 방금 시작) 아무것도 그리지 않는다. */}
+        <Show when={(props.logs?.length ?? 0) > 0}>
+          {/* 스피너는 기동 중(starting)일 때만 — startable·errored 에서 돌면 뭔가 진행 중인 것처럼 보인다. */}
+          <PreviewLogs lines={props.logs!} cmd={props.logCmd} running={state() === "starting"} />
+        </Show>
+
         {/* 수동 재시도 — startable·errored 에서만 노출(starting/none 은 소용없어 숨김).
             연타는 상위 restart() 의 in-flight 잠금+쿨다운이 막는다. */}
         <Show when={showRetry() && props.onRetry}>
