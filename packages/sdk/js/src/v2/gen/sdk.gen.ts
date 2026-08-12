@@ -3308,6 +3308,7 @@ export class Session2 extends HeyApiClient {
         mime: string
         filename?: string
         url: string
+        saved?: string
         source?: FilePartSource
       }>
     },

@@ -5,6 +5,7 @@ import { existsSync } from "node:fs"
 import { readdir, readlink, readFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { Log } from "@/util/log"
+import { ServeTargets } from "./serve-targets"
 
 /**
  * 지정 포트가 LISTEN 중인지 빠르게 확인한다.
@@ -36,9 +37,9 @@ export function probePort(port: number, host = "127.0.0.1", timeoutMs = 250): Pr
  * 방문자가 트리거한 스폰(클라이언트 접속 없음)에서도 dev 서버가 살아나야 한다.
  * 기록 파일은 AI 가 실행을 확인한 커맨드만 담는다.
  *
- * 기록 위치는 항상 stateDir() — 스포너가 주입한 ENK_PROJECT_DIRECTORY 가 있으면 그곳으로
- * 통일한다. 세션이 하위 폴더(git 루트)나 tutorial-directory 에서 열려도 record 와 replay 가
- * 같은 파일을 보도록 하기 위함이다. 재실행 cwd 는 서버가 실제로 돌던 위치를 그대로 쓴다.
+ * 기록 위치는 cwd 가 속한 서빙 타깃 디렉토리(ServeTargets.forCwd) — 세션이 하위 폴더(git
+ * 루트)에서 열려도 타깃(본행사/튜토리얼)별로 record 와 replay 가 같은 파일을 본다.
+ * 재실행 cwd 는 서버가 실제로 돌던 위치를 그대로 쓴다.
  */
 export namespace DevServerReplay {
   const log = Log.create({ service: "enk.dev-server-replay" })
@@ -60,9 +61,9 @@ export namespace DevServerReplay {
   })
   export type State = z.infer<typeof State>
 
-  /** 기록 파일이 놓일 디렉토리. 스포너 주입 경로를 최우선으로 한다. */
-  function stateDir(fallback?: string): string | undefined {
-    return process.env["ENK_PROJECT_DIRECTORY"] ?? fallback
+  /** 기록 파일이 놓일 디렉토리. cwd 가 속한 서빙 타깃을 쓰고, 규약 밖 경로면 fallback 을 쓴다. */
+  function stateDir(cwd: string, fallback: string): string {
+    return ServeTargets.forCwd(cwd)?.dir ?? fallback
   }
 
   /** 셸 인자용 작은따옴표 이스케이프. 경로에 공백·따옴표가 있어도 리다이렉트가 깨지지 않게 한다. */
@@ -70,10 +71,9 @@ export namespace DevServerReplay {
     return `'${value.replaceAll("'", `'\\''`)}'`
   }
 
-  /** dev 서버 출력이 쌓이는 로그 파일 경로. 기록 파일과 같은 stateDir 을 쓴다. */
-  export function logFile(fallback?: string): string | undefined {
-    const dir = stateDir(fallback)
-    return dir ? resolve(dir, LOG_FILE) : undefined
+  /** dev 서버 출력이 쌓이는 로그 파일 경로. 기록 파일과 같은 stateDir 을 쓴다(타깃별로 갈린다). */
+  export function logFile(cwd: string, fallback: string = cwd): string {
+    return resolve(stateDir(cwd, fallback), LOG_FILE)
   }
 
   /**
@@ -83,16 +83,14 @@ export namespace DevServerReplay {
    * 출력은 Node 파이프 대신 셸 리다이렉트로 로그 파일에 남긴다(파이프를 안 잡으므로 hang 위험 없음).
    * 미리보기 대기/오류 화면이 이 파일을 tail 해서 보여준다. 커맨드가 `a && b` 같은 복합문일 수 있어
    * 중괄호 그룹으로 감싸 리다이렉트가 전체에 걸리게 하고, 매 launch 마다 파일을 비워 이번 실행의
-   * 로그만 남긴다(무한 증가 방지). 로그 경로를 못 정하면 예전처럼 그냥 버린다.
+   * 로그만 남긴다(무한 증가 방지).
    *
    * 'error' 리스너가 없으면 비동기 spawn 실패(ENOENT/EAGAIN 등)가 uncaught 예외가 되는데,
    * replay 는 부팅 경로에서 fire-and-forget 로 돌아 프로세스를 죽이므로 반드시 처리한다.
    */
   export function launch(cmd: string, cwd: string, opts?: { dir?: string }) {
-    const file = logFile(opts?.dir ?? cwd)
-    const script = file
-      ? `mkdir -p ${sq(dirname(file))} 2>/dev/null; : > ${sq(file)} 2>/dev/null; {\n${cmd}\n} >> ${sq(file)} 2>&1`
-      : cmd
+    const file = logFile(cwd, opts?.dir ?? cwd)
+    const script = `mkdir -p ${sq(dirname(file))} 2>/dev/null; : > ${sq(file)} 2>/dev/null; {\n${cmd}\n} >> ${sq(file)} 2>&1`
     const child = spawn("/bin/sh", ["-lc", script], {
       cwd,
       detached: true,
@@ -239,9 +237,7 @@ export namespace DevServerReplay {
 
   /** 성공한 dev 서버 커맨드를 기록한다. 실패해도 도구 호출을 막지 않는다(로그만). */
   export async function record(dir: string, state: State) {
-    const target = stateDir(dir)
-    if (!target) return
-    const file = resolve(target, FILE)
+    const file = resolve(stateDir(state.cwd, dir), FILE)
     try {
       await Bun.write(file, JSON.stringify(state, null, 2) + "\n")
       log.info("recorded dev server command", { file, port: state.port })
@@ -250,18 +246,21 @@ export namespace DevServerReplay {
     }
   }
 
-  /** 부팅 시 기록된 커맨드를 재실행한다. 조건이 하나라도 어긋나면 조용히 건너뛴다. */
+  /**
+   * 부팅 시 기록된 커맨드를 재실행한다. 조건이 하나라도 어긋나면 조용히 건너뛴다.
+   *
+   * 되살리는 것은 본행사 타깃뿐이다. 부팅 replay 가 있는 이유는 방문자가 트리거한 스폰
+   * (클라이언트 접속 없음)에서도 갤러리 미리보기가 살아나야 해서인데, 갤러리가 가리키는
+   * 것은 본행사 결과물뿐이다. 튜토리얼 미리보기는 참가자가 화면을 열 때 ensure_dev_server
+   * 로 뜨면 되고, 부팅 때 함께 되살리면 본행사 파드가 쓰지도 않을 튜토리얼 서버에 자원을
+   * 계속 내주게 된다.
+   */
   export async function replay() {
-    const dir = stateDir()
-    if (!dir) return
+    const target = ServeTargets.project()
+    if (!target) return
 
-    const file = resolve(dir, FILE)
-    let state: State
-    try {
-      state = State.parse(await Bun.file(file).json())
-    } catch {
-      return
-    }
+    const state = await loadRecord(target.dir)
+    if (!state) return
 
     if (!existsSync(state.cwd)) {
       log.warn("recorded cwd no longer exists, skipping replay", { cwd: state.cwd })
@@ -272,11 +271,11 @@ export namespace DevServerReplay {
       return
     }
 
-    const child = launch(state.cmd, state.cwd, { dir })
+    const child = launch(state.cmd, state.cwd, { dir: target.dir })
     log.info("replayed dev server", { pid: child.pid, port: state.port, cwd: state.cwd })
     // 기록의 pid 는 항상 "지금 포트를 잡고 있는 프로세스" 여야 한다. 여기서 갱신하지 않으면
     // 재스폰 뒤 stop() 이 죽은 옛 pid 를 들고 폴백으로 새는 일이 생긴다.
-    if (child.pid) await record(dir, { ...state, pid: child.pid })
+    if (child.pid) await record(target.dir, { ...state, pid: child.pid })
   }
 
   // ANSI 이스케이프(색/커서 제어). vite 등 dev 서버 출력은 색이 섞여 오는데, 웹에서 그대로 그리면
@@ -286,11 +285,12 @@ export namespace DevServerReplay {
   /**
    * dev 서버 로그의 마지막 N 줄. 진행률 표시(\r 로 덮어쓰는 줄)는 마지막 조각만 남기고,
    * ANSI 색코드는 벗긴다. 파일이 없거나 읽기 실패면 빈 배열.
+   *
+   * 읽는 파일은 dir 이 속한 타깃의 로그다 — 본행사와 튜토리얼이 서로의 출력을 보지 않는다.
    */
-  export async function readLog(opts?: { dir?: string; lines?: number }): Promise<string[]> {
-    const file = logFile(opts?.dir)
-    if (!file) return []
-    const limit = Math.max(1, Math.min(opts?.lines ?? 40, 500))
+  export async function readLog(opts: { dir: string; lines?: number }): Promise<string[]> {
+    const file = logFile(opts.dir)
+    const limit = Math.max(1, Math.min(opts.lines ?? 40, 500))
     try {
       const handle = Bun.file(file)
       const size = handle.size
@@ -310,14 +310,26 @@ export namespace DevServerReplay {
     }
   }
 
-  /** 기록된 dev 서버 커맨드를 반환한다. 없거나 파싱 실패면 undefined. UI 재시작 등에서 재사용. */
-  export async function loadRecord(fallback?: string): Promise<State | undefined> {
-    const dir = stateDir(fallback)
-    if (!dir) return undefined
+  /**
+   * cwd 가 속한 타깃의 기록. 없거나 파싱 실패면 undefined.
+   *
+   * 그 타깃을 서술하지 않는 기록(규약 이전에 본행사 파일로 몰려 쓰인 튜토리얼 cwd)은 없는
+   * 것으로 본다 — 되살리거나 그 pid 로 프로세스를 죽이면 엉뚱한 앱을 건드리게 된다.
+   */
+  export async function loadRecord(cwd: string): Promise<State | undefined> {
+    const target = ServeTargets.forCwd(cwd)
+    const dir = stateDir(cwd, cwd)
+    let state: State
     try {
-      return State.parse(await Bun.file(resolve(dir, FILE)).json())
+      state = State.parse(await Bun.file(resolve(dir, FILE)).json())
     } catch {
       return undefined
     }
+
+    if (target && ServeTargets.forCwd(state.cwd)?.kind !== target.kind) {
+      log.warn("recorded cwd belongs to another target, ignoring record", { dir, cwd: state.cwd })
+      return undefined
+    }
+    return state
   }
 }

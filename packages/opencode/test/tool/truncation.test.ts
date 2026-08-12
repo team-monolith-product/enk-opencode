@@ -6,7 +6,10 @@ import { Identifier } from "../../src/id/id"
 import { Process } from "../../src/util/process"
 import { Filesystem } from "../../src/util/filesystem"
 import path from "path"
+import { utimes } from "fs/promises"
 import { testEffect } from "../lib/effect"
+import { tmpdir } from "../fixture/fixture"
+import { Instance } from "../../src/project/instance"
 import { writeFileStringScoped } from "../lib/filesystem"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "fixtures")
@@ -140,22 +143,55 @@ describe("Truncate", () => {
     const DAY_MS = 24 * 60 * 60 * 1000
     const it = testEffect(Layer.mergeAll(TruncateSvc.defaultLayer, NodeFileSystem.layer))
 
-    it.effect("deletes files older than 7 days and preserves recent files", () =>
+    const touch = (file: string, at: number) =>
+      Effect.promise(() => utimes(file, new Date(at), new Date(at)))
+
+    it.effect("deletes files untouched for 7 days and preserves recently touched ones", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
 
         yield* fs.makeDirectory(Truncate.DIR, { recursive: true })
 
-        const old = path.join(Truncate.DIR, Identifier.create("tool", false, Date.now() - 10 * DAY_MS))
+        const stale = path.join(Truncate.DIR, Identifier.create("tool", false, Date.now() - 10 * DAY_MS))
         const recent = path.join(Truncate.DIR, Identifier.create("tool", false, Date.now() - 3 * DAY_MS))
+        // Created long ago but read again since: retention follows last use, not creation, so an
+        // output the model is still referencing does not expire out from under it.
+        const revisited = path.join(Truncate.DIR, Identifier.create("tool", false, Date.now() - 11 * DAY_MS))
 
-        yield* writeFileStringScoped(old, "old content")
+        yield* writeFileStringScoped(stale, "stale content")
         yield* writeFileStringScoped(recent, "recent content")
+        yield* writeFileStringScoped(revisited, "revisited content")
+        yield* touch(stale, Date.now() - 10 * DAY_MS)
+        yield* touch(recent, Date.now() - 3 * DAY_MS)
+
         yield* TruncateSvc.Service.use((s) => s.cleanup())
 
-        expect(yield* fs.exists(old)).toBe(false)
+        expect(yield* fs.exists(stale)).toBe(false)
         expect(yield* fs.exists(recent)).toBe(true)
+        expect(yield* fs.exists(revisited)).toBe(true)
       }),
     )
+  })
+})
+
+describe("Truncate.limits", () => {
+  test("falls back to defaults without an instance context", async () => {
+    const result = await Truncate.limits()
+    expect(result).toEqual({ maxLines: Truncate.MAX_LINES, maxBytes: Truncate.MAX_BYTES })
+  })
+
+  test("honors tool_output overrides from config", async () => {
+    await using tmp = await tmpdir({ config: { tool_output: { max_lines: 5, max_bytes: 40 } } })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        expect(await Truncate.limits()).toEqual({ maxLines: 5, maxBytes: 40 })
+
+        const result = await Truncate.output(Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n"))
+        expect(result.truncated).toBe(true)
+        expect(result.content).toContain("truncated...")
+        expect(result.content).not.toContain("line 19")
+      },
+    })
   })
 })

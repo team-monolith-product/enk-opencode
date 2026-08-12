@@ -1,11 +1,11 @@
 import { NodePath } from "@effect/platform-node"
-import { Cause, Duration, Effect, Layer, Schedule, ServiceMap } from "effect"
+import { Cause, Duration, Effect, Layer, Option, Schedule, ServiceMap } from "effect"
 import path from "path"
 import type { Agent } from "../agent/agent"
 import { makeRuntime } from "@/effect/run-service"
 import { AppFileSystem } from "@/filesystem"
+import { Config } from "@/config/config"
 import { evaluate } from "@/permission/evaluate"
-import { Identifier } from "../id/id"
 import { Log } from "../util/log"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
@@ -39,6 +39,10 @@ export namespace Truncate {
      * to the truncation directory and returns a preview plus a hint to inspect the saved file.
      */
     readonly output: (text: string, options?: Options, agent?: Agent.Info) => Effect.Effect<Result>
+    /**
+     * Resolved truncation limits: `tool_output` from config, or MAX_LINES / MAX_BYTES if unset.
+     */
+    readonly limits: () => Effect.Effect<{ maxLines: number; maxBytes: number }>
   }
 
   export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Truncate") {}
@@ -47,22 +51,40 @@ export namespace Truncate {
     Service,
     Effect.gen(function* () {
       const fs = yield* AppFileSystem.Service
+      const config = yield* Config.Service
 
+      // Retention is about how long a saved output stays useful, so it keys off when the file was
+      // last touched. The ID's embedded timestamp only records when it was created, which made a
+      // file that is still being referenced expire on the same schedule as an abandoned one.
       const cleanup = Effect.fn("Truncate.cleanup")(function* () {
-        const cutoff = Identifier.timestamp(Identifier.create("tool", false, Date.now() - Duration.toMillis(RETENTION)))
+        const cutoff = Date.now() - Duration.toMillis(RETENTION)
         const entries = yield* fs.readDirectory(TRUNCATION_DIR).pipe(
           Effect.map((all) => all.filter((name) => name.startsWith("tool_"))),
           Effect.catch(() => Effect.succeed([])),
         )
         for (const entry of entries) {
-          if (Identifier.timestamp(entry) >= cutoff) continue
-          yield* fs.remove(path.join(TRUNCATION_DIR, entry)).pipe(Effect.catch(() => Effect.void))
+          const file = path.join(TRUNCATION_DIR, entry)
+          const info = yield* fs.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined)))
+          const mtime = info && Option.getOrUndefined(info.mtime)
+          if (!mtime || mtime.getTime() >= cutoff) continue
+          yield* fs.remove(file).pipe(Effect.catch(() => Effect.void))
+        }
+      })
+
+      const limits = Effect.fn("Truncate.limits")(function* () {
+        // Truncation also runs where no instance context exists to read config from. Falling back
+        // to the defaults keeps those callers working instead of turning a knob into a crash.
+        const cfg = yield* config.get().pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        return {
+          maxLines: cfg?.tool_output?.max_lines ?? MAX_LINES,
+          maxBytes: cfg?.tool_output?.max_bytes ?? MAX_BYTES,
         }
       })
 
       const output = Effect.fn("Truncate.output")(function* (text: string, options: Options = {}, agent?: Agent.Info) {
-        const maxLines = options.maxLines ?? MAX_LINES
-        const maxBytes = options.maxBytes ?? MAX_BYTES
+        const resolved = yield* limits()
+        const maxLines = options.maxLines ?? resolved.maxLines
+        const maxBytes = options.maxBytes ?? resolved.maxBytes
         const direction = options.direction ?? "head"
         const lines = text.split("\n")
         const totalBytes = Buffer.byteLength(text, "utf-8")
@@ -130,15 +152,23 @@ export namespace Truncate {
         Effect.forkScoped,
       )
 
-      return Service.of({ cleanup, output })
+      return Service.of({ cleanup, output, limits })
     }),
   )
 
-  export const defaultLayer = layer.pipe(Layer.provide(AppFileSystem.defaultLayer), Layer.provide(NodePath.layer))
+  export const defaultLayer = layer.pipe(
+    Layer.provide(AppFileSystem.defaultLayer),
+    Layer.provide(Config.defaultLayer),
+    Layer.provide(NodePath.layer),
+  )
 
   const { runPromise } = makeRuntime(Service, defaultLayer)
 
   export async function output(text: string, options: Options = {}, agent?: Agent.Info): Promise<Result> {
     return runPromise((s) => s.output(text, options, agent))
+  }
+
+  export async function limits(): Promise<{ maxLines: number; maxBytes: number }> {
+    return runPromise((s) => s.limits())
   }
 }

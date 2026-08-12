@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { OpencodeClient, SessionActor } from "@opencode-ai/sdk/v2/client"
-import { createPage, type DocActor } from "@/components/blocksuite/blocksuite-doc"
+import { assetKey, createPage, type DocActor } from "@/components/blocksuite/blocksuite-doc"
 import type { DocUpload } from "@/components/blocksuite/doc-upload"
 import type { FileNodeType } from "@/components/blocksuite/file-reference-block"
 import type { LineRefInput } from "@/components/blocksuite/line-reference-url"
@@ -395,7 +395,7 @@ export function createPromptDoc(input: PromptDocInput) {
 
   const empty = () => (handle ? handle.empty() : true)
 
-  const assets = () => handle?.assets() ?? { count: 0, bytes: 0 }
+  const assets = () => handle?.assets() ?? { count: 0, bytes: 0, keys: [] as string[] }
 
   const addFiles = async (files: File[]) => {
     // Pre-filter on file.size (synchronous, no read) so an oversized file never
@@ -406,17 +406,25 @@ export function createPromptDoc(input: PromptDocInput) {
     // front rather than re-read per file: the adds below run concurrently, so re-reading would let a
     // batch race past the limit. Files that don't fit are dropped and reported via `overflow`.
     const current = assets()
+    // Budgeted per asset id (a content hash), so a file the doc already carries — or one repeated
+    // inside this batch — is free: it is stored once and uploaded once. That also means it is
+    // accepted even when the doc is at the limit, since it adds nothing to spend.
+    const seen = new Set(current.keys ?? [])
     let count = current.count
     let bytes = current.bytes
     let overflow = false
     const accepted: File[] = []
     for (const file of eligible) {
-      if (count + 1 > MAX_ATTACHMENT_COUNT || bytes + file.size > MAX_ATTACHMENT_TOTAL_BYTES) {
-        overflow = true
-        continue
+      const key = await assetKey(file)
+      if (!seen.has(key)) {
+        if (count + 1 > MAX_ATTACHMENT_COUNT || bytes + file.size > MAX_ATTACHMENT_TOTAL_BYTES) {
+          overflow = true
+          continue
+        }
+        seen.add(key)
+        count += 1
+        bytes += file.size
       }
-      count += 1
-      bytes += file.size
       accepted.push(file)
     }
     // addFile resolves once the block exists; the bytes keep uploading in the background under

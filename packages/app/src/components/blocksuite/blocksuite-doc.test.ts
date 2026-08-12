@@ -102,3 +102,25 @@ describe("createPage plain props", () => {
     host.remove()
   })
 })
+
+describe("createPage attachment budget", () => {
+  const bytes = "the-same-ten"
+
+  test("counts one asset per file, not per block", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const next = await page({ theme: "light", init: true })
+    await next.attach(host)
+
+    // Same content under two names: one content-addressed asset, two blocks.
+    expect(await next.addFile(new File([bytes], "a.png", { type: "image/png" }))).toBe(true)
+    expect(await next.addFile(new File([bytes], "copy.png", { type: "image/png" }))).toBe(true)
+    expect(await next.addFile(new File(["other"], "b.png", { type: "image/png" }))).toBe(true)
+
+    const usage = next.assets()
+    expect(usage.count).toBe(2)
+    expect(usage.keys).toHaveLength(2)
+    expect(usage.bytes).toBe(bytes.length + "other".length)
+    host.remove()
+  })
+})

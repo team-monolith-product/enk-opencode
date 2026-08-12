@@ -7,6 +7,7 @@ import { writeClipboard } from "@opencode-ai/ui/util/clipboard"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useClientEnv } from "@/context/client-env"
+import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { ACCEPTED_FILE_TYPES } from "./files"
 import { ACCEPTED_IMAGE_TYPES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
@@ -46,6 +47,7 @@ type ShellProps = {
 
 export const PromptDocShell: Component<ShellProps> = (props) => {
   const env = useClientEnv()
+  const command = useCommand()
   const language = useLanguage()
   let fileInputRef: HTMLInputElement | undefined
   let imageInputRef: HTMLInputElement | undefined
@@ -54,6 +56,9 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
   const [attachOpen, setAttachOpen] = createSignal(false)
   const [attachPos, setAttachPos] = createSignal<{ left: number; bottom: number } | null>(null)
   let countRef: HTMLSpanElement | undefined
+
+  // 세션이 등록한 컴팩션 커맨드. 세션 밖(읽기 전용 뷰어 등)에서는 없으므로 그때는 버튼을 잠근다.
+  const compactCommand = () => command.options.find((x) => x.id === "session.compact")
 
   const ratio = () => (props.maxLength > 0 ? props.length / props.maxLength : 0)
   const over = () => props.length > props.maxLength
@@ -341,6 +346,24 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
                 </span>
                 <span class="oc-auto-label">{language.t("prompt.action.docAutoExpand")}</span>
               </button>
+            </Tooltip>
+          </Show>
+
+          {/* 컴팩션 — devMode 전용. 슬래시 팝오버는 배포 빌드에서 통째로 꺼져 있어 /compact 로는 닿지 않는다. */}
+          <Show when={env.devMode()}>
+            <span class="mx-1 h-4 w-px shrink-0 bg-border-weaker-base" />
+            <Tooltip placement="top" value={language.t("command.session.compact.description")}>
+              <IconButton
+                data-action="prompt-doc-compact"
+                type="button"
+                icon="archive"
+                variant="ghost"
+                class="size-7.5"
+                disabled={compactCommand()?.disabled ?? true}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => command.trigger("session.compact")}
+                aria-label={language.t("command.session.compact")}
+              />
             </Tooltip>
           </Show>
         </div>

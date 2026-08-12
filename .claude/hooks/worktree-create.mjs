@@ -19,8 +19,9 @@
  *      `.env*` 파일들을 복사한다(대상에 이미 있으면 skip).
  *   2) 같은 이유로 gitignore 되는 `.claude` 로컬 설정(CLAUDE.md 등)을 복사한다.
  *      (settings.json·hooks 는 tracked 라 이미 있으므로 skip, worktrees 는 제외)
- *   3) 이 프로젝트 전용 git 사용자 정보(name/email)를 로컬 config 로 설정한다.
- *   4) `bun install` 로 의존성을 설치한다. node_modules 는 gitignore 라
+ *   3) 역시 gitignore 되는 `.agents`(스킬 등)를 통째로 복사한다.
+ *   4) 이 프로젝트 전용 git 사용자 정보(name/email)를 로컬 config 로 설정한다.
+ *   5) `bun install` 로 의존성을 설치한다. node_modules 는 gitignore 라
  *      `git worktree add` 로 따라오지 않으므로 워크트리마다 새로 깔아야 한다.
  */
 import {execFileSync} from 'node:child_process'
@@ -197,15 +198,14 @@ export function copyEnvFiles(mainRepo, worktree) {
 }
 
 /**
- * 메인 저장소의 `.claude` 로컬 설정을 워크트리로 복사한다.
- * `.claude/**` 는 (settings.json·hooks 를 빼고) gitignore 라 워크트리 체크아웃에
- * 따라오지 않으므로, CLAUDE.md 같은 로컬 설정을 직접 복사해야 한다.
- * - `worktrees` 디렉터리는 다른 워크트리들이라 건너뛴다(순환/과다 복사 방지).
- * - 대상에 이미 있는 파일(tracked settings.json·hooks 등)은 건너뛴다.
+ * 메인 저장소의 gitignore 된 디렉터리 하나를 워크트리로 통째로 복사한다.
+ * - 대상에 이미 있는 파일(tracked 파일 등)은 덮어쓰지 않고 건너뛴다.
+ * - `skipDirs` 에 든 이름의 하위 디렉터리는 통째로 건너뛴다.
  */
-export function copyClaudeFiles(mainRepo, worktree) {
-  const root = join(mainRepo, '.claude')
+function copyIgnoredDir(mainRepo, worktree, dirName, skipDirs = []) {
+  const root = join(mainRepo, dirName)
   if (!existsSync(root)) return
+  const skip = new Set(skipDirs)
   let copied = 0
   const walk = (dir) => {
     let entries
@@ -217,11 +217,11 @@ export function copyClaudeFiles(mainRepo, worktree) {
     for (const e of entries) {
       const full = join(dir, e.name)
       if (e.isDirectory()) {
-        if (e.name === 'worktrees') continue
+        if (skip.has(e.name)) continue
         walk(full)
         continue
       }
-      if (!e.isFile()) continue
+      if (!e.isFile() || e.name === '.DS_Store') continue
       const rel = relative(mainRepo, full)
       const dest = join(worktree, rel)
       if (existsSync(dest)) continue
@@ -236,7 +236,26 @@ export function copyClaudeFiles(mainRepo, worktree) {
     }
   }
   walk(root)
-  log(copied > 0 ? `완료 — ${copied}개 .claude 파일 복사됨` : '복사할 .claude 파일 없음')
+  log(copied > 0 ? `완료 — ${copied}개 ${dirName} 파일 복사됨` : `복사할 ${dirName} 파일 없음`)
+}
+
+/**
+ * 메인 저장소의 `.claude` 로컬 설정을 워크트리로 복사한다.
+ * `.claude/**` 는 (settings.json·hooks 를 빼고) gitignore 라 워크트리 체크아웃에
+ * 따라오지 않으므로, CLAUDE.md 같은 로컬 설정을 직접 복사해야 한다.
+ * - `worktrees` 디렉터리는 다른 워크트리들이라 건너뛴다(순환/과다 복사 방지).
+ * - 대상에 이미 있는 파일(tracked settings.json·hooks 등)은 건너뛴다.
+ */
+export function copyClaudeFiles(mainRepo, worktree) {
+  copyIgnoredDir(mainRepo, worktree, '.claude', ['worktrees'])
+}
+
+/**
+ * 메인 저장소의 `.agents`(스킬 등)를 워크트리로 복사한다.
+ * `.agents/**` 도 통째로 gitignore 라 워크트리 체크아웃에 따라오지 않는다.
+ */
+export function copyAgentFiles(mainRepo, worktree) {
+  copyIgnoredDir(mainRepo, worktree, '.agents')
 }
 
 /**
@@ -284,6 +303,7 @@ function main() {
   setGitIdentity(worktreePath)
   copyEnvFiles(mainRepo, worktreePath)
   copyClaudeFiles(mainRepo, worktreePath)
+  copyAgentFiles(mainRepo, worktreePath)
   installDeps(worktreePath)
 
   return worktreePath

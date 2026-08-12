@@ -7,7 +7,7 @@ import {existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import {tmpdir} from 'node:os'
 import {dirname, join} from 'node:path'
 
-import {collectEnvFiles, copyClaudeFiles, copyEnvFiles, createWorktree} from './worktree-create.mjs'
+import {collectEnvFiles, copyAgentFiles, copyClaudeFiles, copyEnvFiles, createWorktree} from './worktree-create.mjs'
 
 let base
 
@@ -73,6 +73,38 @@ describe('copyClaudeFiles', () => {
 
     expect(() => copyClaudeFiles(join(base, 'main'), join(base, 'wt'))).not.toThrow()
     expect(has('wt/.claude')).toBe(false)
+  })
+})
+
+describe('copyAgentFiles', () => {
+  test('gitignore 된 .agents 를 하위 디렉터리까지 복사한다', () => {
+    write('main/.agents/skills/git/SKILL.md', 'git skill')
+    write('main/.agents/skills/solidjs/rules/a.md', 'rule')
+    mkdirSync(join(base, 'wt'), {recursive: true})
+
+    copyAgentFiles(join(base, 'main'), join(base, 'wt'))
+
+    expect(read('wt/.agents/skills/git/SKILL.md')).toBe('git skill')
+    expect(read('wt/.agents/skills/solidjs/rules/a.md')).toBe('rule')
+  })
+
+  test('대상에 이미 있는 파일은 덮어쓰지 않고 .DS_Store 는 건너뛴다', () => {
+    write('main/.agents/skills/git/SKILL.md', 'main')
+    write('main/.agents/skills/.DS_Store', 'junk')
+    write('wt/.agents/skills/git/SKILL.md', 'existing')
+
+    copyAgentFiles(join(base, 'main'), join(base, 'wt'))
+
+    expect(read('wt/.agents/skills/git/SKILL.md')).toBe('existing')
+    expect(has('wt/.agents/skills/.DS_Store')).toBe(false)
+  })
+
+  test('.agents 가 없으면 아무 일도 하지 않는다', () => {
+    mkdirSync(join(base, 'main'), {recursive: true})
+    mkdirSync(join(base, 'wt'), {recursive: true})
+
+    expect(() => copyAgentFiles(join(base, 'main'), join(base, 'wt'))).not.toThrow()
+    expect(has('wt/.agents')).toBe(false)
   })
 })
 

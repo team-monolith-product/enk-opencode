@@ -7,6 +7,7 @@ import DESCRIPTION from "./ensure-dev-server.txt"
 import { Instance } from "../project/instance"
 import { Log } from "../util/log"
 import { DevServerReplay, probePort } from "../enk/dev-server-replay"
+import { ServeTargets } from "../enk/serve-targets"
 
 export { probePort }
 
@@ -22,13 +23,10 @@ async function waitForPort(port: number, timeoutMs: number, abort: AbortSignal):
   return false
 }
 
-export function serveUrl(port: number): string {
-  // 학생에게 안내할 외부 접근 주소. JUPYTERHUB_USER/OPENCODE_SERVE_DOMAIN 환경변수가 있으면 외부 URL,
-  // 없으면 로컬 URL 로 폴백.
-  const user = process.env["JUPYTERHUB_USER"]
-  const domain = process.env["OPENCODE_SERVE_DOMAIN"]
-  if (user && domain) return `https://${user}.${domain}/`
-  return `http://localhost:${port}/`
+export function serveUrl(port: number, kind: ServeTargets.Kind = "project"): string {
+  // 학생에게 안내할 외부 접근 주소. 스포너 env 가 없는 환경에서는 로컬 URL 로 폴백한다.
+  const host = ServeTargets.previewHost(kind)
+  return host ? `${host}/` : `http://localhost:${port}/`
 }
 
 const HOST_HINT =
@@ -55,14 +53,22 @@ export async function reachableExternally(port: number): Promise<boolean | undef
   return reached.some(Boolean)
 }
 
+// 이 세션이 서빙하는 포트. cmd 안의 포트 옵션은 모델이 직접 적으므로, 스키마 기본값과
+// 예시가 처음부터 이 값을 가리켜야 첫 호출이 바로 맞는다.
+function servePort(): number {
+  return ServeTargets.forCwd(Instance.directory)?.port ?? ServeTargets.PORTS.project
+}
+
 export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => ({
   description: DESCRIPTION,
   parameters: z.object({
     cwd: z.string().describe(`서버를 실행할 작업 디렉토리 (기본값 ${Instance.directory})`).optional(),
     cmd: z
       .string()
-      .describe("실행할 셸 명령. 예: 'npm run dev -- --host 0.0.0.0 --port 3000', 'npx --yes serve -l 3000 .'"),
-    port: z.number().describe("서버가 LISTEN 할 포트. OpenCode 환경에서는 3000 고정.").default(3000),
+      .describe(
+        `실행할 셸 명령. 포트는 반드시 ${servePort()} 로 적는다. ` +
+          `예: 'npm run dev -- --host 0.0.0.0 --port ${servePort()}', 'npx --yes serve -l ${servePort()} .'`,
+      ),
     ready_timeout_ms: z.number().describe("새로 띄울 때 LISTEN 시작을 기다리는 최대 시간(ms).").default(15000),
     restart: z
       .boolean()
@@ -76,6 +82,11 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     const startedAt = Date.now()
     // replay 는 부팅 프로세스(다른 cwd)에서 도므로 절대경로로 고정해 기록한다.
     const cwd = resolve(params.cwd ?? Instance.directory)
+
+    // 포트는 인자가 아니라 cwd 의 서빙 타깃이 정한다(본행사 3000 / 튜토리얼 3001).
+    // 미리보기 서브도메인·부팅 replay·CHP 라우팅이 모두 이 규약에 묶여 있다.
+    const target = ServeTargets.forCwd(cwd)
+    const port = target?.port ?? ServeTargets.PORTS.project
 
     type Payload = {
       status: "already_running" | "started" | "failed"
@@ -96,21 +107,21 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     if (!existsSync(cwd)) {
       return result("ensure_dev_server: failed", {
         status: "failed",
-        port: params.port,
+        port,
         ms: Date.now() - startedAt,
         reason: `cwd 가 존재하지 않습니다: ${cwd}`,
       })
     }
 
-    const existing = await DevServerReplay.loadRecord(Instance.directory)
-    const running = await probePort(params.port)
+    const existing = await DevServerReplay.loadRecord(cwd)
+    const running = await probePort(port)
 
     if (running && !params.restart) {
       // 기록은 "재기동하면 이대로 뜬다" 는 약속이므로 검증된 커맨드만 담는다. 지금 떠 있는 서버가
       // params.cmd 로 떴다는 보장이 없어 덮어쓰지 않고, 기록이 아예 없을 때만 백필한다.
       // 대신 어긋난 사실을 그대로 돌려줘 restart 로 정리하도록 유도한다 — 조용히 덮어쓰면
       // 기록만 바뀌고 실제 프로세스는 옛 커맨드 그대로여서 재스폰 때 같은 실패가 되돌아온다.
-      if (!existing) await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port })
+      if (!existing) await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port })
 
       const hints: string[] = []
       if (existing && existing.cmd !== params.cmd)
@@ -118,12 +129,12 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
           "실행 중인 서버는 기록된 명령으로 떠 있어 이번 cmd 는 반영되지 않았습니다. " +
             "이 cmd 로 바꾸려면 restart: true 로 다시 호출하세요.",
         )
-      if ((await reachableExternally(params.port)) === false) hints.push(HOST_HINT)
+      if ((await reachableExternally(port)) === false) hints.push(HOST_HINT)
 
-      return result(`ensure_dev_server: already_running (:${params.port})`, {
+      return result(`ensure_dev_server: already_running (:${port})`, {
         status: "already_running",
-        url: serveUrl(params.port),
-        port: params.port,
+        url: serveUrl(port, target?.kind),
+        port,
         ms: Date.now() - startedAt,
         ...(existing && existing.cmd !== params.cmd ? { recorded_cmd: existing.cmd } : {}),
         ...(hints.length ? { hint: hints.join(" ") } : {}),
@@ -134,47 +145,49 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     await ctx.ask({
       permission: "bash",
       patterns: [params.cmd],
-      always: [`ensure_dev_server :${params.port}`],
+      always: [`ensure_dev_server :${port}`],
       metadata: {},
     })
 
     if (running) {
-      const stopped = await DevServerReplay.stop(params.port, existing?.pid)
+      const stopped = await DevServerReplay.stop(port, existing?.pid)
       if (!stopped) {
         return result("ensure_dev_server: failed", {
           status: "failed",
-          port: params.port,
+          port,
           ms: Date.now() - startedAt,
-          reason: `포트 ${params.port} 를 점유한 기존 프로세스를 종료하지 못했습니다. 학생에게 어떤 프로세스가 포트를 쓰고 있는지 확인이 필요하다고 안내하세요.`,
+          reason: `포트 ${port} 를 점유한 기존 프로세스를 종료하지 못했습니다. 학생에게 어떤 프로세스가 포트를 쓰고 있는지 확인이 필요하다고 안내하세요.`,
         })
       }
-      log.info("stopped previous dev server for restart", { port: params.port })
+      log.info("stopped previous dev server for restart", { port })
     }
 
     const child = DevServerReplay.launch(params.cmd, cwd, { dir: Instance.directory })
-    log.info("spawned dev server", { pid: child.pid, port: params.port, cwd })
+    log.info("spawned dev server", { pid: child.pid, port, cwd })
 
-    const ready = await waitForPort(params.port, params.ready_timeout_ms, ctx.abort)
+    const ready = await waitForPort(port, params.ready_timeout_ms, ctx.abort)
     const ms = Date.now() - startedAt
 
     if (!ready) {
       return result("ensure_dev_server: failed", {
         status: "failed",
-        port: params.port,
+        port,
         ms,
-        reason: `포트 ${params.port} 가 ${params.ready_timeout_ms}ms 안에 LISTEN 되지 않았습니다. 명령어를 확인하세요: ${params.cmd}`,
+        reason:
+          `포트 ${port} 가 ${params.ready_timeout_ms}ms 안에 LISTEN 되지 않았습니다. ` +
+          `cmd 가 ${port} 에 바인딩하는지 확인하세요: ${params.cmd}`,
       })
     }
 
     // 여기까지 왔으면 이 커맨드로 실제 LISTEN 까지 확인됐다 — 기록을 갱신할 자격이 있는 유일한 지점.
-    await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port: params.port, pid: child.pid })
+    await DevServerReplay.record(Instance.directory, { cmd: params.cmd, cwd, port, pid: child.pid })
 
-    return result(`ensure_dev_server: started (:${params.port}, ${ms}ms)`, {
+    return result(`ensure_dev_server: started (:${port}, ${ms}ms)`, {
       status: "started",
-      url: serveUrl(params.port),
-      port: params.port,
+      url: serveUrl(port, target?.kind),
+      port,
       ms,
-      ...((await reachableExternally(params.port)) === false ? { hint: HOST_HINT } : {}),
+      ...((await reachableExternally(port)) === false ? { hint: HOST_HINT } : {}),
     })
   },
 }))

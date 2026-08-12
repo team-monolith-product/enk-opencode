@@ -26,7 +26,20 @@ export namespace ProviderError {
     /prompt too long; exceeded (?:max )?context length/i, // Ollama explicit overflow error
     /too large for model with \d+ maximum context length/i, // Mistral
     /model_context_window_exceeded/i, // z.ai non-standard finish_reason surfaced as error text
+    /request_too_large/i, // Anthropic error type field
+    /tokens in request more than max tokens allowed/i, // z.ai GLM
+    /exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))/i, // OpenAI-compatible
+    /exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?/i, // OpenAI-compatible
+    /input \(\d+ tokens\) is longer than the model'?s context length \(\d+ tokens\)/i, // vLLM / SGLang
+    /prompt has [\d,]+ tokens?, but the configured context size is [\d,]+ tokens?/i, // llama.cpp / Ollama
+    /too many tokens/i,
+    /token limit exceeded/i,
   ]
+
+  // Rate limiting shares vocabulary with overflow ("too many tokens"), but retrying is the
+  // right response there while compaction is the right response for overflow. Checked first
+  // so a throttle is never mistaken for a full context window.
+  const OVERFLOW_EXCLUSIONS = [/^(throttling error|service unavailable):/i, /rate limit/i, /too many requests/i]
 
   function isOpenAiErrorRetryable(e: APICallError) {
     const status = e.statusCode
@@ -38,6 +51,7 @@ export namespace ProviderError {
   // Providers not reliably handled in this function:
   // - z.ai: can accept overflow silently (needs token-count/context-window checks)
   function isOverflow(message: string) {
+    if (OVERFLOW_EXCLUSIONS.some((p) => p.test(message))) return false
     if (OVERFLOW_PATTERNS.some((p) => p.test(message))) return true
 
     // Providers/status patterns handled outside of regex list:

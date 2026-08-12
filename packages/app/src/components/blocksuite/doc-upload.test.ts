@@ -115,6 +115,88 @@ describe("createUploadTracker", () => {
     expect(tracker.active()).toBe(false)
   })
 
+  test("the same file attached again mid-upload rides the request already in flight", () => {
+    const { tracker, calls } = harness()
+    tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })
+    tracker.start({ blockId: "b2", key: "k1", name: "a.png", blob: file() })
+
+    expect(calls).toHaveLength(1)
+    // Both blocks are still tracked — each shows a bar, and submit stays gated for both.
+    calls[0]!.progress(60, 120)
+    expect(tracker.list().map((item) => [item.blockId, uploadPercent(item)])).toEqual([
+      ["b1", 50],
+      ["b2", 50],
+    ])
+  })
+
+  test("one landed upload settles every block that attached the same file", async () => {
+    const { tracker, calls } = harness()
+    tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })
+    tracker.start({ blockId: "b2", key: "k1", name: "a.png", blob: file() })
+
+    calls[0]!.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(tracker.list()).toEqual([])
+    expect(tracker.active()).toBe(false)
+  })
+
+  test("re-attaching a file already on the server uploads nothing", async () => {
+    const { tracker, calls } = harness()
+    tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })
+    calls[0]!.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    tracker.start({ blockId: "b2", key: "k1", name: "a.png", blob: file() })
+    expect(calls).toHaveLength(1)
+    expect(tracker.active()).toBe(false)
+    // ...and an undo that brings such a block back has nothing to resume either.
+    expect(tracker.resume("b3", "k1")).toBe(false)
+    expect(calls).toHaveLength(1)
+  })
+
+  test("deleting the block that was uploading hands the bytes to its twin", () => {
+    const { tracker, calls } = harness()
+    tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })
+    tracker.start({ blockId: "b2", key: "k1", name: "a.png", blob: file() })
+
+    tracker.cancel("b1")
+    expect(calls[0]!.aborted()).toBe(true)
+    // The surviving block still needs the file, so it takes the upload over.
+    expect(calls).toHaveLength(2)
+    expect(calls[1]!.key).toBe("k1")
+    expect(tracker.list().map((item) => item.blockId)).toEqual(["b2"])
+    expect(tracker.active()).toBe(true)
+  })
+
+  test("deleting the twin leaves the upload alone", () => {
+    const { tracker, calls } = harness()
+    tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })
+    tracker.start({ blockId: "b2", key: "k1", name: "a.png", blob: file() })
+
+    tracker.cancel("b2")
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.aborted()).toBe(false)
+    expect(tracker.list().map((item) => item.blockId)).toEqual(["b1"])
+  })
+
+  test("a failed upload marks every block waiting on those bytes", async () => {
+    const { tracker, calls } = harness()
+    tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })
+    tracker.start({ blockId: "b2", key: "k1", name: "a.png", blob: file() })
+
+    calls[0]!.reject(new Error("boom"))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(tracker.list().map((item) => item.status)).toEqual(["error", "error"])
+
+    // Deleting the failed block retries on the twin rather than dropping the file silently.
+    tracker.cancel("b1")
+    expect(calls).toHaveLength(2)
+    expect(tracker.list().map((item) => [item.blockId, item.status])).toEqual([["b2", "uploading"]])
+  })
+
   test("dispose aborts everything still in flight", () => {
     const { tracker, calls } = harness()
     tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })

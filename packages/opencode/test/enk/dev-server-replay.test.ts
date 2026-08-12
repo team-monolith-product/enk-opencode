@@ -79,6 +79,17 @@ async function spawnListener(dir: string, port: number) {
   return child
 }
 
+// teams/{id}/{project,tutorial}-directory 형태의 워크스페이스. 본행사를 env 로 주입한다.
+async function tempWorkspace(): Promise<{ project: string; tutorial: string }> {
+  const root = await tempProjectDir()
+  const project = join(root, "project-directory")
+  const tutorial = join(root, "tutorial-directory")
+  await mkdir(project, { recursive: true })
+  await mkdir(tutorial, { recursive: true })
+  process.env["ENK_PROJECT_DIRECTORY"] = project
+  return { project, tutorial }
+}
+
 async function writeState(projectDir: string, state: DevServerReplay.State) {
   const file = join(projectDir, ".opencode", "dev-server.json")
   await mkdir(join(projectDir, ".opencode"), { recursive: true })
@@ -97,17 +108,28 @@ describe("DevServerReplay", () => {
       expect(JSON.parse(raw)).toEqual(state)
     })
 
-    test("prefers ENK_PROJECT_DIRECTORY over the fallback so record and replay agree", async () => {
-      const canonical = await tempProjectDir()
-      const session = await tempProjectDir()
+    test("본행사 하위 폴더에서 띄워도 타깃 폴더 한 곳에 기록한다", async () => {
+      const { project } = await tempWorkspace()
+      const session = join(project, "app")
+      await mkdir(session, { recursive: true })
       const state = { cmd: "npm run dev -- --port 3000", cwd: session, port: 3000 }
 
-      process.env["ENK_PROJECT_DIRECTORY"] = canonical
       await DevServerReplay.record(session, state)
 
-      const raw = await readFile(join(canonical, ".opencode", "dev-server.json"), "utf8")
+      const raw = await readFile(join(project, ".opencode", "dev-server.json"), "utf8")
       expect(JSON.parse(raw)).toEqual(state)
       expect(existsSync(join(session, ".opencode", "dev-server.json"))).toBe(false)
+    })
+
+    test("튜토리얼 cwd 의 기록은 본행사가 아니라 튜토리얼 폴더에 쓴다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      const state = { cmd: "npm run dev -- --port 3001", cwd: tutorial, port: 3001 }
+
+      await DevServerReplay.record(project, state)
+
+      const raw = await readFile(join(tutorial, ".opencode", "dev-server.json"), "utf8")
+      expect(JSON.parse(raw)).toEqual(state)
+      expect(existsSync(join(project, ".opencode", "dev-server.json"))).toBe(false)
     })
   })
 
@@ -164,13 +186,35 @@ describe("DevServerReplay", () => {
       process.env["ENK_PROJECT_DIRECTORY"] = dir
       await DevServerReplay.replay()
 
-      const recorded = await DevServerReplay.loadRecord()
+      const recorded = await DevServerReplay.loadRecord(dir)
       expect(recorded?.pid).toBeGreaterThan(0)
       cleanups.push(async () => {
         try {
           process.kill(-recorded!.pid!, "SIGKILL")
         } catch {}
       })
+    })
+
+    test("본행사 기록이 튜토리얼 cwd 를 가리키면 재실행하지 않는다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      const marker = join(project, "marker")
+      await writeState(project, { cmd: `echo ok > ${marker}`, cwd: tutorial, port: await freePort() })
+
+      await DevServerReplay.replay()
+
+      await new Promise((r) => setTimeout(r, 200))
+      expect(existsSync(marker)).toBe(false)
+    })
+
+    test("튜토리얼 기록은 부팅 때 되살리지 않는다", async () => {
+      const { tutorial } = await tempWorkspace()
+      const marker = join(tutorial, "marker")
+      await writeState(tutorial, { cmd: `echo ok > ${marker}`, cwd: tutorial, port: await freePort() })
+
+      await DevServerReplay.replay()
+
+      await new Promise((r) => setTimeout(r, 200))
+      expect(existsSync(marker)).toBe(false)
     })
 
     test("skips replay when the recorded cwd no longer exists", async () => {
@@ -248,15 +292,42 @@ describe("DevServerReplay", () => {
       expect(await DevServerReplay.readLog({ dir })).toEqual([])
     })
 
-    test("writes the log next to the record under ENK_PROJECT_DIRECTORY, not the cwd", async () => {
-      const canonical = await tempProjectDir()
-      const session = await tempProjectDir()
+    test("본행사 하위 폴더에서 띄워도 기록과 같은 타깃 폴더에 로그를 쓴다", async () => {
+      const { project } = await tempWorkspace()
+      const session = join(project, "app")
+      await mkdir(session, { recursive: true })
 
-      process.env["ENK_PROJECT_DIRECTORY"] = canonical
       DevServerReplay.launch("echo ok", session)
 
-      expect(await waitForLog(canonical, (l) => l.includes("ok"))).toEqual(["ok"])
+      expect(await waitForLog(project, (l) => l.includes("ok"))).toEqual(["ok"])
       expect(existsSync(join(session, ".opencode", "dev-server.log"))).toBe(false)
+    })
+
+    test("튜토리얼 로그는 본행사 로그와 섞이지 않는다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+
+      DevServerReplay.launch("echo 튜토리얼", tutorial)
+
+      expect(await waitForLog(tutorial, (l) => l.includes("튜토리얼"))).toEqual(["튜토리얼"])
+      expect(await DevServerReplay.readLog({ dir: project })).toEqual([])
+    })
+  })
+
+  describe("loadRecord", () => {
+    test("cwd 가 속한 타깃의 기록을 읽는다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      await writeState(project, { cmd: "본행사", cwd: project, port: 3000 })
+      await writeState(tutorial, { cmd: "튜토리얼", cwd: tutorial, port: 3001 })
+
+      expect((await DevServerReplay.loadRecord(join(project, "src")))?.cmd).toBe("본행사")
+      expect((await DevServerReplay.loadRecord(join(tutorial, "src")))?.cmd).toBe("튜토리얼")
+    })
+
+    test("다른 타깃의 cwd 를 서술하는 기록은 없는 것으로 본다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      await writeState(project, { cmd: "튜토리얼", cwd: tutorial, port: 3000, pid: 1234 })
+
+      expect(await DevServerReplay.loadRecord(project)).toBeUndefined()
     })
   })
 

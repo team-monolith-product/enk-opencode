@@ -42,15 +42,14 @@ export namespace MessageV2 {
     return `[Large text content omitted during compaction: ${length} characters]`
   }
 
-  // Media the request deliberately does NOT inline (see inlineMedia in toModelMessages). Every media
-  // part is accompanied by a synthetic note carrying its path — the saved copy for an upload, the
-  // Read call for a workspace file — so the model still knows what it has and how to reach it,
-  // without the bytes being re-billed on every step of every turn.
-  export function mediaOmittedPlaceholder(input: { mime: string; filename?: string }) {
-    return [
-      `[Attached ${input.mime}: ${input.filename ?? "file"} — contents not inlined.`,
-      `Use the Read tool on the file path in the adjacent note if you need them.]`,
-    ].join(" ")
+  // Media the request deliberately does NOT inline (see deferMedia in toModelMessages). A saved copy
+  // on disk is what makes deferring safe: the model reads those bytes through the Read tool, once,
+  // instead of carrying them in every request. Without one there is nothing to point at, so the note
+  // says so rather than sending the model after a path that does not exist.
+  export function mediaOmittedPlaceholder(input: { mime: string; filename?: string; saved?: string }) {
+    const head = `[Attached ${input.mime}: ${input.filename ?? "file"} — contents not inlined.`
+    if (!input.saved) return `${head} No saved copy is available, so its contents cannot be read.]`
+    return `${head} Call the Read tool on ${input.saved} whenever the answer depends on what it contains.]`
   }
 
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
@@ -208,6 +207,13 @@ export namespace MessageV2 {
     mime: z.string(),
     filename: z.string().optional(),
     url: z.string(),
+    /**
+     * Absolute path of a copy of these bytes on disk, when one exists — the persisted upload for an
+     * attachment, the file itself for a workspace drag. Media that has this can be left out of the
+     * request and read on demand instead; media that lacks it (a failed attachment write, an MCP
+     * blob) has nowhere else to be reached from, so it still travels inline.
+     */
+    saved: z.string().optional(),
     source: FilePartSource.optional(),
   }).meta({
     ref: "FilePart",
@@ -233,6 +239,9 @@ export namespace MessageV2 {
     type: z.literal("compaction"),
     auto: z.boolean(),
     overflow: z.boolean().optional(),
+    // First message of the turn tail that survived this compaction verbatim. Absent means the
+    // summary replaced everything before it, which is how every pre-existing compaction reads.
+    tail_start_id: MessageID.zod.optional(),
   }).meta({
     ref: "CompactionPart",
   })
@@ -631,19 +640,26 @@ export namespace MessageV2 {
     // rejects them sends the whole prompt back through the fallback chain, re-billing it per model.
     const supportsMedia = model.capabilities.attachment === true || model.capabilities.input.image === true
 
-    // PDFs are never inlined, even on a model that supports them: one document expands to thousands
-    // of tokens per page and then rides along in history for the rest of the session. The saved path
-    // is in the prompt, so a model that needs the contents reads it deliberately, once.
-    const inlineMedia = (mime: string) => supportsMedia && mime !== "application/pdf"
+    // Media is not inlined into a user message when the same bytes sit on disk. One image or PDF page
+    // expands to thousands of tokens and then rides along in history for the rest of the session, and
+    // a user-message part is the one place nothing can reclaim it — the pruner only touches tool
+    // parts, so it takes a full compaction. The saved path goes in instead, and a model that needs
+    // the bytes reads them deliberately, once; that Read lands in a tool result, which prune clears
+    // on its own schedule. PDFs defer even without a saved copy, as they always have.
+    //
+    // Media with nowhere on disk to be read back from (a failed attachment write, an MCP blob) still
+    // inlines — a placeholder there would just make the attachment unreachable.
+    const deferMedia = (part: { mime: string; saved?: string }) =>
+      part.mime === "application/pdf" || part.saved !== undefined
 
-    // Dropping media leaves no trace in the request, so a routing gap (the image-model router
-    // disabled, or its target missing) looks to the user like "the model just ignored my image".
-    // Counted here and reported once per request rather than per part.
-    const omitted = { unsupported: 0, pdf: 0 }
-    // A model that reads media can only be dropping the pdf; anything else means the model itself
-    // cannot take it.
+    // Media that never reaches the model leaves no trace in the request, so a routing gap (the
+    // image-model router disabled, or its target missing) looks to the user like "the model just
+    // ignored my image". Counted here and reported once per request rather than per part.
+    const omitted = { unsupported: 0, deferred: 0 }
+    // A model that reads media is only deferring it to the Read tool; anything else means the model
+    // itself cannot take it.
     const countOmitted = () => {
-      if (supportsMedia) omitted.pdf += 1
+      if (supportsMedia) omitted.deferred += 1
       else omitted.unsupported += 1
     }
 
@@ -702,7 +718,7 @@ export namespace MessageV2 {
             })
           // text/plain and directory files are converted into text parts, ignore them
           if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
-            if (isMedia(part.mime) && (options?.stripMedia || !inlineMedia(part.mime))) {
+            if (isMedia(part.mime) && (options?.stripMedia || !supportsMedia || deferMedia(part))) {
               if (!options?.stripMedia) countOmitted()
               userMessage.parts.push({
                 type: "text",
@@ -882,8 +898,11 @@ export namespace MessageV2 {
         model: `${model.providerID}/${model.id}`,
         count: omitted.unsupported,
       })
-    else if (omitted.pdf > 0)
-      log.info("omitted pdf attachments", { model: `${model.providerID}/${model.id}`, count: omitted.pdf })
+    else if (omitted.deferred > 0)
+      log.info("deferred media to the read tool", {
+        model: `${model.providerID}/${model.id}`,
+        count: omitted.deferred,
+      })
 
     const tools = Object.fromEntries(Array.from(toolNames).map((toolName) => [toolName, { toModelOutput }]))
 
@@ -990,22 +1009,60 @@ export namespace MessageV2 {
     },
   )
 
+  // Walks newest-first and stops at the last completed compaction, so the model sees the summary
+  // instead of the history it replaced. When that compaction kept a tail, the walk continues past
+  // it to the tail's first message and the result is reordered to [compaction, summary, tail...]:
+  // the summary covers the head, and the retained turns follow it in the order they happened.
   export async function filterCompacted(stream: AsyncIterable<MessageV2.WithParts>) {
     const result = [] as MessageV2.WithParts[]
     const completed = new Set<string>()
+    let retain: MessageID | undefined
     for await (const msg of stream) {
       result.push(msg)
+      if (retain) {
+        if (msg.info.id === retain) break
+        continue
+      }
       if (
         msg.info.role === "user" &&
         completed.has(msg.info.id) &&
         msg.parts.some((part) => part.type === "compaction")
-      )
-        break
+      ) {
+        const part = msg.parts.find((item): item is CompactionPart => item.type === "compaction")
+        if (!part?.tail_start_id) break
+        retain = part.tail_start_id
+        if (msg.info.id === retain) break
+        continue
+      }
       if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish && !msg.info.error)
         completed.add(msg.info.parentID)
     }
     result.reverse()
-    return result
+
+    const compactionIndex = result.findLastIndex(
+      (msg) =>
+        msg.info.role === "user" &&
+        msg.parts.some((item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined),
+    )
+    if (compactionIndex < 0) return result
+    const compaction = result[compactionIndex]
+    const part = compaction.parts.find(
+      (item): item is CompactionPart => item.type === "compaction" && item.tail_start_id !== undefined,
+    )!
+    const summaryIndex = result.findIndex(
+      (msg, index) =>
+        index > compactionIndex &&
+        msg.info.role === "assistant" &&
+        msg.info.summary &&
+        msg.info.parentID === compaction.info.id,
+    )
+    const tailIndex = result.findIndex((msg) => msg.info.id === part.tail_start_id)
+    if (tailIndex < 0 || tailIndex >= compactionIndex || summaryIndex <= compactionIndex) return result
+    return [
+      ...result.slice(compactionIndex, summaryIndex + 1),
+      ...result.slice(tailIndex, compactionIndex),
+      ...result.slice(summaryIndex + 1),
+    ]
   }
 
   export function fromError(
