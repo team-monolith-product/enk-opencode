@@ -54,7 +54,12 @@ import { ParentParamsProvider } from "@/context/parent-params"
 const HomeRoute = lazy(() => import("@/pages/home"))
 const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
-const Loading = () => <div class="size-full" />
+// 라우트 청크가 늦게 오면 셸 안쪽이 통째로 빈 화면이 된다. 부팅 스플래시와 같은 표시로 채운다.
+const Loading = () => (
+  <div class="size-full flex items-center justify-center">
+    <Splash class="w-12 h-15 opacity-50 animate-pulse" />
+  </div>
+)
 
 if (typeof location === "object" && /\/session(?:\/|$)/.test(location.pathname)) {
   void loadSession()
