@@ -1775,6 +1775,52 @@
   color: #2a2823;
 }
 
+/* 업로드 삭제 확인 — 외부 연동(env-keys) 모달과 같은 디자인 언어. 폭·헤더 리듬·푸터 여백을
+   그대로 맞춘다. env-keys 의 위험 표시 줄무늬와 종이 팔레트는 그쪽 시크릿 화면의 정체성이라
+   가져오지 않고, 색은 테마 토큰을 쓴다. */
+[data-component="dialog"]:has(.asset-delete-dialog) [data-slot="dialog-container"] {
+  width: min(440px, calc(100vw - 48px));
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].asset-delete-dialog {
+  align-self: center;
+  width: 100%;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].asset-delete-dialog [data-slot="dialog-header"] {
+  padding: 24px 28px 8px;
+  border-bottom: none;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].asset-delete-dialog [data-slot="dialog-title"] {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].asset-delete-dialog [data-slot="dialog-description"] {
+  padding: 0 28px 18px;
+  margin: 0;
+  border-bottom: none;
+  color: var(--text-weak);
+  font-size: 13px;
+  line-height: 1.55;
+  align-items: flex-start;
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].asset-delete-dialog [data-slot="dialog-body"] {
+  padding: 0;
+  width: 100%;
+}
+
+.asset-delete-dialog .asset-delete-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 28px 22px;
+}
+
 /* 시안 jt-input: height 28 · padding 0 12 · font 13. Affine 전역 input 리셋이 패딩을 0으로 밀어 이겨 둔다. */
 [data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"] {
   height: 28px;

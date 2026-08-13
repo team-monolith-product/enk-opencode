@@ -12,6 +12,7 @@ import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 
 import FileTree from "@/components/file-tree"
+import { AssetUploadButton, AssetUploadProgress, createAssetUpload } from "@/components/session/asset-upload"
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { SessionContextTab, SortableTab, FileVisual } from "@/components/session"
 import { FileSearchButton } from "@/components/session/file-search-button"
@@ -54,6 +55,9 @@ export function SessionSidePanel(props: {
       bridge.addReference(path, type)
     }
   })
+
+  // __assets__ 업로드. 프롬프트 첨부와 달리 AI 를 거치지 않고 워크스페이스에 그대로 저장된다.
+  const assetUpload = createAssetUpload()
 
   const isDesktop = createMediaQuery("(min-width: 768px)")
 
@@ -510,16 +514,24 @@ export function SessionSidePanel(props: {
               style={{ width: treeWidth() }}
             >
               <div
-                class="h-full flex flex-col overflow-hidden group/filetree"
-                classList={{ "border-r border-border-weaker-base": reviewOpen() }}
+                class="h-full flex flex-col overflow-hidden group/filetree relative"
+                classList={{
+                  "border-r border-border-weaker-base": reviewOpen(),
+                  "outline outline-2 -outline-offset-2 outline-border-accent": assetUpload.dragging(),
+                }}
+                {...assetUpload.drop}
               >
                 {/* 운영 레이아웃은 타이틀바/헤더가 없어 "파일 검색" 버튼이 사라진다.
                   탐색기 상단에 직접 노출해 동일한 DialogSelectFile 모달을 연다. */}
-                <Show when={env.productionLayout()}>
-                  <div class="shrink-0 px-3 pt-3">
+                <div class="shrink-0 px-3 pt-3 flex flex-col gap-2">
+                  <Show when={env.productionLayout()}>
                     <FileSearchButton onClick={openFileSearch} />
-                  </div>
-                </Show>
+                  </Show>
+                  {/* 업로드는 프롬프트 첨부(10개·25MB)와 별개 경로라 눈에 보이는 버튼으로 노출한다.
+                    파일은 __assets__ 로 그대로 저장되고 AI 를 거치지 않는다. */}
+                  <AssetUploadButton upload={assetUpload} class="-mx-1" />
+                  <AssetUploadProgress upload={assetUpload} />
+                </div>
                 <Tabs
                   variant="pill"
                   value={fileTreeTab()}
@@ -586,6 +598,9 @@ export function SessionSidePanel(props: {
                           onContextAdd={onContextAdd()}
                           contextLabel={language.t("session.files.addToContext")}
                           contextFolderLabel={language.t("session.files.addFolderToContext")}
+                          deletable={assetUpload.deletable}
+                          onDelete={assetUpload.remove}
+                          deleteLabel={language.t("session.files.delete.label")}
                         />
                       </Match>
                     </Switch>
