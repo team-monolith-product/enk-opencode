@@ -9,6 +9,7 @@ import DESCRIPTION from "./grep.txt"
 import { Instance } from "../project/instance"
 import path from "path"
 import { assertExternalDirectory } from "./external-directory"
+import { Assets } from "../file/assets"
 
 const MAX_LINE_LENGTH = 2000
 
@@ -41,6 +42,10 @@ export const GrepTool = Tool.define("grep", {
 
     const rgPath = await Ripgrep.filepath()
     const args = ["-nH", "--hidden", "--no-messages", "--field-match-separator=|", "--regexp", params.pattern]
+    // The upload folder is git-excluded so it stays out of diffs, which also hides it from rg.
+    // Searching it has to be asked for explicitly by pointing `path` at it — that way an uploaded
+    // corpus never dilutes a search of the code.
+    if (Assets.contains(searchPath)) args.push("--no-ignore-vcs")
     if (params.include) {
       args.push("--glob", params.include)
     }

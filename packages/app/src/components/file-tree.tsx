@@ -3,6 +3,7 @@ import { encodeFilePath } from "@/context/file/path"
 import { Collapsible } from "@opencode-ai/ui/collapsible"
 import { FileIcon } from "@opencode-ai/ui/file-icon"
 import { Icon } from "@opencode-ai/ui/icon"
+import { IconButton } from "@opencode-ai/ui/icon-button"
 import { ContextAddButton } from "@opencode-ai/ui/context-add-button"
 import {
   createEffect,
@@ -214,6 +215,13 @@ export default function FileTree(props: {
   onContextAdd?: (path: string, type: "file" | "directory") => void
   contextLabel?: string
   contextFolderLabel?: string
+  /**
+   * Whether a node may be deleted from the tree. This is a whole-project tree, so the delete
+   * affordance is opt-in per node rather than global — today only the upload folder allows it.
+   */
+  deletable?: (node: FileNode) => boolean
+  onDelete?: (node: FileNode) => void
+  deleteLabel?: string
 
   _filter?: Filter
   _marks?: Set<string>
@@ -468,6 +476,23 @@ export default function FileTree(props: {
                         }}
                       />
                     </Show>
+                    <Show when={props.onDelete && props.deletable?.(node)}>
+                      <IconButton
+                        icon="trash"
+                        variant="ghost"
+                        size="small"
+                        class="shrink-0 opacity-0 group-hover/foldernode:opacity-100 focus-visible:opacity-100 transition-opacity"
+                        aria-label={props.deleteLabel ?? ""}
+                        title={props.deleteLabel}
+                        // The row is a Collapsible.Trigger; without this the click would also toggle it.
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          event.preventDefault()
+                          props.onDelete?.(node)
+                        }}
+                      />
+                    </Show>
                     <Show when={kind()}>
                       {(value) => <div class="shrink-0 size-1.5 mr-1.5 rounded-full" style={kindDotColor(value())} />}
                     </Show>
@@ -497,6 +522,9 @@ export default function FileTree(props: {
                         onContextAdd={props.onContextAdd}
                         contextLabel={props.contextLabel}
                         contextFolderLabel={props.contextFolderLabel}
+                        deletable={props.deletable}
+                        onDelete={props.onDelete}
+                        deleteLabel={props.deleteLabel}
                         _filter={filter()}
                         _marks={marks()}
                         _deeps={deeps()}
@@ -583,6 +611,22 @@ export default function FileTree(props: {
                         event.stopPropagation()
                         event.preventDefault()
                         props.onContextAdd?.(node.path, "file")
+                      }}
+                    />
+                  </Show>
+                  <Show when={props.onDelete && props.deletable?.(node)}>
+                    <IconButton
+                      icon="trash"
+                      variant="ghost"
+                      size="small"
+                      class="shrink-0 opacity-0 group-hover/filenode:opacity-100 focus-visible:opacity-100 transition-opacity"
+                      aria-label={props.deleteLabel ?? ""}
+                      title={props.deleteLabel}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        event.preventDefault()
+                        props.onDelete?.(node)
                       }}
                     />
                   </Show>
