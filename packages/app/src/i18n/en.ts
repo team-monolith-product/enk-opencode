@@ -34,6 +34,7 @@ export const dict = {
   "command.session.previous.unseen": "Previous unread session",
   "command.session.next.unseen": "Next unread session",
   "command.session.archive": "Archive session",
+  "command.session.clear": "Clear session",
 
   "command.palette": "Command palette",
 
@@ -1086,4 +1087,10 @@ export const dict = {
   "workspace.reset.archived.one": "1 session will be archived.",
   "workspace.reset.archived.many": "{{count}} sessions will be archived.",
   "workspace.reset.note": "This will reset the workspace to match the default branch.",
+
+  "session.clear.title": "Clear session",
+  "session.clear.description": "Put the current conversation away and move on to a new session.",
+  "session.clear.confirm": "Clear this session?",
+  "session.clear.note": "Once cleared, you won't be able to reopen this conversation.",
+  "session.clear.button": "Clear session",
 }

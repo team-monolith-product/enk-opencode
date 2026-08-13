@@ -21,6 +21,7 @@ import { base64Encode } from "@opencode-ai/util/encode"
 import { decode64 } from "@/utils/base64"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Button } from "@opencode-ai/ui/button"
+import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
@@ -1104,6 +1105,20 @@ export default function Layout(props: ParentProps) {
         },
       },
       {
+        id: "session.clear",
+        title: language.t("command.session.clear"),
+        category: language.t("command.category.session"),
+        disabled: !params.dir || !params.id,
+        onSelect: () => {
+          // currentSessions() 는 사이드바에 펼쳐진 워크스페이스만 담는다. 열려 있는 세션이 거기 없을 수 있어
+          // 라우트가 가리키는 디렉터리 스토어에서 직접 찾는다.
+          const directory = currentDir()
+          if (!directory || !params.id) return
+          const session = globalSync.child(directory)[0].session?.find((s) => s.id === params.id)
+          if (session) dialog.show(() => <DialogClearSession session={session} />)
+        },
+      },
+      {
         id: "workspace.new",
         title: language.t("workspace.new"),
         category: language.t("command.category.workspace"),
@@ -1622,6 +1637,54 @@ export default function Layout(props: ParentProps) {
         },
       ],
     })
+  }
+
+  // "세션 지우기" 확인창. 속으로는 보관(archiveSession)이지만 사용자에겐 그렇게 말하지 않는다 —
+  // 배포 레이아웃엔 사이드바가 없어 보관된 세션으로 돌아갈 길이 없으니, 사용자 입장에선 "다시 못 여는" 게 전부다.
+  // 문구에 보관을 되살리지 말 것. 되돌릴 수 없어 보이니 한 번 묻는다.
+  function DialogClearSession(props: { session: Session }) {
+    const handleClear = () => {
+      dialog.close()
+      void archiveSession(props.session)
+    }
+
+    return (
+      <Dialog
+        title={language.t("session.clear.title")}
+        description={language.t("session.clear.description")}
+        action={<span class="sr-only" />}
+        transition
+        fit
+        class="session-clear-dialog hazard-dialog"
+      >
+        <div class="session-clear-body">
+          <div class="session-clear-callout">
+            <span class="session-clear-badge">
+              <Icon name="warning" class="size-4.5" />
+            </span>
+            <div class="session-clear-copy">
+              <span class="session-clear-headline">{language.t("session.clear.confirm")}</span>
+              <span class="session-clear-note">{language.t("session.clear.note")}</span>
+            </div>
+          </div>
+        </div>
+        <div class="hazard-dialog-footer">
+          <div class="flex-1" />
+          <Button type="button" size="normal" variant="secondary" onClick={() => dialog.close()}>
+            {language.t("common.cancel")}
+          </Button>
+          <Button
+            type="button"
+            size="normal"
+            variant="primary"
+            class="session-clear-confirm"
+            onClick={handleClear}
+          >
+            {language.t("session.clear.button")}
+          </Button>
+        </div>
+      </Dialog>
+    )
   }
 
   function DialogDeleteWorkspace(props: { root: string; directory: string }) {
