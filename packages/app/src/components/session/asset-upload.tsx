@@ -126,7 +126,9 @@ export function createAssetUpload() {
     const subtree = await assetSubtree({ client: sdk.client, directory: sdk.directory, relative })
     dialog.show(() => (
       <AssetDeleteDialog
-        name={node.path === ASSETS_DIR ? ASSETS_DIR : node.name}
+        // Deleting the upload folder is "delete everything"; naming the folder there would make the
+        // user translate an internal name into what is about to happen.
+        name={node.path === ASSETS_DIR ? undefined : node.name}
         subtree={subtree}
         onConfirm={() => removeNow(relative, node.name)}
       />
@@ -137,11 +139,15 @@ export function createAssetUpload() {
 }
 
 /**
- * Confirmation for a folder delete. It quotes the real count and size rather than a generic "are
- * you sure": the whole point is that the row the user clicked does not show what is underneath it.
+ * Confirmation for a folder delete. The count and size are the whole point — the row the user
+ * clicked shows neither, so a generic "are you sure" would tell them nothing they did not know.
+ *
+ * Chrome follows DialogEnvKeys (title / description / footer rhythm, see .asset-delete-dialog in
+ * index.css) so the two modals read as one product rather than two.
  */
 function AssetDeleteDialog(props: {
-  name: string
+  /** The folder's name, or undefined when the target is the upload folder itself. */
+  name?: string
   subtree: { count: number; bytes: number }
   onConfirm: () => void
 }) {
@@ -149,30 +155,38 @@ function AssetDeleteDialog(props: {
   const language = useLanguage()
 
   return (
-    <Dialog title={language.t("session.files.delete.confirm.title", { name: props.name })}>
-      <div class="flex flex-col gap-4 p-4">
-        <p class="text-14-regular text-text-weak">
-          {language.t("session.files.delete.confirm.body", {
-            count: props.subtree.count.toLocaleString(),
-            size: formatBytes(props.subtree.bytes),
-          })}
-        </p>
-        <div class="flex items-center justify-end gap-2">
-          <Button type="button" variant="ghost" size="small" onClick={() => dialog.close()}>
-            {language.t("common.cancel")}
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            size="small"
-            onClick={() => {
-              dialog.close()
-              props.onConfirm()
-            }}
-          >
-            {language.t("session.files.delete.confirm.action")}
-          </Button>
-        </div>
+    <Dialog
+      title={
+        props.name
+          ? language.t("session.files.delete.confirm.title", { name: props.name })
+          : language.t("session.files.delete.confirm.title.all")
+      }
+      description={language.t("session.files.delete.confirm.body", {
+        count: props.subtree.count.toLocaleString(),
+        size: formatBytes(props.subtree.bytes),
+      })}
+      action={<span class="sr-only" />}
+      transition
+      fit
+      class="asset-delete-dialog"
+    >
+      <div class="asset-delete-footer">
+        <div class="flex-1" />
+        <Button type="button" size="normal" variant="secondary" onClick={() => dialog.close()}>
+          {language.t("common.cancel")}
+        </Button>
+        <Button
+          type="button"
+          size="normal"
+          variant="primary"
+          autofocus
+          onClick={() => {
+            dialog.close()
+            props.onConfirm()
+          }}
+        >
+          {language.t("session.files.delete.confirm.action")}
+        </Button>
       </div>
     </Dialog>
   )
