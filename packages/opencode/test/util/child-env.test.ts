@@ -100,6 +100,31 @@ describe("ChildEnv", () => {
     expect(Object.fromEntries(kept)).toEqual(ChildEnv.sanitize({ base }))
   })
 
+  test("overlay blanks every blocked name instead of dropping it", () => {
+    const env = ChildEnv.overlay({ base })
+    // 환경을 덧씌우기만 하는 spawn 에서는 "빠진 이름"이 곧 "부모 값 그대로"다. 지우는 대신 덮는다.
+    for (const name of Object.keys(base)) expect(name in env).toBe(true)
+    for (const name of ["JUPYTERHUB_API_TOKEN", "ENK_AI_USAGE_TOKEN", "GITHUB_TOKEN", "MY_API_KEY"]) {
+      expect(env[name]).toBe("")
+    }
+    // 값이 살아 있는 항목은 sanitize 와 정확히 같아야 한다
+    const kept = Object.entries(env).filter(([, value]) => value !== "")
+    expect(Object.fromEntries(kept)).toEqual(ChildEnv.sanitize({ base }) as Record<string, string>)
+  })
+
+  test("overlay keeps extend and never emits undefined", () => {
+    const env = ChildEnv.overlay({
+      base,
+      extend: { TERM: "xterm-256color", OPENCODE_TERMINAL: "1", GITHUB_TOKEN: undefined },
+    })
+    expect(env.TERM).toBe("xterm-256color")
+    // extend 는 필터 뒤에 얹는 값이라 차단 접두사여도 통과한다 (sanitize 와 같은 규칙)
+    expect(env.OPENCODE_TERMINAL).toBe("1")
+    // undefined 를 그대로 두면 bun-pty 가 "undefined" 라는 문자열 값으로 실어 보낸다
+    expect(env.GITHUB_TOKEN).toBe("")
+    for (const value of Object.values(env)) expect(typeof value).toBe("string")
+  })
+
   test("envFileKeys reads names from every .env variant except .env.example", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "child-env-"))
     await writeFile(path.join(dir, ".env"), "OPENAI_API_KEY=sk-1\nPORT=3000\n")

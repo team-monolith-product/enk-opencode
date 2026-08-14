@@ -185,14 +185,18 @@ export namespace Pty {
           const shellEnv = await Plugin.trigger("shell.env", { cwd }, { env: {} })
           // 터미널은 사람이 쓰는 통로지만 서버 API 라 접근면이 넓다. bash 툴과 같은 allowlist 를 태워
           // 운영 시크릿이 셸 환경에 남지 않게 한다.
-          const env = ChildEnv.sanitize({
+          //
+          // sanitize 가 아니라 overlay 인 이유: bun-pty 는 넘긴 env 로 환경을 교체하지 않고 부모의
+          // exec 시점 environ 위에 얹기만 한다. 통과 목록만 넘기면 걸러낸 이름이 자식에 그대로
+          // 남으므로, 차단 대상을 빈 값으로 덮는 항목까지 함께 넘겨야 한다.
+          const env = ChildEnv.overlay({
             extend: {
               ...input.env,
               ...shellEnv.env,
               TERM: "xterm-256color",
               OPENCODE_TERMINAL: "1",
             },
-          }) as Record<string, string>
+          })
 
           if (process.platform === "win32") {
             env.LC_ALL = "C.UTF-8"
