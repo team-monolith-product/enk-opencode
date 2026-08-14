@@ -334,6 +334,24 @@ export async function createPage(input: DocMountInput) {
     },
   })
 
+  // The tracker only learns a key from an upload IT ran, and it is rebuilt with the editor — so on a
+  // fresh mount every asset the doc already carries looks unknown, and re-attaching one of those
+  // files would send its bytes again. Seed it from what the server actually holds, NOT from the
+  // doc's own blocks: a block whose upload was aborted mid-flight (tab closed) stays in the doc with
+  // nothing behind it, and marking that key stored would strand it — re-attaching the file is what
+  // heals such a block, and nothing would upload it again.
+  //
+  // Not awaited: opening the editor must not wait on a round trip. Until the list answers, an
+  // unknown key just uploads again, which is the safe answer anyway.
+  if (blobs && !input.readonly && !input.preview) {
+    void blobs
+      .list()
+      .then((stored) => {
+        for (const key of stored) uploads.markStored(key)
+      })
+      .catch(() => {})
+  }
+
   // The block IS the upload's handle: removing it (delete, or undo of the add) cancels, and undoing
   // that removal puts it back. `doc` is swapped on rebind(), so this re-subscribes with it.
   let offBlocks: (() => void) | undefined
@@ -709,14 +727,6 @@ export async function createPage(input: DocMountInput) {
     }
     return { count, bytes, keys: [...seen] }
   }
-
-  // Whatever the doc carries at this point came off the server (the sync load above ran before the
-  // editor was built), so those assets are stored and re-attaching one of those files must not upload
-  // it again — the tracker is rebuilt with the editor and would otherwise re-send every asset of a
-  // reloaded draft. Only blocks present NOW: one that arrives later over the socket may be a peer's
-  // attachment whose bytes are still on the wire, and for those a redundant upload is the safe
-  // answer — a key marked stored is one nobody will ever upload.
-  if (blobs) for (const key of assets().keys) uploads.markStored(key)
 
   const addReference = (path: string, nodeType: FileNodeType = "file") => {
     if (input.readonly) return false

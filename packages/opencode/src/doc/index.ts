@@ -452,6 +452,20 @@ export namespace Doc {
     },
   )
 
+  // Which assets this doc actually holds. Ids only — the caller asking "is it already up there?" is
+  // deciding whether to send bytes, so answering with the bytes would defeat the question.
+  export const assetList = fn(
+    z.object({
+      docID: DocID.zod,
+    }),
+    (input) => {
+      get(input.docID)
+      return Database.use((db) =>
+        db.select({ id: DocAssetTable.id }).from(DocAssetTable).where(eq(DocAssetTable.doc_id, input.docID)).all(),
+      ).map((row) => row.id)
+    },
+  )
+
   export const assetGet = fn(
     z.object({
       docID: DocID.zod,

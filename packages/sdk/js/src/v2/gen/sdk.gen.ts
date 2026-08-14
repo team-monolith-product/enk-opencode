@@ -26,6 +26,8 @@ import type {
   DocAssetCreateResponses,
   DocAssetGetErrors,
   DocAssetGetResponses,
+  DocAssetListErrors,
+  DocAssetListResponses,
   DocConnectErrors,
   DocConnectResponses,
   DocCycleGetErrors,
@@ -3900,6 +3902,38 @@ export class Sync extends HeyApiClient {
 }
 
 export class Asset extends HeyApiClient {
+  /**
+   * List doc assets
+   *
+   * Return the ids of the assets stored for a collaborative doc.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      docID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "docID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<DocAssetListResponses, DocAssetListErrors, ThrowOnError>({
+      url: "/doc/{docID}/asset",
+      ...options,
+      ...params,
+    })
+  }
+
   /**
    * Upload doc asset
    *

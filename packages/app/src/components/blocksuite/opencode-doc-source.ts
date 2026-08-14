@@ -403,8 +403,19 @@ export class OpencodeBlobSource implements BlobSource {
 
   async delete(_key: string) {}
 
+  /**
+   * The ids this doc's asset store actually holds — ids only, no bytes.
+   *
+   * This is the authoritative answer to "is it already up there?", which the doc's own blocks are
+   * not: a block whose upload was aborted mid-flight (tab closed, session switched) stays in the doc
+   * with nothing behind it.
+   */
   async list() {
-    return []
+    const res = await this.opts.client.doc.asset.list(
+      { docID: this.opts.docID, directory: this.opts.directory },
+      { cache: "no-store", throwOnError: false },
+    )
+    return res.data ?? []
   }
 }
 
