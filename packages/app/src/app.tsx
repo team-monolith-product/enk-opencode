@@ -161,12 +161,30 @@ function resolveRouterBase(): string | undefined {
   return normalized || undefined
 }
 
+// 팔레트를 갈아끼우는 프레임 동안만 transition 을 끈다(규칙은 index.css). 테마 적용과 같은
+// 태스크에서 붙였다가 두 프레임 뒤에 떼므로, 전환 자체는 애니메이션되지 않고 hover 같은 평소
+// 전환은 그대로 남는다.
+let themeSwitchFrame: number | undefined
+function suppressThemeTransitions() {
+  if (typeof document === "undefined") return
+  const root = document.documentElement
+  root.setAttribute("data-theme-switching", "")
+  if (themeSwitchFrame !== undefined) cancelAnimationFrame(themeSwitchFrame)
+  themeSwitchFrame = requestAnimationFrame(() => {
+    themeSwitchFrame = requestAnimationFrame(() => {
+      themeSwitchFrame = undefined
+      root.removeAttribute("data-theme-switching")
+    })
+  })
+}
+
 export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
   return (
     <MetaProvider>
       <Font />
       <ThemeProvider
         onThemeApplied={(_, mode) => {
+          suppressThemeTransitions()
           void window.api?.setTitlebar?.({ mode })
         }}
       >

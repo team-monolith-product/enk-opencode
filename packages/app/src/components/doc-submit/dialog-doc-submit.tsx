@@ -2,6 +2,7 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEffect, createMemo, createSignal, For, type JSX, onCleanup, onMount, Show, type Accessor } from "solid-js"
 import { useClientEnv } from "@/context/client-env"
 import { createPage } from "@/components/blocksuite/blocksuite-doc"
+import { useColorScheme } from "@/utils/color-scheme"
 import { SessionPreviewMascot } from "@/pages/session/session-preview-mascot"
 import type { DocSubmitActor, DocSubmitState } from "../prompt-input/doc-submit"
 import { avatarLabel } from "./avatar-label"
@@ -177,16 +178,12 @@ function ConsentCountdownChip(props: { sec: number; danger: boolean }) {
 }
 
 // ── prompt doc snapshot — read-only mount of the doc being sent ────────────
-function snapshotTheme(): "light" | "dark" {
-  const scheme = document.documentElement.getAttribute("data-color-scheme")
-  if (scheme === "dark" || scheme === "light") return scheme
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-}
-
 function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
+  const snapshotTheme = useColorScheme()
   const [fail, setFail] = createSignal(false)
+  // 테마 동기화 이펙트가 mount 완료보다 먼저 돌므로 시그널로 둔다.
+  const [page, setPage] = createSignal<Awaited<ReturnType<typeof createPage>>>()
   let el: HTMLDivElement | undefined
-  let page: Awaited<ReturnType<typeof createPage>> | undefined
   let stop = false
 
   onMount(() => {
@@ -215,19 +212,24 @@ function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
           await next.dispose()
           return
         }
-        page = next
+        setPage(next)
         await next.attach(host)
       })
       .catch(() => {
-        void page?.dispose()
-        page = undefined
+        void page()?.dispose()
+        setPage(undefined)
         setFail(true)
       })
   })
 
+  // OS 색 구성이 바뀌면 다시 칠한다 — 에디터는 테마를 내부 상태로 들고 있다.
+  createEffect(() => {
+    page()?.setTheme(snapshotTheme())
+  })
+
   onCleanup(() => {
     stop = true
-    void page?.dispose()
+    void page()?.dispose()
   })
 
   return (

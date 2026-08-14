@@ -161,6 +161,10 @@
   --affine-editor-side-padding: 12px;
   --affine-editor-bottom-padding: 0px;
   --affine-background-primary-color: transparent;
+  /* 아래 page-editor 규칙이 이 변수로 color 를 잡고, 그 색이 shadow DOM 안쪽 문단까지 그대로
+     상속된다. 여기서 정의하지 않으면 affine 기본 라이트값(#121212)이 잡혀서 다크에서 말풍선
+     글자가 종이(#3a3628)와 붙어 안 보인다. prompt-doc(편집기) 쪽과 같은 토큰을 쓴다. */
+  --affine-text-primary-color: var(--text-strong);
 }
 
 [data-component="prompt-doc-viewer"] page-editor,

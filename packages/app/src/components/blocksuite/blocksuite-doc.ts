@@ -823,6 +823,10 @@ export async function createPage(input: DocMountInput) {
       applyIdentity()
     },
     setTheme: (theme: "light" | "dark") => {
+      // attach() 가 applyTheme() 로 집어가므로 붙기 전에 불려도 값은 안 잃는다. std 는 attach
+      // 전까지 없어서, 여기서 바로 만지면 터진다.
+      input.theme = theme
+      if (!editor.std) return
       editor.std.get(ThemeProvider).app$.value = scheme(theme)
     },
     dispose: async () => {

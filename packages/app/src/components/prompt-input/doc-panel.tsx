@@ -6,20 +6,16 @@ import {
   type OpenLineReferenceDetail,
 } from "@/components/blocksuite/doc-block-events"
 import { usePromptDocBridge } from "@/context/prompt-doc-bridge"
+import { useColorScheme } from "@/utils/color-scheme"
 import type { createPromptDoc } from "./doc"
 
 type PanelProps = {
   doc: ReturnType<typeof createPromptDoc>
 }
 
-function theme() {
-  const scheme = document.documentElement.getAttribute("data-color-scheme")
-  if (scheme === "dark" || scheme === "light") return scheme
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-}
-
 export const PromptDocPanel: Component<PanelProps> = (props) => {
   const bridge = usePromptDocBridge()
+  const theme = useColorScheme()
   const [root, setRoot] = createSignal<HTMLDivElement>()
 
   onMount(() => {
