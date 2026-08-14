@@ -5,7 +5,7 @@ import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/ui/file"
 import { Font } from "@opencode-ai/ui/font"
-import { Splash } from "@opencode-ai/ui/logo"
+import { JitdaMark, Splash } from "@opencode-ai/ui/logo"
 import { ThemeProvider } from "@opencode-ai/ui/theme/context"
 import { MetaProvider } from "@solidjs/meta"
 import { type BaseRouterProps, Navigate, Route, Router, useLocation } from "@solidjs/router"
@@ -54,7 +54,12 @@ import { ParentParamsProvider } from "@/context/parent-params"
 const HomeRoute = lazy(() => import("@/pages/home"))
 const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
-const Loading = () => <div class="size-full" />
+// 라우트 청크가 늦게 오면 셸 안쪽이 통째로 빈 화면이 된다. 짓다 마크로 채운다.
+const Loading = () => (
+  <div class="size-full flex items-center justify-center">
+    <JitdaMark class="w-14 h-auto opacity-50 animate-pulse" />
+  </div>
+)
 
 if (typeof location === "object" && /\/session(?:\/|$)/.test(location.pathname)) {
   void loadSession()
@@ -244,7 +249,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
       when={checkMode() === "blocking" ? !startupHealthCheck.loading : startupHealthCheck.state !== "pending"}
       fallback={
         <div class="h-dvh w-screen flex flex-col items-center justify-center" data-app-surface="canvas">
-          <Splash class="w-16 h-20 opacity-50 animate-pulse" />
+          <JitdaMark class="w-19 h-auto opacity-50 animate-pulse" />
         </div>
       }
     >

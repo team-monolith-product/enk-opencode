@@ -1,6 +1,8 @@
 import { Component, createEffect, createSignal, type JSX, onCleanup, onMount, Show } from "solid-js"
+import { Skeleton } from "@opencode-ai/ui/skeleton"
 import { useSDK } from "@/context/sdk"
 import { usePromptDocBridge } from "@/context/prompt-doc-bridge"
+import { useDelayed } from "@/hooks/use-delayed"
 import { useColorScheme } from "@/utils/color-scheme"
 import {
   OPEN_FILE_REFERENCE,
@@ -15,6 +17,9 @@ export const DocMessage: Component<{ id: string; fallback?: JSX.Element }> = (pr
   const bridge = usePromptDocBridge()
   const theme = useColorScheme()
   const [fail, setFail] = createSignal(false)
+  const [attached, setAttached] = createSignal(false)
+  // attach 전까지 말풍선은 내용 없는 납작한 줄로 남는다. 그 자리를 스켈레톤이 채운다.
+  const pending = useDelayed(() => !attached())
   // 아래 테마 동기화 이펙트가 붙는 시점보다 mount 가 늦으므로 시그널로 둔다 — 평범한 변수면
   // 페이지가 준비돼도 이펙트가 다시 돌지 않아 첫 색을 놓친다.
   const [page, setPage] = createSignal<Awaited<ReturnType<typeof createPage>>>()
@@ -67,6 +72,7 @@ export const DocMessage: Component<{ id: string; fallback?: JSX.Element }> = (pr
         }
         setPage(next)
         await next.attach(host)
+        if (!stop) setAttached(true)
       })
       .catch(() => {
         void page()?.dispose()
@@ -91,6 +97,12 @@ export const DocMessage: Component<{ id: string; fallback?: JSX.Element }> = (pr
       when={!fail()}
       fallback={props.fallback ?? <span data-component="prompt-doc-viewer-error">문서를 불러올 수 없습니다.</span>}
     >
+      <Show when={pending()}>
+        <div data-component="prompt-doc-viewer-loading" class="flex flex-col gap-2 py-1">
+          <Skeleton width="88%" delay={0} />
+          <Skeleton width="60%" delay={0.12} />
+        </div>
+      </Show>
       <div ref={el} data-component="prompt-doc-viewer" />
     </Show>
   )
