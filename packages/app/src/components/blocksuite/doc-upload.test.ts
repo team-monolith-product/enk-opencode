@@ -156,6 +156,30 @@ describe("createUploadTracker", () => {
     expect(calls).toHaveLength(1)
   })
 
+  test("a file the doc already carried uploads nothing on a fresh tracker", () => {
+    // What a reload/session switch leaves behind: the editor (and its tracker) is rebuilt, so the
+    // asset of a block already in the doc was never uploaded by THIS tracker. Seeded, it still counts
+    // as stored and re-attaching the same file sends no bytes.
+    const { tracker, calls } = harness()
+    tracker.markStored("k1")
+
+    tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })
+    expect(calls).toHaveLength(0)
+    expect(tracker.active()).toBe(false)
+    // ...and an undo that brings such a block back has nothing to resume either.
+    expect(tracker.resume("b2", "k1")).toBe(false)
+    expect(calls).toHaveLength(0)
+  })
+
+  test("a seeded key leaves an unrelated file's upload alone", () => {
+    const { tracker, calls } = harness()
+    tracker.markStored("k1")
+
+    tracker.start({ blockId: "b1", key: "k2", name: "b.png", blob: file("b.png") })
+    expect(calls.map((call) => call.key)).toEqual(["k2"])
+    expect(tracker.active()).toBe(true)
+  })
+
   test("deleting the block that was uploading hands the bytes to its twin", () => {
     const { tracker, calls } = harness()
     tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })

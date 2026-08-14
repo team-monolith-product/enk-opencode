@@ -46,8 +46,9 @@ export function createUploadTracker(input: UploadTrackerInput) {
   // without asking the user to pick the file again. Keyed by asset id: undo may restore the block
   // under a fresh id, but the sourceId it carries is the one we uploaded under.
   const blobs = new Map<string, { name: string; blob: Blob }>()
-  // Assets whose bytes reached the server. Nothing removes them: the asset store is per doc and
-  // never deletes, so re-attaching one of these files is a no-op upload.
+  // Assets whose bytes are on the server: uploads that landed here, plus whatever the caller seeded
+  // via markStored(). Nothing removes them: the asset store is per doc and never deletes, so
+  // re-attaching one of these files is a no-op upload.
   const stored = new Set<string>()
 
   const emit = () => input.onChange()
@@ -183,6 +184,19 @@ export function createUploadTracker(input: UploadTrackerInput) {
     cancel,
     resume,
     list,
+    /**
+     * Record an asset as already on the server without uploading it.
+     *
+     * A tracker only learns a key from an upload IT ran, and it is rebuilt with the editor — so on a
+     * fresh mount (reload, session switch) every asset the doc already carries looks unknown, and
+     * re-attaching one of those files would send its bytes a second time. The caller seeds those keys
+     * here. Only for assets whose bytes are known to have landed: a key marked stored is one nothing
+     * will ever upload, so marking one that is still on the wire would leave the doc referencing an
+     * asset the server does not have.
+     */
+    markStored: (key: string) => {
+      stored.add(key)
+    },
     /** True while any upload is still in flight or failed — the prompt must not be sent yet. */
     active: () => entries.size > 0,
     dispose: () => {

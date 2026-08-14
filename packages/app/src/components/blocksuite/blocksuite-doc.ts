@@ -710,6 +710,14 @@ export async function createPage(input: DocMountInput) {
     return { count, bytes, keys: [...seen] }
   }
 
+  // Whatever the doc carries at this point came off the server (the sync load above ran before the
+  // editor was built), so those assets are stored and re-attaching one of those files must not upload
+  // it again — the tracker is rebuilt with the editor and would otherwise re-send every asset of a
+  // reloaded draft. Only blocks present NOW: one that arrives later over the socket may be a peer's
+  // attachment whose bytes are still on the wire, and for those a redundant upload is the safe
+  // answer — a key marked stored is one nobody will ever upload.
+  if (blobs) for (const key of assets().keys) uploads.markStored(key)
+
   const addReference = (path: string, nodeType: FileNodeType = "file") => {
     if (input.readonly) return false
     ensureEditable(doc)
