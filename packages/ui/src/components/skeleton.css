@@ -1,0 +1,50 @@
+[data-component="skeleton"] {
+  /* 어떤 표면 위에 올려도 대비가 나오도록 표면색이 아닌 텍스트색을 섞어 쓴다. */
+  --skeleton-base: color-mix(in srgb, var(--text-weak) 14%, transparent);
+  --skeleton-peak: color-mix(in srgb, var(--text-weak) 26%, transparent);
+  --skeleton-duration: 1.6s;
+
+  display: block;
+  flex-shrink: 0;
+  background-color: var(--skeleton-base);
+  background-image: linear-gradient(
+    90deg,
+    transparent 40%,
+    var(--skeleton-peak) 50%,
+    transparent 60%
+  );
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  /* 100% → 0% 이 왼쪽에서 오른쪽으로 지나가는 방향이다 (text-shimmer 와 동일). */
+  animation: skeleton-sweep var(--skeleton-duration) ease-in-out infinite;
+
+  &[data-shape="line"] {
+    height: 10px;
+    border-radius: var(--radius-sm);
+  }
+
+  &[data-shape="block"] {
+    border-radius: var(--radius-md);
+  }
+
+  &[data-shape="circle"] {
+    aspect-ratio: 1;
+    border-radius: var(--radius-pill);
+  }
+}
+
+@keyframes skeleton-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-component="skeleton"] {
+    background-image: none;
+    animation: pulse-opacity 2s ease-in-out infinite;
+  }
+}

@@ -58,6 +58,7 @@ import {
   shouldFocusTerminalOnKeyDown,
 } from "@/pages/session/helpers"
 import { MessageTimeline } from "@/pages/session/message-timeline"
+import { MessageTimelineSkeleton } from "@/pages/session/message-timeline-skeleton"
 import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/pages/session/review-tab"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { syncSessionModel } from "@/pages/session/session-model-helpers"
@@ -65,6 +66,7 @@ import { SessionSidePanel } from "@/pages/session/session-side-panel"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
+import { useDelayed } from "@/hooks/use-delayed"
 import { Identifier } from "@/utils/id"
 import { Persist, persisted } from "@/utils/persist"
 import { extractPromptFromParts } from "@/utils/prompt"
@@ -477,6 +479,8 @@ export default function Page() {
     if (!id) return true
     return sync.data.message[id] !== undefined
   })
+  // 캐시된 세션은 같은 프레임에 준비되므로, 잠깐 스치는 대기에는 스켈레톤을 띄우지 않는다.
+  const messagesPending = useDelayed(() => !messagesReady())
   const historyMore = createMemo(() => {
     const id = params.id
     if (!id) return false
@@ -1765,7 +1769,14 @@ export default function Page() {
       <div class="flex-1 min-h-0 overflow-hidden">
         <Switch>
           <Match when={params.id}>
-            <Show when={messagesReady()}>
+            <Show
+              when={messagesReady()}
+              fallback={
+                <Show when={messagesPending()}>
+                  <MessageTimelineSkeleton centered={centered()} />
+                </Show>
+              }
+            >
               <MessageTimeline
                 mobileChanges={mobileChanges()}
                 mobileFallback={reviewContent({

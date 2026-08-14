@@ -5,6 +5,8 @@ import { FileIcon } from "@opencode-ai/ui/file-icon"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { ContextAddButton } from "@opencode-ai/ui/context-add-button"
+import { Skeleton } from "@opencode-ai/ui/skeleton"
+import { useDelayed } from "@/hooks/use-delayed"
 import {
   createEffect,
   createMemo,
@@ -23,6 +25,8 @@ import { Dynamic } from "solid-js/web"
 import type { FileNode } from "@opencode-ai/sdk/v2"
 
 const MAX_DEPTH = 128
+
+const skeletonRows = ["72%", "54%", "63%", "41%", "58%"]
 
 function pathToFileUrl(filepath: string): string {
   return `file://${encodeFilePath(filepath)}`
@@ -404,8 +408,20 @@ export default function FileTree(props: {
     return out
   })
 
+  // 목록을 받아오기 전에는 행이 하나도 안 그려져 패널이 비어 보인다. 그동안 행 자리를 잡아 둔다.
+  const listing = useDelayed(() => !!file.tree.state(props.path)?.loading && nodes().length === 0)
+
   return (
     <div data-component="filetree" class={`flex flex-col gap-0.5 ${props.class ?? ""}`}>
+      <Show when={listing()}>
+        <For each={skeletonRows}>
+          {(width, index) => (
+            <div class="h-6 flex items-center" style={`padding-left: ${Math.max(0, 8 + level * 12 - 4)}px`}>
+              <Skeleton width={width} height={8} delay={index() * 0.1} />
+            </div>
+          )}
+        </For>
+      </Show>
       <For each={nodes()}>
         {(node) => {
           const expanded = () => file.tree.state(node.path)?.expanded ?? false
