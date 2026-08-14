@@ -183,16 +183,17 @@ export namespace Pty {
 
           const cwd = input.cwd || state.dir
           const shellEnv = await Plugin.trigger("shell.env", { cwd }, { env: {} })
-          // 터미널은 사람이 쓰는 통로지만 서버 API 라 접근면이 넓다. bash 툴과 같은 allowlist 를 태워
-          // 운영 시크릿이 셸 환경에 남지 않게 한다.
-          const env = ChildEnv.sanitize({
+          // 터미널은 사람이 쓰는 통로지만 서버 API 라 접근면이 넓다. bash 툴과 같은 필터를 태워
+          // 운영 시크릿도 프로젝트 .env 값도 셸 환경에 남지 않게 한다. 필터 기준 디렉토리는 세션의
+          // cwd 가 아니라 프로젝트 루트다 — .env 는 거기 있고, bash 툴도 같은 기준을 쓴다.
+          const env = (await ChildEnv.forAgent(state.dir, {
             extend: {
               ...input.env,
               ...shellEnv.env,
               TERM: "xterm-256color",
               OPENCODE_TERMINAL: "1",
             },
-          }) as Record<string, string>
+          })) as Record<string, string>
 
           if (process.platform === "win32") {
             env.LC_ALL = "C.UTF-8"

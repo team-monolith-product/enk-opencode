@@ -346,12 +346,8 @@ async function shellEnv(ctx: Tool.Context, cwd: string) {
   const extra = await Plugin.trigger("shell.env", { cwd, sessionID: ctx.sessionID, callID: ctx.callID }, { env: {} })
   // 에이전트가 직접 명령을 짜는 통로라 상속은 allowlist 로만 한다. 배포가 주입한 운영 시크릿과
   // opencode 가 런타임에 써넣는 토큰이 `env` 한 줄에 통째로 새는 걸 막는 게 목적이다.
-  const env = ChildEnv.sanitize({ extend: extra.env })
-  // Bun 이 서버 시작 시 cwd 의 .env 를 process.env 로 자동 로드하므로, 명령 문자열에 ".env" 가
-  // 없어도 `echo $KEY` 로 시크릿이 새어나갈 수 있다. allowlist 를 통과한 이름과 겹칠 수도 있어
-  // 프로젝트 .env 계열 파일에 정의된 키는 마지막에 한 번 더 제거한다.
-  for (const name of await ChildEnv.envFileKeys(Instance.directory)) delete env[name]
-  return env
+  // 프로젝트 .env 키까지 지우는 이유는 forAgent 주석에 있다.
+  return ChildEnv.forAgent(Instance.directory, { extend: extra.env })
 }
 
 async function launch(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
