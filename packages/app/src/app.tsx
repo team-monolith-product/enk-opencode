@@ -231,7 +231,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
       when={checkMode() === "blocking" ? !startupHealthCheck.loading : startupHealthCheck.state !== "pending"}
       fallback={
         <div class="h-dvh w-screen flex flex-col items-center justify-center" data-app-surface="canvas">
-          <Splash class="w-16 h-20 opacity-50 animate-pulse" />
+          <JitdaMark class="w-19 h-auto opacity-50 animate-pulse" />
         </div>
       }
     >
