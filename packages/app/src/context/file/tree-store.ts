@@ -145,6 +145,21 @@ export function createFileTreeStore(options: TreeStoreOptions) {
     return tree.dir[dir]
   }
 
+  /**
+   * Every already-listed directory at or under `input`. `listDir` reads one level, so a caller that
+   * changed a whole subtree on disk needs this to know which of its levels are on screen.
+   */
+  const loadedDirs = (input: string) => {
+    const prefix = options.normalizeDir(input)
+    const out: string[] = []
+    for (const [dir, state] of Object.entries(tree.dir)) {
+      if (!state.loaded) continue
+      if (prefix !== "" && dir !== prefix && !dir.startsWith(prefix + "/")) continue
+      out.push(dir)
+    }
+    return out
+  }
+
   const children = (input: string) => {
     const dir = options.normalizeDir(input)
     const ids = tree.dir[dir]?.children
@@ -163,6 +178,7 @@ export function createFileTreeStore(options: TreeStoreOptions) {
     collapseDir,
     dirState,
     children,
+    loadedDirs,
     node: (path: string) => tree.node[path],
     isLoaded: (path: string) => Boolean(tree.dir[path]?.loaded),
     reset,

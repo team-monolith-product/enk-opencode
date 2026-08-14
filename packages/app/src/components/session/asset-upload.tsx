@@ -5,6 +5,7 @@ import { showToast } from "@opencode-ai/ui/toast"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createSignal, Show } from "solid-js"
 import type { FileNode } from "@opencode-ai/sdk/v2"
+import { useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import {
@@ -26,6 +27,7 @@ import {
  */
 export function createAssetUpload() {
   const sdk = useSDK()
+  const file = useFile()
   const language = useLanguage()
   const dialog = useDialog()
 
@@ -33,6 +35,21 @@ export function createAssetUpload() {
   const [dragging, setDragging] = createSignal(false)
 
   const uploading = () => !!progress()
+
+  /**
+   * The tree is the only place an upload is visible, so it cannot be left to the file watcher: the
+   * watcher is off under OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER, subscribes only after
+   * OPENCODE_FILEWATCHER_DEFER_MS, and skips a directory the tree has not listed — which is exactly
+   * the first upload, the one that creates the folder. Re-listing costs one request per level the
+   * user already has open.
+   */
+  const refreshTree = () => {
+    // The root: the upload folder appears with the first file and is gone after "delete all".
+    void file.tree.refresh("")
+    // Then each open level inside it — a list is one level deep, so a folder upload needs every
+    // parent it created. A directory a delete just removed lists as empty rather than failing.
+    for (const dir of file.tree.loadedDirs(ASSETS_DIR)) void file.tree.refresh(dir)
+  }
 
   const run = async (files: PickedFile[]) => {
     if (files.length === 0) return
@@ -48,6 +65,7 @@ export function createAssetUpload() {
       onProgress: (done, total) => setProgress({ done, total }),
     })
     setProgress(undefined)
+    if (result.uploaded > 0) refreshTree()
 
     if (result.failed.length === 0) {
       showToast({
@@ -102,6 +120,7 @@ export function createAssetUpload() {
 
   const removeNow = async (relative: string, label: string) => {
     const ok = await deleteAsset({ client: sdk.client, directory: sdk.directory, relative })
+    if (ok) refreshTree()
     showToast(
       ok
         ? { title: language.t("session.files.delete.done", { name: label }) }
