@@ -5,7 +5,7 @@ import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/ui/file"
 import { Font } from "@opencode-ai/ui/font"
-import { Splash } from "@opencode-ai/ui/logo"
+import { JitdaMark, Splash } from "@opencode-ai/ui/logo"
 import { ThemeProvider } from "@opencode-ai/ui/theme/context"
 import { MetaProvider } from "@solidjs/meta"
 import { type BaseRouterProps, Navigate, Route, Router, useLocation } from "@solidjs/router"
@@ -54,10 +54,10 @@ import { ParentParamsProvider } from "@/context/parent-params"
 const HomeRoute = lazy(() => import("@/pages/home"))
 const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
-// 라우트 청크가 늦게 오면 셸 안쪽이 통째로 빈 화면이 된다. 부팅 스플래시와 같은 표시로 채운다.
+// 라우트 청크가 늦게 오면 셸 안쪽이 통째로 빈 화면이 된다. 짓다 마크로 채운다.
 const Loading = () => (
   <div class="size-full flex items-center justify-center">
-    <Splash class="w-12 h-15 opacity-50 animate-pulse" />
+    <JitdaMark class="w-14 h-auto opacity-50 animate-pulse" />
   </div>
 )
 
