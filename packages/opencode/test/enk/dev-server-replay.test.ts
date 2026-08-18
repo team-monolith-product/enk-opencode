@@ -206,15 +206,27 @@ describe("DevServerReplay", () => {
       expect(existsSync(marker)).toBe(false)
     })
 
-    test("튜토리얼 기록은 부팅 때 되살리지 않는다", async () => {
+    test("튜토리얼 기록도 부팅 때 되살린다", async () => {
       const { tutorial } = await tempWorkspace()
       const marker = join(tutorial, "marker")
       await writeState(tutorial, { cmd: `echo ok > ${marker}`, cwd: tutorial, port: await freePort() })
 
       await DevServerReplay.replay()
 
-      await new Promise((r) => setTimeout(r, 200))
-      expect(existsSync(marker)).toBe(false)
+      expect(await waitFor(() => existsSync(marker))).toBe(true)
+    })
+
+    test("두 타깃의 기록을 모두 되살린다", async () => {
+      const { project, tutorial } = await tempWorkspace()
+      const projectMarker = join(project, "marker")
+      const tutorialMarker = join(tutorial, "marker")
+      await writeState(project, { cmd: `echo ok > ${projectMarker}`, cwd: project, port: await freePort() })
+      await writeState(tutorial, { cmd: `echo ok > ${tutorialMarker}`, cwd: tutorial, port: await freePort() })
+
+      await DevServerReplay.replay()
+
+      expect(await waitFor(() => existsSync(projectMarker))).toBe(true)
+      expect(await waitFor(() => existsSync(tutorialMarker))).toBe(true)
     })
 
     test("skips replay when the recorded cwd no longer exists", async () => {
