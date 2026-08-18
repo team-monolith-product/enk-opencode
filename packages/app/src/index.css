@@ -93,6 +93,16 @@
     }
   }
 
+  /* 색 구성 전환은 상태 변화가 아니라 팔레트 교체다 — 크로스페이드할 대상이 아니다. 말풍선
+     종이처럼 hover 용 transition 을 단 요소는 전환 때도 160ms 를 애니메이션하는데, 그 사이
+     content-visibility:auto 로 렌더를 건너뛴 대화 턴은 아예 끝내지 못하고 이전 스킴 색에
+     굳는다. app.tsx 가 테마를 적용하는 프레임에만 이 속성을 달아 전환을 통째로 끈다. */
+  :root[data-theme-switching] *,
+  :root[data-theme-switching] *::before,
+  :root[data-theme-switching] *::after {
+    transition: none !important;
+  }
+
   /* While a ResizeHandle drag is active (set on <body> in resize-handle.tsx),
      make iframes pointer-transparent so they can't steal hit-testing and break
      the handle's pointer capture — otherwise rushing the cursor over the preview
@@ -1547,6 +1557,8 @@
   --env-text-muted: #8a8779;
   --env-text-weak: #69675c;
   --env-text-ink: #14130f;
+  --env-text-strong: #2a2823;
+  --env-hover: rgb(0 0 0 / 0.04);
   --env-accent: #cc4a0a;
   --env-danger: #ff6b1f;
   position: relative;
@@ -1555,6 +1567,33 @@
   border-radius: 10px;
   overflow: hidden;
   padding-top: 12px;
+}
+
+/* 시안(Jitda 디자인 시스템)은 라이트 단일 팔레트라 위 값들은 다크에서 그대로 쓰면 어두운 모달
+   안에 흰 종이 섬이 뜬다. 새 색을 지어내지 않고 시안이 정한 '관계'만 다크 테마 토큰으로 옮긴다:
+   목록은 모달보다 한 단계 눌린 면, 대기 줄은 앰버 워시, accent 는 danger 를 밝힌 주황.
+   해저드 줄무늬(검-노)는 현실의 경고 테이프 기호라 두 모드에서 같다. */
+:root[data-color-scheme="dark"] [data-component="dialog"] [data-slot="dialog-content"].hazard-dialog {
+  --env-surface: var(--background-strong);
+  --env-line: var(--border-weak-base);
+  --env-pending: color-mix(in srgb, var(--surface-warning-base) 30%, var(--background-strong));
+  --env-text-muted: var(--text-weaker);
+  --env-text-weak: var(--text-weak);
+  --env-text-ink: var(--text-strong);
+  --env-text-strong: var(--text-strong);
+  --env-hover: rgb(255 255 255 / 0.08);
+  --env-accent: color-mix(in srgb, var(--env-danger) 70%, var(--text-strong));
+}
+
+/* 이 모달의 입력칸만 affine 전역 input 리셋의 라이트 기본색(#121212)을 물려받아, 다크에서
+   어두운 줄 위에 검은 글씨가 된다(주소창 등 다른 입력칸은 멀쩡). 라이트 렌더링을 건드리지
+   않도록 다크에서만 잡아준다. */
+:root[data-color-scheme="dark"]
+  [data-component="dialog"]
+  [data-slot="dialog-content"].env-keys-dialog
+  [data-component="input"][data-variant="normal"]
+  [data-slot="input-input"] {
+  color: var(--env-text-ink);
 }
 
 /* E · 외부 연동 관리 다이얼로그 — 시안 EEnvKeys(env-keys-list) */
@@ -1708,7 +1747,7 @@
 }
 
 .env-keys-dialog .env-keys-eye:hover:not(:disabled) {
-  background: rgb(0 0 0 / 0.04);
+  background: var(--env-hover);
 }
 
 .env-keys-dialog .env-keys-eye:disabled {
@@ -1742,7 +1781,7 @@
 }
 
 .env-keys-dialog button.env-keys-chip:hover:not(:disabled) {
-  background: rgb(0 0 0 / 0.04);
+  background: var(--env-hover);
 }
 
 .env-keys-dialog button.env-keys-chip:disabled {
@@ -1778,7 +1817,7 @@
 
 .env-keys-dialog .env-keys-summary b {
   font-weight: 600;
-  color: #2a2823;
+  color: var(--env-text-strong);
 }
 
 /* 업로드 삭제 확인 — 외부 연동(env-keys) 모달과 같은 디자인 언어. 폭·헤더 리듬·푸터 여백을
