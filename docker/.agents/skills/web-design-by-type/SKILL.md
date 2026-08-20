@@ -142,7 +142,3 @@ description: 만들려는 결과물의 종류(포트폴리오, 카페 홈페이�
 - 매일 오래 쓰는가, 한 번 보고 마는가 → 전자는 눈이 편한 차분한 색, 후자는 첫인상이 강한 색.
 - 누가 쓰는가 → 어린이·초보는 Claymorphism처럼 크고 둥글게, 전문 사용자는 밀도 높고 담백하게.
 - 재미가 목적인가, 일이 목적인가 → 재미는 색과 움직임을 늘리고, 일은 줄입니다.
-
----
-
-출처: 유형별·스타일별 데이터는 [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) (MIT License) 의 products.csv, styles.csv 에서 발췌해 한국어로 다시 쓴 것입니다.
