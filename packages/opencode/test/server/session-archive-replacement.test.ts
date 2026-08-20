@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { GlobalBus } from "../../src/bus/global"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { Session } from "../../src/session"
@@ -61,6 +62,78 @@ describe("session archive replacement", () => {
     const after = await activeRoots(tmp.path)
     expect(after).toHaveLength(1)
     expect(after[0]!.id).not.toBe(removed.id)
+  })
+
+  // 같은 세션을 함께 보던 사람들이 동시에 지우기를 누르면 보관 요청이 여러 개 온다. 대체 세션이
+  // 여러 개 생기면 먼저 받은 쪽과 나중에 받은 쪽이 서로 다른 세션으로 흩어진다.
+  test("simultaneous archives of the same session leave exactly one replacement", async () => {
+    for (const config of [{ ensureSession: true, ensureOneSession: true }, { ensureSession: true }]) {
+      await using tmp = await tmpdir({ config })
+      const app = Server.Default()
+      const headers = { "x-opencode-directory": tmp.path, "content-type": "application/json" }
+
+      await app.request("/session", { headers })
+      const before = await activeRoots(tmp.path)
+      expect(before).toHaveLength(1)
+      const archived = before[0]!
+
+      const archive = () =>
+        app.request(`/session/${archived.id}`, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ time: { archived: Date.now() } }),
+        })
+      const responses = await Promise.all([archive(), archive(), archive()])
+      for (const res of responses) expect(res.status).toBe(200)
+
+      const after = await activeRoots(tmp.path)
+      expect(after).toHaveLength(1)
+      expect(after[0]!.id).not.toBe(archived.id)
+
+      await Instance.disposeAll()
+    }
+  })
+
+  // 늦게 도착한 보관 요청은 보관 시각을 덮어쓰지도, session.updated 를 다시 뿌리지도 않는다.
+  test("archiving an already archived session is ignored", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    const app = Server.Default()
+    const headers = { "x-opencode-directory": tmp.path, "content-type": "application/json" }
+
+    await app.request("/session", { headers })
+    const target = (await activeRoots(tmp.path))[0]!
+
+    const first = await app.request(`/session/${target.id}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ time: { archived: 1000 } }),
+    })
+    expect(first.status).toBe(200)
+
+    const updates: string[] = []
+    const listener = (evt: { payload: { type: string; properties?: { info?: { id?: string } } } }) => {
+      if (evt.payload.type !== "session.updated") return
+      if (evt.payload.properties?.info?.id !== target.id) return
+      updates.push(evt.payload.type)
+    }
+    GlobalBus.on("event", listener)
+
+    try {
+      const second = await app.request(`/session/${target.id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ time: { archived: 2000 } }),
+      })
+      expect(second.status).toBe(200)
+      expect((await second.json()).time.archived).toBe(1000)
+      expect(updates).toHaveLength(0)
+    } finally {
+      GlobalBus.off("event", listener)
+    }
+
+    const after = await activeRoots(tmp.path)
+    expect(after).toHaveLength(1)
+    expect(after[0]!.id).not.toBe(target.id)
   })
 
   test("archiving leaves no session behind when ensureSession is off", async () => {
