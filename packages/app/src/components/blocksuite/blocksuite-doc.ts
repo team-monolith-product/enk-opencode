@@ -10,7 +10,14 @@ import { ensureEffects } from "./effects"
 import { frame, settled } from "./frame"
 import { inlineReady } from "./inline-editor"
 import { OpencodeAwarenessSource, OpencodeBlobSource, OpencodeDocSource, type DocSyncOpts } from "./opencode-doc-source"
-import { createUploadTracker, missingMarks, paintUploads, stranded, type DocMissing, type DocUpload } from "./doc-upload"
+import {
+  createMissingRegistry,
+  createUploadTracker,
+  missingMarks,
+  paintUploads,
+  type DocMissing,
+  type DocUpload,
+} from "./doc-upload"
 import { scheme } from "./theme"
 import { FileReferenceBlockSpec, withFileReferenceSchema, type FileNodeType } from "./file-reference-block"
 import { LineReferenceBlockSpec, withLineReferenceSchema } from "./line-reference-block"
@@ -296,11 +303,6 @@ export async function createPage(input: DocMountInput) {
     })
   }
 
-  // Asset ids the server has answered 404 for — the doc's standing answer to "are these bytes
-  // actually there?". Uploads alone cannot answer it: the tracker is rebuilt with the editor, so an
-  // upload abandoned mid-transfer leaves a block behind that nothing local knows anything about.
-  const absent = new Set<string>()
-
   let uploadFrame: ReturnType<typeof setTimeout> | undefined
   // Progress events fire many times a second; coalesce the DOM writes. A timer rather than
   // requestAnimationFrame: rAF is suspended while the tab is in the background, which is exactly
@@ -309,7 +311,7 @@ export async function createPage(input: DocMountInput) {
     if (uploadFrame) return
     uploadFrame = setTimeout(() => {
       uploadFrame = undefined
-      paintUploads(editor, [...uploads.list(), ...missingMarks(missing())])
+      paintUploads(editor, [...uploads.list(), ...missingMarks(missing.list())])
     }, 60)
   }
 
@@ -321,30 +323,22 @@ export async function createPage(input: DocMountInput) {
     return sourceId(model) ?? "attachment"
   }
 
-  const missing = (): DocMissing[] =>
-    stranded(
+  // Uploads alone cannot say which attachments are actually on the server: the tracker is rebuilt
+  // with the editor, so a transfer abandoned mid-flight leaves a block behind that nothing local
+  // knows anything about. The registry keeps the server's answer instead.
+  const missing = createMissingRegistry({
+    blocks: () =>
       [...doc.getBlockByFlavour("affine:image"), ...doc.getBlockByFlavour("affine:attachment")].map((model) => ({
         blockId: model.id,
         key: sourceId(model),
         name: assetName(model),
       })),
-      absent,
-      uploads.list().map((item) => item.key),
-    )
-
-  const notifyMarks = () => {
-    paint()
-    input.onUploadsChange?.(uploads.list())
-    input.onMissingChange?.(missing())
-  }
-
-  /** Fold in what a fetch — or an export — just learned about an asset's presence on the server. */
-  const markAsset = (key: string, gone: boolean) => {
-    if (gone === absent.has(key)) return
-    if (gone) absent.add(key)
-    else absent.delete(key)
-    notifyMarks()
-  }
+    uploading: () => uploads.list().map((item) => item.key),
+    onChange: () => {
+      paint()
+      input.onMissingChange?.(missing.list())
+    },
+  })
 
   // Re-write the block's own sourceId once the bytes are up. A collaborator receives the block over
   // the doc socket before the asset exists on the server, so their image/attachment has already
@@ -368,13 +362,19 @@ export async function createPage(input: DocMountInput) {
       await blobs.upload(key, blob, opts)
       settleAsset(key)
     },
-    onChange: notifyMarks,
+    onChange: () => {
+      paint()
+      input.onUploadsChange?.(uploads.list())
+      // A landed upload takes its asset out of the "still uploading" exemption, so the stranded
+      // list can change without any block or fetch having moved.
+      missing.refresh()
+    },
   })
 
   // The blob source is the only place that ever asks the server for an asset, so it is where a
   // block's bytes are found to be gone. BlockSuite cannot show that itself — a null blob leaves the
   // image spinning forever — so the answer is routed here instead.
-  if (blobs) blobs.onAssetMissing = markAsset
+  if (blobs) blobs.onAssetMissing = missing.mark
 
   // The block IS the upload's handle: removing it (delete, or undo of the add) cancels, and undoing
   // that removal puts it back. `doc` is swapped on rebind(), so this re-subscribes with it.
@@ -386,12 +386,17 @@ export async function createPage(input: DocMountInput) {
     const sub = doc.slots.blockUpdated.on((event) => {
       if (event.type === "delete") {
         uploads.cancel(event.id)
+        // Deleting the block is the only way out of a stranded attachment, so the gate has to
+        // notice. Nothing else here fires for it: there is no upload entry left to cancel.
+        missing.refresh()
         return
       }
       if (event.type !== "add") return
       const key = sourceId(event.model)
       if (!key) return
       uploads.resume(event.id, key)
+      // Undo brought the block back — with it, whatever was wrong with its asset.
+      missing.refresh()
     })
     offBlocks = () => sub.dispose()
   }
@@ -465,6 +470,8 @@ export async function createPage(input: DocMountInput) {
       cursors = input.readonly ? undefined : watchCursorLabels(editor, el)
       fit(el)
       paint()
+      // rebind swapped the whole doc; the block list came with it.
+      missing.refresh()
       if (restore) void focus()
     })
   }
@@ -840,7 +847,7 @@ export async function createPage(input: DocMountInput) {
     assets,
     uploads: () => uploads.list(),
     uploading: () => uploads.active(),
-    missing,
+    missing: missing.list,
     addReference,
     addLineReference,
     onHistory,
@@ -854,8 +861,8 @@ export async function createPage(input: DocMountInput) {
       })
       // The export re-reads every asset, which makes it the freshest answer there is — fold it back
       // in so a block that only turns out to be dead at send time gets marked too, not just refused.
-      for (const item of out.assets) markAsset(item.id, false)
-      for (const item of out.missing) markAsset(item.id, true)
+      for (const item of out.assets) missing.mark(item.id, false)
+      for (const item of out.missing) missing.mark(item.id, true)
       return out
     },
     plain: () => docPlain(doc),
@@ -885,6 +892,7 @@ export async function createPage(input: DocMountInput) {
       offComposition = undefined
       offBlocks?.()
       offBlocks = undefined
+      missing.dispose()
       uploads.dispose()
       if (uploadFrame) clearTimeout(uploadFrame)
       uploadFrame = undefined
