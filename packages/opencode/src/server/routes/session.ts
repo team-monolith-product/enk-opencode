@@ -4,7 +4,7 @@ import { describeRoute, validator, resolver } from "hono-openapi"
 import { SessionID, MessageID, PartID } from "@/session/schema"
 import z from "zod"
 import { Session } from "../../session"
-import { getOrCreateMain } from "../../session/ensure"
+import { ensureSession, getOrCreateMain } from "../../session/ensure"
 import { MessageV2 } from "../../session/message-v2"
 import { SessionPrompt } from "../../session/prompt"
 import { SessionCompaction } from "../../session/compaction"
@@ -240,6 +240,7 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         await Session.remove(sessionID)
+        await ensureSession()
         return c.json(true)
       },
     )
@@ -287,6 +288,10 @@ export const SessionRoutes = lazy(() =>
         }
         if (updates.time?.archived !== undefined) {
           await Session.setArchived({ sessionID, time: updates.time.archived })
+          // 보관하면 남은 대화가 없어질 수 있다. 한 세션만 띄우는 워크스페이스(ensureSession)에서는
+          // 이 요청 안에서 대체 세션까지 만들어 둔다 — 그래야 지운 사람도, 같은 세션을 함께 보고
+          // 있던 다른 접속자도 session.created 를 받아 같은 새 세션으로 옮겨갈 수 있다.
+          if (updates.time.archived) await ensureSession()
         }
 
         const session = await Session.get(sessionID)
