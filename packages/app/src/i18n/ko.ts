@@ -333,6 +333,7 @@ export const dict = {
   "prompt.action.docUndo": "실행 취소",
   "prompt.action.docRedo": "다시 실행",
   "prompt.action.docUploading": "첨부 업로드 중…",
+  "prompt.action.docMissingAsset": "업로드가 끝나지 않은 첨부가 있어요",
   "prompt.attachment.remove": "첨부 파일 제거",
   "prompt.action.send": "전송",
   "prompt.action.stop": "중지",
@@ -355,6 +356,9 @@ export const dict = {
   "prompt.toast.tooManyAttachments.description": "프롬프트 하나에 첨부는 {{count}}개, 합계 {{size}}MB까지예요.",
   "prompt.toast.docUploading.title": "첨부 업로드 중",
   "prompt.toast.docUploading.description": "업로드가 끝나길 기다리거나, 블럭을 삭제해 취소하세요.",
+  "prompt.toast.docMissingAsset.title": "첨부 업로드가 끝나지 않음",
+  "prompt.toast.docMissingAsset.description":
+    "{{name}} 이(가) 서버에 없어서 프롬프트에서 빠져요. 블럭을 삭제하거나 파일을 다시 첨부하세요.",
   "prompt.toast.docUploadFailed.title": "첨부 업로드 실패",
   "prompt.toast.docUploadFailed.description": "{{name}} 을(를) 올리지 못했어요. 블럭을 삭제하고 다시 첨부하세요.",
   "prompt.toast.docRotated.title": "새 협업 문서",

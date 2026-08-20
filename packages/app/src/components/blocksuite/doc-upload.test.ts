@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createUploadTracker, uploadPercent } from "./doc-upload"
+import { createUploadTracker, missingMarks, paintUploads, stranded, uploadPercent } from "./doc-upload"
 
 function harness() {
   const calls: {
@@ -213,5 +213,68 @@ describe("uploadPercent", () => {
     expect(uploadPercent({ loaded: 0, total: 0 })).toBe(0)
     expect(uploadPercent({ loaded: 1, total: 3 })).toBe(33)
     expect(uploadPercent({ loaded: 9, total: 4 })).toBe(100)
+  })
+})
+
+describe("missingMarks", () => {
+  test("wears the same error state as a failed upload", () => {
+    const editor = document.createElement("div")
+    const block = document.createElement("div")
+    block.dataset.blockId = "b1"
+    editor.append(block)
+
+    paintUploads(editor, missingMarks([{ blockId: "b1", key: "k1", name: "a.png" }]))
+
+    expect(block.dataset.ocUpload).toBe("error")
+    expect(block.dataset.ocUploadLabel).toBe("!")
+    // A full-width bar, not a 0% sliver: nothing is in progress here, the attachment is dead.
+    expect(block.style.getPropertyValue("--oc-upload")).toBe("100%")
+  })
+
+  test("clears once the block is no longer stranded", () => {
+    const editor = document.createElement("div")
+    const block = document.createElement("div")
+    block.dataset.blockId = "b1"
+    editor.append(block)
+
+    paintUploads(editor, missingMarks([{ blockId: "b1", key: "k1", name: "a.png" }]))
+    paintUploads(editor, [])
+
+    expect(block.dataset.ocUpload).toBeUndefined()
+  })
+})
+
+describe("stranded", () => {
+  const blocks = [
+    { blockId: "b1", key: "k1", name: "a.png" },
+    { blockId: "b2", key: "k2", name: "b.png" },
+  ]
+
+  test("names the blocks whose bytes the server does not have", () => {
+    expect(stranded(blocks, new Set(["k2"]))).toEqual([{ blockId: "b2", key: "k2", name: "b.png" }])
+  })
+
+  test("an asset still uploading is not stranded", () => {
+    // The uploader's own client never gets here (it renders from its local blob), but a collaborator
+    // 404s on every block the moment it arrives — right up until the bytes land.
+    expect(stranded(blocks, new Set(["k1", "k2"]), ["k1"])).toEqual([
+      { blockId: "b2", key: "k2", name: "b.png" },
+    ])
+  })
+
+  test("deleting the block clears the mark without clearing the 404", () => {
+    expect(stranded([], new Set(["k1"]))).toEqual([])
+  })
+
+  test("every block on the same dead asset is stranded", () => {
+    const twins = [
+      { blockId: "b1", key: "k1", name: "a.png" },
+      { blockId: "b2", key: "k1", name: "copy.png" },
+    ]
+    expect(stranded(twins, new Set(["k1"])).map((item) => item.blockId)).toEqual(["b1", "b2"])
+  })
+
+  test("a block with no asset id yet is nobody's problem", () => {
+    expect(stranded([{ blockId: "b1", name: "a.png" }], new Set(["k1"]))).toEqual([])
   })
 })

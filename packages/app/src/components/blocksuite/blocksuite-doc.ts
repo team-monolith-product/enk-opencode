@@ -10,7 +10,7 @@ import { ensureEffects } from "./effects"
 import { frame, settled } from "./frame"
 import { inlineReady } from "./inline-editor"
 import { OpencodeAwarenessSource, OpencodeBlobSource, OpencodeDocSource, type DocSyncOpts } from "./opencode-doc-source"
-import { createUploadTracker, paintUploads, type DocUpload } from "./doc-upload"
+import { createUploadTracker, missingMarks, paintUploads, stranded, type DocMissing, type DocUpload } from "./doc-upload"
 import { scheme } from "./theme"
 import { FileReferenceBlockSpec, withFileReferenceSchema, type FileNodeType } from "./file-reference-block"
 import { LineReferenceBlockSpec, withLineReferenceSchema } from "./line-reference-block"
@@ -46,6 +46,8 @@ export type DocMountInput = {
   onDraftChange?: () => void
   /** Fired whenever an attachment upload starts, progresses, finishes, fails or is cancelled. */
   onUploadsChange?: (uploads: DocUpload[]) => void
+  /** Fired whenever the set of blocks stranded on an asset the server does not have changes. */
+  onMissingChange?: (missing: DocMissing[]) => void
 }
 
 type TextProp = {
@@ -294,6 +296,11 @@ export async function createPage(input: DocMountInput) {
     })
   }
 
+  // Asset ids the server has answered 404 for — the doc's standing answer to "are these bytes
+  // actually there?". Uploads alone cannot answer it: the tracker is rebuilt with the editor, so an
+  // upload abandoned mid-transfer leaves a block behind that nothing local knows anything about.
+  const absent = new Set<string>()
+
   let uploadFrame: ReturnType<typeof setTimeout> | undefined
   // Progress events fire many times a second; coalesce the DOM writes. A timer rather than
   // requestAnimationFrame: rAF is suspended while the tab is in the background, which is exactly
@@ -302,8 +309,41 @@ export async function createPage(input: DocMountInput) {
     if (uploadFrame) return
     uploadFrame = setTimeout(() => {
       uploadFrame = undefined
-      paintUploads(editor, uploads.list())
+      paintUploads(editor, [...uploads.list(), ...missingMarks(missing())])
     }, 60)
+  }
+
+  const assetName = (model: BlockModel) => {
+    const caption = (model as unknown as { caption?: unknown }).caption
+    if (typeof caption === "string" && caption.trim()) return caption.trim()
+    const name = (model as unknown as { name?: unknown }).name
+    if (typeof name === "string" && name.trim()) return name.trim()
+    return sourceId(model) ?? "attachment"
+  }
+
+  const missing = (): DocMissing[] =>
+    stranded(
+      [...doc.getBlockByFlavour("affine:image"), ...doc.getBlockByFlavour("affine:attachment")].map((model) => ({
+        blockId: model.id,
+        key: sourceId(model),
+        name: assetName(model),
+      })),
+      absent,
+      uploads.list().map((item) => item.key),
+    )
+
+  const notifyMarks = () => {
+    paint()
+    input.onUploadsChange?.(uploads.list())
+    input.onMissingChange?.(missing())
+  }
+
+  /** Fold in what a fetch — or an export — just learned about an asset's presence on the server. */
+  const markAsset = (key: string, gone: boolean) => {
+    if (gone === absent.has(key)) return
+    if (gone) absent.add(key)
+    else absent.delete(key)
+    notifyMarks()
   }
 
   // Re-write the block's own sourceId once the bytes are up. A collaborator receives the block over
@@ -328,11 +368,13 @@ export async function createPage(input: DocMountInput) {
       await blobs.upload(key, blob, opts)
       settleAsset(key)
     },
-    onChange: () => {
-      paint()
-      input.onUploadsChange?.(uploads.list())
-    },
+    onChange: notifyMarks,
   })
+
+  // The blob source is the only place that ever asks the server for an asset, so it is where a
+  // block's bytes are found to be gone. BlockSuite cannot show that itself — a null blob leaves the
+  // image spinning forever — so the answer is routed here instead.
+  if (blobs) blobs.onAssetMissing = markAsset
 
   // The block IS the upload's handle: removing it (delete, or undo of the add) cancels, and undoing
   // that removal puts it back. `doc` is swapped on rebind(), so this re-subscribes with it.
@@ -798,17 +840,24 @@ export async function createPage(input: DocMountInput) {
     assets,
     uploads: () => uploads.list(),
     uploading: () => uploads.active(),
+    missing,
     addReference,
     addLineReference,
     onHistory,
-    markdown: () =>
-      input.sync
-        ? docMarkdown(doc, {
-            docID: input.sync.docID,
-            directory: input.sync.directory,
-            client: input.sync.client,
-          })
-        : Promise.resolve({ text: docPlain(doc), assets: [] }),
+    markdown: async () => {
+      const sync = input.sync
+      if (!sync) return { text: docPlain(doc), assets: [], missing: [] }
+      const out = await docMarkdown(doc, {
+        docID: sync.docID,
+        directory: sync.directory,
+        client: sync.client,
+      })
+      // The export re-reads every asset, which makes it the freshest answer there is — fold it back
+      // in so a block that only turns out to be dead at send time gets marked too, not just refused.
+      for (const item of out.assets) markAsset(item.id, false)
+      for (const item of out.missing) markAsset(item.id, true)
+      return out
+    },
     plain: () => docPlain(doc),
     empty: () => !docPlain(doc),
     undo,

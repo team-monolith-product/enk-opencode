@@ -22,6 +22,49 @@ type Entry = DocUpload & {
   controller?: AbortController
 }
 
+/**
+ * A block whose asset the server does not have, with nothing uploading it.
+ *
+ * This is what an upload that was abandoned mid-transfer leaves behind: `addFile` inserts the block
+ * first and starts the upload second, so leaving (tab close, session switch, unmount) aborts the
+ * bytes while the block — already replicated through yjs — stays in the doc. Nothing in the upload
+ * tracker survives that, so the mark has to come from asking the server instead.
+ */
+export type DocMissing = {
+  blockId: string
+  /** Asset id (the block's sourceId). */
+  key: string
+  name: string
+}
+
+/** Missing assets as paint marks, so a dead attachment wears the same error state as a failed upload. */
+export function missingMarks(list: DocMissing[]): DocUpload[] {
+  return list.map((item) => ({ ...item, loaded: 0, total: 0, status: "error" as const }))
+}
+
+/**
+ * The doc's attachment blocks that are stranded on an asset the server answered 404 for.
+ *
+ * Driven by the doc rather than by the 404 set, so deleting the block is all it takes to clear the
+ * mark. Assets an upload is still working on are left out: they are already covered by the upload
+ * gate, and a *collaborator's* in-flight upload legitimately 404s here right up until it lands.
+ */
+export function stranded(
+  blocks: Array<{ blockId: string; key?: string; name: string }>,
+  absent: ReadonlySet<string>,
+  uploading: Iterable<string> = [],
+): DocMissing[] {
+  if (absent.size === 0) return []
+  const busy = new Set(uploading)
+  const out: DocMissing[] = []
+  for (const block of blocks) {
+    const key = block.key
+    if (!key || busy.has(key) || !absent.has(key)) continue
+    out.push({ blockId: block.blockId, key, name: block.name })
+  }
+  return out
+}
+
 export type UploadTrackerInput = {
   upload: (key: string, blob: Blob, opts: BlobUploadOpts) => Promise<unknown>
   onChange: () => void

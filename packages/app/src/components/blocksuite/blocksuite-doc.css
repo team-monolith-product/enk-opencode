@@ -150,6 +150,15 @@
   transition: none;
 }
 
+/* A block whose asset the server does not have is not loading — nothing is fetching those bytes any
+   more. BlockSuite cannot tell: its image card keeps spinning forever because a null blob returns
+   without setting `error` (only the throw path does). Fade the card so the error mark above it is
+   the state the block reads as. Dimmed rather than hidden — the block still has to be selectable to
+   be deleted. Only stranded blocks have a card at all: a failed upload still renders its local blob. */
+[data-component="prompt-doc"] [data-block-id][data-oc-upload="error"] affine-image-fallback-card {
+  opacity: 0.4;
+}
+
 [data-component="prompt-doc-viewer"] {
   display: block;
   width: 100%;
