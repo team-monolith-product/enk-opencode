@@ -4,7 +4,8 @@ import { describeRoute, validator, resolver } from "hono-openapi"
 import { SessionID, MessageID, PartID } from "@/session/schema"
 import z from "zod"
 import { Session } from "../../session"
-import { ensureSession, getOrCreateMain } from "../../session/ensure"
+import { getOrCreateMain } from "../../session/ensure"
+import { archiveSession, removeSession } from "../../session/archive"
 import { MessageV2 } from "../../session/message-v2"
 import { SessionPrompt } from "../../session/prompt"
 import { SessionCompaction } from "../../session/compaction"
@@ -239,8 +240,7 @@ export const SessionRoutes = lazy(() =>
       ),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
-        await Session.remove(sessionID)
-        await ensureSession()
+        await removeSession(sessionID)
         return c.json(true)
       },
     )
@@ -288,17 +288,10 @@ export const SessionRoutes = lazy(() =>
         }
         const archived = updates.time?.archived
         if (archived !== undefined) {
-          // 같은 세션을 함께 보던 사람들이 동시에 지우기를 누르면 보관 요청이 여러 번 온다.
-          // 먼저 온 하나만 인정한다 — 뒤늦은 요청이 보관 시각을 덮어쓰거나 session.updated 를
-          // 한 번 더 뿌리지 않게 한다. 응답은 그대로 보관된 세션이라 늦게 누른 쪽도 정상 진행된다.
-          const duplicate = !!archived && !!(await Session.get(sessionID)).time.archived
-          if (!duplicate) {
-            await Session.setArchived({ sessionID, time: archived })
-            // 보관하면 남은 대화가 없어질 수 있다. 한 세션만 띄우는 워크스페이스(ensureSession)에서는
-            // 이 요청 안에서 대체 세션까지 만들어 둔다 — 그래야 지운 사람도, 같은 세션을 함께 보고
-            // 있던 다른 접속자도 session.created 를 받아 같은 새 세션으로 옮겨갈 수 있다.
-            if (archived) await ensureSession()
-          }
+          // 실행 중단·대체 세션 생성·중복 요청 무시는 모두 archiveSession 안에 있다. 지우기는 투표를
+          // 거쳐서도 들어오므로(doc 의 clear 합의) 한 곳에만 두어 두 경로가 갈리지 않게 한다.
+          if (archived) await archiveSession({ sessionID, time: archived })
+          else await Session.setArchived({ sessionID, time: archived })
         }
 
         const session = await Session.get(sessionID)

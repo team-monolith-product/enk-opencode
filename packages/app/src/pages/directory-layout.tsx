@@ -88,6 +88,30 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
     followReplacement(info.id)
   })
   onCleanup(unsubscribeSessionRemoval)
+
+  // 자리를 비운 사이(탭 절전·네트워크 끊김)에 지워졌다면 그 이벤트는 못 받는다. 돌아왔을 때 목록만
+  // 조용히 갱신되고 화면은 사라진 대화에 남는다. 그래서 스트림이 다시 붙을 때마다 지금 보고 있는
+  // 세션이 아직 살아 있는지 서버에 되묻는다. 한 세션만 띄우는 워크스페이스에서만 — 그 밖에서는
+  // 보관된 세션을 일부러 열어 둔 것일 수 있다.
+  const unsubscribeReconnect = globalSDK.event.listen((e) => {
+    if (e.name !== "global") return
+    if (e.details?.type !== "server.connected") return
+    const id = params.id
+    if (!id) return
+    if (!sync.data.config.ensureSession) return
+    void sdk.client.session
+      .get({ sessionID: id })
+      .then((res) => {
+        if (params.id !== id) return
+        if (!res.data?.time?.archived) return
+        followReplacement(id)
+      })
+      .catch(() => {
+        // 완전히 지워졌으면 조회가 실패한다 — 그 역시 자리를 옮겨야 한다는 뜻이다.
+        if (params.id === id) followReplacement(id)
+      })
+  })
+  onCleanup(unsubscribeReconnect)
   onCleanup(() => SessionFollow.clear(props.directory))
 
   // 대체 세션을 기다리는 동안. 도착하면 옮겨가고, 이벤트가 끊겨 오지 않으면 빈 새 세션 화면으로 떨어진다.

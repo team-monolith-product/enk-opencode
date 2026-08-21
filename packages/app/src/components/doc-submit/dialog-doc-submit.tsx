@@ -10,7 +10,7 @@ import { useCountdown } from "./use-countdown"
 import "./doc-submit.css"
 
 // What the vote will do once approved — drives the dialog copy.
-export type DocSubmitKind = "doc" | "question-send" | "question-dismiss" | "question-back" | "stop"
+export type DocSubmitKind = "doc" | "question-send" | "question-dismiss" | "question-back" | "stop" | "clear"
 
 // For question votes: the question(s) and the answer(s) being agreed on, shown so everyone sees
 // exactly what is about to be sent (or which question is being dismissed).
@@ -49,6 +49,7 @@ function headline(kind: DocSubmitKind | undefined) {
   if (kind === "question-dismiss") return "이 질문, 닫을까요?"
   if (kind === "question-back") return "이전 질문으로 돌아갈까요?"
   if (kind === "stop") return "AI 응답을 멈출까요?"
+  if (kind === "clear") return "이 대화, 지울까요?"
   return "이 프롬프트, 보낼까요?"
 }
 
@@ -56,6 +57,7 @@ function requestVerb(kind: DocSubmitKind | undefined) {
   if (kind === "question-dismiss") return "닫기를"
   if (kind === "question-back") return "되돌리기를"
   if (kind === "stop") return "중지를"
+  if (kind === "clear") return "지우기를"
   return "전송을"
 }
 
@@ -63,6 +65,7 @@ function approveLabel(kind: DocSubmitKind | undefined) {
   if (kind === "question-dismiss") return "수락하고 닫기"
   if (kind === "question-back") return "수락하고 돌아가기"
   if (kind === "stop") return "수락하고 멈추기"
+  if (kind === "clear") return "수락하고 지우기"
   return "수락하고 보내기"
 }
 
@@ -70,6 +73,7 @@ function excludeLabel(kind: DocSubmitKind | undefined) {
   if (kind === "question-dismiss") return "나간 인원 제외하고 닫기"
   if (kind === "question-back") return "나간 인원 제외하고 돌아가기"
   if (kind === "stop") return "나간 인원 제외하고 멈추기"
+  if (kind === "clear") return "나간 인원 제외하고 지우기"
   return "나간 인원 제외하고 보내기"
 }
 
@@ -78,6 +82,7 @@ function proceedVerb(kind: DocSubmitKind | undefined) {
   if (kind === "question-dismiss") return "닫혀요"
   if (kind === "question-back") return "되돌아가요"
   if (kind === "stop") return "멈춰요"
+  if (kind === "clear") return "지워져요"
   return "전송돼요"
 }
 
@@ -85,6 +90,8 @@ function warnText(kind: DocSubmitKind | undefined) {
   if (kind === "question-dismiss") return "닫으면 이 질문은 사라져요. 거절하면 그대로 둘 수 있어요."
   if (kind === "question-back") return "되돌리면 이 질문의 답변이 초기화돼요. 거절하면 그대로 둘 수 있어요."
   if (kind === "stop") return "멈추면 진행 중인 AI 응답이 중단돼요. 거절하면 계속 진행돼요."
+  if (kind === "clear")
+    return "지우면 이 대화는 다시 열 수 없어요. 모두 새 세션으로 함께 옮겨가요. 거절하면 그대로 둘 수 있어요."
   return "전송 후에는 AI 응답을 취소할 수 없어요. 거절하면 다시 편집할 수 있어요."
 }
 
@@ -273,7 +280,7 @@ function PreviewCard(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boo
 // for a bare "stop" vote.
 function SnapshotArea(props: { kind?: DocSubmitKind; state: DocSubmitState; preview?: () => DocSubmitPreviewItem[]; sdk?: DocSubmitSdk }) {
   return (
-    <Show when={props.kind !== "stop"}>
+    <Show when={props.kind !== "stop" && props.kind !== "clear"}>
       <div class="jt-snap-scroll ds-snap">
         <Show
           when={props.kind === "doc" && props.sdk}
@@ -465,6 +472,7 @@ function WaitingBody(props: {
   )
   const sub = () => {
     if (props.kind === "stop") return "모두 동의하면 AI 응답을 멈춰요"
+    if (props.kind === "clear") return "모두 동의하면 이 대화를 지워요"
     if (props.kind === "question-dismiss") return "모두 동의하면 질문을 닫아요"
     if (props.kind === "question-back") return "모두 동의하면 이전 질문으로 돌아가요"
     return "모두 동의하면 바로 AI에게 전송돼요"
