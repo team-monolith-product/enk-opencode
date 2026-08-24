@@ -1810,11 +1810,6 @@ export default function Page() {
                   if (root) scheduleScrollState(root)
                 }}
                 turnStart={historyWindow.turnStart()}
-                historyMore={historyMore()}
-                historyLoading={historyLoading()}
-                onLoadEarlier={() => {
-                  void historyWindow.loadAndReveal()
-                }}
                 renderedUserMessages={historyWindow.renderedUserMessages()}
                 anchor={anchor}
               />

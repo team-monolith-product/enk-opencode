@@ -214,9 +214,6 @@ export function MessageTimeline(props: {
   centered: boolean
   setContentRef: (el: HTMLDivElement) => void
   turnStart: number
-  historyMore: boolean
-  historyLoading: boolean
-  onLoadEarlier: () => void
   renderedUserMessages: UserMessage[]
   anchor: (id: string) => string
 }) {
@@ -909,21 +906,6 @@ export function MessageTimeline(props: {
                 "mt-0": !props.centered,
               }}
             >
-              <Show when={props.turnStart > 0 || props.historyMore}>
-                <div class="w-full flex justify-center">
-                  <Button
-                    variant="ghost"
-                    size="large"
-                    class="text-12-medium opacity-50"
-                    disabled={props.historyLoading}
-                    onClick={props.onLoadEarlier}
-                  >
-                    {props.historyLoading
-                      ? language.t("session.messages.loadingEarlier")
-                      : language.t("session.messages.loadEarlier")}
-                  </Button>
-                </div>
-              </Show>
               <For each={rendered()}>
                 {(messageID) => {
                   const active = createMemo(() => activeMessageID() === messageID)
