@@ -999,7 +999,7 @@ export default function Layout(props: ParentProps) {
     const index = sessions.findIndex((s) => s.id === session.id)
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
-    // 지우기가 실패했는데 화면만 넘어가면 지워진 줄 알고 대화를 이어간다. 실패는 실패로 보여준다.
+    // 초기화가 실패했는데 화면만 넘어가면 정리된 줄 알고 대화를 이어간다. 실패는 실패로 보여준다.
     const removed = await globalSDK.client.session
       .update({
         directory: session.directory,
@@ -1009,7 +1009,7 @@ export default function Layout(props: ParentProps) {
       .then(() => true)
       .catch((err) => {
         showToast({
-          title: language.t("session.delete.failed.title"),
+          title: language.t("session.clear.failed.title"),
           description: errorMessage(err, language.t("common.requestFailed")),
         })
         return false

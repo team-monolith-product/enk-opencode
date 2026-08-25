@@ -1728,7 +1728,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       } catch {
         session.setApprovalSession(input.sessionID)
         showToast({
-          title: "전송 동의 요청 실패",
+          title: language.t("docSubmit.toast.requestFailed"),
           description: language.t("common.requestFailed"),
         })
         return true

@@ -312,7 +312,7 @@ export function createPromptDocSession(): PromptDocSession {
               .then(setApproval)
               .catch(() =>
                 showToast({
-                  title: "전송 동의 실패",
+                  title: language.t("docSubmit.toast.approveFailed"),
                   description: language.t("common.requestFailed"),
                 }),
               )
@@ -331,7 +331,7 @@ export function createPromptDocSession(): PromptDocSession {
               .then(setApproval)
               .catch(() =>
                 showToast({
-                  title: "전송 동의 취소 실패",
+                  title: language.t("docSubmit.toast.cancelFailed"),
                   description: language.t("common.requestFailed"),
                 }),
               )
@@ -350,7 +350,7 @@ export function createPromptDocSession(): PromptDocSession {
               .then(setApproval)
               .catch(() =>
                 showToast({
-                  title: "전송 실패",
+                  title: language.t("docSubmit.toast.sendFailed"),
                   description: language.t("common.requestFailed"),
                 }),
               )
@@ -428,7 +428,7 @@ export function createPromptDocSession(): PromptDocSession {
       // Never fall through to a solo abort here: peers exist, so stopping without their consent is
       // exactly what the vote is for. Surface the failure and leave the run alone.
       showToast({
-        title: "중지 동의 요청 실패",
+        title: language.t("docSubmit.toast.stopRequestFailed"),
         description: language.t("common.requestFailed"),
       })
     }
@@ -471,7 +471,7 @@ export function createPromptDocSession(): PromptDocSession {
     } catch {
       // 동의 없이 혼자 지우는 길로 새면 안 된다. 다른 투표가 도는 중이라 서버가 거절했을 수도 있다.
       showToast({
-        title: "지우기 동의 요청 실패",
+        title: language.t("docSubmit.toast.clearRequestFailed"),
         description: language.t("common.requestFailed"),
       })
     }

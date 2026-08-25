@@ -457,7 +457,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               action: "approve",
             })
               .then(setApproval)
-              .catch(() => showToast({ title: "전송 동의 실패", description: language.t("common.requestFailed") }))
+              .catch(() => showToast({ title: language.t("docSubmit.toast.approveFailed"), description: language.t("common.requestFailed") }))
           }}
           cancel={() => {
             const current = approval()
@@ -471,7 +471,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               action: "cancel",
             })
               .then(setApproval)
-              .catch(() => showToast({ title: "전송 동의 취소 실패", description: language.t("common.requestFailed") }))
+              .catch(() => showToast({ title: language.t("docSubmit.toast.cancelFailed"), description: language.t("common.requestFailed") }))
           }}
           exclude={() => {
             const current = approval()
@@ -485,7 +485,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               action: "exclude",
             })
               .then(setApproval)
-              .catch(() => showToast({ title: "전송 실패", description: language.t("common.requestFailed") }))
+              .catch(() => showToast({ title: language.t("docSubmit.toast.sendFailed"), description: language.t("common.requestFailed") }))
           }}
           close={closeApproval}
           onExpire={() => {
