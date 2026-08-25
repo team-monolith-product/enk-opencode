@@ -18,6 +18,7 @@ import {
   type DocMissing,
   type DocUpload,
 } from "./doc-upload"
+import { repairSelection } from "./doc-selection"
 import { scheme } from "./theme"
 import { FileReferenceBlockSpec, withFileReferenceSchema, type FileNodeType } from "./file-reference-block"
 import { LineReferenceBlockSpec, withLineReferenceSchema } from "./line-reference-block"
@@ -376,6 +377,44 @@ export async function createPage(input: DocMountInput) {
   // image spinning forever — so the answer is routed here instead.
   if (blobs) blobs.onAssetMissing = missing.mark
 
+  // A delete normally moves the selection with it. When the render that was supposed to do that
+  // throws mid-update, the selection is left pointing at a block the doc no longer has — and
+  // BlockSuite resolves that id on every keystroke, doing nothing when it misses. The editor then
+  // looks dead (Backspace above all) until the page is reloaded. Re-point it instead.
+  //
+  // Deferred a tick for two reasons: BlockSuite emits the delete *before* the block leaves the doc,
+  // and waiting lets the editor's own selection move land first, so this only steps in when that
+  // move never happened.
+  let healFrame: ReturnType<typeof setTimeout> | undefined
+  const healSelection = () => {
+    if (input.readonly) return
+    if (healFrame) return
+    healFrame = setTimeout(() => {
+      healFrame = undefined
+      const selection = editor.std?.selection
+      if (!selection) return
+      const plan = repairSelection(
+        selection.value,
+        (id) => !!doc.getBlock(id),
+        () => {
+          const blocks = doc.getBlockByFlavour("affine:paragraph")
+          return blocks[blocks.length - 1]?.id
+        },
+      )
+      if (!plan) return
+      if (!plan.caret) {
+        selection.set(plan.keep)
+        return
+      }
+      const model = doc.getBlock(plan.caret)?.model
+      const index = model?.text?.length ?? 0
+      selection.set([
+        ...plan.keep,
+        selection.create("text", { from: { blockId: plan.caret, index, length: 0 }, to: null }),
+      ])
+    }, 0)
+  }
+
   // The block IS the upload's handle: removing it (delete, or undo of the add) cancels, and undoing
   // that removal puts it back. `doc` is swapped on rebind(), so this re-subscribes with it.
   let offBlocks: (() => void) | undefined
@@ -389,6 +428,7 @@ export async function createPage(input: DocMountInput) {
         // Deleting the block is the only way out of a stranded attachment, so the gate has to
         // notice. Nothing else here fires for it: there is no upload entry left to cancel.
         missing.refresh()
+        healSelection()
         return
       }
       if (event.type !== "add") return
@@ -896,6 +936,8 @@ export async function createPage(input: DocMountInput) {
       uploads.dispose()
       if (uploadFrame) clearTimeout(uploadFrame)
       uploadFrame = undefined
+      if (healFrame) clearTimeout(healFrame)
+      healFrame = undefined
       if (draftFrame) cancelAnimationFrame(draftFrame)
       draftFrame = undefined
       offY?.()

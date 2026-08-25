@@ -23,6 +23,7 @@ import { AppFileSystem } from "../../src/filesystem"
 import { SessionCompaction } from "../../src/session/compaction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
+import { Identifier } from "../../src/id/id"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { SessionFallback } from "../../src/session/fallback"
@@ -456,6 +457,42 @@ it.effect("loop exits immediately when last assistant has stop finish", () =>
         expect(yield* test.calls).toBe(0)
       }),
     { git: true },
+  ),
+)
+
+it.effect("loop answers a new user message whose id predates the last assistant", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { test, prompt, sessions, chat } = yield* boot()
+        yield* test.reply(...replyStop("world"))
+        yield* seed(chat.id, { finish: "stop" })
+
+        // The web client mints the user message id in the browser, so a lagging client clock
+        // produces an id that sorts before the assistant message it follows.
+        const skewed = MessageID.make(Identifier.create("message", false, Date.now() - 5 * 60 * 1000))
+        const msg = yield* sessions.updateMessage({
+          id: skewed,
+          role: "user" as const,
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          time: { created: Date.now() },
+        })
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: msg.id,
+          sessionID: chat.id,
+          type: "text",
+          text: "hello",
+        })
+
+        const result = yield* prompt.loop({ sessionID: chat.id })
+        expect(yield* test.calls).toBe(1)
+        expect(result.info.role).toBe("assistant")
+        expect(result.parts.some((part) => part.type === "text" && part.text === "world")).toBe(true)
+      }),
+    { git: true, config: cfg },
   ),
 )
 
