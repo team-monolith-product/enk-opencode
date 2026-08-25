@@ -1093,7 +1093,7 @@ export const dict = {
   "session.clear.title": "Reset conversation",
   "session.clear.description": "Put the current conversation away and move on to a new one.",
   "session.clear.confirm": "Reset this conversation?",
-  "session.clear.note": "Once reset, you won't be able to reopen this conversation.",
+  "session.clear.note": "Once reset, you won't be able to reopen this conversation. The files you worked on stay.",
   "session.clear.button": "Reset conversation",
   "session.clear.failed.title": "Failed to reset conversation",
   // Consent dialog — send / question / stop / conversation reset votes share one copy frame.
@@ -1127,7 +1127,7 @@ export const dict = {
   "docSubmit.warn.questionDismiss": "Dismissing removes this question. Reject to leave it as is.",
   "docSubmit.warn.questionBack": "Going back resets the answers to this question. Reject to leave it as is.",
   "docSubmit.warn.stop": "Stopping cancels the AI response in flight. Reject to let it continue.",
-  "docSubmit.warn.clear": "Once reset, this conversation cannot be reopened. Everyone moves to a new one together. Reject to leave it as is.",
+  "docSubmit.warn.clear": "Once reset, this conversation cannot be reopened and everyone moves to a new one together. The files you worked on stay. Reject to leave it as is.",
   "docSubmit.hint.doc": "Once everyone agrees it goes straight to the AI",
   "docSubmit.hint.questionDismiss": "Once everyone agrees the question closes",
   "docSubmit.hint.questionBack": "Once everyone agrees it goes back to the previous question",
