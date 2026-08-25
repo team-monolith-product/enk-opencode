@@ -1,6 +1,7 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEffect, createMemo, createSignal, For, type JSX, onCleanup, onMount, Show, type Accessor } from "solid-js"
 import { useClientEnv } from "@/context/client-env"
+import { useLanguage } from "@/context/language"
 import { createPage } from "@/components/blocksuite/blocksuite-doc"
 import { useColorScheme } from "@/utils/color-scheme"
 import { SessionPreviewMascot } from "@/pages/session/session-preview-mascot"
@@ -44,55 +45,104 @@ type Props = {
 }
 
 // ── copy helpers (kind-aware) ──────────────────────────────────────────────
-function headline(kind: DocSubmitKind | undefined) {
-  if (kind === "question-send") return "이 답변, 보낼까요?"
-  if (kind === "question-dismiss") return "이 질문, 닫을까요?"
-  if (kind === "question-back") return "이전 질문으로 돌아갈까요?"
-  if (kind === "stop") return "AI 응답을 멈출까요?"
-  if (kind === "clear") return "이 대화, 지울까요?"
-  return "이 프롬프트, 보낼까요?"
+// 문구는 i18n 에 있고 여기서는 키만 고른다. 투표 종류마다 같은 자리에 다른 말이 들어가므로,
+// 종류 → 키 표를 두고 표에 없는 종류는 기본(doc = 전송)으로 떨어진다.
+const copyKey = <T extends Record<string, string>>(table: T, fallback: keyof T) => {
+  return (kind: DocSubmitKind | undefined) => (table[kind ?? ""] ?? table[fallback]) as T[keyof T]
 }
 
-function requestVerb(kind: DocSubmitKind | undefined) {
-  if (kind === "question-dismiss") return "닫기를"
-  if (kind === "question-back") return "되돌리기를"
-  if (kind === "stop") return "중지를"
-  if (kind === "clear") return "지우기를"
-  return "전송을"
-}
+const headline = copyKey(
+  {
+    doc: "docSubmit.headline.doc",
+    "question-send": "docSubmit.headline.questionSend",
+    "question-dismiss": "docSubmit.headline.questionDismiss",
+    "question-back": "docSubmit.headline.questionBack",
+    stop: "docSubmit.headline.stop",
+    clear: "docSubmit.headline.clear",
+  } as const,
+  "doc",
+)
 
-function approveLabel(kind: DocSubmitKind | undefined) {
-  if (kind === "question-dismiss") return "수락하고 닫기"
-  if (kind === "question-back") return "수락하고 돌아가기"
-  if (kind === "stop") return "수락하고 멈추기"
-  if (kind === "clear") return "수락하고 지우기"
-  return "수락하고 보내기"
-}
+const requestVerb = copyKey(
+  {
+    doc: "docSubmit.requestVerb.doc",
+    "question-dismiss": "docSubmit.requestVerb.questionDismiss",
+    "question-back": "docSubmit.requestVerb.questionBack",
+    stop: "docSubmit.requestVerb.stop",
+    clear: "docSubmit.requestVerb.clear",
+  } as const,
+  "doc",
+)
 
-function excludeLabel(kind: DocSubmitKind | undefined) {
-  if (kind === "question-dismiss") return "나간 인원 제외하고 닫기"
-  if (kind === "question-back") return "나간 인원 제외하고 돌아가기"
-  if (kind === "stop") return "나간 인원 제외하고 멈추기"
-  if (kind === "clear") return "나간 인원 제외하고 지우기"
-  return "나간 인원 제외하고 보내기"
-}
+const approveLabel = copyKey(
+  {
+    doc: "docSubmit.approve.doc",
+    "question-dismiss": "docSubmit.approve.questionDismiss",
+    "question-back": "docSubmit.approve.questionBack",
+    stop: "docSubmit.approve.stop",
+    clear: "docSubmit.approve.clear",
+  } as const,
+  "doc",
+)
 
-// Verb used in the live "동의 현황" status line ("…전송돼요" / "…진행돼요").
-function proceedVerb(kind: DocSubmitKind | undefined) {
-  if (kind === "question-dismiss") return "닫혀요"
-  if (kind === "question-back") return "되돌아가요"
-  if (kind === "stop") return "멈춰요"
-  if (kind === "clear") return "지워져요"
-  return "전송돼요"
-}
+const excludeLabel = copyKey(
+  {
+    doc: "docSubmit.exclude.doc",
+    "question-dismiss": "docSubmit.exclude.questionDismiss",
+    "question-back": "docSubmit.exclude.questionBack",
+    stop: "docSubmit.exclude.stop",
+    clear: "docSubmit.exclude.clear",
+  } as const,
+  "doc",
+)
 
-function warnText(kind: DocSubmitKind | undefined) {
-  if (kind === "question-dismiss") return "닫으면 이 질문은 사라져요. 거절하면 그대로 둘 수 있어요."
-  if (kind === "question-back") return "되돌리면 이 질문의 답변이 초기화돼요. 거절하면 그대로 둘 수 있어요."
-  if (kind === "stop") return "멈추면 진행 중인 AI 응답이 중단돼요. 거절하면 계속 진행돼요."
-  if (kind === "clear")
-    return "지우면 이 대화는 다시 열 수 없어요. 모두 새 세션으로 함께 옮겨가요. 거절하면 그대로 둘 수 있어요."
-  return "전송 후에는 AI 응답을 취소할 수 없어요. 거절하면 다시 편집할 수 있어요."
+// Verb used in the live "동의 현황" status line ("…전송돼요" / "…초기화돼요").
+const proceedVerb = copyKey(
+  {
+    doc: "docSubmit.proceed.doc",
+    "question-dismiss": "docSubmit.proceed.questionDismiss",
+    "question-back": "docSubmit.proceed.questionBack",
+    stop: "docSubmit.proceed.stop",
+    clear: "docSubmit.proceed.clear",
+  } as const,
+  "doc",
+)
+
+const warnText = copyKey(
+  {
+    doc: "docSubmit.warn.doc",
+    "question-dismiss": "docSubmit.warn.questionDismiss",
+    "question-back": "docSubmit.warn.questionBack",
+    stop: "docSubmit.warn.stop",
+    clear: "docSubmit.warn.clear",
+  } as const,
+  "doc",
+)
+
+const hintText = copyKey(
+  {
+    doc: "docSubmit.hint.doc",
+    "question-dismiss": "docSubmit.hint.questionDismiss",
+    "question-back": "docSubmit.hint.questionBack",
+    stop: "docSubmit.hint.stop",
+    clear: "docSubmit.hint.clear",
+  } as const,
+  "doc",
+)
+
+/**
+ * 문장 하나를 통째로 번역하면서 그 안의 한 조각만 굵게 보이려면, 번역문에 자리를 표시해 두고
+ * 렌더할 때 그 자리에서 자른다. i18n 자리표시자({{…}})와 겹치지 않게 {em} 을 쓴다.
+ */
+function emphasize(text: string, em: JSX.Element) {
+  const [before, after] = text.split("{em}")
+  return (
+    <>
+      {before}
+      <strong>{em}</strong>
+      {after}
+    </>
+  )
 }
 
 // Votes that show only the question text (no answers) in the preview.
@@ -176,16 +226,18 @@ function ConsentAvatar(props: { name: string; color: string; size?: number; dash
 }
 
 function ConsentCountdownChip(props: { sec: number; danger: boolean }) {
+  const language = useLanguage()
   return (
     <span class="ds-chip" classList={{ "ds-chip--danger": props.danger }}>
       {ICON.clock(13)}
-      자동 거절까지 {props.sec}초
+      {language.t("docSubmit.countdown.autoReject", { sec: props.sec })}
     </span>
   )
 }
 
 // ── prompt doc snapshot — read-only mount of the doc being sent ────────────
 function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
+  const language = useLanguage()
   const snapshotTheme = useColorScheme()
   const [fail, setFail] = createSignal(false)
   // 테마 동기화 이펙트가 mount 완료보다 먼저 돌므로 시그널로 둔다.
@@ -240,7 +292,7 @@ function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
   })
 
   return (
-    <Show when={!fail()} fallback={<div class="ds-snap-fallback">문서를 불러올 수 없습니다.</div>}>
+    <Show when={!fail()} fallback={<div class="ds-snap-fallback">{language.t("docSubmit.snapshot.failed")}</div>}>
       <div ref={el} data-component="prompt-doc-viewer" />
     </Show>
   )
@@ -248,6 +300,7 @@ function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
 
 // ── question preview (rendered inside the snapshot card for question votes) ─
 function PreviewCard(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boolean }) {
+  const language = useLanguage()
   return (
     <div class="ds-preview" data-multi={props.items().length > 1}>
       <For each={props.items()}>
@@ -261,7 +314,7 @@ function PreviewCard(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boo
               <Show when={!props.dismiss}>
                 <Show
                   when={item.answers.length > 0}
-                  fallback={<div class="ds-preview-a ds-preview-a--empty">미선택</div>}
+                  fallback={<div class="ds-preview-a ds-preview-a--empty">{language.t("docSubmit.preview.noAnswer")}</div>}
                 >
                   <div class="ds-preview-answers">
                     <For each={item.answers}>{(answer) => <span class="ds-preview-a">{answer}</span>}</For>
@@ -319,18 +372,24 @@ function VotingBody(props: {
     return left.length === 1 && left[0]?.actorID === props.actorID
   }
   const danger = () => props.sec <= 5
+  const language = useLanguage()
+  const requesterName = () => requester()?.name ?? language.t("docSubmit.requester.fallback")
+  const proceed = () => language.t(proceedVerb(props.kind))
 
   return (
     <div class="ds-body ds-body--voting">
       <div class="ds-vote-header">
-        <ConsentAvatar name={requester()?.name ?? "참여자"} color={requester()?.color ?? "#888"} size={34} />
+        <ConsentAvatar name={requesterName()} color={requester()?.color ?? "#888"} size={34} />
         <div class="ds-vote-header__text">
-          <strong>{requester()?.name ?? "참여자"}</strong>님이 {requestVerb(props.kind)} 요청했어요
+          {emphasize(
+            language.t("docSubmit.request.line", { verb: language.t(requestVerb(props.kind)) }),
+            requesterName(),
+          )}
         </div>
         <ConsentCountdownChip sec={props.sec} danger={danger()} />
       </div>
 
-      <h2 class="ds-headline">{headline(props.kind)}</h2>
+      <h2 class="ds-headline">{language.t(headline(props.kind))}</h2>
 
       <SnapshotArea kind={props.kind} state={props.state} preview={props.preview} sdk={props.sdk} />
 
@@ -355,12 +414,16 @@ function VotingBody(props: {
                 when={departed().length > 0}
                 fallback={
                   <span>
-                    <strong class="ds-ok">모두 동의했어요</strong> · 곧 {proceedVerb(props.kind)}
+                    <strong class="ds-ok">{language.t("docSubmit.status.allAgreed")}</strong>{" · "}
+                    {language.t("docSubmit.status.soon", { verb: proceed() })}
                   </span>
                 }
               >
                 <span>
-                  <strong>{departed().length}명</strong>이 나갔어요 · 요청자가 진행을 정해요
+                  {emphasize(
+                    language.t("docSubmit.status.departed"),
+                    language.t("docSubmit.count.people", { count: departed().length }),
+                  )}
                 </span>
               </Show>
             }
@@ -369,12 +432,18 @@ function VotingBody(props: {
               when={onlyMe()}
               fallback={
                 <span>
-                  <strong>{remaining().length}명</strong>이 더 동의하면 {proceedVerb(props.kind)}
+                  {emphasize(
+                    language.t("docSubmit.status.remaining", { verb: proceed() }),
+                    language.t("docSubmit.count.people", { count: remaining().length }),
+                  )}
                 </span>
               }
             >
               <span>
-                이제 <strong>나만</strong> 동의하면 {proceedVerb(props.kind)}
+                {emphasize(
+                  language.t("docSubmit.status.onlyMe", { verb: proceed() }),
+                  language.t("docSubmit.status.onlyMe.em"),
+                )}
               </span>
             </Show>
           </Show>
@@ -383,19 +452,19 @@ function VotingBody(props: {
 
       <div class="ds-actions">
         <button type="button" class="jt-btn jt-btn-secondary jt-btn-lg" onClick={props.cancel}>
-          거절 <span class="ds-kbd">Esc</span>
+          {language.t("docSubmit.action.reject")} <span class="ds-kbd">Esc</span>
         </button>
         <span class="ds-actions__spacer" />
         <button type="button" class="jt-btn jt-btn-critical jt-btn-lg ds-btn-approve" onClick={props.approve}>
           {ICON.send(15)}
-          {approveLabel(props.kind)}
+          {language.t(approveLabel(props.kind))}
           <span class="ds-kbd ds-kbd--on-dark">Enter</span>
         </button>
       </div>
 
       <div class="ds-warn">
         {ICON.warn(12)}
-        {warnText(props.kind)}
+        {language.t(warnText(props.kind))}
       </div>
     </div>
   )
@@ -415,10 +484,11 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
     }
     prev = now
   })
+  const language = useLanguage()
   const suffix = () => {
     let out = ""
-    if (props.actor.actorID === props.me) out += " (나)"
-    if (props.actor.actorID === props.requesterID) out += " · 요청자"
+    if (props.actor.actorID === props.me) out += language.t("docSubmit.actor.me")
+    if (props.actor.actorID === props.requesterID) out += language.t("docSubmit.actor.requester")
     return out
   }
   const gone = () => props.actor.status === "left"
@@ -436,17 +506,17 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
             when={gone()}
             fallback={
               <span class="ds-status-row__wait">
-                대기 중 <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
+                {language.t("docSubmit.actor.waiting")} <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
               </span>
             }
           >
             <span class="ds-status-row__wait">
-              {ICON.user(12)} 나감
+              {ICON.user(12)} {language.t("docSubmit.actor.left")}
             </span>
           </Show>
         }
       >
-        <span class="jt-pill jt-pill-started ds-status-row__pill">동의함</span>
+        <span class="jt-pill jt-pill-started ds-status-row__pill">{language.t("docSubmit.actor.agreed")}</span>
       </Show>
     </div>
   )
@@ -461,6 +531,7 @@ function WaitingBody(props: {
   exclude?: () => void
   spectator?: boolean
 }) {
+  const language = useLanguage()
   const allOk = createMemo(() => props.state.actors.every((item) => item.status === "approved"))
   // The departed are the sole holdouts: the requester (and only the requester) may proceed without
   // them — a departure by itself never sends.
@@ -470,13 +541,7 @@ function WaitingBody(props: {
       props.state.actors.some((item) => item.status === "left") &&
       !props.state.actors.some((item) => item.status === "pending"),
   )
-  const sub = () => {
-    if (props.kind === "stop") return "모두 동의하면 AI 응답을 멈춰요"
-    if (props.kind === "clear") return "모두 동의하면 이 대화를 지워요"
-    if (props.kind === "question-dismiss") return "모두 동의하면 질문을 닫아요"
-    if (props.kind === "question-back") return "모두 동의하면 이전 질문으로 돌아가요"
-    return "모두 동의하면 바로 AI에게 전송돼요"
-  }
+  const sub = () => language.t(hintText(props.kind))
   // A readonly spectator sees the SAME waiting/status view an already-approved participant sees — same
   // copy and layout. The only difference: it cannot cancel, so the "동의 취소" button is hidden.
   return (
@@ -485,14 +550,14 @@ function WaitingBody(props: {
       <div class="ds-waiting-head">
         <h2 class="ds-headline ds-headline--center">
           {excludable()
-            ? "나간 팀원만 응답하지 않았어요"
+            ? language.t("docSubmit.waiting.leftOnly")
             : allOk()
-              ? "모두 동의했어요. 진행할게요"
-              : "동의했어요. 팀원을 기다려요"}
+              ? language.t("docSubmit.waiting.allAgreed")
+              : language.t("docSubmit.waiting.pending")}
         </h2>
         <p class="ds-waiting-sub">
-          {excludable() ? "제외하고 보내거나, 돌아올 때까지 기다릴 수 있어요" : sub()} ·{" "}
-          <span class="ds-nowrap">자동 거절까지 {props.sec}초</span>
+          {excludable() ? language.t("docSubmit.waiting.excludable") : sub()} ·{" "}
+          <span class="ds-nowrap">{language.t("docSubmit.countdown.autoReject", { sec: props.sec })}</span>
         </p>
       </div>
       <div class="jt-snap-scroll ds-status-list">
@@ -503,12 +568,12 @@ function WaitingBody(props: {
       <Show when={!props.spectator}>
         <div class="ds-waiting-actions">
           <button type="button" class="jt-btn jt-btn-secondary" onClick={props.cancel}>
-            동의 취소 <span class="ds-kbd">Esc</span>
+            {language.t("docSubmit.action.cancel")} <span class="ds-kbd">Esc</span>
           </button>
           <Show when={excludable() && props.exclude}>
             <button type="button" class="jt-btn jt-btn-critical ds-btn-approve" onClick={props.exclude}>
               {ICON.send(14)}
-              {excludeLabel(props.kind)}
+              {language.t(excludeLabel(props.kind))}
             </button>
           </Show>
         </div>
@@ -518,24 +583,31 @@ function WaitingBody(props: {
 }
 
 // ── failure card — three outcomes, auto-returns to canvas ──────────────────
-function failInfo(state: DocSubmitState): { title: string; sub: string; icon: JSX.Element } {
+type Translate = ReturnType<typeof useLanguage>["t"]
+
+function failInfo(state: DocSubmitState, t: Translate): { title: string; sub: string; icon: JSX.Element } {
   const timeoutSec = Math.round(state.timeoutMs / 1000)
   if (state.status === "left") {
-    return { title: "전송이 무산됐어요", sub: "팀원이 캔버스를 나가 합의가 깨졌어요. 다시 모이면 보낼 수 있어요.", icon: ICON.user(22) }
+    return { title: t("docSubmit.failed.left.title"), sub: t("docSubmit.failed.left.sub"), icon: ICON.user(22) }
   }
   if (state.status === "expired") {
     return {
-      title: "시간이 초과되었어요",
-      sub: `${timeoutSec}초 안에 모두 동의하지 않아 전송되지 않았어요. 다시 시도해 주세요.`,
+      title: t("docSubmit.failed.expired.title"),
+      sub: t("docSubmit.failed.expired.sub", { sec: timeoutSec }),
       icon: ICON.clock(22),
     }
   }
-  return { title: "전송이 취소되었어요", sub: "캔버스로 돌아가 내용을 다시 다듬은 뒤 보낼 수 있어요.", icon: ICON.x(22) }
+  return {
+    title: t("docSubmit.failed.cancelled.title"),
+    sub: t("docSubmit.failed.cancelled.sub"),
+    icon: ICON.x(22),
+  }
 }
 
 function FailureCard(props: { state: DocSubmitState; close: () => void }) {
   const env = useClientEnv()
-  const info = createMemo(() => failInfo(props.state))
+  const language = useLanguage()
+  const info = createMemo(() => failInfo(props.state, language.t))
   const total = env.submitFailureCloseSec()
   const [auto, setAuto] = createSignal(total)
   createEffect(() => {
@@ -554,9 +626,9 @@ function FailureCard(props: { state: DocSubmitState; close: () => void }) {
       <div class="ds-fail__bar">
         <div class="ds-fail__bar-fill" style={{ width: `${total > 0 ? (Math.max(0, auto()) / total) * 100 : 0}%` }} />
       </div>
-      <span class="ds-fail__count">{Math.max(0, auto())}초 후 캔버스로 돌아가요</span>
+      <span class="ds-fail__count">{language.t("docSubmit.failed.back.count", { sec: Math.max(0, auto()) })}</span>
       <button type="button" class="jt-btn jt-btn-secondary ds-fail__btn" onClick={props.close}>
-        지금 돌아가기 {ICON.arrowRight(14)}
+        {language.t("docSubmit.failed.back.now")} {ICON.arrowRight(14)}
       </button>
     </div>
   )
@@ -632,6 +704,7 @@ function ConsentFrame(props: {
 }
 
 export function DialogDocSubmit(props: Props) {
+  const language = useLanguage()
   const state = () => props.state()
   const me = () => state()?.actors.find((item) => item.actorID === props.actorID)
   const pending = () => state()?.status === "pending"
@@ -671,7 +744,7 @@ export function DialogDocSubmit(props: Props) {
       data-component="doc-submit-overlay"
       role="alertdialog"
       aria-modal="true"
-      aria-label={failed() ? "합의 무산" : "전송 동의"}
+      aria-label={failed() ? language.t("docSubmit.aria.failed") : language.t("docSubmit.aria.dialog")}
     >
       <div data-slot="doc-submit-backdrop" />
       <Show when={state()}>

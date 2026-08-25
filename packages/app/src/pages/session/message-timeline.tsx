@@ -31,6 +31,7 @@ import { useSync } from "@/context/sync"
 import { messageAgentColor } from "@/utils/agent"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
 import { SessionFollow } from "@/utils/session-follow"
+import { DialogClearSession } from "@/components/session/dialog-clear-session"
 import { makeTimer } from "@solid-primitives/timer"
 
 type MessageComment = {
@@ -447,6 +448,13 @@ export function MessageTimeline(props: {
     navigate(`/${params.dir}/session`)
   }
 
+  // 대화 헤더에서도 컴포저 버튼·사이드바와 같은 확인창(그리고 같은 동의)을 거친다.
+  const clearSession = (sessionID: string) => {
+    const session = sync.session.get(sessionID)
+    if (!session) return
+    dialog.show(() => <DialogClearSession session={session} clear={() => archiveSession(sessionID)} />)
+  }
+
   const archiveSession = async (sessionID: string) => {
     const session = sync.session.get(sessionID)
     if (!session) return
@@ -791,8 +799,8 @@ export function MessageTimeline(props: {
                                   </DropdownMenu.ItemLabel>
                                 </DropdownMenu.Item>
                               </Show>
-                              <DropdownMenu.Item onSelect={() => void archiveSession(id())}>
-                                <DropdownMenu.ItemLabel>{language.t("common.archive")}</DropdownMenu.ItemLabel>
+                              <DropdownMenu.Item onSelect={() => clearSession(id())}>
+                                <DropdownMenu.ItemLabel>{language.t("session.clear.title")}</DropdownMenu.ItemLabel>
                               </DropdownMenu.Item>
                               <DropdownMenu.Separator />
                               <DropdownMenu.Item

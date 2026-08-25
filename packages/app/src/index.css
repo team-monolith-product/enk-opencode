@@ -1902,63 +1902,122 @@
 
 [data-component="dialog"] [data-slot="dialog-content"].session-clear-dialog {
   max-width: 440px;
+  /* 합의 카드와 같은 --r-md. 이어서 뜨는 두 카드의 모서리가 달라 보이면 안 된다. */
+  border-radius: 12px;
 }
 
-.session-clear-dialog .session-clear-body {
-  padding: 0 28px 6px;
-  width: 100%;
-}
-
-/* 시안 EnvKeys 의 경고 카드와 같은 구성 — 아이콘 배지 + 제목 + 보조 설명. */
-.session-clear-dialog .session-clear-callout {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  border: 1px solid var(--env-line);
-  border-radius: 4px;
-  background: var(--env-surface);
-  padding: 14px 16px;
-}
-
-.session-clear-dialog .session-clear-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--env-pending);
-  color: var(--env-accent);
-}
-
-.session-clear-dialog .session-clear-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.session-clear-dialog .session-clear-headline {
-  font-size: 13px;
-  font-weight: 600;
+/* 합의(동의) 다이얼로그와 같은 언어 — 질문 하나가 주인공이다. 상자 친 경고 카드로 두 번 말하지
+   않는다: 제목이 곧 질문이고 나머지는 밑으로 눌러 둔다. 크기·자간은 합의 카드의 ds-headline 값. */
+[data-component="dialog"] [data-slot="dialog-content"].session-clear-dialog [data-slot="dialog-title"] {
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.022em;
   color: var(--env-text-ink);
 }
 
-.session-clear-dialog .session-clear-note {
-  font-size: 12px;
-  line-height: 1.55;
+/* 설명은 Dialog 컴포넌트가 인라인으로 margin-left:-4px 를 박아 제목보다 4px 왼쪽에서 시작한다
+   (ui/components/dialog.tsx). 인라인이라 선택자로는 못 이겨 !important 로 되돌린다 — 제목·설명·
+   경고·버튼이 모두 28px 한 선에서 시작해야 한다. */
+[data-component="dialog"] [data-slot="dialog-content"].session-clear-dialog [data-slot="dialog-description"] {
+  margin-left: 0 !important;
+  width: 100%;
+  padding-bottom: 14px;
   color: var(--env-text-weak);
 }
 
-/* 삭제 CTA — 시안의 삭제 버튼과 같은 danger 계열을 채움형으로. */
+/* .hazard-dialog 의 [data-slot="dialog-body"] 는 padding:0 이라 경고 줄이 카드 바닥에 붙는다.
+   합의 카드(ds-body--voting)와 같은 22px 를 아래에 둔다. */
+[data-component="dialog"] [data-slot="dialog-content"].session-clear-dialog [data-slot="dialog-body"] {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 22px;
+}
+
+/* 액션이 먼저, 경고가 그 아래 한 줄 — 합의 카드와 같은 순서다. */
+.session-clear-dialog .hazard-dialog-footer {
+  order: -1;
+  padding: 4px 28px 12px;
+}
+
+.session-clear-dialog .session-clear-body {
+  padding: 0 28px;
+  width: 100%;
+}
+
+/* 경고는 합의 카드의 ds-warn 과 같은 크기·색이다. 상자를 두르면 이 창만 무거워져, 바로 뒤따라
+   뜨는 합의 카드와 다른 물건처럼 보인다. */
+.session-clear-dialog .session-clear-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--env-text-muted);
+}
+
+.session-clear-dialog .session-clear-warn svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* 액션 — 합의 카드의 jt-btn-lg: 44px 높이, 필 라디우스, 14.5/700. */
+.session-clear-dialog [data-component="button"].session-clear-cancel,
 .session-clear-dialog [data-component="button"].session-clear-confirm {
-  background: var(--env-danger);
-  border-color: var(--env-danger);
-  color: #fff;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  font-size: 14.5px;
+  font-weight: 700;
+  gap: 9px;
+}
+
+.session-clear-dialog [data-component="button"].session-clear-cancel {
+  background: var(--background-base);
+  border-color: var(--env-line);
+  color: var(--env-text-ink);
+}
+
+.session-clear-dialog [data-component="button"].session-clear-cancel:hover:not(:disabled) {
+  background: var(--env-hover);
+  border-color: var(--env-text-weak);
+}
+
+/* 되돌릴 수 없는 실행 — 합의 카드의 jt-btn-critical 과 같은 해저드 배색(검정 바탕 · 헬멧 노랑
+   글씨 · 노란 링). 이 창은 이미 해저드 줄무늬를 쓰고 있어 주황 채움보다 이쪽이 한 벌이다. */
+.session-clear-dialog [data-component="button"].session-clear-confirm {
+  background: var(--env-hazard-ink);
+  border-color: var(--env-hazard-ink);
+  color: var(--env-hazard-mark);
+  box-shadow: 0 0 0 2px var(--env-hazard-mark);
+  letter-spacing: 0.02em;
 }
 
 .session-clear-dialog [data-component="button"].session-clear-confirm:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--env-danger) 88%, #000);
-  border-color: color-mix(in srgb, var(--env-danger) 88%, #000);
+  background: #000;
+  border-color: #000;
+  box-shadow:
+    0 0 0 2px var(--env-hazard-mark),
+    0 6px 20px rgb(20 19 15 / 0.35);
+}
+
+/* 키 힌트 — 합의 카드의 ds-kbd 와 같은 형태(모노 11px, 아래만 2px 테두리). */
+.session-clear-dialog .session-clear-kbd {
+  font-family: "D2Coding", "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--env-text-weak);
+  background: var(--env-surface);
+  border: 1px solid var(--env-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 4px 6px;
+}
+
+.session-clear-dialog .session-clear-kbd--on-dark {
+  color: var(--env-hazard-mark);
+  background: rgb(255 206 43 / 0.18);
+  border-color: rgb(255 206 43 / 0.4);
 }
