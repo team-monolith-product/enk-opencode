@@ -352,6 +352,7 @@ export const dict = {
   "prompt.action.docUndo": "Undo",
   "prompt.action.docRedo": "Redo",
   "prompt.action.docUploading": "Uploading attachments…",
+  "prompt.action.docMissingAsset": "An attachment never finished uploading",
   "prompt.attachment.remove": "Remove attachment",
   "prompt.action.send": "Send",
   "prompt.action.stop": "Stop",
@@ -375,6 +376,9 @@ export const dict = {
   "prompt.toast.tooManyAttachments.description": "Up to {{count}} attachments and {{size}} MB in total per prompt.",
   "prompt.toast.docUploading.title": "Attachments still uploading",
   "prompt.toast.docUploading.description": "Wait for the upload to finish, or delete the block to cancel it.",
+  "prompt.toast.docMissingAsset.title": "Attachment never finished uploading",
+  "prompt.toast.docMissingAsset.description":
+    "{{name}} is not on the server, so it would be left out of the prompt. Delete the block, or attach the file again.",
   "prompt.toast.docUploadFailed.title": "Upload failed",
   "prompt.toast.docUploadFailed.description": "{{name}} could not be uploaded. Delete the block and attach it again.",
   "prompt.toast.docRotated.title": "New collaboration document",
