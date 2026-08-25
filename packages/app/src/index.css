@@ -1916,15 +1916,22 @@
   color: var(--env-text-ink);
 }
 
+/* 설명은 Dialog 컴포넌트가 인라인으로 margin-left:-4px 를 박아 제목보다 4px 왼쪽에서 시작한다
+   (ui/components/dialog.tsx). 인라인이라 선택자로는 못 이겨 !important 로 되돌린다 — 제목·설명·
+   경고·버튼이 모두 28px 한 선에서 시작해야 한다. */
 [data-component="dialog"] [data-slot="dialog-content"].session-clear-dialog [data-slot="dialog-description"] {
+  margin-left: 0 !important;
+  width: 100%;
   padding-bottom: 14px;
   color: var(--env-text-weak);
 }
 
-.session-clear-dialog [data-slot="dialog-body"] {
+/* .hazard-dialog 의 [data-slot="dialog-body"] 는 padding:0 이라 경고 줄이 카드 바닥에 붙는다.
+   합의 카드(ds-body--voting)와 같은 22px 를 아래에 둔다. */
+[data-component="dialog"] [data-slot="dialog-content"].session-clear-dialog [data-slot="dialog-body"] {
   display: flex;
   flex-direction: column;
-  padding-bottom: 20px;
+  padding-bottom: 22px;
 }
 
 /* 액션이 먼저, 경고가 그 아래 한 줄 — 합의 카드와 같은 순서다. */
