@@ -33,7 +33,6 @@ export const dict = {
   "command.session.next": "Next session",
   "command.session.previous.unseen": "Previous unread session",
   "command.session.next.unseen": "Next unread session",
-  "command.session.archive": "Archive session",
   "command.session.clear": "Reset conversation",
 
   "command.palette": "Command palette",
@@ -789,7 +788,6 @@ export const dict = {
   "common.learnMore": "Learn more",
   "common.rename": "Rename",
   "common.reset": "Reset",
-  "common.archive": "Archive",
   "common.delete": "Delete",
   "common.close": "Close",
   "common.back": "Back",
@@ -1087,9 +1085,9 @@ export const dict = {
   "workspace.reset.title": "Reset workspace",
   "workspace.reset.confirm": 'Reset workspace "{{name}}"?',
   "workspace.reset.button": "Reset workspace",
-  "workspace.reset.archived.none": "No active sessions will be archived.",
-  "workspace.reset.archived.one": "1 session will be archived.",
-  "workspace.reset.archived.many": "{{count}} sessions will be archived.",
+  "workspace.reset.archived.none": "No conversation to reset.",
+  "workspace.reset.archived.one": "1 conversation will be reset.",
+  "workspace.reset.archived.many": "{{count}} conversations will be reset.",
   "workspace.reset.note": "This will reset the workspace to match the default branch.",
 
   "session.clear.title": "Reset conversation",

@@ -30,7 +30,6 @@ export const dict = {
   "command.session.next": "Siguiente sesión",
   "command.session.previous.unseen": "Sesión no leída anterior",
   "command.session.next.unseen": "Siguiente sesión no leída",
-  "command.session.archive": "Archivar sesión",
 
   "command.palette": "Paleta de comandos",
 
@@ -604,7 +603,6 @@ export const dict = {
   "common.learnMore": "Saber más",
   "common.rename": "Renombrar",
   "common.reset": "Restablecer",
-  "common.archive": "Archivar",
   "common.delete": "Eliminar",
   "common.close": "Cerrar",
   "common.edit": "Editar",
