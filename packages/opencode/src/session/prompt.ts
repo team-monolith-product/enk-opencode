@@ -1553,6 +1553,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
         function* (input: PromptInput) {
           const session = yield* sessions.get(input.sessionID)
+          // 지워진(보관된) 세션은 아무도 다시 열 수 없다. 늦게 도착한 전송 — 동의 투표가 통과한
+          // 직후나, 잠깐 끊겼던 참가자의 재시도 — 을 그대로 받으면 아무도 보지 못하는 대화가 생기고
+          // 요금만 나간다.
+          if (session.time.archived) throw new Session.ArchivedError(input.sessionID)
           yield* Effect.promise(() => SessionRevert.cleanup(session))
           const message = yield* createUserMessage(input)
           yield* sessions.touch(input.sessionID)

@@ -179,6 +179,8 @@ import type {
   SessionPromptAsyncResponses,
   SessionPromptDocAdvanceErrors,
   SessionPromptDocAdvanceResponses,
+  SessionPromptDocClearErrors,
+  SessionPromptDocClearResponses,
   SessionPromptDocErrors,
   SessionPromptDocReadyErrors,
   SessionPromptDocReadyResponses,
@@ -2205,6 +2207,59 @@ export class PromptDoc extends HeyApiClient {
       ThrowOnError
     >({
       url: "/session/{sessionID}/prompt-doc/stop",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Create session clear approval
+   *
+   * Create a collaborative consent vote to clear (archive) the session.
+   */
+  public clear<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      docID?: string
+      actorID?: string
+      actorIDs?: Array<string>
+      names?: {
+        [key: string]: string
+      }
+      timeoutMs?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "docID" },
+            { in: "body", key: "actorID" },
+            { in: "body", key: "actorIDs" },
+            { in: "body", key: "names" },
+            { in: "body", key: "timeoutMs" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionPromptDocClearResponses,
+      SessionPromptDocClearErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/prompt-doc/clear",
       ...options,
       ...params,
       headers: {

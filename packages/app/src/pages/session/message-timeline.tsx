@@ -30,6 +30,7 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { messageAgentColor } from "@/utils/agent"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
+import { SessionFollow } from "@/utils/session-follow"
 import { makeTimer } from "@solid-primitives/timer"
 
 type MessageComment = {
@@ -437,6 +438,12 @@ export function MessageTimeline(props: {
       navigate(`/${params.dir}/session/${nextSessionID}`)
       return
     }
+    // 한 세션만 띄우는 워크스페이스는 서버가 지우기 요청 안에서 대체 세션을 만들어 뒀다. 빈 화면으로
+    // 보내 버리면 새 세션으로 옮겨간 다른 접속자들과 갈라지므로, 이동은 directory-layout 에 맡긴다.
+    if (sync.data.config.ensureSession) {
+      SessionFollow.expect(sdk.directory)
+      return
+    }
     navigate(`/${params.dir}/session`)
   }
 
@@ -444,7 +451,9 @@ export function MessageTimeline(props: {
     const session = sync.session.get(sessionID)
     if (!session) return
 
-    const sessions = sync.data.session ?? []
+    // 대화 화면을 대신할 수 있는 건 루트 세션뿐이다. 자식(서브에이전트) 세션이 목록에 섞여 있어
+    // 걸러내지 않으면 보관 뒤 서브에이전트 세션으로 튄다.
+    const sessions = (sync.data.session ?? []).filter((s) => !s.parentID && !s.time?.archived)
     const index = sessions.findIndex((s) => s.id === sessionID)
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 

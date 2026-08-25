@@ -19,6 +19,8 @@ import { useClientEnv } from "@/context/client-env"
 import { Persist, persisted } from "@/utils/persist"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { decode64 } from "@/utils/base64"
+import { SessionFollow } from "@/utils/session-follow"
+import { SessionClearVote } from "@/utils/session-clear-vote"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -991,28 +993,47 @@ export default function Layout(props: ParentProps) {
 
   async function archiveSession(session: Session) {
     const [store, setStore] = globalSync.child(session.directory)
-    const sessions = store.session ?? []
+    // 대화 화면을 대신할 수 있는 건 루트 세션뿐이다. 자식(서브에이전트) 세션이 목록에 섞여 있어
+    // 걸러내지 않으면 보관 뒤 서브에이전트 세션으로 튄다.
+    const sessions = (store.session ?? []).filter((s) => !s.parentID && !s.time?.archived)
     const index = sessions.findIndex((s) => s.id === session.id)
-    const nextSession = sessions[index + 1] ?? sessions[index - 1]
+    const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
-    await globalSDK.client.session.update({
-      directory: session.directory,
-      sessionID: session.id,
-      time: { archived: Date.now() },
-    })
+    // 지우기가 실패했는데 화면만 넘어가면 지워진 줄 알고 대화를 이어간다. 실패는 실패로 보여준다.
+    const removed = await globalSDK.client.session
+      .update({
+        directory: session.directory,
+        sessionID: session.id,
+        time: { archived: Date.now() },
+      })
+      .then(() => true)
+      .catch((err) => {
+        showToast({
+          title: language.t("session.delete.failed.title"),
+          description: errorMessage(err, language.t("common.requestFailed")),
+        })
+        return false
+      })
+    if (!removed) return
+
     setStore(
       produce((draft) => {
         const match = Binary.search(draft.session, session.id, (s) => s.id)
         if (match.found) draft.session.splice(match.index, 1)
       }),
     )
-    if (session.id === params.id) {
-      if (nextSession) {
-        navigate(`/${params.dir}/session/${nextSession.id}`)
-      } else {
-        navigate(`/${params.dir}/session`)
-      }
+    if (session.id !== params.id) return
+    if (nextSession) {
+      navigate(`/${params.dir}/session/${nextSession.id}`)
+      return
     }
+    // 한 세션만 띄우는 워크스페이스는 서버가 이 요청 안에서 대체 세션을 만들어 뒀다. 빈 화면으로
+    // 보내 버리면 새 세션으로 옮겨간 다른 접속자들과 갈라지므로, 이동은 directory-layout 에 맡긴다.
+    if (store.config.ensureSession) {
+      SessionFollow.expect(session.directory)
+      return
+    }
+    navigate(`/${params.dir}/session`)
   }
 
   command.register("layout", () => {
@@ -1643,8 +1664,11 @@ export default function Layout(props: ParentProps) {
   // 배포 레이아웃엔 사이드바가 없어 보관된 세션으로 돌아갈 길이 없으니, 사용자 입장에선 "다시 못 여는" 게 전부다.
   // 문구에 보관을 되살리지 말 것. 되돌릴 수 없어 보이니 한 번 묻는다.
   function DialogClearSession(props: { session: Session }) {
-    const handleClear = () => {
+    const handleClear = async () => {
       dialog.close()
+      // 지우기는 되돌릴 수 없고, 같이 보던 사람들의 대화까지 사라진다. 함께 쓰는 중이면 전송·중지와
+      // 같은 동의를 먼저 구하고, 합의가 서면 서버가 지운다. 물어볼 상대가 없을 때만 바로 지운다.
+      if (await SessionClearVote.request(props.session.id)) return
       void archiveSession(props.session)
     }
 
