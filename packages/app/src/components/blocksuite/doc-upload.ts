@@ -22,6 +22,118 @@ type Entry = DocUpload & {
   controller?: AbortController
 }
 
+/**
+ * A block whose asset the server does not have, with nothing uploading it.
+ *
+ * This is what an upload that was abandoned mid-transfer leaves behind: `addFile` inserts the block
+ * first and starts the upload second, so leaving (tab close, session switch, unmount) aborts the
+ * bytes while the block — already replicated through yjs — stays in the doc. Nothing in the upload
+ * tracker survives that, so the mark has to come from asking the server instead.
+ */
+export type DocMissing = {
+  blockId: string
+  /** Asset id (the block's sourceId). */
+  key: string
+  name: string
+}
+
+/** Missing assets as paint marks, so a dead attachment wears the same error state as a failed upload. */
+export function missingMarks(list: DocMissing[]): DocUpload[] {
+  return list.map((item) => ({ ...item, loaded: 0, total: 0, status: "error" as const }))
+}
+
+/**
+ * The doc's attachment blocks that are stranded on an asset the server answered 404 for.
+ *
+ * Driven by the doc rather than by the 404 set, so deleting the block is all it takes to clear the
+ * mark. Assets an upload is still working on are left out: they are already covered by the upload
+ * gate, and a *collaborator's* in-flight upload legitimately 404s here right up until it lands.
+ */
+export function stranded(
+  blocks: Array<{ blockId: string; key?: string; name: string }>,
+  absent: ReadonlySet<string>,
+  uploading: Iterable<string> = [],
+): DocMissing[] {
+  if (absent.size === 0) return []
+  const busy = new Set(uploading)
+  const out: DocMissing[] = []
+  for (const block of blocks) {
+    const key = block.key
+    if (!key || busy.has(key) || !absent.has(key)) continue
+    out.push({ blockId: block.blockId, key, name: block.name })
+  }
+  return out
+}
+
+export type MissingRegistryInput = {
+  /** The doc's attachment blocks, read fresh on every query rather than cached. */
+  blocks: () => Array<{ blockId: string; key?: string; name: string }>
+  /** Asset ids an upload is still working on. */
+  uploading: () => Iterable<string>
+  /** Fired when the answer to "which blocks are stranded?" actually changes. */
+  onChange: () => void
+}
+
+/**
+ * Which of the doc's attachments the server does not have.
+ *
+ * Two things move the answer and neither can be inferred from the other: what the server says about
+ * an asset (`mark`, from a fetch or an export), and which blocks the doc currently holds (`refresh`,
+ * from a block being added or deleted). Missing the second is what leaves a deleted block still
+ * blocking submit — the mark is keyed by asset, but the gate is a question about blocks.
+ */
+export function createMissingRegistry(input: MissingRegistryInput) {
+  const absent = new Set<string>()
+  let last = ""
+  let queued = false
+  let dead = false
+
+  const list = () => stranded(input.blocks(), absent, input.uploading())
+
+  // Block changes are frequent and mostly irrelevant here, so the emit is gated on the answer
+  // actually differing rather than on something having happened.
+  const settle = () => {
+    if (dead) return
+    const next = list()
+      .map((item) => `${item.blockId}:${item.key}`)
+      .join("|")
+    if (next === last) return
+    last = next
+    input.onChange()
+  }
+
+  return {
+    list,
+    /** Fold in what a fetch — or an export — just learned about an asset's presence on the server. */
+    mark: (key: string, gone: boolean) => {
+      if (gone === absent.has(key)) return
+      if (gone) absent.add(key)
+      else absent.delete(key)
+      settle()
+    },
+    /**
+     * The doc changed. Deleting the stranded block is how a user clears this, so it has to count.
+     *
+     * Deferred, because BlockSuite fires `blockUpdated` for a deletion *before* the block leaves the
+     * doc: reading the block list from inside that handler still returns the block being deleted, so
+     * a synchronous recompute would see no change and stay silent — leaving submit blocked on a
+     * block the user just removed. Coalesced, so a multi-block delete recomputes once.
+     */
+    refresh: () => {
+      if (queued || dead) return
+      queued = true
+      queueMicrotask(() => {
+        queued = false
+        settle()
+      })
+    },
+    /** Editor torn down — a recompute already queued must not report into the replacement. */
+    dispose: () => {
+      dead = true
+    },
+  }
+}
+
 export type UploadTrackerInput = {
   upload: (key: string, blob: Blob, opts: BlobUploadOpts) => Promise<unknown>
   onChange: () => void

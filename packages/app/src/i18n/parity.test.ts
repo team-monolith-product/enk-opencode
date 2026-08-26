@@ -20,7 +20,17 @@ import { dict as tr } from "./tr"
 const locales = [ar, br, bs, da, de, es, fr, ja, ko, no, pl, ru, th, tr, zh, zht]
 const keys = ["command.session.previous.unseen", "command.session.next.unseen"] as const
 
+const consentKeys = (dict: Record<string, string>) => Object.keys(dict).filter((key) => key.startsWith("docSubmit."))
+
 describe("i18n parity", () => {
+  // 합의 다이얼로그는 문구가 전부 i18n 에 있다. 한쪽에만 키가 있으면 그 자리에 키 문자열이 그대로
+  // 노출되므로, ko 와 en 은 같은 집합을 들고 있어야 한다.
+  test("consent dialog keys exist in both ko and en", () => {
+    expect(consentKeys(ko).sort()).toEqual(consentKeys(en).sort())
+    expect(consentKeys(en).length).toBeGreaterThan(0)
+  })
+
+
   test("non-English locales translate targeted unseen session keys", () => {
     for (const locale of locales) {
       for (const key of keys) {

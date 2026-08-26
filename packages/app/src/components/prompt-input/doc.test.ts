@@ -31,7 +31,7 @@ const handle = {
   empty: () => true,
   plain: () => "",
   actors: () => [],
-  markdown: async () => ({ text: "", assets: [] }),
+  markdown: async () => ({ text: "", assets: [], missing: [] }),
   collection: { id: "doc_1" },
 }
 
@@ -152,6 +152,35 @@ describe("createPromptDoc plain props", () => {
     // the `act` prefix so it passes ActorID.zod on the observer-only submit socket.
     expect(upsert).not.toHaveBeenCalled()
     expect(doc.actorID()?.startsWith("act")).toBe(true)
+  })
+})
+
+describe("createPromptDoc missing attachments", () => {
+  const mounted = async () => {
+    mounts.length = 0
+    const [store] = createStore(config())
+    const doc = createPromptDoc({ createPage, config: store, client, onSubmit: () => {} })
+    await doc.mount({ el: document.createElement("div"), theme: "light" })
+    return doc
+  }
+
+  test("an asset the server never received blocks the prompt", async () => {
+    const doc = await mounted()
+    expect(doc.missing()).toEqual([])
+
+    mounts.at(-1)?.onMissingChange?.([{ blockId: "b1", key: "k1", name: "shot.png" }])
+
+    // The upload tracker was rebuilt with this editor, so it knows nothing about the transfer that
+    // was abandoned — uploading() is false and only this keeps the prompt from going out without it.
+    expect(doc.uploading()).toBe(false)
+    expect(doc.missing()).toEqual([{ blockId: "b1", key: "k1", name: "shot.png" }])
+  })
+
+  test("switching sessions does not carry the stranded block over", async () => {
+    const doc = await mounted()
+    mounts.at(-1)?.onMissingChange?.([{ blockId: "b1", key: "k1", name: "shot.png" }])
+    doc.reset()
+    expect(doc.missing()).toEqual([])
   })
 })
 

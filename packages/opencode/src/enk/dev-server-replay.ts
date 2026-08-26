@@ -257,18 +257,20 @@ export namespace DevServerReplay {
   }
 
   /**
-   * 부팅 시 기록된 커맨드를 재실행한다. 조건이 하나라도 어긋나면 조용히 건너뛴다.
+   * 부팅 시 기록된 커맨드를 타깃마다 재실행한다. 조건이 하나라도 어긋나면 조용히 건너뛴다.
    *
-   * 되살리는 것은 본행사 타깃뿐이다. 부팅 replay 가 있는 이유는 방문자가 트리거한 스폰
-   * (클라이언트 접속 없음)에서도 갤러리 미리보기가 살아나야 해서인데, 갤러리가 가리키는
-   * 것은 본행사 결과물뿐이다. 튜토리얼 미리보기는 참가자가 화면을 열 때 ensure_dev_server
-   * 로 뜨면 되고, 부팅 때 함께 되살리면 본행사 파드가 쓰지도 않을 튜토리얼 서버에 자원을
-   * 계속 내주게 된다.
+   * 부팅 replay 가 있는 이유는 방문자가 트리거한 스폰(클라이언트 접속 없음)에서도 갤러리
+   * 미리보기가 살아나야 해서다. 갤러리는 튜토리얼 결과물도 가리키므로 두 타깃을 모두
+   * 되살린다 — 아직 dev 서버를 띄운 적 없는 타깃은 기록이 없어 그대로 건너뛴다.
    */
   export async function replay() {
-    const target = ServeTargets.project()
-    if (!target) return
+    for (const target of [ServeTargets.project(), ServeTargets.tutorial()]) {
+      if (!target) continue
+      await replayTarget(target)
+    }
+  }
 
+  async function replayTarget(target: ServeTargets.Target) {
     const state = await loadRecord(target.dir)
     if (!state) return
 

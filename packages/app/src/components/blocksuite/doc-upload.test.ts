@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { createUploadTracker, uploadPercent } from "./doc-upload"
+import {
+  createMissingRegistry,
+  createUploadTracker,
+  missingMarks,
+  paintUploads,
+  stranded,
+  uploadPercent,
+} from "./doc-upload"
 
 function harness() {
   const calls: {
@@ -237,5 +244,197 @@ describe("uploadPercent", () => {
     expect(uploadPercent({ loaded: 0, total: 0 })).toBe(0)
     expect(uploadPercent({ loaded: 1, total: 3 })).toBe(33)
     expect(uploadPercent({ loaded: 9, total: 4 })).toBe(100)
+  })
+})
+
+describe("missingMarks", () => {
+  test("wears the same error state as a failed upload", () => {
+    const editor = document.createElement("div")
+    const block = document.createElement("div")
+    block.dataset.blockId = "b1"
+    editor.append(block)
+
+    paintUploads(editor, missingMarks([{ blockId: "b1", key: "k1", name: "a.png" }]))
+
+    expect(block.dataset.ocUpload).toBe("error")
+    expect(block.dataset.ocUploadLabel).toBe("!")
+    // A full-width bar, not a 0% sliver: nothing is in progress here, the attachment is dead.
+    expect(block.style.getPropertyValue("--oc-upload")).toBe("100%")
+  })
+
+  test("clears once the block is no longer stranded", () => {
+    const editor = document.createElement("div")
+    const block = document.createElement("div")
+    block.dataset.blockId = "b1"
+    editor.append(block)
+
+    paintUploads(editor, missingMarks([{ blockId: "b1", key: "k1", name: "a.png" }]))
+    paintUploads(editor, [])
+
+    expect(block.dataset.ocUpload).toBeUndefined()
+  })
+})
+
+describe("stranded", () => {
+  const blocks = [
+    { blockId: "b1", key: "k1", name: "a.png" },
+    { blockId: "b2", key: "k2", name: "b.png" },
+  ]
+
+  test("names the blocks whose bytes the server does not have", () => {
+    expect(stranded(blocks, new Set(["k2"]))).toEqual([{ blockId: "b2", key: "k2", name: "b.png" }])
+  })
+
+  test("an asset still uploading is not stranded", () => {
+    // The uploader's own client never gets here (it renders from its local blob), but a collaborator
+    // 404s on every block the moment it arrives — right up until the bytes land.
+    expect(stranded(blocks, new Set(["k1", "k2"]), ["k1"])).toEqual([
+      { blockId: "b2", key: "k2", name: "b.png" },
+    ])
+  })
+
+  test("deleting the block clears the mark without clearing the 404", () => {
+    expect(stranded([], new Set(["k1"]))).toEqual([])
+  })
+
+  test("every block on the same dead asset is stranded", () => {
+    const twins = [
+      { blockId: "b1", key: "k1", name: "a.png" },
+      { blockId: "b2", key: "k1", name: "copy.png" },
+    ]
+    expect(stranded(twins, new Set(["k1"])).map((item) => item.blockId)).toEqual(["b1", "b2"])
+  })
+
+  test("a block with no asset id yet is nobody's problem", () => {
+    expect(stranded([{ blockId: "b1", name: "a.png" }], new Set(["k1"]))).toEqual([])
+  })
+})
+
+describe("createMissingRegistry", () => {
+  // refresh() defers past the event that triggered it, so assertions have to let the microtask run.
+  const tick = () => Promise.resolve()
+
+  const harness = () => {
+    let blocks: Array<{ blockId: string; key?: string; name: string }> = [{ blockId: "b1", key: "k1", name: "a.png" }]
+    let uploading: string[] = []
+    let changes = 0
+    const registry = createMissingRegistry({
+      blocks: () => blocks,
+      uploading: () => uploading,
+      onChange: () => {
+        changes++
+      },
+    })
+    return {
+      registry,
+      changed: () => changes,
+      setBlocks: (next: typeof blocks) => {
+        blocks = next
+      },
+      setUploading: (next: string[]) => {
+        uploading = next
+      },
+    }
+  }
+
+  test("a 404 strands the block that references it", () => {
+    const h = harness()
+    h.registry.mark("k1", true)
+    expect(h.registry.list()).toEqual([{ blockId: "b1", key: "k1", name: "a.png" }])
+    expect(h.changed()).toBe(1)
+  })
+
+  test("deleting the block clears the gate", async () => {
+    const h = harness()
+    h.registry.mark("k1", true)
+    // Deleting is the user's only way out — the asset is still 404, so nothing re-marks it and the
+    // gate would stay shut forever if the doc changing did not count as a change.
+    h.setBlocks([])
+    h.registry.refresh()
+    await tick()
+    expect(h.registry.list()).toEqual([])
+    expect(h.changed()).toBe(2)
+  })
+
+  test("a refresh reads the doc after the event that triggered it", async () => {
+    const h = harness()
+    h.registry.mark("k1", true)
+    // BlockSuite fires its delete event BEFORE the block leaves the doc, so this is what the handler
+    // actually sees: refresh() first, block gone only afterwards. Recomputing on the spot would find
+    // nothing changed and never reopen submit.
+    h.registry.refresh()
+    h.setBlocks([])
+    await tick()
+    expect(h.changed()).toBe(2)
+  })
+
+  test("a multi-block delete recomputes once", async () => {
+    const h = harness()
+    h.registry.mark("k1", true)
+    h.setBlocks([])
+    h.registry.refresh()
+    h.registry.refresh()
+    h.registry.refresh()
+    await tick()
+    expect(h.changed()).toBe(2)
+  })
+
+  test("undo brings the stranded block back", async () => {
+    const h = harness()
+    h.registry.mark("k1", true)
+    h.setBlocks([])
+    h.registry.refresh()
+    await tick()
+    h.setBlocks([{ blockId: "b2", key: "k1", name: "a.png" }])
+    h.registry.refresh()
+    await tick()
+    expect(h.registry.list()).toEqual([{ blockId: "b2", key: "k1", name: "a.png" }])
+    expect(h.changed()).toBe(3)
+  })
+
+  test("an upload starting and landing moves the block in and out on its own", async () => {
+    const h = harness()
+    h.registry.mark("k1", true)
+    h.setUploading(["k1"])
+    h.registry.refresh()
+    await tick()
+    expect(h.registry.list()).toEqual([])
+
+    // The upload landed: the source reports the bytes are there now.
+    h.setUploading([])
+    h.registry.mark("k1", false)
+    expect(h.registry.list()).toEqual([])
+  })
+
+  test("a doc change that does not move the answer says nothing", async () => {
+    const h = harness()
+    h.registry.refresh()
+    h.registry.refresh()
+    await tick()
+    expect(h.changed()).toBe(0)
+
+    h.registry.mark("k1", true)
+    h.setBlocks([{ blockId: "b1", key: "k1", name: "a.png" }, { blockId: "b2", name: "typed text" }])
+    h.registry.refresh()
+    await tick()
+    expect(h.changed()).toBe(1)
+  })
+
+  test("a recompute queued past teardown never reports", async () => {
+    const h = harness()
+    h.registry.mark("k1", true)
+    h.setBlocks([])
+    h.registry.refresh()
+    h.registry.dispose()
+    await tick()
+    // The editor is gone; its replacement owns the answer now.
+    expect(h.changed()).toBe(1)
+  })
+
+  test("marking the same answer twice is not a change", () => {
+    const h = harness()
+    h.registry.mark("k1", true)
+    h.registry.mark("k1", true)
+    expect(h.changed()).toBe(1)
   })
 })

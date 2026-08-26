@@ -5604,6 +5604,118 @@
         ]
       }
     },
+    "/session/{sessionID}/prompt-doc/clear": {
+      "post": {
+        "operationId": "session.promptDoc.clear",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Create session clear approval",
+        "description": "Create a collaborative consent vote to clear (archive) the session.",
+        "responses": {
+          "200": {
+            "description": "Submit approval state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocSubmit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "docID": {
+                    "type": "string",
+                    "pattern": "^doc.*"
+                  },
+                  "actorID": {
+                    "type": "string",
+                    "pattern": "^act.*"
+                  },
+                  "actorIDs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^act.*"
+                    }
+                  },
+                  "names": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "timeoutMs": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "docID",
+                  "actorID"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc.clear({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/session/{sessionID}/prompt-doc/submit/{submitID}/respond": {
       "post": {
         "operationId": "session.promptDoc.submit.respond",
@@ -16468,7 +16580,8 @@
         "enum": [
           "doc",
           "question",
-          "stop"
+          "stop",
+          "clear"
         ]
       },
       "DocSubmitStatus": {

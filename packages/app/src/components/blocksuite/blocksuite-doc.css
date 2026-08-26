@@ -150,6 +150,15 @@
   transition: none;
 }
 
+/* A block whose asset the server does not have is not loading — nothing is fetching those bytes any
+   more. BlockSuite cannot tell: its image card keeps spinning forever because a null blob returns
+   without setting `error` (only the throw path does). Fade the card so the error mark above it is
+   the state the block reads as. Dimmed rather than hidden — the block still has to be selectable to
+   be deleted. Only stranded blocks have a card at all: a failed upload still renders its local blob. */
+[data-component="prompt-doc"] [data-block-id][data-oc-upload="error"] affine-image-fallback-card {
+  opacity: 0.4;
+}
+
 [data-component="prompt-doc-viewer"] {
   display: block;
   width: 100%;
@@ -161,6 +170,10 @@
   --affine-editor-side-padding: 12px;
   --affine-editor-bottom-padding: 0px;
   --affine-background-primary-color: transparent;
+  /* 아래 page-editor 규칙이 이 변수로 color 를 잡고, 그 색이 shadow DOM 안쪽 문단까지 그대로
+     상속된다. 여기서 정의하지 않으면 affine 기본 라이트값(#121212)이 잡혀서 다크에서 말풍선
+     글자가 종이(#3a3628)와 붙어 안 보인다. prompt-doc(편집기) 쪽과 같은 토큰을 쓴다. */
+  --affine-text-primary-color: var(--text-strong);
 }
 
 [data-component="prompt-doc-viewer"] page-editor,

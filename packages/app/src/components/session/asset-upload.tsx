@@ -5,6 +5,7 @@ import { showToast } from "@opencode-ai/ui/toast"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createSignal, Show } from "solid-js"
 import type { FileNode } from "@opencode-ai/sdk/v2"
+import { useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import {
@@ -26,6 +27,7 @@ import {
  */
 export function createAssetUpload() {
   const sdk = useSDK()
+  const file = useFile()
   const language = useLanguage()
   const dialog = useDialog()
 
@@ -33,6 +35,29 @@ export function createAssetUpload() {
   const [dragging, setDragging] = createSignal(false)
 
   const uploading = () => !!progress()
+
+  /**
+   * Re-lists the folders a batch touched, given paths relative to the upload folder. The tree
+   * otherwise only follows the file watcher, and a batch is where a watcher event is most likely to
+   * be missing: the deferred subscription window, a disabled watcher, or a folder whose name the
+   * watcher ignores (`build`, `dist`, `logs` … see FileIgnore.PATTERNS) all leave the upload
+   * invisible until the user collapses and reopens the folder.
+   */
+  const refreshTree = (relatives: string[]) => {
+    const dirs = new Set<string>([""])
+    for (const relative of relatives) {
+      // The last segment is the file or folder itself; what needs re-listing is every folder above.
+      const parts = [ASSETS_DIR, ...relative.split("/").slice(0, -1)]
+      for (let i = 1; i <= parts.length; i++) dirs.add(parts.slice(0, i).join("/"))
+    }
+    for (const dir of dirs) {
+      // Only folders the tree has actually listed. The server sanitizes names, so a path derived
+      // from what was sent may not be the one on disk, and listing that would only add a phantom
+      // empty folder to the tree.
+      if (!file.tree.state(dir)?.loaded) continue
+      void file.tree.refresh(dir)
+    }
+  }
 
   const run = async (files: PickedFile[]) => {
     if (files.length === 0) return
@@ -48,6 +73,7 @@ export function createAssetUpload() {
       onProgress: (done, total) => setProgress({ done, total }),
     })
     setProgress(undefined)
+    refreshTree(files.map((item) => item.path))
 
     if (result.failed.length === 0) {
       showToast({
@@ -102,6 +128,7 @@ export function createAssetUpload() {
 
   const removeNow = async (relative: string, label: string) => {
     const ok = await deleteAsset({ client: sdk.client, directory: sdk.directory, relative })
+    refreshTree([relative])
     showToast(
       ok
         ? { title: language.t("session.files.delete.done", { name: label }) }

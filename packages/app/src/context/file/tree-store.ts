@@ -26,9 +26,17 @@ export function createFileTreeStore(options: TreeStoreOptions) {
   })
 
   const inflight = new Map<string, Promise<void>>()
+  /**
+   * Directories whose contents changed while a listing for them was already in flight. That
+   * response was read from disk before the change landed, so returning it as the final state leaves
+   * the tree stale — uploading a batch of files fires far more watcher events than requests, so
+   * without this the last events of the batch are the ones that get swallowed.
+   */
+  const stale = new Set<string>()
 
   const reset = () => {
     inflight.clear()
+    stale.clear()
     setTree("node", reconcile({}))
     setTree("dir", reconcile({}))
     setTree("dir", "", { expanded: true })
@@ -47,7 +55,11 @@ export function createFileTreeStore(options: TreeStoreOptions) {
     if (!opts?.force && current?.loaded) return Promise.resolve()
 
     const pending = inflight.get(dir)
-    if (pending) return pending
+    if (pending) {
+      // Only a forced call knows something changed; a plain one is happy with the in-flight answer.
+      if (opts?.force) stale.add(dir)
+      return pending
+    }
 
     setTree(
       "dir",
@@ -121,6 +133,9 @@ export function createFileTreeStore(options: TreeStoreOptions) {
       })
       .finally(() => {
         inflight.delete(dir)
+        if (!stale.delete(dir)) return
+        if (options.scope() !== directory) return
+        void listDir(dir, { force: true })
       })
 
     inflight.set(dir, promise)

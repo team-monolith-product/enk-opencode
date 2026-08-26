@@ -2018,7 +2018,7 @@ export type SessionPromptDoc = {
   sessionID: string
 }
 
-export type DocSubmitTargetKind = "doc" | "question" | "stop"
+export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear"
 
 export type DocSubmitStatus = "pending" | "sent" | "cancelled" | "expired" | "left"
 
@@ -4757,6 +4757,48 @@ export type SessionPromptDocStopResponses = {
 }
 
 export type SessionPromptDocStopResponse = SessionPromptDocStopResponses[keyof SessionPromptDocStopResponses]
+
+export type SessionPromptDocClearData = {
+  body?: {
+    docID: string
+    actorID: string
+    actorIDs?: Array<string>
+    names?: {
+      [key: string]: string
+    }
+    timeoutMs?: number
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/prompt-doc/clear"
+}
+
+export type SessionPromptDocClearErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionPromptDocClearError = SessionPromptDocClearErrors[keyof SessionPromptDocClearErrors]
+
+export type SessionPromptDocClearResponses = {
+  /**
+   * Submit approval state
+   */
+  200: DocSubmit
+}
+
+export type SessionPromptDocClearResponse = SessionPromptDocClearResponses[keyof SessionPromptDocClearResponses]
 
 export type SessionPromptDocSubmitRespondData = {
   body?: {

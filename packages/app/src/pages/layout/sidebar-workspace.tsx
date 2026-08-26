@@ -40,7 +40,7 @@ export type WorkspaceSidebarContext = {
   setHoverSession: (id: string | undefined) => void
   clearHoverProjectSoon: () => void
   prefetchSession: (session: Session, priority?: "high" | "low") => void
-  archiveSession: (session: Session) => Promise<void>
+  clearSession: (session: Session) => void
   workspaceName: (directory: string, projectId?: string, branch?: string) => string | undefined
   renameWorkspace: (directory: string, next: string, projectId?: string, branch?: string) => void
   editorOpen: (id: string) => boolean
@@ -279,7 +279,7 @@ const WorkspaceSessionList = (props: {
           setHoverSession={props.ctx.setHoverSession}
           clearHoverProjectSoon={props.ctx.clearHoverProjectSoon}
           prefetchSession={props.ctx.prefetchSession}
-          archiveSession={props.ctx.archiveSession}
+          clearSession={props.ctx.clearSession}
         />
       )}
     </For>

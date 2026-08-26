@@ -341,6 +341,15 @@ export class OpencodeBlobSource implements BlobSource {
   // here is what lets the author see their own image while it is still uploading.
   private local = new Map<string, Blob>()
 
+  /**
+   * Answers "does the server have these bytes?" every time a fetch settles it. A 404 is normal while
+   * an upload is still on the wire, and permanent when the tab was closed mid-transfer: the block
+   * reached the server over the doc socket, the bytes never did. The editor turns the standing
+   * answer into the block's error mark and into the submit gate, because BlockSuite cannot — a null
+   * blob leaves its image spinning forever (retry and `error` live on the throw path only).
+   */
+  onAssetMissing?: (key: string, missing: boolean) => void
+
   constructor(private opts: DocSyncOpts) {}
 
   async get(key: string): Promise<Blob | null> {
@@ -355,9 +364,15 @@ export class OpencodeBlobSource implements BlobSource {
       { cache: "no-store", parseAs: "blob", throwOnError: false },
     )
     if (res.error) {
-      if (res.response.status === 404) return null
+      // Only a 404 is an answer. A transport failure or a 5xx says nothing about what the server
+      // holds, so it must not mark the asset gone and block the prompt.
+      if (res.response.status === 404) {
+        this.onAssetMissing?.(key, true)
+        return null
+      }
       throw new Error("doc asset fetch failed")
     }
+    this.onAssetMissing?.(key, false)
     return (res.data as Blob | undefined) ?? null
   }
 
@@ -398,6 +413,7 @@ export class OpencodeBlobSource implements BlobSource {
       await send()
     }
     opts.onProgress?.(total, total)
+    this.onAssetMissing?.(key, false)
     return key
   }
 

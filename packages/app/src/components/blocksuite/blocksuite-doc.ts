@@ -10,7 +10,15 @@ import { ensureEffects } from "./effects"
 import { frame, settled } from "./frame"
 import { inlineReady } from "./inline-editor"
 import { OpencodeAwarenessSource, OpencodeBlobSource, OpencodeDocSource, type DocSyncOpts } from "./opencode-doc-source"
-import { createUploadTracker, paintUploads, type DocUpload } from "./doc-upload"
+import {
+  createMissingRegistry,
+  createUploadTracker,
+  missingMarks,
+  paintUploads,
+  type DocMissing,
+  type DocUpload,
+} from "./doc-upload"
+import { repairSelection } from "./doc-selection"
 import { scheme } from "./theme"
 import { FileReferenceBlockSpec, withFileReferenceSchema, type FileNodeType } from "./file-reference-block"
 import { LineReferenceBlockSpec, withLineReferenceSchema } from "./line-reference-block"
@@ -46,6 +54,8 @@ export type DocMountInput = {
   onDraftChange?: () => void
   /** Fired whenever an attachment upload starts, progresses, finishes, fails or is cancelled. */
   onUploadsChange?: (uploads: DocUpload[]) => void
+  /** Fired whenever the set of blocks stranded on an asset the server does not have changes. */
+  onMissingChange?: (missing: DocMissing[]) => void
 }
 
 type TextProp = {
@@ -302,9 +312,34 @@ export async function createPage(input: DocMountInput) {
     if (uploadFrame) return
     uploadFrame = setTimeout(() => {
       uploadFrame = undefined
-      paintUploads(editor, uploads.list())
+      paintUploads(editor, [...uploads.list(), ...missingMarks(missing.list())])
     }, 60)
   }
+
+  const assetName = (model: BlockModel) => {
+    const caption = (model as unknown as { caption?: unknown }).caption
+    if (typeof caption === "string" && caption.trim()) return caption.trim()
+    const name = (model as unknown as { name?: unknown }).name
+    if (typeof name === "string" && name.trim()) return name.trim()
+    return sourceId(model) ?? "attachment"
+  }
+
+  // Uploads alone cannot say which attachments are actually on the server: the tracker is rebuilt
+  // with the editor, so a transfer abandoned mid-flight leaves a block behind that nothing local
+  // knows anything about. The registry keeps the server's answer instead.
+  const missing = createMissingRegistry({
+    blocks: () =>
+      [...doc.getBlockByFlavour("affine:image"), ...doc.getBlockByFlavour("affine:attachment")].map((model) => ({
+        blockId: model.id,
+        key: sourceId(model),
+        name: assetName(model),
+      })),
+    uploading: () => uploads.list().map((item) => item.key),
+    onChange: () => {
+      paint()
+      input.onMissingChange?.(missing.list())
+    },
+  })
 
   // Re-write the block's own sourceId once the bytes are up. A collaborator receives the block over
   // the doc socket before the asset exists on the server, so their image/attachment has already
@@ -331,6 +366,9 @@ export async function createPage(input: DocMountInput) {
     onChange: () => {
       paint()
       input.onUploadsChange?.(uploads.list())
+      // A landed upload takes its asset out of the "still uploading" exemption, so the stranded
+      // list can change without any block or fetch having moved.
+      missing.refresh()
     },
   })
 
@@ -352,6 +390,49 @@ export async function createPage(input: DocMountInput) {
       .catch(() => {})
   }
 
+  // The blob source is the only place that ever asks the server for an asset, so it is where a
+  // block's bytes are found to be gone. BlockSuite cannot show that itself — a null blob leaves the
+  // image spinning forever — so the answer is routed here instead.
+  if (blobs) blobs.onAssetMissing = missing.mark
+
+  // A delete normally moves the selection with it. When the render that was supposed to do that
+  // throws mid-update, the selection is left pointing at a block the doc no longer has — and
+  // BlockSuite resolves that id on every keystroke, doing nothing when it misses. The editor then
+  // looks dead (Backspace above all) until the page is reloaded. Re-point it instead.
+  //
+  // Deferred a tick for two reasons: BlockSuite emits the delete *before* the block leaves the doc,
+  // and waiting lets the editor's own selection move land first, so this only steps in when that
+  // move never happened.
+  let healFrame: ReturnType<typeof setTimeout> | undefined
+  const healSelection = () => {
+    if (input.readonly) return
+    if (healFrame) return
+    healFrame = setTimeout(() => {
+      healFrame = undefined
+      const selection = editor.std?.selection
+      if (!selection) return
+      const plan = repairSelection(
+        selection.value,
+        (id) => !!doc.getBlock(id),
+        () => {
+          const blocks = doc.getBlockByFlavour("affine:paragraph")
+          return blocks[blocks.length - 1]?.id
+        },
+      )
+      if (!plan) return
+      if (!plan.caret) {
+        selection.set(plan.keep)
+        return
+      }
+      const model = doc.getBlock(plan.caret)?.model
+      const index = model?.text?.length ?? 0
+      selection.set([
+        ...plan.keep,
+        selection.create("text", { from: { blockId: plan.caret, index, length: 0 }, to: null }),
+      ])
+    }, 0)
+  }
+
   // The block IS the upload's handle: removing it (delete, or undo of the add) cancels, and undoing
   // that removal puts it back. `doc` is swapped on rebind(), so this re-subscribes with it.
   let offBlocks: (() => void) | undefined
@@ -362,12 +443,18 @@ export async function createPage(input: DocMountInput) {
     const sub = doc.slots.blockUpdated.on((event) => {
       if (event.type === "delete") {
         uploads.cancel(event.id)
+        // Deleting the block is the only way out of a stranded attachment, so the gate has to
+        // notice. Nothing else here fires for it: there is no upload entry left to cancel.
+        missing.refresh()
+        healSelection()
         return
       }
       if (event.type !== "add") return
       const key = sourceId(event.model)
       if (!key) return
       uploads.resume(event.id, key)
+      // Undo brought the block back — with it, whatever was wrong with its asset.
+      missing.refresh()
     })
     offBlocks = () => sub.dispose()
   }
@@ -441,6 +528,8 @@ export async function createPage(input: DocMountInput) {
       cursors = input.readonly ? undefined : watchCursorLabels(editor, el)
       fit(el)
       paint()
+      // rebind swapped the whole doc; the block list came with it.
+      missing.refresh()
       if (restore) void focus()
     })
   }
@@ -816,17 +905,24 @@ export async function createPage(input: DocMountInput) {
     assets,
     uploads: () => uploads.list(),
     uploading: () => uploads.active(),
+    missing: missing.list,
     addReference,
     addLineReference,
     onHistory,
-    markdown: () =>
-      input.sync
-        ? docMarkdown(doc, {
-            docID: input.sync.docID,
-            directory: input.sync.directory,
-            client: input.sync.client,
-          })
-        : Promise.resolve({ text: docPlain(doc), assets: [] }),
+    markdown: async () => {
+      const sync = input.sync
+      if (!sync) return { text: docPlain(doc), assets: [], missing: [] }
+      const out = await docMarkdown(doc, {
+        docID: sync.docID,
+        directory: sync.directory,
+        client: sync.client,
+      })
+      // The export re-reads every asset, which makes it the freshest answer there is — fold it back
+      // in so a block that only turns out to be dead at send time gets marked too, not just refused.
+      for (const item of out.assets) missing.mark(item.id, false)
+      for (const item of out.missing) missing.mark(item.id, true)
+      return out
+    },
     plain: () => docPlain(doc),
     empty: () => !docPlain(doc),
     undo,
@@ -841,6 +937,10 @@ export async function createPage(input: DocMountInput) {
       applyIdentity()
     },
     setTheme: (theme: "light" | "dark") => {
+      // attach() 가 applyTheme() 로 집어가므로 붙기 전에 불려도 값은 안 잃는다. std 는 attach
+      // 전까지 없어서, 여기서 바로 만지면 터진다.
+      input.theme = theme
+      if (!editor.std) return
       editor.std.get(ThemeProvider).app$.value = scheme(theme)
     },
     dispose: async () => {
@@ -850,9 +950,12 @@ export async function createPage(input: DocMountInput) {
       offComposition = undefined
       offBlocks?.()
       offBlocks = undefined
+      missing.dispose()
       uploads.dispose()
       if (uploadFrame) clearTimeout(uploadFrame)
       uploadFrame = undefined
+      if (healFrame) clearTimeout(healFrame)
+      healFrame = undefined
       if (draftFrame) cancelAnimationFrame(draftFrame)
       draftFrame = undefined
       offY?.()

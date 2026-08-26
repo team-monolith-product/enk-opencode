@@ -32,6 +32,8 @@ type ShellProps = {
   modes?: JSX.Element
   onCapture: () => void
   capturing?: boolean
+  /** 다른 합의가 도는 중에는 지우기를 시작할 수 없다. */
+  clearDisabled?: boolean
   /** 미리보기가 캡처 가능한 상태(URL·ready·패널 열림)인지. false 면 캡처 항목을 비활성화한다. */
   canCapture?: boolean
   expand?: {
@@ -370,7 +372,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
             </Tooltip>
           </Show>
 
-          {/* 세션 지우기 — 확인창을 거쳐 기존 보관 동작을 그대로 부른다.
+          {/* 세션 지우기 — 확인창을 거치고, 같이 쓰는 중이면 거기서 동의 투표로 이어진다.
               배포 레이아웃엔 사이드바가 없어 사이드바의 보관 버튼에는 닿을 수 없다. */}
           <Tooltip placement="top" value={language.t("command.session.clear")}>
             <IconButton
@@ -379,7 +381,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               icon="trash"
               variant="ghost"
               class="size-7.5"
-              disabled={props.readonly || (clearCommand()?.disabled ?? true)}
+              disabled={props.readonly || props.clearDisabled || (clearCommand()?.disabled ?? true)}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => command.trigger("session.clear")}
               aria-label={language.t("command.session.clear")}

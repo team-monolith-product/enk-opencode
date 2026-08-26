@@ -244,7 +244,68 @@ describe("docMarkdown", () => {
       mime: "application/pdf",
       filename: "brief.pdf",
     })
+    expect(out.missing).toHaveLength(0)
     expect(docPlain(ctx.doc)).toContain("brief.pdf")
+  })
+
+  test("reports an attachment the server does not have instead of dropping it silently", async () => {
+    const ctx = page()
+
+    add(
+      ctx.doc,
+      "affine:attachment",
+      { sourceId: "gone_1", name: "notes.pdf", type: "application/pdf", size: 9 },
+      ctx.note,
+    )
+
+    const out = await docMarkdown(
+      ctx.doc,
+      opts(async () => new Response("not found", { status: 404 })),
+    )
+
+    // The link still goes into the markdown, but nothing carries the bytes — that mismatch is the
+    // whole bug, so the caller has to be told rather than left to send a dangling reference.
+    expect(out.text).toContain("[notes.pdf](attachment://notes.pdf)")
+    expect(out.assets).toHaveLength(0)
+    expect(out.missing).toEqual([{ id: "gone_1", blockId: expect.any(String), name: "notes.pdf" }])
+  })
+
+  test("reports an image the server does not have", async () => {
+    const ctx = page()
+
+    add(ctx.doc, "affine:image", { sourceId: "gone_2", caption: "shot.png", size: 4 }, ctx.note)
+
+    const out = await docMarkdown(
+      ctx.doc,
+      opts(async () => new Response("not found", { status: 404 })),
+    )
+
+    expect(out.text).toContain("![shot.png](attachment://gone_2)")
+    expect(out.assets).toHaveLength(0)
+    expect(out.missing).toEqual([{ id: "gone_2", blockId: expect.any(String), name: "shot.png" }])
+  })
+
+  test("a stored asset that is not exportable is not missing", async () => {
+    const ctx = page()
+
+    add(
+      ctx.doc,
+      "affine:attachment",
+      { sourceId: "zip_2", name: "project.sb3", type: "image/png", size: 4 },
+      ctx.note,
+    )
+
+    const out = await docMarkdown(
+      ctx.doc,
+      opts(async () =>
+        new Response(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), { headers: { "Content-Type": "image/png" } }),
+      ),
+    )
+
+    // The bytes ARE on the server; only the mime keeps them out of the file parts. The link the model
+    // gets is all this asset was ever going to contribute, so sending is fine.
+    expect(out.assets).toHaveLength(0)
+    expect(out.missing).toHaveLength(0)
   })
 
   test("keeps mislabeled binary attachments out of assets", async () => {
