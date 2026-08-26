@@ -5,6 +5,7 @@ import { SessionID, MessageID, PartID } from "@/session/schema"
 import z from "zod"
 import { Session } from "../../session"
 import { getOrCreateMain } from "../../session/ensure"
+import { archiveSession, removeSession } from "../../session/archive"
 import { MessageV2 } from "../../session/message-v2"
 import { SessionPrompt } from "../../session/prompt"
 import { SessionCompaction } from "../../session/compaction"
@@ -239,7 +240,7 @@ export const SessionRoutes = lazy(() =>
       ),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
-        await Session.remove(sessionID)
+        await removeSession(sessionID)
         return c.json(true)
       },
     )
@@ -285,8 +286,12 @@ export const SessionRoutes = lazy(() =>
         if (updates.title !== undefined) {
           await Session.setTitle({ sessionID, title: updates.title })
         }
-        if (updates.time?.archived !== undefined) {
-          await Session.setArchived({ sessionID, time: updates.time.archived })
+        const archived = updates.time?.archived
+        if (archived !== undefined) {
+          // 실행 중단·대체 세션 생성·중복 요청 무시는 모두 archiveSession 안에 있다. 지우기는 투표를
+          // 거쳐서도 들어오므로(doc 의 clear 합의) 한 곳에만 두어 두 경로가 갈리지 않게 한다.
+          if (archived) await archiveSession({ sessionID, time: archived })
+          else await Session.setArchived({ sessionID, time: archived })
         }
 
         const session = await Session.get(sessionID)

@@ -30,6 +30,8 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { messageAgentColor } from "@/utils/agent"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
+import { SessionFollow } from "@/utils/session-follow"
+import { DialogClearSession } from "@/components/session/dialog-clear-session"
 import { makeTimer } from "@solid-primitives/timer"
 
 type MessageComment = {
@@ -214,9 +216,6 @@ export function MessageTimeline(props: {
   centered: boolean
   setContentRef: (el: HTMLDivElement) => void
   turnStart: number
-  historyMore: boolean
-  historyLoading: boolean
-  onLoadEarlier: () => void
   renderedUserMessages: UserMessage[]
   anchor: (id: string) => string
 }) {
@@ -437,14 +436,29 @@ export function MessageTimeline(props: {
       navigate(`/${params.dir}/session/${nextSessionID}`)
       return
     }
+    // 한 세션만 띄우는 워크스페이스는 서버가 지우기 요청 안에서 대체 세션을 만들어 뒀다. 빈 화면으로
+    // 보내 버리면 새 세션으로 옮겨간 다른 접속자들과 갈라지므로, 이동은 directory-layout 에 맡긴다.
+    if (sync.data.config.ensureSession) {
+      SessionFollow.expect(sdk.directory)
+      return
+    }
     navigate(`/${params.dir}/session`)
+  }
+
+  // 대화 헤더에서도 컴포저 버튼·사이드바와 같은 확인창(그리고 같은 동의)을 거친다.
+  const clearSession = (sessionID: string) => {
+    const session = sync.session.get(sessionID)
+    if (!session) return
+    dialog.show(() => <DialogClearSession session={session} clear={() => archiveSession(sessionID)} />)
   }
 
   const archiveSession = async (sessionID: string) => {
     const session = sync.session.get(sessionID)
     if (!session) return
 
-    const sessions = sync.data.session ?? []
+    // 대화 화면을 대신할 수 있는 건 루트 세션뿐이다. 자식(서브에이전트) 세션이 목록에 섞여 있어
+    // 걸러내지 않으면 보관 뒤 서브에이전트 세션으로 튄다.
+    const sessions = (sync.data.session ?? []).filter((s) => !s.parentID && !s.time?.archived)
     const index = sessions.findIndex((s) => s.id === sessionID)
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
@@ -782,8 +796,8 @@ export function MessageTimeline(props: {
                                   </DropdownMenu.ItemLabel>
                                 </DropdownMenu.Item>
                               </Show>
-                              <DropdownMenu.Item onSelect={() => void archiveSession(id())}>
-                                <DropdownMenu.ItemLabel>{language.t("common.archive")}</DropdownMenu.ItemLabel>
+                              <DropdownMenu.Item onSelect={() => clearSession(id())}>
+                                <DropdownMenu.ItemLabel>{language.t("session.clear.title")}</DropdownMenu.ItemLabel>
                               </DropdownMenu.Item>
                               <DropdownMenu.Separator />
                               <DropdownMenu.Item
@@ -909,21 +923,6 @@ export function MessageTimeline(props: {
                 "mt-0": !props.centered,
               }}
             >
-              <Show when={props.turnStart > 0 || props.historyMore}>
-                <div class="w-full flex justify-center">
-                  <Button
-                    variant="ghost"
-                    size="large"
-                    class="text-12-medium opacity-50"
-                    disabled={props.historyLoading}
-                    onClick={props.onLoadEarlier}
-                  >
-                    {props.historyLoading
-                      ? language.t("session.messages.loadingEarlier")
-                      : language.t("session.messages.loadEarlier")}
-                  </Button>
-                </div>
-              </Show>
               <For each={rendered()}>
                 {(messageID) => {
                   const active = createMemo(() => activeMessageID() === messageID)

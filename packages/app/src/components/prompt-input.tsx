@@ -648,6 +648,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     if (action !== "stop" && docMode() === "doc" && doc.uploading()) {
       return <span>{language.t("prompt.action.docUploading")}</span>
     }
+    if (action !== "stop" && docMode() === "doc" && doc.missing().length > 0) {
+      return <span>{language.t("prompt.action.docMissingAsset")}</span>
+    }
     if (action === "stop") {
       return (
         <div class="flex items-center gap-2">
@@ -1725,7 +1728,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       } catch {
         session.setApprovalSession(input.sessionID)
         showToast({
-          title: "전송 동의 요청 실패",
+          title: language.t("docSubmit.toast.requestFailed"),
           description: language.t("common.requestFailed"),
         })
         return true
@@ -1776,6 +1779,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         })
         return
       }
+      // An attachment whose bytes never landed (the tab was closed mid-upload) leaves a block that
+      // nothing is uploading any more. commitMarkdown() would export it as a bare attachment:// link
+      // with no file part, so the prompt would go out looking complete with the file quietly gone.
+      const stranded = doc.missing()
+      if (stranded.length > 0) {
+        showToast({
+          title: language.t("prompt.toast.docMissingAsset.title"),
+          description: language.t("prompt.toast.docMissingAsset.description", { name: stranded[0]!.name }),
+        })
+        return
+      }
       // Last line of defense for the attachment budget. addFiles already refuses over-budget adds,
       // but BlockSuite's own paste/drag inside the editor creates blocks without going through it.
       const usage = doc.assets()
@@ -1787,6 +1801,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         return
       }
       const next = await doc.commitMarkdown()
+      // The export re-read every asset, so this is the authoritative answer — it also catches a
+      // block whose bytes went missing without the editor ever having fetched them.
+      if (next?.missing.length) {
+        showToast({
+          title: language.t("prompt.toast.docMissingAsset.title"),
+          description: language.t("prompt.toast.docMissingAsset.description", { name: next.missing[0]!.name }),
+        })
+        return
+      }
       const text = next?.text
       if (!text) {
         if (working()) {
@@ -2234,7 +2257,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               maxLength={MAX_PROMPT_DOC_CHARS}
               shake={countShake()}
               submitDisabled={
-                readonly || (submitAction() === "send" && (!hasDraft() || doc.uploading()))
+                readonly ||
+                (submitAction() === "send" && (!hasDraft() || doc.uploading() || doc.missing().length > 0))
               }
               tip={tip()}
               onExit={exitDoc}
@@ -2242,6 +2266,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               onCapture={captureTab}
               capturing={capturing()}
               canCapture={previewBridge.canCapture()}
+              clearDisabled={session.votePending()}
               expand={composerExpand()}
               autoExpand={{ enabled: autoExpand(), onToggle: toggleAutoExpand }}
             />

@@ -91,7 +91,7 @@
     --text-on-warning-base: #000000;
     --text-on-info-base: #000000;
     --text-diff-add-base: #4c6855;
-    --text-diff-delete-base: #f9d2bd;
+    --text-diff-delete-base: #B54008;
     --text-diff-delete-strong: #362014;
     --text-diff-add-strong: #172c1e;
     --text-on-info-weak: #000000;
@@ -204,8 +204,8 @@
     --icon-diff-add-active: #172c1e;
     --icon-diff-delete-base: #f9d2bd;
     --icon-diff-delete-hover: #775947;
-    --icon-diff-modified-base: #FFCE2B;
-    --syntax-comment: #8A8779;
+    --icon-diff-modified-base: #A06A0A;
+    --syntax-comment: #69675C;
     --syntax-regexp: var(--text-base);
     --syntax-string: #096C4D;
     --syntax-keyword: #1F3A52;
@@ -327,8 +327,8 @@
     --input-focus: #2A2823;
     --input-disabled: #161512;
     --text-base: #B8B4A6;
-    --text-weak: #8A8779;
-    --text-weaker: #69675C;
+    --text-weak: #A49F92;
+    --text-weaker: #948F7F;
     --text-strong: #F4F2EC;
     --text-invert-base: #cac9c3;
     --text-invert-weak: #6a6964;
@@ -407,7 +407,7 @@
     --icon-disabled: #33322e;
     --icon-focus: #f0eee8;
     --icon-invert-base: #0b0a07;
-    --icon-weak-base: #69675C;
+    --icon-weak-base: #948F7F;
     --icon-weak-hover: #f0eee8;
     --icon-weak-active: #6a6964;
     --icon-weak-selected: #6a6964;
@@ -459,7 +459,7 @@
     --icon-diff-delete-base: #dfaf94;
     --icon-diff-delete-hover: #ffe7d9;
     --icon-diff-modified-base: #FFCE2B;
-    --syntax-comment: #69675C;
+    --syntax-comment: #948F7F;
     --syntax-regexp: var(--text-base);
     --syntax-string: #D6F1DE;
     --syntax-keyword: #DDE4EC;

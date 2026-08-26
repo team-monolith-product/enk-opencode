@@ -19,6 +19,8 @@ import { useClientEnv } from "@/context/client-env"
 import { Persist, persisted } from "@/utils/persist"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { decode64 } from "@/utils/base64"
+import { SessionFollow } from "@/utils/session-follow"
+import { DialogClearSession } from "@/components/session/dialog-clear-session"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Button } from "@opencode-ai/ui/button"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -989,30 +991,54 @@ export default function Layout(props: ParentProps) {
     }
   }
 
+  // 초기화에 닿는 모든 길(컴포저 버튼·커맨드·사이드바)이 같은 확인창을 거치게 한다.
+  function clearSession(session: Session) {
+    dialog.show(() => <DialogClearSession session={session} clear={archiveSession} />)
+  }
+
   async function archiveSession(session: Session) {
     const [store, setStore] = globalSync.child(session.directory)
-    const sessions = store.session ?? []
+    // 대화 화면을 대신할 수 있는 건 루트 세션뿐이다. 자식(서브에이전트) 세션이 목록에 섞여 있어
+    // 걸러내지 않으면 보관 뒤 서브에이전트 세션으로 튄다.
+    const sessions = (store.session ?? []).filter((s) => !s.parentID && !s.time?.archived)
     const index = sessions.findIndex((s) => s.id === session.id)
-    const nextSession = sessions[index + 1] ?? sessions[index - 1]
+    const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
-    await globalSDK.client.session.update({
-      directory: session.directory,
-      sessionID: session.id,
-      time: { archived: Date.now() },
-    })
+    // 초기화가 실패했는데 화면만 넘어가면 정리된 줄 알고 대화를 이어간다. 실패는 실패로 보여준다.
+    const removed = await globalSDK.client.session
+      .update({
+        directory: session.directory,
+        sessionID: session.id,
+        time: { archived: Date.now() },
+      })
+      .then(() => true)
+      .catch((err) => {
+        showToast({
+          title: language.t("session.clear.failed.title"),
+          description: errorMessage(err, language.t("common.requestFailed")),
+        })
+        return false
+      })
+    if (!removed) return
+
     setStore(
       produce((draft) => {
         const match = Binary.search(draft.session, session.id, (s) => s.id)
         if (match.found) draft.session.splice(match.index, 1)
       }),
     )
-    if (session.id === params.id) {
-      if (nextSession) {
-        navigate(`/${params.dir}/session/${nextSession.id}`)
-      } else {
-        navigate(`/${params.dir}/session`)
-      }
+    if (session.id !== params.id) return
+    if (nextSession) {
+      navigate(`/${params.dir}/session/${nextSession.id}`)
+      return
     }
+    // 한 세션만 띄우는 워크스페이스는 서버가 이 요청 안에서 대체 세션을 만들어 뒀다. 빈 화면으로
+    // 보내 버리면 새 세션으로 옮겨간 다른 접속자들과 갈라지므로, 이동은 directory-layout 에 맡긴다.
+    if (store.config.ensureSession) {
+      SessionFollow.expect(session.directory)
+      return
+    }
+    navigate(`/${params.dir}/session`)
   }
 
   command.register("layout", () => {
@@ -1094,17 +1120,6 @@ export default function Layout(props: ParentProps) {
         onSelect: () => navigateSessionByUnseen(1),
       },
       {
-        id: "session.archive",
-        title: language.t("command.session.archive"),
-        category: language.t("command.category.session"),
-        // keybind: "mod+shift+backspace",
-        disabled: !params.dir || !params.id,
-        onSelect: () => {
-          const session = currentSessions().find((s) => s.id === params.id)
-          if (session) archiveSession(session)
-        },
-      },
-      {
         id: "session.clear",
         title: language.t("command.session.clear"),
         category: language.t("command.category.session"),
@@ -1115,7 +1130,7 @@ export default function Layout(props: ParentProps) {
           const directory = currentDir()
           if (!directory || !params.id) return
           const session = globalSync.child(directory)[0].session?.find((s) => s.id === params.id)
-          if (session) dialog.show(() => <DialogClearSession session={session} />)
+          if (session) clearSession(session)
         },
       },
       {
@@ -1639,54 +1654,6 @@ export default function Layout(props: ParentProps) {
     })
   }
 
-  // "세션 지우기" 확인창. 속으로는 보관(archiveSession)이지만 사용자에겐 그렇게 말하지 않는다 —
-  // 배포 레이아웃엔 사이드바가 없어 보관된 세션으로 돌아갈 길이 없으니, 사용자 입장에선 "다시 못 여는" 게 전부다.
-  // 문구에 보관을 되살리지 말 것. 되돌릴 수 없어 보이니 한 번 묻는다.
-  function DialogClearSession(props: { session: Session }) {
-    const handleClear = () => {
-      dialog.close()
-      void archiveSession(props.session)
-    }
-
-    return (
-      <Dialog
-        title={language.t("session.clear.title")}
-        description={language.t("session.clear.description")}
-        action={<span class="sr-only" />}
-        transition
-        fit
-        class="session-clear-dialog hazard-dialog"
-      >
-        <div class="session-clear-body">
-          <div class="session-clear-callout">
-            <span class="session-clear-badge">
-              <Icon name="warning" class="size-4.5" />
-            </span>
-            <div class="session-clear-copy">
-              <span class="session-clear-headline">{language.t("session.clear.confirm")}</span>
-              <span class="session-clear-note">{language.t("session.clear.note")}</span>
-            </div>
-          </div>
-        </div>
-        <div class="hazard-dialog-footer">
-          <div class="flex-1" />
-          <Button type="button" size="normal" variant="secondary" onClick={() => dialog.close()}>
-            {language.t("common.cancel")}
-          </Button>
-          <Button
-            type="button"
-            size="normal"
-            variant="primary"
-            class="session-clear-confirm"
-            onClick={handleClear}
-          >
-            {language.t("session.clear.button")}
-          </Button>
-        </div>
-      </Dialog>
-    )
-  }
-
   function DialogDeleteWorkspace(props: { root: string; directory: string }) {
     const name = createMemo(() => getFilename(props.directory))
     const [data, setData] = createStore({
@@ -2042,7 +2009,7 @@ export default function Layout(props: ParentProps) {
     setHoverSession,
     clearHoverProjectSoon,
     prefetchSession,
-    archiveSession,
+    clearSession,
     workspaceName,
     renameWorkspace,
     editorOpen,
@@ -2093,7 +2060,7 @@ export default function Layout(props: ParentProps) {
       setHoverSession,
       clearHoverProjectSoon,
       prefetchSession,
-      archiveSession,
+      clearSession,
     },
     setHoverSession,
   }

@@ -18,9 +18,27 @@ export type DocExportAsset = {
   url: string
 }
 
+/**
+ * A block whose asset the server could not hand back — an upload that was abandoned mid-transfer,
+ * most often. The export cannot carry the file, so without this the prompt goes out as a dangling
+ * `attachment://` link with no file part: the attachment silently disappears from what the model
+ * sees. Reported so the caller can refuse to send instead.
+ */
+export type DocMissingAsset = {
+  id: string
+  blockId: string
+  name: string
+}
+
 export type DocExport = {
   text: string
   assets: DocExportAsset[]
+  missing: DocMissingAsset[]
+}
+
+type Collected = {
+  assets: DocExportAsset[]
+  missing: DocMissingAsset[]
 }
 
 type Inline = {
@@ -270,10 +288,10 @@ function plain(model: BlockModel): string[] {
   return [...Object.values(props(model)).map((value) => String(value)), ...children()].filter(Boolean)
 }
 
-async function block(model: BlockModel, opts: ExportOpts, assets: DocExportAsset[], depth = 0): Promise<string[]> {
+async function block(model: BlockModel, opts: ExportOpts, out: Collected, depth = 0): Promise<string[]> {
   const next = model.flavour === "affine:list" ? depth + 1 : depth
   const children = async () =>
-    (await Promise.all(model.children.map((child) => block(child, opts, assets, next)))).flat()
+    (await Promise.all(model.children.map((child) => block(child, opts, out, next)))).flat()
 
   if (model.flavour === "affine:page" || model.flavour === "affine:note" || model.flavour === "affine:surface") {
     return children()
@@ -373,10 +391,13 @@ async function block(model: BlockModel, opts: ExportOpts, assets: DocExportAsset
     const id = source(model)
     const nested = await children()
     if (!id) return nested
-    const found = await asset(opts, id)
-    if (!found) return [`![${caption(model) || id}](attachment://${encodeURIComponent(id)})`, ...nested]
     const name = caption(model) || id
-    if (exportable(found.mime)) assets.push({ id, mime: found.mime, filename: id, url: found.url })
+    const found = await asset(opts, id)
+    if (!found) {
+      out.missing.push({ id, blockId: model.id, name })
+      return [`![${name}](attachment://${encodeURIComponent(id)})`, ...nested]
+    }
+    if (exportable(found.mime)) out.assets.push({ id, mime: found.mime, filename: id, url: found.url })
     return [`![${name}](attachment://${encodeURIComponent(id)})`, ...nested]
   }
 
@@ -389,7 +410,10 @@ async function block(model: BlockModel, opts: ExportOpts, assets: DocExportAsset
     const nested = await children()
     if (!id) return [`[${label(name)}]`, ...meta, ...nested]
     const found = await asset(opts, id)
-    if (found && exportable(found.mime)) assets.push({ id, mime: found.mime, filename: name, url: found.url })
+    // `!found` is a 404 (or a failed read), not a filtered mime — an asset that IS stored but is not
+    // exportable still reaches the model as the link below, so it is not missing.
+    if (!found) out.missing.push({ id, blockId: model.id, name })
+    else if (exportable(found.mime)) out.assets.push({ id, mime: found.mime, filename: name, url: found.url })
     // The chat view hides an exported file part's standalone chip only when the markdown
     // references it by the part's filename. Images export filename=id so they key the link
     // by id; attachments must keep their real filename (the server names the on-disk copy
@@ -409,11 +433,12 @@ async function block(model: BlockModel, opts: ExportOpts, assets: DocExportAsset
 }
 
 export async function docMarkdown(doc: Doc, opts: ExportOpts): Promise<DocExport> {
-  const assets: DocExportAsset[] = []
-  const lines = doc.root ? await block(doc.root, opts, assets) : []
+  const out: Collected = { assets: [], missing: [] }
+  const lines = doc.root ? await block(doc.root, opts, out) : []
   return {
     text: lines.join("\n\n").trim(),
-    assets,
+    assets: out.assets,
+    missing: out.missing,
   }
 }
 

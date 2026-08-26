@@ -14,8 +14,9 @@ export type DocSubmitState = {
   submitID: string
   sessionID: string
   // 'doc' → targetID is the prompt doc id; 'question' → the question request id; 'stop' → the prompt
-  // doc id whose in-flight AI response a consensus would cancel.
-  targetKind: "doc" | "question" | "stop"
+  // doc id whose in-flight AI response a consensus would cancel; 'clear' → the prompt doc id of the
+  // session a consensus would delete (archive).
+  targetKind: "doc" | "question" | "stop" | "clear"
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
@@ -116,6 +117,17 @@ type StopInput = {
 // (keyed by docID) for lifecycle events and the same respond endpoint.
 export async function startStopSubmit(input: StopInput) {
   return json(path(input, `/session/${input.sessionID}/prompt-doc/stop`), {
+    docID: input.docID,
+    actorID: input.actorID,
+    names: input.names,
+    timeoutMs: input.timeoutMs,
+  })
+}
+
+// Start a consent vote to clear (delete) the session. Same socket and dialog as a stop vote; on
+// approval the server cancels the run, archives the session and leaves a replacement behind.
+export async function startClearSubmit(input: StopInput) {
+  return json(path(input, `/session/${input.sessionID}/prompt-doc/clear`), {
     docID: input.docID,
     actorID: input.actorID,
     names: input.names,

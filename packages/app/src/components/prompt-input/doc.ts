@@ -2,7 +2,7 @@ import { createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { OpencodeClient, SessionActor } from "@opencode-ai/sdk/v2/client"
 import { assetKey, createPage, type DocActor } from "@/components/blocksuite/blocksuite-doc"
-import type { DocUpload } from "@/components/blocksuite/doc-upload"
+import type { DocMissing, DocUpload } from "@/components/blocksuite/doc-upload"
 import type { FileNodeType } from "@/components/blocksuite/file-reference-block"
 import type { LineRefInput } from "@/components/blocksuite/line-reference-url"
 import type { DocSyncOpts } from "@/components/blocksuite/opencode-doc-source"
@@ -128,6 +128,7 @@ export function createPromptDoc(input: PromptDocInput) {
 
   const [ready, setReady] = createSignal(false)
   const [uploads, setUploads] = createSignal<DocUpload[]>([])
+  const [missing, setMissing] = createSignal<DocMissing[]>([])
   const [filled, setFilled] = createSignal(false)
   const [length, setLength] = createSignal(0)
   const [docID, setDocID] = createSignal<string | undefined>()
@@ -174,6 +175,7 @@ export function createPromptDoc(input: PromptDocInput) {
     // dispose() aborts whatever was still uploading, so nothing is left in flight for a doc that
     // no longer exists.
     setUploads([])
+    setMissing([])
     await current?.dispose()
   }
 
@@ -245,6 +247,10 @@ export function createPromptDoc(input: PromptDocInput) {
           input.onUploadFailed?.(item.name)
         }
       },
+      // No toast here: unlike a failed upload this is not an event the user just caused — it is a
+      // state the doc was already in when it loaded. It surfaces as the block's error mark and as
+      // the blocked submit, which is where the user actually runs into it.
+      onMissingChange: (list) => setMissing(list),
     })
     if (!alive()) {
       await fresh.dispose()
@@ -367,6 +373,7 @@ export function createPromptDoc(input: PromptDocInput) {
     setFilled(false)
     setLength(0)
     setUploads([])
+    setMissing([])
     void serialize(async () => {
       await drop()
     })
@@ -492,6 +499,10 @@ export function createPromptDoc(input: PromptDocInput) {
     // Attachments still on the wire (or failed). commitMarkdown() re-reads every asset from the
     // server, so sending now would drop or break them — the composer blocks submit on this.
     uploading: () => uploads().length > 0,
+    // Attachments whose bytes never reached the server, with nothing left uploading them (a tab
+    // closed mid-transfer). commitMarkdown() would export them as dangling attachment:// links with
+    // no file part, so the composer blocks submit on this too.
+    missing,
     addFiles,
     addReference,
     addLineReference,

@@ -34,7 +34,6 @@ export const dict = {
   "command.session.next": "下一個工作階段",
   "command.session.previous.unseen": "上一個未讀會話",
   "command.session.next.unseen": "下一個未讀會話",
-  "command.session.archive": "封存工作階段",
 
   "command.palette": "命令面板",
 
@@ -591,7 +590,6 @@ export const dict = {
   "common.learnMore": "深入了解",
   "common.rename": "重新命名",
   "common.reset": "重設",
-  "common.archive": "封存",
   "common.delete": "刪除",
   "common.close": "關閉",
   "common.edit": "編輯",

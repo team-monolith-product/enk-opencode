@@ -308,6 +308,12 @@ export namespace Session {
     }
   }
 
+  export class ArchivedError extends Error {
+    constructor(public readonly sessionID: string) {
+      super(`Session ${sessionID} is archived`)
+    }
+  }
+
   export interface Interface {
     readonly create: (input?: {
       parentID?: SessionID
