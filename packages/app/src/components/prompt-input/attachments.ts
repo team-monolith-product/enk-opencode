@@ -44,6 +44,16 @@ export function attachmentUsage(prompt: Prompt): AttachmentUsage {
   }
 }
 
+/**
+ * Whether a drag belongs to something that declares its own drop zone (`data-drop-zone`), such as
+ * the file explorer's upload area. The listeners below are on the document in the capture phase, so
+ * without this check the composer would swallow every drop in the app before the zone sees it.
+ */
+function ownedByDropZone(event: DragEvent) {
+  const target = event.target
+  return target instanceof Element && !!target.closest("[data-drop-zone]")
+}
+
 export function createPromptAttachments(input: PromptAttachmentsInput) {
   const prompt = usePrompt()
   const language = useLanguage()
@@ -213,6 +223,7 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
   const handleGlobalDragOver = (event: DragEvent) => {
     if (!input.enabled()) return
     if (input.isDialogActive()) return
+    if (ownedByDropZone(event)) return
 
     event.preventDefault()
     const hasFiles = event.dataTransfer?.types.includes("Files")
@@ -227,6 +238,7 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
   const handleGlobalDragLeave = (event: DragEvent) => {
     if (!input.enabled()) return
     if (input.isDialogActive()) return
+    if (ownedByDropZone(event)) return
     if (!event.relatedTarget) {
       input.setDraggingType(null)
     }
@@ -235,6 +247,7 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
   const handleGlobalDrop = async (event: DragEvent) => {
     if (!input.enabled()) return
     if (input.isDialogActive()) return
+    if (ownedByDropZone(event)) return
 
     event.preventDefault()
     event.stopPropagation()

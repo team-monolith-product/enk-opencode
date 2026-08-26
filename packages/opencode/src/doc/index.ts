@@ -9,6 +9,7 @@ import { QuestionID } from "@/question/schema"
 import { Session } from "@/session"
 import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
+import { archiveSession } from "@/session/archive"
 import { Database, NotFoundError } from "@/storage/db"
 import { fn } from "@/util/fn"
 import { Color } from "@/util/color"
@@ -508,10 +509,18 @@ export namespace Doc {
     .meta({ ref: "DocSubmitActor" })
   export type SubmitActorInfo = z.infer<typeof SubmitActorInfo>
 
-  // What a consent vote acts on once approved: send a prompt doc, reply/dismiss an AI question, or
-  // stop ('cancel') the session's in-flight AI response.
-  export const SubmitTargetKind = z.enum(["doc", "question", "stop"]).meta({ ref: "DocSubmitTargetKind" })
+  // What a consent vote acts on once approved: send a prompt doc, reply/dismiss an AI question,
+  // stop ('cancel') the session's in-flight AI response, or clear (archive) the session itself.
+  export const SubmitTargetKind = z.enum(["doc", "question", "stop", "clear"]).meta({ ref: "DocSubmitTargetKind" })
   export type SubmitTargetKind = z.infer<typeof SubmitTargetKind>
+
+  /** 지우기 합의와 다른 합의가 겹칠 때. 참가자가 서로 다른 것에 동의하는 상황을 막는다. */
+  export const VoteConflictError = NamedError.create(
+    "DocVoteConflictError",
+    z.object({
+      message: z.string(),
+    }),
+  )
 
   export const SubmitState = z
     .object({
@@ -738,6 +747,12 @@ export namespace Doc {
   }
 
   function send(row: SubmitRow) {
+    if (row.target_kind === "clear") {
+      // 합의된 지우기: 실행을 끊고 보관한 뒤 대체 세션까지 만든다(archiveSession). 이미 지워졌으면
+      // 아무것도 하지 않으므로 재시도·중복 합의에도 안전하다.
+      archiveSession({ sessionID: row.session_id }).catch((err) => fail(row, err))
+      return
+    }
     if (row.target_kind === "stop") {
       // Consensus to stop the AI: cancel the run. Idempotent — a no-op if it already finished
       // (which is why an agreed and a cancelled stop vote look the same once the response is done).
@@ -799,6 +814,24 @@ export namespace Doc {
     if (!next) return row
     cast("expired", read(next))
     return next
+  }
+
+  /** 이 세션에서 아직 결론 나지 않은 투표. 만료된 행은 여기서 정리하며 지나간다. */
+  function pending(sessionID: SessionID) {
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(DocSubmitTable)
+        .where(and(eq(DocSubmitTable.session_id, sessionID), eq(DocSubmitTable.status, "pending")))
+        .all(),
+    )
+    for (const row of rows) {
+      const next = expire(row)
+      if (next.status !== "pending") continue
+      if (!timers.has(next.id)) schedule(next)
+      return next
+    }
+    return undefined
   }
 
   function active(sessionID: SessionID, targetID: string, actorID?: ActorID, targetKind?: SubmitTargetKind) {
@@ -939,6 +972,14 @@ export namespace Doc {
     const found = active(input.sessionID, input.targetID, undefined, input.targetKind)
     if (found) return found
 
+    // 지우기 합의는 다른 합의와 겹치면 안 된다. 전송 투표가 도는 중에 세션이 사라지거나, 지우기
+    // 투표가 도는 중에 전송이 통과하면 참가자들이 서로 다른 것에 동의한 셈이 된다. 진행 중인 투표가
+    // 있으면 지우기를 시작할 수 없고, 지우기가 도는 동안에는 다른 투표를 시작할 수 없다.
+    const busy = pending(input.sessionID)
+    if (busy && (input.targetKind === "clear" || busy.target_kind === "clear")) {
+      throw new VoteConflictError({ message: "Another consent vote is in progress" })
+    }
+
     const ids = targets(input.targetID, input.actorID)
     const timeout = clamp(input.timeoutMs)
     const now = Date.now()
@@ -1022,6 +1063,25 @@ export namespace Doc {
     actorIDs: ActorID.zod.array().optional(),
     names: z.record(z.string(), z.string()).optional(),
     timeoutMs: z.number().optional(),
+  })
+
+  // 세션 지우기 합의. stop 과 마찬가지로 프롬프트 docID 를 대상으로 삼아 같은 참가자들(과 같은
+  // 다이얼로그)에게 닿는다. 합의가 서면 send() 가 세션을 보관한다.
+  export const ClearSubmitCreateInput = StopSubmitCreateInput
+
+  export const clearSubmitCreate = fn(ClearSubmitCreateInput, (input) => {
+    Session.get(input.sessionID)
+    get(input.docID)
+    return create({
+      sessionID: input.sessionID,
+      targetKind: "clear",
+      targetID: input.docID,
+      docID: input.docID,
+      actorID: input.actorID,
+      names: input.names,
+      promptBlob: "{}",
+      timeoutMs: input.timeoutMs,
+    })
   })
 
   export const stopSubmitCreate = fn(StopSubmitCreateInput, (input) => {

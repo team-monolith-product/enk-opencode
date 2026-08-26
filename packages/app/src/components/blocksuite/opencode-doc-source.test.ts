@@ -87,6 +87,57 @@ describe("OpencodeBlobSource", () => {
     expect(Array.from(new Uint8Array(await blob!.arrayBuffer()))).toEqual([4, 5, 6])
   })
 
+  test("reports an asset the server does not have", async () => {
+    const seen: Array<[string, boolean]> = []
+    const source = new OpencodeBlobSource(opts(async () => new Response("not found", { status: 404 })))
+    source.onAssetMissing = (key, missing) => seen.push([key, missing])
+
+    // Null rather than a throw is what BlockSuite's image block turns into an endless spinner, so the
+    // answer has to leave through this callback for anyone to ever see it.
+    await expect(source.get("hash")).resolves.toBeNull()
+    expect(seen).toEqual([["hash", true]])
+  })
+
+  test("clears the mark once the asset is readable", async () => {
+    const seen: Array<[string, boolean]> = []
+    let status = 404
+    const source = new OpencodeBlobSource(
+      opts(async () =>
+        status === 404
+          ? new Response("not found", { status: 404 })
+          : new Response(new Uint8Array([1]), { status: 200, headers: { "Content-Type": "image/png" } }),
+      ),
+    )
+    source.onAssetMissing = (key, missing) => seen.push([key, missing])
+
+    await source.get("hash")
+    status = 200
+    await source.get("hash")
+    expect(seen).toEqual([
+      ["hash", true],
+      ["hash", false],
+    ])
+  })
+
+  test("a failed fetch says nothing about what the server holds", async () => {
+    const seen: Array<[string, boolean]> = []
+    const source = new OpencodeBlobSource(opts(async () => new Response("boom", { status: 500 })))
+    source.onAssetMissing = (key, missing) => seen.push([key, missing])
+
+    // A 5xx must not strand the block: only a 404 is an answer.
+    await expect(source.get("hash")).rejects.toThrow()
+    expect(seen).toEqual([])
+  })
+
+  test("a landed upload clears the mark", async () => {
+    const seen: Array<[string, boolean]> = []
+    const source = new OpencodeBlobSource(opts(async () => new Response(JSON.stringify({ assetID: "hash" }))))
+    source.onAssetMissing = (key, missing) => seen.push([key, missing])
+
+    await source.upload("hash", new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }))
+    expect(seen).toEqual([["hash", false]])
+  })
+
   test("preserves reverse proxy base path", async () => {
     const source = new OpencodeBlobSource(
       prefixed(async (input) => {

@@ -5,6 +5,7 @@ import DESCRIPTION from "./ls.txt"
 import { Instance } from "../project/instance"
 import { Ripgrep } from "../file/ripgrep"
 import { assertExternalDirectory } from "./external-directory"
+import { Assets } from "../file/assets"
 
 export const IGNORE_PATTERNS = [
   "node_modules/",
@@ -56,7 +57,12 @@ export const ListTool = Tool.define("list", {
 
     const ignoreGlobs = IGNORE_PATTERNS.map((p) => `!${p}*`).concat(params.ignore?.map((p) => `!${p}`) || [])
     const files = []
-    for await (const file of Ripgrep.files({ cwd: searchPath, glob: ignoreGlobs, signal: ctx.abort })) {
+    for await (const file of Ripgrep.files({
+      cwd: searchPath,
+      glob: ignoreGlobs,
+      noIgnore: Assets.contains(searchPath),
+      signal: ctx.abort,
+    })) {
       files.push(file)
       if (files.length >= LIMIT) break
     }

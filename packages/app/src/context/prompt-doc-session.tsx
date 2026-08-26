@@ -25,11 +25,13 @@ import { sessionBusy } from "@/components/prompt-input/composer-state"
 import {
   connectSubmit,
   respondSubmit,
+  startClearSubmit,
   startStopSubmit,
   type DocSubmitState,
 } from "@/components/prompt-input/doc-submit"
 import { DialogDocSubmit } from "@/components/doc-submit/dialog-doc-submit"
 import { startRtcKeepalive } from "@/utils/rtc-keepalive"
+import { SessionClearVote } from "@/utils/session-clear-vote"
 
 export type PromptMode = "normal" | "shell" | "doc"
 
@@ -54,6 +56,14 @@ export type PromptDocSession = {
   working: Accessor<boolean>
   /** Start (or fall back to a direct abort of) the shared stop of the in-flight response. */
   requestStop: () => Promise<void>
+  /**
+   * 세션 지우기 합의를 시작한다. 지우기는 되돌릴 수 없고 함께 보던 사람들의 대화까지 사라지므로,
+   * 전송·중지와 같은 동의를 거친다. 혼자면 투표할 상대가 없으니 false 를 돌려주고, 호출한 쪽이
+   * 기존 확인창 경로로 지운다.
+   */
+  requestClear: () => Promise<boolean>
+  /** 진행 중인 합의가 있는지. 투표가 도는 동안에는 다른 합의를 시작할 수 없다. */
+  votePending: Accessor<boolean>
   /** Render/refresh the consent dialog for a vote state received from the server. */
   showApproval: (state: DocSubmitState) => void
   /** Session whose send is currently owned by a consent vote (composer skips its local finish). */
@@ -144,6 +154,9 @@ export function createPromptDocSession(): PromptDocSession {
     const id = params.id
     if (prev === id) return id
     doc.reset()
+    // 보던 세션이 지워지면 모두 새 세션으로 옮겨간다. 그때 남아 있던 동의창은 사라진 세션의 투표라,
+    // 새 대화 위에 떠서 죽은 세션으로 요청을 보내게 된다.
+    closeApproval()
     return id
   })
 
@@ -239,6 +252,9 @@ export function createPromptDocSession(): PromptDocSession {
   let approvalID: string | undefined
   let finalizedID: string | undefined
 
+  // 투표가 도는 동안에는 다른 합의를 시작할 수 없다(서버도 지우기 합의에 대해 같은 규칙을 건다).
+  const votePending = createMemo(() => approval()?.status === "pending")
+
   const closeApproval = () => {
     dialog.close()
     approvalID = undefined
@@ -280,7 +296,7 @@ export function createPromptDocSession(): PromptDocSession {
           state={approval}
           actorID={actorID}
           spectator={readonly}
-          kind={approval()?.targetKind === "stop" ? "stop" : "doc"}
+          kind={approval()?.targetKind === "stop" || approval()?.targetKind === "clear" ? (approval()!.targetKind as "stop" | "clear") : "doc"}
           sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
           approve={() => {
             const current = approval()
@@ -296,7 +312,7 @@ export function createPromptDocSession(): PromptDocSession {
               .then(setApproval)
               .catch(() =>
                 showToast({
-                  title: "전송 동의 실패",
+                  title: language.t("docSubmit.toast.approveFailed"),
                   description: language.t("common.requestFailed"),
                 }),
               )
@@ -315,7 +331,7 @@ export function createPromptDocSession(): PromptDocSession {
               .then(setApproval)
               .catch(() =>
                 showToast({
-                  title: "전송 동의 취소 실패",
+                  title: language.t("docSubmit.toast.cancelFailed"),
                   description: language.t("common.requestFailed"),
                 }),
               )
@@ -334,7 +350,7 @@ export function createPromptDocSession(): PromptDocSession {
               .then(setApproval)
               .catch(() =>
                 showToast({
-                  title: "전송 실패",
+                  title: language.t("docSubmit.toast.sendFailed"),
                   description: language.t("common.requestFailed"),
                 }),
               )
@@ -412,11 +428,63 @@ export function createPromptDocSession(): PromptDocSession {
       // Never fall through to a solo abort here: peers exist, so stopping without their consent is
       // exactly what the vote is for. Surface the failure and leave the run alone.
       showToast({
-        title: "중지 동의 요청 실패",
+        title: language.t("docSubmit.toast.stopRequestFailed"),
         description: language.t("common.requestFailed"),
       })
     }
   }
+
+  /**
+   * 세션 지우기도 함께 쓰는 행동이다. 누군가 혼자 누르면 나머지가 보던 대화가 예고 없이 사라지고,
+   * 되돌릴 수도 없다. 그래서 전송·중지와 같은 동의 투표를 거친다 — 합의가 서면 서버가 실행을 끊고
+   * 세션을 보관한 뒤 대체 세션을 만들고, 모두 그 새 세션으로 함께 옮겨간다.
+   *
+   * 혼자(또는 doc 모드가 아닐 때)는 물어볼 상대가 없으니 false 를 돌려준다 — 호출한 쪽이 기존
+   * 확인창 경로로 지운다.
+   */
+  const requestClear = async () => {
+    const sessionID = params.id
+    const docID = doc.docID()
+    const actorID = doc.actorID()
+    if (mode() !== "doc" || !sessionID || !docID || !actorID) return false
+
+    const list = doc.actors()
+    const ids = Array.from(new Set([actorID, ...list.map((item) => item.actorID)]))
+    if (ids.length <= 1) return false
+
+    const names: Record<string, string> = {}
+    for (const item of list) {
+      const name = item.name?.trim()
+      if (name && name !== item.actorID) names[item.actorID] = name
+    }
+    try {
+      const state = await startClearSubmit({
+        baseUrl: sdk.url,
+        directory: sdk.directory,
+        sessionID,
+        docID,
+        actorID,
+        names,
+      })
+      setApprovalSession(sessionID)
+      showApproval(state)
+    } catch {
+      // 동의 없이 혼자 지우는 길로 새면 안 된다. 다른 투표가 도는 중이라 서버가 거절했을 수도 있다.
+      showToast({
+        title: language.t("docSubmit.toast.clearRequestFailed"),
+        description: language.t("common.requestFailed"),
+      })
+    }
+    return true
+  }
+
+  // 지우기 확인창은 앱 셸에 있어 이 컨텍스트에 닿지 않는다. 지금 열린 세션이 자기 요청 함수를 걸어
+  // 두면, 확인창이 "지우기" 를 누른 순간 동의를 먼저 구할 수 있다.
+  createEffect(() => {
+    const id = params.id
+    if (!id) return
+    onCleanup(SessionClearVote.register(id, requestClear))
+  })
 
   return {
     doc,
@@ -424,6 +492,8 @@ export function createPromptDocSession(): PromptDocSession {
     setMode,
     working,
     requestStop,
+    requestClear,
+    votePending,
     showApproval,
     approvalSession,
     setApprovalSession,

@@ -19,6 +19,7 @@ import type {
   ConfigProvidersResponses,
   ConfigUpdateErrors,
   ConfigUpdateResponses,
+  DevServerLogsResponses,
   DevServerRestartResponses,
   DevServerStatusResponses,
   DocAssetCreateErrors,
@@ -61,6 +62,11 @@ import type {
   ExperimentalWorkspaceListResponses,
   ExperimentalWorkspaceRemoveErrors,
   ExperimentalWorkspaceRemoveResponses,
+  FileAssetCreateErrors,
+  FileAssetCreateResponses,
+  FileAssetDeleteErrors,
+  FileAssetDeleteResponses,
+  FileAssetListResponses,
   FileListResponses,
   FilePartInput,
   FilePartSource,
@@ -173,6 +179,8 @@ import type {
   SessionPromptAsyncResponses,
   SessionPromptDocAdvanceErrors,
   SessionPromptDocAdvanceResponses,
+  SessionPromptDocClearErrors,
+  SessionPromptDocClearResponses,
   SessionPromptDocErrors,
   SessionPromptDocReadyErrors,
   SessionPromptDocReadyResponses,
@@ -1405,6 +1413,36 @@ export class DevServer extends HeyApiClient {
       ...params,
     })
   }
+
+  /**
+   * Preview dev server logs
+   *
+   * Tail the preview dev server output captured by the launcher (.opencode/dev-server.log). Returns the last `tail` non-empty lines with ANSI escapes stripped, plus the command that produced them. Empty when no dev server has been launched yet.
+   */
+  public logs<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<DevServerLogsResponses, unknown, ThrowOnError>({
+      url: "/dev-server/logs",
+      ...options,
+      ...params,
+    })
+  }
 }
 
 export class Tool extends HeyApiClient {
@@ -2169,6 +2207,59 @@ export class PromptDoc extends HeyApiClient {
       ThrowOnError
     >({
       url: "/session/{sessionID}/prompt-doc/stop",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Create session clear approval
+   *
+   * Create a collaborative consent vote to clear (archive) the session.
+   */
+  public clear<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      docID?: string
+      actorID?: string
+      actorIDs?: Array<string>
+      names?: {
+        [key: string]: string
+      }
+      timeoutMs?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "docID" },
+            { in: "body", key: "actorID" },
+            { in: "body", key: "actorIDs" },
+            { in: "body", key: "names" },
+            { in: "body", key: "timeoutMs" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionPromptDocClearResponses,
+      SessionPromptDocClearErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/prompt-doc/clear",
       ...options,
       ...params,
       headers: {
@@ -4359,6 +4450,110 @@ export class Find extends HeyApiClient {
   }
 }
 
+export class Asset2 extends HeyApiClient {
+  /**
+   * Delete uploaded files
+   *
+   * Delete one uploaded file, or the whole __assets__ folder when no path is given.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      path?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<FileAssetDeleteResponses, FileAssetDeleteErrors, ThrowOnError>({
+      url: "/file/asset",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List uploaded files
+   *
+   * List the files stored in the __assets__ upload folder.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<FileAssetListResponses, unknown, ThrowOnError>({
+      url: "/file/asset",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Upload a file
+   *
+   * Store a file in the __assets__ upload folder, verbatim and without involving the model. The body is the raw bytes; the destination comes from the `path` query parameter.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      path: string
+      body: Blob | File
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "path" },
+            { key: "body", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<FileAssetCreateResponses, FileAssetCreateErrors, ThrowOnError>({
+      bodySerializer: null,
+      url: "/file/asset",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class File extends HeyApiClient {
   /**
    * List files
@@ -4452,6 +4647,11 @@ export class File extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _asset?: Asset2
+  get asset(): Asset2 {
+    return (this._asset ??= new Asset2({ client: this.client }))
   }
 }
 

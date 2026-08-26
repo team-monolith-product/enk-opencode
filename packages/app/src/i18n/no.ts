@@ -33,7 +33,6 @@ export const dict = {
   "command.session.next": "Neste sesjon",
   "command.session.previous.unseen": "Forrige uleste økt",
   "command.session.next.unseen": "Neste uleste økt",
-  "command.session.archive": "Arkiver sesjon",
 
   "command.palette": "Kommandopalett",
 
@@ -604,7 +603,6 @@ export const dict = {
   "common.learnMore": "Lær mer",
   "common.rename": "Gi nytt navn",
   "common.reset": "Tilbakestill",
-  "common.archive": "Arkiver",
   "common.delete": "Slett",
   "common.close": "Lukk",
   "common.edit": "Rediger",

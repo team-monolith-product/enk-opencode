@@ -1285,6 +1285,655 @@
         ]
       }
     },
+    "/env-file": {
+      "get": {
+        "operationId": "envFile.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "List env file keys",
+        "description": "List the key names stored in the project root .env file, with optional updated_at timestamps. Values are never included here — read one with GET /env-file/{name}/value.",
+        "responses": {
+          "200": {
+            "description": "Key names and update times",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvFileKeys"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.envFile.list({\n  ...\n})"
+          }
+        ]
+      },
+      "put": {
+        "operationId": "envFile.set",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Set env file keys",
+        "description": "Merge key=value pairs into the project root .env file. Existing keys are overwritten in place, new keys appended. Values are never returned.",
+        "responses": {
+          "200": {
+            "description": "Key names after update",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvFileKeys"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "values": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "maxLength": 256,
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 8192
+                    }
+                  }
+                },
+                "required": [
+                  "values"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.envFile.set({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/env-file/{name}/value": {
+      "get": {
+        "operationId": "envFile.value",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Read one env file value",
+        "description": "Read a single stored value so a person can check it in the opencode UI. Agent tools are denied this path by Permission.ENV_FILE_GUARD, the same guard that blocks reading .env directly.",
+        "responses": {
+          "200": {
+            "description": "The stored value",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvFileValue"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.envFile.value({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/env-file/{name}": {
+      "delete": {
+        "operationId": "envFile.remove",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Remove env file key",
+        "description": "Remove a key from the project root .env file.",
+        "responses": {
+          "200": {
+            "description": "Key names after removal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvFileKeys"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.envFile.remove({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/env-request": {
+      "get": {
+        "operationId": "envRequest.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "List pending env requests",
+        "description": "Get all pending environment value requests across all sessions.",
+        "responses": {
+          "200": {
+            "description": "List of pending env requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EnvRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.envRequest.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/env-request/{requestID}/submit": {
+      "post": {
+        "operationId": "envRequest.submit",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestID",
+            "schema": {
+              "type": "string",
+              "pattern": "^env.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Submit env request value",
+        "description": "Store the value for a pending env request in the project root .env file. The value is never returned and never reaches the model.",
+        "responses": {
+          "200": {
+            "description": "Value stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192
+                  }
+                },
+                "required": [
+                  "value"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.envRequest.submit({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/env-request/{requestID}/skip": {
+      "post": {
+        "operationId": "envRequest.skip",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestID",
+            "schema": {
+              "type": "string",
+              "pattern": "^env.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Skip env request",
+        "description": "Continue without a value. The assistant is told to proceed with sample data.",
+        "responses": {
+          "200": {
+            "description": "Request skipped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.envRequest.skip({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/env-request/{requestID}/reject": {
+      "post": {
+        "operationId": "envRequest.reject",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestID",
+            "schema": {
+              "type": "string",
+              "pattern": "^env.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Reject env request",
+        "description": "Dismiss the request without storing a value.",
+        "responses": {
+          "200": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.envRequest.reject({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/dev-server/status": {
+      "get": {
+        "operationId": "devServer.status",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Preview dev server status",
+        "description": "Report the preview dev server state so the client can pick the right fallback UI: none | starting | startable | ready | errored. The server self-probes http://127.0.0.1:PORT to get an authoritative HTTP status, then probes the port on a non-loopback address to catch dev servers bound to loopback only (started without --host 0.0.0.0), which the preview proxy cannot reach. Those report state=errored with loopbackOnly=true and no httpStatus.",
+        "responses": {
+          "200": {
+            "description": "Dev server status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevServerStatus"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.devServer.status({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/dev-server/restart": {
+      "post": {
+        "operationId": "devServer.restart",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Restart dev server",
+        "description": "Restart the preview dev server by replaying the command recorded by the last ensure_dev_server call. Idempotent: returns already_starting while a launch is in progress and already_running if the port is already listening, so it is safe to call repeatedly.",
+        "responses": {
+          "200": {
+            "description": "Dev server restart result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevServerRestart"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.devServer.restart({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/dev-server/logs": {
+      "get": {
+        "operationId": "devServer.logs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Preview dev server logs",
+        "description": "Tail the preview dev server output captured by the launcher (.opencode/dev-server.log). Returns the last `tail` non-empty lines with ANSI escapes stripped, plus the command that produced them. Empty when no dev server has been launched yet.",
+        "responses": {
+          "200": {
+            "description": "Dev server log tail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevServerLogs"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.devServer.logs({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/experimental/tool/ids": {
       "get": {
         "operationId": "tool.ids",
@@ -4038,6 +4687,9 @@
                             "url": {
                               "type": "string"
                             },
+                            "saved": {
+                              "type": "string"
+                            },
                             "source": {
                               "$ref": "#/components/schemas/FilePartSource"
                             }
@@ -4826,7 +5478,6 @@
                 "required": [
                   "docID",
                   "actorID",
-                  "actorIDs",
                   "prompt"
                 ]
               }
@@ -4939,8 +5590,7 @@
                 },
                 "required": [
                   "docID",
-                  "actorID",
-                  "actorIDs"
+                  "actorID"
                 ]
               }
             }
@@ -4950,6 +5600,118 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc.stop({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/prompt-doc/clear": {
+      "post": {
+        "operationId": "session.promptDoc.clear",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Create session clear approval",
+        "description": "Create a collaborative consent vote to clear (archive) the session.",
+        "responses": {
+          "200": {
+            "description": "Submit approval state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocSubmit"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "docID": {
+                    "type": "string",
+                    "pattern": "^doc.*"
+                  },
+                  "actorID": {
+                    "type": "string",
+                    "pattern": "^act.*"
+                  },
+                  "actorIDs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^act.*"
+                    }
+                  },
+                  "names": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "timeoutMs": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "docID",
+                  "actorID"
+                ]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.promptDoc.clear({\n  ...\n})"
           }
         ]
       }
@@ -5039,7 +5801,8 @@
                     "type": "string",
                     "enum": [
                       "approve",
-                      "cancel"
+                      "cancel",
+                      "exclude"
                     ]
                   }
                 },
@@ -5103,6 +5866,13 @@
               "pattern": "^act.*"
             },
             "required": true
+          },
+          {
+            "in": "query",
+            "name": "observer",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "summary": "Connect to prompt doc submit approvals",
@@ -5271,7 +6041,6 @@
                 "required": [
                   "requestID",
                   "actorID",
-                  "actorIDs",
                   "payload"
                 ]
               }
@@ -5371,7 +6140,8 @@
                     "type": "string",
                     "enum": [
                       "approve",
-                      "cancel"
+                      "cancel",
+                      "exclude"
                     ]
                   }
                 },
@@ -5434,6 +6204,13 @@
               "pattern": "^act.*"
             },
             "required": true
+          },
+          {
+            "in": "query",
+            "name": "observer",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "summary": "Connect to question reply submit approvals",
@@ -5561,6 +6338,101 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.question.draft.connect({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/session/{sessionID}/env-request/draft/connect": {
+      "get": {
+        "operationId": "session.envRequest.draft.connect",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sessionID",
+            "schema": {
+              "type": "string",
+              "pattern": "^ses.*"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "requestID",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "actorID",
+            "schema": {
+              "type": "string",
+              "pattern": "^act.*"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Connect to env request value draft",
+        "description": "Bidirectional WebSocket for co-editing the name and value of a pending env request. Participants only — read-only viewers are refused. The draft is in-memory and discarded when the request resolves.",
+        "responses": {
+          "200": {
+            "description": "Connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.session.envRequest.draft.connect({\n  ...\n})"
           }
         ]
       }
@@ -7513,6 +8385,174 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.file.status({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/file/asset": {
+      "get": {
+        "operationId": "file.asset.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "List uploaded files",
+        "description": "List the files stored in the __assets__ upload folder.",
+        "responses": {
+          "200": {
+            "description": "Uploaded files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetList"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.file.asset.list({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "operationId": "file.asset.create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "description": "Destination relative to the upload folder, e.g. `spec/api.md`"
+          }
+        ],
+        "summary": "Upload a file",
+        "description": "Store a file in the __assets__ upload folder, verbatim and without involving the model. The body is the raw bytes; the destination comes from the `path` query parameter.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.file.asset.create({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "file.asset.delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Path relative to the upload folder. Omit to delete all."
+          }
+        ],
+        "summary": "Delete uploaded files",
+        "description": "Delete one uploaded file, or the whole __assets__ folder when no path is given.",
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.file.asset.delete({\n  ...\n})"
           }
         ]
       }
@@ -9985,6 +11025,128 @@
           "properties"
         ]
       },
+      "EnvRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Environment variable name the app reads (UPPER_SNAKE_CASE)",
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "label": {
+            "description": "Service name shown to the user, in their language",
+            "type": "string",
+            "maxLength": 120
+          },
+          "reason": {
+            "description": "Why this value is needed, in the user's language",
+            "type": "string",
+            "maxLength": 500
+          },
+          "docsUrl": {
+            "description": "Where the user can obtain the value",
+            "type": "string",
+            "maxLength": 500
+          },
+          "replace": {
+            "description": "Hint that the user is replacing an existing value. Optional — the tool opens the input even when a value is already stored",
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^env.*"
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses.*"
+          },
+          "tool": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg.*"
+              },
+              "callID": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "messageID",
+              "callID"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "id",
+          "sessionID"
+        ]
+      },
+      "Event.env.request.asked": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "env.request.asked"
+          },
+          "properties": {
+            "$ref": "#/components/schemas/EnvRequest"
+          }
+        },
+        "required": [
+          "type",
+          "properties"
+        ]
+      },
+      "EnvRequestStatus": {
+        "type": "string",
+        "enum": [
+          "saved",
+          "skipped",
+          "canceled"
+        ]
+      },
+      "Event.env.request.resolved": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "env.request.resolved"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "requestID": {
+                "type": "string",
+                "pattern": "^env.*"
+              },
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "$ref": "#/components/schemas/EnvRequestStatus"
+              }
+            },
+            "required": [
+              "sessionID",
+              "requestID",
+              "name",
+              "status"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "properties"
+        ]
+      },
       "Event.tui.prompt.append": {
         "type": "object",
         "properties": {
@@ -11545,6 +12707,9 @@
           "url": {
             "type": "string"
           },
+          "saved": {
+            "type": "string"
+          },
           "source": {
             "$ref": "#/components/schemas/FilePartSource"
           }
@@ -12095,6 +13260,10 @@
           },
           "overflow": {
             "type": "boolean"
+          },
+          "tail_start_id": {
+            "type": "string",
+            "pattern": "^msg.*"
           }
         },
         "required": [
@@ -12517,6 +13686,12 @@
           },
           {
             "$ref": "#/components/schemas/Event.todo.updated"
+          },
+          {
+            "$ref": "#/components/schemas/Event.env.request.asked"
+          },
+          {
+            "$ref": "#/components/schemas/Event.env.request.resolved"
           },
           {
             "$ref": "#/components/schemas/Event.tui.prompt.append"
@@ -14142,6 +15317,23 @@
               }
             }
           },
+          "tool_output": {
+            "type": "object",
+            "properties": {
+              "max_lines": {
+                "description": "Maximum lines of tool output kept in context before truncation (default: 2000)",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "max_bytes": {
+                "description": "Maximum bytes of tool output kept in context before truncation (default: 51200)",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          },
           "compaction": {
             "type": "object",
             "properties": {
@@ -14152,6 +15344,18 @@
               "prune": {
                 "description": "Enable pruning of old tool outputs (default: true)",
                 "type": "boolean"
+              },
+              "tail_turns": {
+                "description": "Number of recent user turns, including their following assistant/tool responses, to keep verbatim during compaction (default: 2)",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "preserve_recent_tokens": {
+                "description": "Maximum number of tokens from recent turns to preserve verbatim after compaction",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
               },
               "reserved": {
                 "description": "Token buffer for compaction. Leaves enough window to avoid overflow during compaction.",
@@ -14678,6 +15882,129 @@
           }
         }
       },
+      "EnvFileKeys": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updated_at": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "empty": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "keys",
+          "empty"
+        ]
+      },
+      "EnvFileValue": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ]
+      },
+      "DevServerStatus": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "none",
+              "starting",
+              "startable",
+              "ready",
+              "errored"
+            ]
+          },
+          "port": {
+            "type": "number"
+          },
+          "httpStatus": {
+            "type": "number"
+          },
+          "loopbackOnly": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "DevServerRestart": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "already_running",
+              "started",
+              "failed",
+              "no_command",
+              "already_starting"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "port": {
+            "type": "number"
+          },
+          "ms": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "ms"
+        ]
+      },
+      "DevServerLogs": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cmd": {
+            "type": "string"
+          },
+          "port": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "lines"
+        ]
+      },
       "ToolIDs": {
         "type": "array",
         "items": {
@@ -15067,6 +16394,9 @@
           "url": {
             "type": "string"
           },
+          "saved": {
+            "type": "string"
+          },
           "source": {
             "$ref": "#/components/schemas/FilePartSource"
           }
@@ -15188,7 +16518,8 @@
         "enum": [
           "doc",
           "question",
-          "stop"
+          "stop",
+          "clear"
         ]
       },
       "DocSubmitStatus": {
@@ -15218,7 +16549,8 @@
             "type": "string",
             "enum": [
               "pending",
-              "approved"
+              "approved",
+              "left"
             ]
           }
         },
@@ -16047,6 +17379,89 @@
           "added",
           "removed",
           "status"
+        ]
+      },
+      "AssetEntry": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "modified": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "path",
+          "size",
+          "modified"
+        ]
+      },
+      "AssetList": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssetEntry"
+            }
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "count",
+              "bytes"
+            ]
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "total": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "count": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "file",
+              "total",
+              "count"
+            ]
+          }
+        },
+        "required": [
+          "files",
+          "usage",
+          "limits"
         ]
       },
       "MCPStatusConnected": {

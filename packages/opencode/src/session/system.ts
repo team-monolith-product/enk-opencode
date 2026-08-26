@@ -1,3 +1,4 @@
+import { Assets } from "../file/assets"
 import { Ripgrep } from "../file/ripgrep"
 
 import { Instance } from "../project/instance"
@@ -54,8 +55,57 @@ export namespace SystemPrompt {
             : ""
         }`,
         `</directories>`,
-      ].join("\n"),
+        uploads(),
+      ]
+        .filter(Boolean)
+        .join("\n"),
     ]
+  }
+
+  /** Files listed here are cheap; the same files as attachments would be re-billed every step. */
+  const UPLOAD_LIST_LIMIT = 100
+
+  /**
+   * Tells the agent what the user has uploaded, so it never has to go looking, and how the folder
+   * differs from the rest of the workspace. Both rules below exist because the folder is
+   * git-excluded (see Assets.exclude):
+   *
+   *  - the originals are the only files here that nothing can restore, and
+   *  - anything shipping that points at this path works in preview and breaks on deploy, which is
+   *    a failure no amount of looking at the running app will reveal.
+   *
+   * Being excluded also hides the folder from glob/grep unless they are pointed at it, hence the
+   * explicit path rather than trusting the agent to discover it.
+   *
+   * Returns "" when nothing has been uploaded, so a project that never uses the feature pays
+   * nothing for it.
+   */
+  function uploads() {
+    const files = Assets.list()
+    if (files.length === 0) return ""
+
+    const shown = files.slice(0, UPLOAD_LIST_LIMIT)
+    return [
+      `<uploads>`,
+      `  The user uploaded these files directly. They were stored as-is and you have not seen their contents.`,
+      `  Directory: ${Assets.root()}`,
+      `  This directory is excluded from git, so glob/grep skip it unless you pass this path explicitly.`,
+      `  Reading them in place is fine. Two rules apply:`,
+      `  1. These are the user's originals and nothing backs them up: do not modify, delete or rename them.`,
+      `  2. Nothing that ships may point here. Because the directory is not committed, code that reads a`,
+      `     path under it works in preview and breaks the moment the project is committed or deployed.`,
+      `     If the project needs one of these files at runtime, move it into the project's normal location`,
+      `     for that kind of file (public/, assets/, fixtures/, ...) and reference it there instead.`,
+      ...shown.map((file) => `  ${file.path} (${size(file.size)})`),
+      ...(files.length > shown.length ? [`  [${files.length - shown.length} more]`] : []),
+      `</uploads>`,
+    ].join("\n")
+  }
+
+  function size(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+    return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
   }
 
   export async function skills(agent: Agent.Info) {

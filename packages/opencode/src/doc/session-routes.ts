@@ -157,6 +157,31 @@ export const SessionDocRoutes = () =>
       },
     )
     .post(
+      "/:sessionID/prompt-doc/clear",
+      describeRoute({
+        summary: "Create session clear approval",
+        description: "Create a collaborative consent vote to clear (archive) the session.",
+        operationId: "session.promptDoc.clear",
+        responses: {
+          200: {
+            description: "Submit approval state",
+            content: { "application/json": { schema: resolver(Doc.SubmitState) } },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ sessionID: SessionID.zod })),
+      validator("json", Doc.ClearSubmitCreateInput.omit({ sessionID: true })),
+      async (c) => {
+        return c.json(
+          Doc.clearSubmitCreate({
+            ...c.req.valid("json"),
+            sessionID: c.req.valid("param").sessionID,
+          }),
+        )
+      },
+    )
+    .post(
       "/:sessionID/prompt-doc/submit/:submitID/respond",
       describeRoute({
         summary: "Respond to prompt doc submit approval",

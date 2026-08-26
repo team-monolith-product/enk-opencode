@@ -204,7 +204,7 @@ export function DialogEnvKeys() {
       action={<span class="sr-only" />}
       transition
       fit
-      class="env-keys-dialog"
+      class="env-keys-dialog hazard-dialog"
     >
       <form onSubmit={save} class="env-keys-form flex flex-col w-full">
         <div class="flex flex-col gap-4 px-7 pt-[18px] pb-2 overflow-y-auto max-h-[56vh] w-full">
@@ -406,7 +406,7 @@ export function DialogEnvKeys() {
           </Show>
         </div>
 
-        <div class="env-keys-footer">
+        <div class="hazard-dialog-footer">
           <Show when={!loadError() && summaryText()}>
             <span class="env-keys-summary">
               {language.t("envKeys.summary.prefix")} <b>{summaryText()}</b> {language.t("envKeys.summary.suffix")}

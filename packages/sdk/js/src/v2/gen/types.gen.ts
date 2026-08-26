@@ -1868,6 +1868,12 @@ export type DevServerRestart = {
   reason?: string
 }
 
+export type DevServerLogs = {
+  lines: Array<string>
+  cmd?: string
+  port?: number
+}
+
 export type ToolIds = Array<string>
 
 export type ToolListItem = {
@@ -2012,7 +2018,7 @@ export type SessionPromptDoc = {
   sessionID: string
 }
 
-export type DocSubmitTargetKind = "doc" | "question" | "stop"
+export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear"
 
 export type DocSubmitStatus = "pending" | "sent" | "cancelled" | "expired" | "left"
 
@@ -2182,6 +2188,25 @@ export type File = {
   added: number
   removed: number
   status: "added" | "deleted" | "modified"
+}
+
+export type AssetEntry = {
+  path: string
+  size: number
+  modified: number
+}
+
+export type AssetList = {
+  files: Array<AssetEntry>
+  usage: {
+    count: number
+    bytes: number
+  }
+  limits: {
+    file: number
+    total: number
+    count: number
+  }
 }
 
 export type McpStatusConnected = {
@@ -3167,6 +3192,25 @@ export type DevServerRestartResponses = {
 }
 
 export type DevServerRestartResponse = DevServerRestartResponses[keyof DevServerRestartResponses]
+
+export type DevServerLogsData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/dev-server/logs"
+}
+
+export type DevServerLogsResponses = {
+  /**
+   * Dev server log tail
+   */
+  200: DevServerLogs
+}
+
+export type DevServerLogsResponse = DevServerLogsResponses[keyof DevServerLogsResponses]
 
 export type ToolIdsData = {
   body?: never
@@ -4714,6 +4758,48 @@ export type SessionPromptDocStopResponses = {
 
 export type SessionPromptDocStopResponse = SessionPromptDocStopResponses[keyof SessionPromptDocStopResponses]
 
+export type SessionPromptDocClearData = {
+  body?: {
+    docID: string
+    actorID: string
+    actorIDs?: Array<string>
+    names?: {
+      [key: string]: string
+    }
+    timeoutMs?: number
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/prompt-doc/clear"
+}
+
+export type SessionPromptDocClearErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionPromptDocClearError = SessionPromptDocClearErrors[keyof SessionPromptDocClearErrors]
+
+export type SessionPromptDocClearResponses = {
+  /**
+   * Submit approval state
+   */
+  200: DocSubmit
+}
+
+export type SessionPromptDocClearResponse = SessionPromptDocClearResponses[keyof SessionPromptDocClearResponses]
+
 export type SessionPromptDocSubmitRespondData = {
   body?: {
     actorID: string
@@ -5761,6 +5847,89 @@ export type FileStatusResponses = {
 }
 
 export type FileStatusResponse = FileStatusResponses[keyof FileStatusResponses]
+
+export type FileAssetDeleteData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    /**
+     * Path relative to the upload folder. Omit to delete all.
+     */
+    path?: string
+  }
+  url: "/file/asset"
+}
+
+export type FileAssetDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type FileAssetDeleteError = FileAssetDeleteErrors[keyof FileAssetDeleteErrors]
+
+export type FileAssetDeleteResponses = {
+  /**
+   * Deleted
+   */
+  200: boolean
+}
+
+export type FileAssetDeleteResponse = FileAssetDeleteResponses[keyof FileAssetDeleteResponses]
+
+export type FileAssetListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/asset"
+}
+
+export type FileAssetListResponses = {
+  /**
+   * Uploaded files
+   */
+  200: AssetList
+}
+
+export type FileAssetListResponse = FileAssetListResponses[keyof FileAssetListResponses]
+
+export type FileAssetCreateData = {
+  body: Blob | File
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    /**
+     * Destination relative to the upload folder, e.g. `spec/api.md`
+     */
+    path: string
+  }
+  url: "/file/asset"
+}
+
+export type FileAssetCreateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type FileAssetCreateError = FileAssetCreateErrors[keyof FileAssetCreateErrors]
+
+export type FileAssetCreateResponses = {
+  /**
+   * Stored file
+   */
+  200: AssetEntry
+}
+
+export type FileAssetCreateResponse = FileAssetCreateResponses[keyof FileAssetCreateResponses]
 
 export type EventSubscribeData = {
   body?: never

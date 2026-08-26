@@ -219,11 +219,17 @@ export namespace Ripgrep {
     hidden?: boolean
     follow?: boolean
     maxDepth?: number
+    /**
+     * Search paths git is told to ignore. Needed for the upload folder, which is excluded via
+     * .git/info/exclude so it stays out of diffs — without this rg would skip it entirely.
+     */
+    noIgnore?: boolean
     signal?: AbortSignal
   }) {
     input.signal?.throwIfAborted()
 
     const args = [await filepath(), "--files", "--glob=!.git/*"]
+    if (input.noIgnore) args.push("--no-ignore-vcs")
     if (input.follow) args.push("--follow")
     if (input.hidden !== false) args.push("--hidden")
     if (input.maxDepth !== undefined) args.push(`--max-depth=${input.maxDepth}`)
@@ -338,8 +344,11 @@ export namespace Ripgrep {
     glob?: string[]
     limit?: number
     follow?: boolean
+    /** See `files`: the upload folder is git-excluded, so searching it requires opting out. */
+    noIgnore?: boolean
   }) {
     const args = [`${await filepath()}`, "--json", "--hidden", "--glob=!.git/*"]
+    if (input.noIgnore) args.push("--no-ignore-vcs")
     if (input.follow) args.push("--follow")
 
     if (input.glob) {

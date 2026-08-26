@@ -5,7 +5,7 @@ import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/ui/file"
 import { Font } from "@opencode-ai/ui/font"
-import { Splash } from "@opencode-ai/ui/logo"
+import { JitdaMark, Splash } from "@opencode-ai/ui/logo"
 import { ThemeProvider } from "@opencode-ai/ui/theme/context"
 import { MetaProvider } from "@solidjs/meta"
 import { type BaseRouterProps, Navigate, Route, Router, useLocation } from "@solidjs/router"
@@ -54,7 +54,12 @@ import { ParentParamsProvider } from "@/context/parent-params"
 const HomeRoute = lazy(() => import("@/pages/home"))
 const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
-const Loading = () => <div class="size-full" />
+// 라우트 청크가 늦게 오면 셸 안쪽이 통째로 빈 화면이 된다. 짓다 마크로 채운다.
+const Loading = () => (
+  <div class="size-full flex items-center justify-center">
+    <JitdaMark class="w-14 h-auto opacity-50 animate-pulse" />
+  </div>
+)
 
 if (typeof location === "object" && /\/session(?:\/|$)/.test(location.pathname)) {
   void loadSession()
@@ -161,12 +166,30 @@ function resolveRouterBase(): string | undefined {
   return normalized || undefined
 }
 
+// 팔레트를 갈아끼우는 프레임 동안만 transition 을 끈다(규칙은 index.css). 테마 적용과 같은
+// 태스크에서 붙였다가 두 프레임 뒤에 떼므로, 전환 자체는 애니메이션되지 않고 hover 같은 평소
+// 전환은 그대로 남는다.
+let themeSwitchFrame: number | undefined
+function suppressThemeTransitions() {
+  if (typeof document === "undefined") return
+  const root = document.documentElement
+  root.setAttribute("data-theme-switching", "")
+  if (themeSwitchFrame !== undefined) cancelAnimationFrame(themeSwitchFrame)
+  themeSwitchFrame = requestAnimationFrame(() => {
+    themeSwitchFrame = requestAnimationFrame(() => {
+      themeSwitchFrame = undefined
+      root.removeAttribute("data-theme-switching")
+    })
+  })
+}
+
 export function AppBaseProviders(props: ParentProps<{ locale?: Locale }>) {
   return (
     <MetaProvider>
       <Font />
       <ThemeProvider
         onThemeApplied={(_, mode) => {
+          suppressThemeTransitions()
           void window.api?.setTitlebar?.({ mode })
         }}
       >
@@ -226,7 +249,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
       when={checkMode() === "blocking" ? !startupHealthCheck.loading : startupHealthCheck.state !== "pending"}
       fallback={
         <div class="h-dvh w-screen flex flex-col items-center justify-center" data-app-surface="canvas">
-          <Splash class="w-16 h-20 opacity-50 animate-pulse" />
+          <JitdaMark class="w-19 h-auto opacity-50 animate-pulse" />
         </div>
       }
     >

@@ -19,8 +19,11 @@ import { useClientEnv } from "@/context/client-env"
 import { Persist, persisted } from "@/utils/persist"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { decode64 } from "@/utils/base64"
+import { SessionFollow } from "@/utils/session-follow"
+import { DialogClearSession } from "@/components/session/dialog-clear-session"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Button } from "@opencode-ai/ui/button"
+import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
@@ -988,30 +991,54 @@ export default function Layout(props: ParentProps) {
     }
   }
 
+  // 초기화에 닿는 모든 길(컴포저 버튼·커맨드·사이드바)이 같은 확인창을 거치게 한다.
+  function clearSession(session: Session) {
+    dialog.show(() => <DialogClearSession session={session} clear={archiveSession} />)
+  }
+
   async function archiveSession(session: Session) {
     const [store, setStore] = globalSync.child(session.directory)
-    const sessions = store.session ?? []
+    // 대화 화면을 대신할 수 있는 건 루트 세션뿐이다. 자식(서브에이전트) 세션이 목록에 섞여 있어
+    // 걸러내지 않으면 보관 뒤 서브에이전트 세션으로 튄다.
+    const sessions = (store.session ?? []).filter((s) => !s.parentID && !s.time?.archived)
     const index = sessions.findIndex((s) => s.id === session.id)
-    const nextSession = sessions[index + 1] ?? sessions[index - 1]
+    const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
-    await globalSDK.client.session.update({
-      directory: session.directory,
-      sessionID: session.id,
-      time: { archived: Date.now() },
-    })
+    // 초기화가 실패했는데 화면만 넘어가면 정리된 줄 알고 대화를 이어간다. 실패는 실패로 보여준다.
+    const removed = await globalSDK.client.session
+      .update({
+        directory: session.directory,
+        sessionID: session.id,
+        time: { archived: Date.now() },
+      })
+      .then(() => true)
+      .catch((err) => {
+        showToast({
+          title: language.t("session.clear.failed.title"),
+          description: errorMessage(err, language.t("common.requestFailed")),
+        })
+        return false
+      })
+    if (!removed) return
+
     setStore(
       produce((draft) => {
         const match = Binary.search(draft.session, session.id, (s) => s.id)
         if (match.found) draft.session.splice(match.index, 1)
       }),
     )
-    if (session.id === params.id) {
-      if (nextSession) {
-        navigate(`/${params.dir}/session/${nextSession.id}`)
-      } else {
-        navigate(`/${params.dir}/session`)
-      }
+    if (session.id !== params.id) return
+    if (nextSession) {
+      navigate(`/${params.dir}/session/${nextSession.id}`)
+      return
     }
+    // 한 세션만 띄우는 워크스페이스는 서버가 이 요청 안에서 대체 세션을 만들어 뒀다. 빈 화면으로
+    // 보내 버리면 새 세션으로 옮겨간 다른 접속자들과 갈라지므로, 이동은 directory-layout 에 맡긴다.
+    if (store.config.ensureSession) {
+      SessionFollow.expect(session.directory)
+      return
+    }
+    navigate(`/${params.dir}/session`)
   }
 
   command.register("layout", () => {
@@ -1093,14 +1120,17 @@ export default function Layout(props: ParentProps) {
         onSelect: () => navigateSessionByUnseen(1),
       },
       {
-        id: "session.archive",
-        title: language.t("command.session.archive"),
+        id: "session.clear",
+        title: language.t("command.session.clear"),
         category: language.t("command.category.session"),
-        // keybind: "mod+shift+backspace",
         disabled: !params.dir || !params.id,
         onSelect: () => {
-          const session = currentSessions().find((s) => s.id === params.id)
-          if (session) archiveSession(session)
+          // currentSessions() 는 사이드바에 펼쳐진 워크스페이스만 담는다. 열려 있는 세션이 거기 없을 수 있어
+          // 라우트가 가리키는 디렉터리 스토어에서 직접 찾는다.
+          const directory = currentDir()
+          if (!directory || !params.id) return
+          const session = globalSync.child(directory)[0].session?.find((s) => s.id === params.id)
+          if (session) clearSession(session)
         },
       },
       {
@@ -1979,7 +2009,7 @@ export default function Layout(props: ParentProps) {
     setHoverSession,
     clearHoverProjectSoon,
     prefetchSession,
-    archiveSession,
+    clearSession,
     workspaceName,
     renameWorkspace,
     editorOpen,
@@ -2030,7 +2060,7 @@ export default function Layout(props: ParentProps) {
       setHoverSession,
       clearHoverProjectSoon,
       prefetchSession,
-      archiveSession,
+      clearSession,
     },
     setHoverSession,
   }

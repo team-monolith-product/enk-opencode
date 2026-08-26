@@ -32,6 +32,8 @@ type ShellProps = {
   modes?: JSX.Element
   onCapture: () => void
   capturing?: boolean
+  /** 다른 합의가 도는 중에는 지우기를 시작할 수 없다. */
+  clearDisabled?: boolean
   /** 미리보기가 캡처 가능한 상태(URL·ready·패널 열림)인지. false 면 캡처 항목을 비활성화한다. */
   canCapture?: boolean
   expand?: {
@@ -59,6 +61,8 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
 
   // 세션이 등록한 컴팩션 커맨드. 세션 밖(읽기 전용 뷰어 등)에서는 없으므로 그때는 버튼을 잠근다.
   const compactCommand = () => command.options.find((x) => x.id === "session.compact")
+  // 레이아웃이 등록한 세션 지우기 커맨드. 세션 밖에서는 disabled 라 버튼도 같이 잠긴다.
+  const clearCommand = () => command.options.find((x) => x.id === "session.clear")
 
   const ratio = () => (props.maxLength > 0 ? props.length / props.maxLength : 0)
   const over = () => props.length > props.maxLength
@@ -349,9 +353,10 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
             </Tooltip>
           </Show>
 
+          <span class="mx-1 h-4 w-px shrink-0 bg-border-weaker-base" />
+
           {/* 컴팩션 — devMode 전용. 슬래시 팝오버는 배포 빌드에서 통째로 꺼져 있어 /compact 로는 닿지 않는다. */}
           <Show when={env.devMode()}>
-            <span class="mx-1 h-4 w-px shrink-0 bg-border-weaker-base" />
             <Tooltip placement="top" value={language.t("command.session.compact.description")}>
               <IconButton
                 data-action="prompt-doc-compact"
@@ -366,6 +371,22 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               />
             </Tooltip>
           </Show>
+
+          {/* 세션 지우기 — 확인창을 거치고, 같이 쓰는 중이면 거기서 동의 투표로 이어진다.
+              배포 레이아웃엔 사이드바가 없어 사이드바의 보관 버튼에는 닿을 수 없다. */}
+          <Tooltip placement="top" value={language.t("command.session.clear")}>
+            <IconButton
+              data-action="prompt-doc-clear-session"
+              type="button"
+              icon="trash"
+              variant="ghost"
+              class="size-7.5"
+              disabled={props.readonly || props.clearDisabled || (clearCommand()?.disabled ?? true)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => command.trigger("session.clear")}
+              aria-label={language.t("command.session.clear")}
+            />
+          </Tooltip>
         </div>
         <div class="flex items-center gap-2">
           {/* 글자 수 카운터 — 상한 80%에 닿는 순간 그냥 나타난다. 초과 시 현재 글자수만 빨간색으로 전환 */}

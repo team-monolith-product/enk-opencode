@@ -6,6 +6,7 @@ import DESCRIPTION from "./glob.txt"
 import { Ripgrep } from "../file/ripgrep"
 import { Instance } from "../project/instance"
 import { assertExternalDirectory } from "./external-directory"
+import { Assets } from "../file/assets"
 
 export const GlobTool = Tool.define("glob", {
   description: DESCRIPTION,
@@ -39,6 +40,8 @@ export const GlobTool = Tool.define("glob", {
     for await (const file of Ripgrep.files({
       cwd: search,
       glob: [params.pattern],
+      // See GrepTool: the upload folder is git-excluded, so reaching it requires pointing `path` at it.
+      noIgnore: Assets.contains(search),
       signal: ctx.abort,
     })) {
       if (files.length >= limit) {
