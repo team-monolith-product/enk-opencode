@@ -5,6 +5,17 @@ import { Pty } from "../../src/pty"
 import { tmpdir } from "../fixture/fixture"
 import { setTimeout as sleep } from "node:timers/promises"
 
+const DONE = "__PTY_ENV_DONE__"
+
+const wait = async (fn: () => boolean, ms = 5000) => {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
+    if (fn()) return
+    await sleep(25)
+  }
+  throw new Error("timeout waiting for pty output")
+}
+
 // PTY 는 bash 툴과 같은 "에이전트/사람이 명령을 짜는 셸" 경로다. 계약도 같아야 한다:
 // 배포가 주입한 시크릿도, 프로젝트 .env 에 저장한 값도 셸 환경에 존재하지 않는다.
 describe("pty env", () => {
@@ -51,18 +62,23 @@ describe("pty env", () => {
           // 출력이 나오기 전에 소켓을 붙일 시간을 준다 — 프로세스가 끝나면 세션이 사라진다.
           const info = await Pty.create({
             command: "/usr/bin/env",
-            args: ["sh", "-c", "sleep 0.3; printenv"],
+            args: ["sh", "-c", "sleep 0.3; printenv; echo __PTY_ENV_DONE__"],
             title: "env",
           })
           try {
             Pty.connect(info.id, ws as any)
-            await sleep(1500)
+            // 덤프가 "끝났는지" 를 기다린다. 대조군은 덤프 중간에 나오므로 그걸 신호로 삼으면
+            // 뒤늦게 도착하는 시크릿 줄을 놓친 채 단언해 가짜 성공이 된다.
+            await wait(() => out.join("").includes(DONE))
 
             const output = out.join("")
             expect(output).toContain(control.NODE_ENV)
+            // 터미널은 기본 폭(80)에서 줄을 접으면서 값 중간에 CRLF 를 끼워 넣는다. 값이 길어지면
+            // 접힌 자리 때문에 toContain 이 조용히 통과해 가짜 성공이 되므로 펴서 본다.
+            const unwrapped = output.replace(/[\r\n]/g, "")
             for (const [name, value] of Object.entries(secrets)) {
-              expect(output).not.toContain(value)
-              expect(output).not.toContain(name)
+              expect(unwrapped).not.toContain(value)
+              expect(unwrapped).not.toContain(name)
             }
           } finally {
             await Pty.remove(info.id)
