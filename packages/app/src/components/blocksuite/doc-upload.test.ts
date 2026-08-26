@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   createMissingRegistry,
+  createStoredSeed,
   createUploadTracker,
   missingMarks,
   paintUploads,
@@ -39,6 +40,52 @@ function harness() {
 }
 
 const file = (name = "a.png", size = 100) => new File([new Uint8Array(size)], name, { type: "image/png" })
+
+describe("createStoredSeed", () => {
+  test("asks the server once, however many files are attached", async () => {
+    let asks = 0
+    const marked: string[] = []
+    const seed = createStoredSeed({
+      list: async () => {
+        asks++
+        return ["k1", "k2"]
+      },
+      markStored: (key) => marked.push(key),
+    })
+
+    await Promise.all([seed(), seed()])
+    await seed()
+
+    expect(asks).toBe(1)
+    expect(marked).toEqual(["k1", "k2"])
+  })
+
+  test("never asks until the first attachment", () => {
+    let asks = 0
+    createStoredSeed({
+      list: async () => {
+        asks++
+        return []
+      },
+      markStored: () => {},
+    })
+    // Building the editor must not cost a round trip — most of them never see an attachment, and the
+    // doc each send rotates to is empty by construction.
+    expect(asks).toBe(0)
+  })
+
+  test("a failed query resolves, leaving the upload to send bytes it may not need to", async () => {
+    const seed = createStoredSeed({
+      list: () => Promise.reject(new Error("offline")),
+      markStored: () => {
+        throw new Error("nothing to mark")
+      },
+    })
+
+    // Resolves rather than rejecting: not knowing must not fail the attach.
+    expect(await seed().then(() => "resolved")).toBe("resolved")
+  })
+})
 
 describe("createUploadTracker", () => {
   test("an added file blocks submit until its bytes land", async () => {

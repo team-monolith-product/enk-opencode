@@ -134,6 +134,30 @@ export function createMissingRegistry(input: MissingRegistryInput) {
   }
 }
 
+/**
+ * Asks the server — once — which assets it already holds, and marks them stored on the tracker.
+ *
+ * Deferred to the first attachment rather than run when the editor is built: the answer only decides
+ * whether an attachment's bytes need sending, so an editor nobody attaches to must not pay a round
+ * trip for it — least of all the empty doc every send rotates to, whose list comes back empty by
+ * construction.
+ *
+ * A failed query resolves instead of rejecting. Not knowing means the next upload sends bytes that
+ * may already be up there, which is the harmless direction; failing the attach would not be.
+ */
+export function createStoredSeed(input: { list: () => Promise<string[]>; markStored: (key: string) => void }) {
+  let asked: Promise<void> | undefined
+  return () => {
+    asked ??= input
+      .list()
+      .then((keys) => {
+        for (const key of keys) input.markStored(key)
+      })
+      .catch(() => {})
+    return asked
+  }
+}
+
 export type UploadTrackerInput = {
   upload: (key: string, blob: Blob, opts: BlobUploadOpts) => Promise<unknown>
   onChange: () => void
