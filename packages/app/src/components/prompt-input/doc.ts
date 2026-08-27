@@ -8,7 +8,12 @@ import type { LineRefInput } from "@/components/blocksuite/line-reference-url"
 import type { DocSyncOpts } from "@/components/blocksuite/opencode-doc-source"
 import { label } from "@/components/blocksuite/actor"
 import { clearActor, loadActor, saveActor } from "./doc-actor"
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
+import {
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_TOTAL_BYTES,
+  type AttachmentUsage,
+} from "@/constants/file-picker"
 
 type DocHandle = Awaited<ReturnType<typeof createPage>>
 
@@ -46,6 +51,14 @@ export type PromptDocInput = {
    * failed on CI's Linux box.
    */
   createPage?: typeof createPage
+  /**
+   * What the composer already carries against the same per-prompt budget. A doc-mode send ships both
+   * lanes — the doc's blocks and the prompt's own image parts, which promptFromDocMarkdown keeps —
+   * so an add has to be weighed against the sum. Without it a tab capture taken in normal mode is
+   * invisible to the doc's check (and vice versa) and the count/byte limits leak a second full
+   * budget's worth.
+   */
+  baseUsage?: () => AttachmentUsage
 }
 
 // Bootstrap requests (actor registration + prompt doc lookup) run before the sync layer exists, so a
@@ -413,12 +426,15 @@ export function createPromptDoc(input: PromptDocInput) {
     // front rather than re-read per file: the adds below run concurrently, so re-reading would let a
     // batch race past the limit. Files that don't fit are dropped and reported via `overflow`.
     const current = assets()
+    // Attachments living on the composer side of the same prompt. They are not doc blocks, so they
+    // can never match an incoming file's asset key — they only ever spend budget.
+    const base = input.baseUsage?.() ?? { count: 0, bytes: 0 }
     // Budgeted per asset id (a content hash), so a file the doc already carries — or one repeated
     // inside this batch — is free: it is stored once and uploaded once. That also means it is
     // accepted even when the doc is at the limit, since it adds nothing to spend.
     const seen = new Set(current.keys ?? [])
-    let count = current.count
-    let bytes = current.bytes
+    let count = current.count + base.count
+    let bytes = current.bytes + base.bytes
     let overflow = false
     const accepted: File[] = []
     for (const file of eligible) {

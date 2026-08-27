@@ -217,6 +217,26 @@ describe("createPromptDoc attachment budget", () => {
     expect(handle.addFile).toHaveBeenCalledTimes(MAX_ATTACHMENT_COUNT)
   })
 
+  test("counts the composer's attachments too — one budget, two lanes", async () => {
+    // A doc-mode send ships the composer's image parts alongside the doc's blocks, so a tab capture
+    // taken before switching into doc mode has to spend the same budget. Counted apart, this add
+    // would be waved through and the message would carry MAX + 2 attachments.
+    assetUsage = { count: 0, bytes: 0, keys: [] }
+    handle.addFile.mockClear()
+    const [store] = createStore(config())
+    const doc = createPromptDoc({
+      createPage,
+      config: store,
+      client,
+      onSubmit: () => {},
+      baseUsage: () => ({ count: MAX_ATTACHMENT_COUNT - 1, bytes: 0 }),
+    })
+    await doc.mount({ el: document.createElement("div"), theme: "light" })
+    const result = await doc.addFiles([file("a.png", 1), file("b.png", 1)])
+    expect(result.overflow).toBe(true)
+    expect(handle.addFile).toHaveBeenCalledTimes(1)
+  })
+
   test("counts what the doc already holds, not just this batch", async () => {
     const doc = await mounted()
     assetUsage = { count: MAX_ATTACHMENT_COUNT - 1, bytes: 0, keys: [] }
