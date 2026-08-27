@@ -195,9 +195,13 @@ export namespace Pty {
           }) as Record<string, string>
           // bash 와 같은 이유로 프로젝트 .env 계열 키를 한 번 더 지운다. Bun 이 서버 시작 시 cwd 의
           // .env 를 process.env 로 올리는데, HTTP_PROXY 처럼 allowlist 를 통과하는 이름이면
-          // sanitize 만으로는 남아서 `echo $HTTP_PROXY` 로 값이 그대로 보인다. 기준 디렉토리는
-          // input.cwd 가 아니라 bash 와 같은 Instance.directory 여야 두 경로의 계약이 어긋나지 않는다.
-          for (const name of await ChildEnv.envFileKeys(Instance.directory)) delete env[name]
+          // sanitize 만으로는 남아서 `echo $HTTP_PROXY` 로 값이 그대로 보인다.
+          //
+          // 기준은 input.cwd 가 아니라 인스턴스 디렉토리다 — bash 가 Instance.directory 를 쓰므로
+          // 여기서 다른 걸 보면 두 경로의 계약이 어긋난다. state.dir 은 InstanceState 의 캐시 키가
+          // Instance.directory 라 같은 값이면서, 컨텍스트가 확실한 제너레이터에서 이미 잡아 둔
+          // 값이다. Effect.promise 안에서 AsyncLocalStorage 를 다시 뒤지지 않는다.
+          for (const name of await ChildEnv.envFileKeys(state.dir)) delete env[name]
 
           if (process.platform === "win32") {
             env.LC_ALL = "C.UTF-8"
