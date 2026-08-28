@@ -206,6 +206,27 @@ export const DocRoutes = lazy(() =>
       },
     )
     .get(
+      "/:docID/asset",
+      describeRoute({
+        summary: "List doc assets",
+        description: "Return the ids of the assets stored for a collaborative doc.",
+        operationId: "doc.asset.list",
+        responses: {
+          200: {
+            description: "Asset ids",
+            content: {
+              "application/json": {
+                schema: resolver(z.array(AssetID.zod)),
+              },
+            },
+          },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ docID: DocID.zod })),
+      async (c) => c.json(Doc.assetList({ docID: c.req.valid("param").docID })),
+    )
+    .get(
       "/:docID/asset/:assetID",
       describeRoute({
         summary: "Get doc asset",

@@ -12,6 +12,7 @@ import { inlineReady } from "./inline-editor"
 import { OpencodeAwarenessSource, OpencodeBlobSource, OpencodeDocSource, type DocSyncOpts } from "./opencode-doc-source"
 import {
   createMissingRegistry,
+  createStoredSeed,
   createUploadTracker,
   missingMarks,
   paintUploads,
@@ -370,6 +371,17 @@ export async function createPage(input: DocMountInput) {
       // list can change without any block or fetch having moved.
       missing.refresh()
     },
+  })
+
+  // The tracker only learns a key from an upload IT ran, and it is rebuilt with the editor — so on a
+  // fresh mount every asset the doc already carries looks unknown, and re-attaching one of those
+  // files would send its bytes again. Seeded from what the server actually holds, NOT from the doc's
+  // own blocks: a block whose upload was aborted mid-flight (tab closed) stays in the doc with
+  // nothing behind it, and marking that key stored would strand it — re-attaching the file is what
+  // heals such a block, and nothing would upload it again.
+  const seedStored = createStoredSeed({
+    list: () => (blobs ? blobs.list() : Promise.resolve([])),
+    markStored: uploads.markStored,
   })
 
   // The blob source is the only place that ever asks the server for an asset, so it is where a
@@ -762,7 +774,13 @@ export async function createPage(input: DocMountInput) {
       // Cache first, insert second, upload third. The block renders from the local blob right away
       // and carries a progress bar until the bytes land — instead of the editor sitting empty for
       // the whole upload and then flashing a block that looks already finished.
+      //
+      // Both awaits before the insert, so insert→start stays synchronous and no block can be left
+      // without its upload. The list query rides alongside the hash rather than after it: hashing
+      // reads the whole blob, so it is the slower of the two and usually hides this entirely.
+      const answer = seedStored()
       const id = await assetKey(file)
+      await answer
       blobs.remember(id, file)
       const blockId = insert(id, file, parent.id)
       if (blockId) uploads.start({ blockId, key: id, name: file.name, blob: file })

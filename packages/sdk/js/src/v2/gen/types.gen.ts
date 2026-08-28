@@ -5270,6 +5270,36 @@ export type DocSyncPushResponses = {
 
 export type DocSyncPushResponse = DocSyncPushResponses[keyof DocSyncPushResponses]
 
+export type DocAssetListData = {
+  body?: never
+  path: {
+    docID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/doc/{docID}/asset"
+}
+
+export type DocAssetListErrors = {
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type DocAssetListError = DocAssetListErrors[keyof DocAssetListErrors]
+
+export type DocAssetListResponses = {
+  /**
+   * Asset ids
+   */
+  200: Array<string>
+}
+
+export type DocAssetListResponse = DocAssetListResponses[keyof DocAssetListResponses]
+
 export type DocAssetCreateData = {
   body?: {
     id?: string
