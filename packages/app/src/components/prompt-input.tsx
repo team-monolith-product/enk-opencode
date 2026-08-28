@@ -81,7 +81,12 @@ import { promptPlaceholder } from "./prompt-input/placeholder"
 import { promptFromDocMarkdown } from "@/components/prompt-input/prompt-plain"
 import { PromptDocShell } from "./prompt-input/doc-shell"
 import { MAX_PROMPT_DOC_CHARS } from "@/constants/prompt"
-import { attachmentBudgetParams, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
+import {
+  addAttachmentUsage,
+  attachmentBudgetParams,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_TOTAL_BYTES,
+} from "@/constants/file-picker"
 import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
@@ -1792,7 +1797,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       }
       // Last line of defense for the attachment budget. addFiles already refuses over-budget adds,
       // but BlockSuite's own paste/drag inside the editor creates blocks without going through it.
-      const usage = doc.assets()
+      // Counted across both lanes because both are about to be sent: `base` below carries the
+      // prompt's own image parts (a capture taken in normal mode, a restored history entry) into the
+      // doc-mode message, so checking the doc's blocks alone leaves them unbudgeted.
+      const usage = addAttachmentUsage(doc.assets(), attachmentUsage(prompt.current()))
       if (usage.count > MAX_ATTACHMENT_COUNT || usage.bytes > MAX_ATTACHMENT_TOTAL_BYTES) {
         showToast({
           title: language.t("prompt.toast.tooManyAttachments.title"),

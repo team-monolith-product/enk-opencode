@@ -25,6 +25,17 @@ export function attachmentBudgetParams() {
 export type AttachmentUsage = { count: number; bytes: number }
 
 /**
+ * Adds two budgets together. A doc-mode send ships the doc's own image/attachment blocks *and* the
+ * composer's image parts (promptFromDocMarkdown carries every non-text part over), so the per-prompt
+ * budget only holds if it is measured across both — counted apart, an attachment added in one of the
+ * two (a tab capture, a paste, a prompt restored from history) is free to the other and the limit
+ * can be walked past twice over.
+ */
+export function addAttachmentUsage(a: AttachmentUsage, b: AttachmentUsage): AttachmentUsage {
+  return { count: a.count + b.count, bytes: a.bytes + b.bytes }
+}
+
+/**
  * Whether one more attachment of `size` fits the per-prompt budget. An attachment whose size is
  * unknown (restored from a sent message, where the part carries only a reference) still takes a
  * slot but adds no bytes — the same convention the doc-side block count uses.

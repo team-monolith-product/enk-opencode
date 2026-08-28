@@ -21,6 +21,7 @@ import { useLanguage } from "@/context/language"
 import { useParentParams } from "@/context/parent-params"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createPromptDoc, type PromptDocConfig } from "@/components/prompt-input/doc"
+import { attachmentUsage } from "@/components/prompt-input/attachments"
 import { sessionBusy } from "@/components/prompt-input/composer-state"
 import {
   connectSubmit,
@@ -135,6 +136,10 @@ export function createPromptDocSession(): PromptDocSession {
     config: docConfig,
     client: sdk.client,
     onSubmit: () => handlers.submit?.(),
+    // The doc and the composer spend one shared per-prompt attachment budget: a doc-mode send ships
+    // the doc's blocks together with whatever image parts the prompt still carries. Handing the doc
+    // the composer's usage is what stops an image added on one side from being free on the other.
+    baseUsage: () => attachmentUsage(prompt.current()),
     // Esc in the doc editor: swallow BlockSuite's native handling always; stop only while a run is
     // in flight (requestStop drives the shared stop-consent vote in collaborative docs).
     onStop: () => {
