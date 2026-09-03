@@ -29,6 +29,7 @@ import { FileTime } from "../file/time"
 import { Flag } from "../flag/flag"
 import { ModelPolicy } from "../enk/model-policy"
 import { ModelFallback } from "../enk/model-fallback"
+import { Locale } from "../enk/locale"
 import { SessionFallback } from "./fallback"
 import { ulid } from "ulid"
 import { spawn } from "child_process"
@@ -1113,6 +1114,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           agent: ag.name,
           model,
           system: input.system,
+          locale: input.locale,
           format: input.format,
           variant,
         }
@@ -1950,6 +1952,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           agent: userAgent,
           parts,
           variant: input.variant,
+          locale: input.locale,
         })
         yield* bus.publish(Command.Event.Executed, {
           name: input.command,
@@ -2022,6 +2025,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       ),
     format: MessageV2.Format.optional(),
     system: z.string().optional(),
+    locale: Locale.Schema.optional(),
     variant: z.string().optional(),
     parts: z.array(
       z.discriminatedUnion("type", [
@@ -2115,6 +2119,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     arguments: z.string(),
     command: z.string(),
     variant: z.string().optional(),
+    locale: Locale.Schema.optional(),
     parts: z
       .array(
         z.discriminatedUnion("type", [

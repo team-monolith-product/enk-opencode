@@ -3,6 +3,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 import z from "zod"
 import { NamedError } from "@opencode-ai/util/error"
 import { isAssetRef } from "@opencode-ai/util/attachment-ref"
+import { Locale } from "@/enk/locale"
 import { loadAssetRef } from "./attachment-ref"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
 import { LSP } from "../lsp"
@@ -407,6 +408,7 @@ export namespace MessageV2 {
       modelID: ModelID.zod,
     }),
     system: z.string().optional(),
+    locale: Locale.Schema.optional(),
     tools: z.record(z.string(), z.boolean()).optional(),
     variant: z.string().optional(),
   }).meta({

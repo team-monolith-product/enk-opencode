@@ -14,6 +14,7 @@ import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
+import { promptLocale, type PromptLocale } from "@/utils/prompt-locale"
 import { buildRequestParts } from "./build-request-parts"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
@@ -33,6 +34,7 @@ export type FollowupDraft = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  locale?: PromptLocale
 }
 
 type FollowupSendInput = {
@@ -55,6 +57,7 @@ export type PromptApprovalInput = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  locale?: PromptLocale
   parts: RequestParts
 }
 
@@ -100,6 +103,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         agent: input.draft.agent,
         model: `${input.draft.model.providerID}/${input.draft.model.modelID}`,
         variant: input.draft.variant,
+        locale: input.draft.locale,
         parts: images.map((attachment) => ({
           id: Identifier.ascending("part"),
           type: "file" as const,
@@ -168,6 +172,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       messageID,
       parts: requestParts,
       variant: input.draft.variant,
+      locale: input.draft.locale,
     })
     return true
   } catch (err) {
@@ -406,6 +411,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       providerID: currentModel.provider.id,
     }
     const agent = currentAgent.name
+    const locale = promptLocale(language.locale())
     const context = prompt.context.items().slice()
     const draft: FollowupDraft = {
       sessionID: session.id,
@@ -415,6 +421,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       agent,
       model,
       variant,
+      locale,
     }
 
     const clearInput = () => {
@@ -479,6 +486,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             agent,
             model: `${model.providerID}/${model.modelID}`,
             variant,
+            locale,
             parts: files.map((attachment) => ({
               id: Identifier.ascending("part"),
               type: "file" as const,
@@ -519,6 +527,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         agent,
         model,
         variant,
+        locale,
         parts: requestParts,
       })
     ) {

@@ -200,6 +200,7 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
         locale: initial,
       }),
     )
+    if (props.locale && store.locale !== props.locale) setStore("locale", props.locale)
 
     const locale = createMemo<Locale>(() => normalizeLocale(store.locale))
     const intl = createMemo(() => INTL[locale()])
