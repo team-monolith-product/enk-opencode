@@ -587,6 +587,8 @@ export type OutputFormatJsonSchema = {
 
 export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
 
+export type PromptLocale = "ko" | "en"
+
 export type UserMessage = {
   id: string
   sessionID: string
@@ -606,6 +608,7 @@ export type UserMessage = {
     modelID: string
   }
   system?: string
+  locale?: PromptLocale
   tools?: {
     [key: string]: boolean
   }
@@ -4122,6 +4125,7 @@ export type SessionPromptData = {
     }
     format?: OutputFormat
     system?: string
+    locale?: PromptLocale
     variant?: string
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
@@ -4322,6 +4326,7 @@ export type SessionPromptAsyncData = {
     }
     format?: OutputFormat
     system?: string
+    locale?: PromptLocale
     variant?: string
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
@@ -4365,6 +4370,7 @@ export type SessionCommandData = {
     arguments: string
     command: string
     variant?: string
+    locale?: PromptLocale
     parts?: Array<{
       id?: string
       type: "file"
@@ -4679,6 +4685,7 @@ export type SessionPromptDocSubmitData = {
       }
       format?: OutputFormat
       system?: string
+      locale?: PromptLocale
       variant?: string
       parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     }

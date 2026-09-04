@@ -1,7 +1,8 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
+import { promptLocale, type PromptLocale } from "@/utils/prompt-locale"
 
 type IdName = { id: string; name: string; color?: string }
-type ParentParams = { user: IdName[]; team: IdName[]; readonly: boolean }
+type ParentParams = { user: IdName[]; team: IdName[]; readonly: boolean; locale?: PromptLocale }
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
 
@@ -29,6 +30,7 @@ const parseSearch = (search: string): ParentParams => {
     user: filterIdName(params.getAll("user")),
     team: filterIdName(params.getAll("team")),
     readonly: parseReadonly(params.get("readonly")),
+    locale: promptLocale(params.get("locale")),
   }
 }
 
@@ -47,7 +49,7 @@ const capture = (): ParentParams => {
   const fromUrl = parseSearch(window.location.search)
   // `readonly` matters even with no user/team — a bare `?readonly=true` must still be captured and
   // survive the post-redirect reload.
-  if (fromUrl.user.length || fromUrl.team.length || fromUrl.readonly) {
+  if (fromUrl.user.length || fromUrl.team.length || fromUrl.readonly || fromUrl.locale) {
     try {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(fromUrl))
     } catch {
@@ -59,7 +61,12 @@ const capture = (): ParentParams => {
     const raw = sessionStorage.getItem(STORAGE_KEY)
     if (raw) {
       const stored = JSON.parse(raw) as Partial<ParentParams>
-      return { user: stored.user ?? [], team: stored.team ?? [], readonly: stored.readonly ?? false }
+      return {
+        user: stored.user ?? [],
+        team: stored.team ?? [],
+        readonly: stored.readonly ?? false,
+        locale: promptLocale(stored.locale),
+      }
     }
   } catch {
     // ignore
@@ -74,6 +81,8 @@ const captured = capture()
  * 빠져 나가 provider 아래인지 보장되지 않는 곳에서 쓴다(use() 는 provider 가 없으면 throw).
  */
 export const readonlyViewer = (): boolean => captured.readonly
+
+export const parentLocale = () => captured.locale
 
 export const { use: useParentParams, provider: ParentParamsProvider } = createSimpleContext({
   name: "ClientEnv",

@@ -482,6 +482,7 @@ When constructing the summary, try to stick to this template:
               format: original.format,
               tools: original.tools,
               system: original.system,
+              locale: original.locale,
               variant: original.variant,
             })
             for (const part of replay.parts) {

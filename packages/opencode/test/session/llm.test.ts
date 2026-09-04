@@ -15,6 +15,7 @@ import { tmpdir } from "../fixture/fixture"
 import type { Agent } from "../../src/agent/agent"
 import type { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { Locale } from "../../src/enk/locale"
 
 describe("session.llm.hasToolCalls", () => {
   test("returns false for empty messages array", () => {
@@ -381,6 +382,92 @@ describe("session.llm.stream", () => {
 
         const reasoning = (body.reasoningEffort as string | undefined) ?? (body.reasoning_effort as string | undefined)
         expect(reasoning).toBe("high")
+      },
+    })
+  })
+
+  test("appends the response language directive after the last user message system prompt", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const model = fixture.model
+
+    const request = waitRequest(
+      "/chat/completions",
+      new Response(createChatStream("Hello"), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: [providerID],
+            provider: {
+              [providerID]: {
+                options: {
+                  apiKey: "test-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await Provider.getModel(ProviderID.make(providerID), ModelID.make(model.id))
+        const sessionID = SessionID.make("session-test-locale")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+
+        const user = {
+          id: MessageID.make("user-locale"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
+          system: "custom user system",
+          locale: "en",
+        } satisfies MessageV2.User
+
+        const stream = await LLM.stream({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["You are a helpful assistant."],
+          abort: new AbortController().signal,
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {},
+        })
+
+        for await (const _ of stream.fullStream) {
+        }
+
+        const body = (await request).body
+        const system = (body.messages as Array<{ role: string; content: string }>)
+          .filter((item) => item.role === "system")
+          .map((item) => item.content)
+          .join("\n")
+
+        expect(system.endsWith(Locale.directive("en"))).toBe(true)
+        expect(system.indexOf("custom user system")).toBeLessThan(system.indexOf("<response_language>"))
       },
     })
   })

@@ -167,7 +167,7 @@ function detectLocale(): Locale {
     if (match) return match.locale
   }
 
-  return "en"
+  return "ko"
 }
 
 export function normalizeLocale(value: string): Locale {
@@ -200,6 +200,7 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
         locale: initial,
       }),
     )
+    if (props.locale && store.locale !== props.locale) setStore("locale", props.locale)
 
     const locale = createMemo<Locale>(() => normalizeLocale(store.locale))
     const intl = createMemo(() => INTL[locale()])

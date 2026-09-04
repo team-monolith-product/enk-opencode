@@ -43,7 +43,7 @@ type StartInput = {
   docID: string
   actorID: string
   names?: Record<string, string>
-  prompt: Pick<PromptApprovalInput, "messageID" | "agent" | "model" | "variant" | "parts">
+  prompt: Pick<PromptApprovalInput, "messageID" | "agent" | "model" | "variant" | "locale" | "parts">
   timeoutMs?: number
 }
 
