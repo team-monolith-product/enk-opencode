@@ -12,6 +12,7 @@ import { dict as zh } from "@/i18n/zh"
 import { handleNotificationClick } from "@/utils/notification-click"
 import pkg from "../package.json"
 import { ServerConnection } from "./context/server"
+import { parentLocale } from "./context/parent-params"
 
 const DEFAULT_SERVER_URL_KEY = "opencode.settings.dat:defaultServerUrl"
 
@@ -135,7 +136,7 @@ if (root instanceof HTMLElement) {
   render(
     () => (
       <PlatformProvider value={platform}>
-        <AppBaseProviders>
+        <AppBaseProviders locale={parentLocale()}>
           <AppInterface
             defaultServer={ServerConnection.Key.make(getDefaultUrl())}
             servers={[server]}
