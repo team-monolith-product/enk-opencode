@@ -167,7 +167,7 @@ function detectLocale(): Locale {
     if (match) return match.locale
   }
 
-  return "en"
+  return "ko"
 }
 
 export function normalizeLocale(value: string): Locale {

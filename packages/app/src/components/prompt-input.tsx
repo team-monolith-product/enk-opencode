@@ -1724,6 +1724,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             agent: input.agent,
             model: input.model,
             variant: input.variant,
+            locale: input.locale,
             parts: input.parts,
           },
         })

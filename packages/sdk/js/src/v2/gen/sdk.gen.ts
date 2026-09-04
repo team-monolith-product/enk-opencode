@@ -123,6 +123,7 @@ import type {
   ProjectUpdateErrors,
   ProjectUpdateResponses,
   PromptCycleStatus,
+  PromptLocale,
   ProviderAuthResponses,
   ProviderListResponses,
   ProviderOauthAuthorizeErrors,
@@ -2123,6 +2124,7 @@ export class PromptDoc extends HeyApiClient {
         }
         format?: OutputFormat
         system?: string
+        locale?: PromptLocale
         variant?: string
         parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
       }
@@ -3207,6 +3209,7 @@ export class Session2 extends HeyApiClient {
       }
       format?: OutputFormat
       system?: string
+      locale?: PromptLocale
       variant?: string
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
@@ -3227,6 +3230,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "tools" },
             { in: "body", key: "format" },
             { in: "body", key: "system" },
+            { in: "body", key: "locale" },
             { in: "body", key: "variant" },
             { in: "body", key: "parts" },
           ],
@@ -3339,6 +3343,7 @@ export class Session2 extends HeyApiClient {
       }
       format?: OutputFormat
       system?: string
+      locale?: PromptLocale
       variant?: string
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
@@ -3359,6 +3364,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "tools" },
             { in: "body", key: "format" },
             { in: "body", key: "system" },
+            { in: "body", key: "locale" },
             { in: "body", key: "variant" },
             { in: "body", key: "parts" },
           ],
@@ -3393,6 +3399,7 @@ export class Session2 extends HeyApiClient {
       arguments?: string
       command?: string
       variant?: string
+      locale?: PromptLocale
       parts?: Array<{
         id?: string
         type: "file"
@@ -3419,6 +3426,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "arguments" },
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
+            { in: "body", key: "locale" },
             { in: "body", key: "parts" },
           ],
         },
