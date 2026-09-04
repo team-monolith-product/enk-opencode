@@ -21,7 +21,7 @@ const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const syncedDirectories: string[] = []
-const sentPrompts: Array<{ sessionID: string; parts: Array<{ metadata?: { docID?: string } }> }> = []
+const sentPrompts: Array<{ sessionID: string; locale?: string; parts: Array<{ metadata?: { docID?: string } }> }> = []
 const aborted: string[] = []
 const queued: string[] = []
 
@@ -49,7 +49,11 @@ const clientFor = (directory: string) => {
         return { data: undefined }
       },
       prompt: async () => ({ data: undefined }),
-      promptAsync: async (input: { sessionID: string; parts: Array<{ metadata?: { docID?: string } }> }) => {
+      promptAsync: async (input: {
+        sessionID: string
+        locale?: string
+        parts: Array<{ metadata?: { docID?: string } }>
+      }) => {
         sentPrompts.push(input)
         return { data: undefined }
       },
@@ -206,6 +210,7 @@ beforeAll(async () => {
   mock.module("@/context/language", () => ({
     useLanguage: () => ({
       t: (key: string) => key,
+      locale: () => "en",
     }),
   }))
 
@@ -329,6 +334,35 @@ describe("prompt submit worktree selection", () => {
         variant: "high",
       },
     })
+  })
+
+  test("sends the viewer locale with the prompt", async () => {
+    params = { id: "session-1" }
+
+    const submit = createPromptSubmit({
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    const event = { preventDefault: () => undefined } as unknown as Event
+
+    await submit.handleSubmit(event)
+    await Bun.sleep(0)
+
+    expect(sentPrompts).toHaveLength(1)
+    expect(sentPrompts[0]).toMatchObject({ sessionID: "session-1", locale: "en" })
   })
 
   test("seeds new sessions before optimistic prompts are added", async () => {
