@@ -19,7 +19,6 @@ import {
   githubCode,
   listGitHubRepos,
   pushGitHub,
-  unbindGitHubRepo,
   type GitHubRepo,
   type GitHubStatus,
 } from "@/utils/server"
@@ -70,7 +69,8 @@ export function DialogGitHub() {
     repos?: GitHubRepo[]
     pick?: GitHubRepo
     message: string
-  }>({ failed: false, busy: false, waiting: false, mode: "new", name: today(), message: "" })
+    choosing: boolean
+  }>({ failed: false, busy: false, waiting: false, mode: "new", name: today(), message: "", choosing: false })
 
   const fail = (err: unknown) => {
     const code = githubCode(err)
@@ -140,14 +140,12 @@ export function DialogGitHub() {
       if (state.mode === "existing" && pick) return bindGitHubRepo(o, { owner: pick.owner, name: pick.name })
       return createGitHubRepo(o, { name: state.name.trim() })
     })
-    if (status) setState("status", status)
+    if (status) setState({ status, choosing: false })
   }
 
-  const change = async () => {
-    const o = opts()
-    if (!o || spectator) return
-    const status = await run(() => unbindGitHubRepo(o))
-    if (status) setState({ status, pick: undefined })
+  const change = () => {
+    if (spectator) return
+    setState({ choosing: true, pick: undefined })
   }
 
   const push = async () => {
@@ -175,7 +173,7 @@ export function DialogGitHub() {
     if (state.failed) return "failed"
     if (!state.status) return "loading"
     if (!state.status.login) return "unlinked"
-    if (!state.status.repo) return "choose"
+    if (!state.status.repo || state.choosing) return "choose"
     return "push"
   })
 
@@ -385,6 +383,11 @@ export function DialogGitHub() {
               </Button>
             </Match>
             <Match when={view() === "choose"}>
+              <Show when={state.status?.repo}>
+                <Button type="button" size="normal" variant="secondary" onClick={() => setState("choosing", false)}>
+                  {language.t("common.cancel")}
+                </Button>
+              </Show>
               <Button
                 type="button"
                 size="normal"

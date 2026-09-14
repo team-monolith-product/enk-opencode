@@ -173,12 +173,6 @@ export function bindGitHubRepo(opts: GitHubOpts, input: { owner: string; name: s
     .then((res) => res.data as GitHubStatus)
 }
 
-export function unbindGitHubRepo(opts: GitHubOpts): Promise<GitHubStatus> {
-  return devServerClient(opts)
-    .delete({ url: "/github/repo" })
-    .then((res) => res.data as GitHubStatus)
-}
-
 export function pushGitHub(opts: GitHubOpts, input: { message?: string; member?: GitHubMember }): Promise<GitHubPush> {
   return devServerClient(opts)
     .post({ url: "/github/push", body: input })
