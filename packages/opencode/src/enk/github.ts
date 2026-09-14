@@ -118,7 +118,7 @@ export namespace GitHub {
     return (await res.json().catch(() => undefined)) as Link | undefined
   }
 
-  async function report(body: Record<string, string | null>) {
+  async function report(body: Record<string, string | boolean | null>) {
     const rails = backend()
     if (!rails) return
     const res = await fetch(rails.url, {
@@ -143,8 +143,8 @@ export namespace GitHub {
     return {
       enabled: true,
       connectUrl: hit.connect_url,
-      login: hit.login,
-      linkedBy: hit.linked_by,
+      login: hit.connected ? hit.login : undefined,
+      linkedBy: hit.connected ? hit.linked_by : undefined,
       repo: hit.repo,
       push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
     }
@@ -170,7 +170,10 @@ export namespace GitHub {
       | { message?: string; errors?: { message?: string }[] }
       | undefined
     const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
-    if (res.status === 401) throw new Failure("revoked", 409, message)
+    if (res.status === 401) {
+      await report({ revoked: true }).catch(() => undefined)
+      throw new Failure("revoked", 409, message)
+    }
     if (res.status === 404) throw new Failure("missing", 404, message)
     if (res.status === 422) throw new Failure("exists", 422, message)
     throw new Failure("remote", 502, message)
