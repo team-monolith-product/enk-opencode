@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import { $ } from "bun"
 import path from "path"
 import { mkdir, rm, truncate, writeFile } from "fs/promises"
@@ -21,10 +21,17 @@ afterEach(async () => {
 
 /** 팀 pod 가 이야기하는 hackathon-rails 역할. 실제 HTTP 를 그대로 태운다. */
 function serve(link: Record<string, unknown>) {
-  const server = Bun.serve({ port: 0, fetch: () => Response.json(link) })
+  const reports: unknown[] = []
+  const server = Bun.serve({
+    port: 0,
+    fetch: async (req) => {
+      if (req.method === "PUT") reports.push(await req.json())
+      return Response.json(link)
+    },
+  })
   process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
   process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
-  return { server, [Symbol.asyncDispose]: () => server.stop(true) }
+  return { server, reports, [Symbol.asyncDispose]: () => server.stop(true) }
 }
 
 async function workspace(root: string) {
@@ -188,6 +195,40 @@ describe("GitHub.publish", () => {
     expect((await ws.publish("again")).sha).toBeUndefined()
   })
 
+  test("a generated message sees what changed since the last push", async () => {
+    await using tmp = await tmpdir()
+    const repo = await workspace(tmp.path)
+    await put(repo.work, { "index.html": "<h1>hi</h1>", "old.txt": "bye" })
+    await repo.publish("first")
+    await put(repo.work, { "index.html": "<h1>hello</h1>", "new.txt": "hi" })
+    await rm(path.join(repo.work, "old.txt"))
+    const seen: GitHub.Change[][] = []
+    const publish = () =>
+      GitHub.publish({
+        gitdir: path.join(tmp.path, "gitdir"),
+        worktree: repo.work,
+        remote: repo.remote,
+        branch: "main",
+        author,
+        message: async (changes) => {
+          seen.push(changes)
+          return "second"
+        },
+      })
+
+    await publish()
+    await publish()
+
+    expect(seen).toEqual([
+      [
+        { status: "M", file: "index.html" },
+        { status: "A", file: "new.txt" },
+        { status: "D", file: "old.txt" },
+      ],
+    ])
+    expect(await repo.log()).toEqual(["second", "first"])
+  })
+
   test("a workspace with nothing but secrets is refused", async () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)
@@ -240,6 +281,42 @@ describe("GitHub.status", () => {
 
     expect(await GitHub.status(path.join(tmp.path, "tutorial-directory"))).toEqual({ enabled: false })
     expect((await GitHub.status(path.join(tmp.path, "project-directory"))).enabled).toBe(true)
+  })
+
+  test("asks the team to connect again once the token is gone", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      enabled: true,
+      connected: false,
+      connect_url: "https://dev.jitda.io/auth/github?team_id=7",
+      login: "octocat",
+      linked_by: "홍길동",
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+
+    const status = await GitHub.status(tmp.path)
+
+    expect(status.login).toBeUndefined()
+    expect(status.linkedBy).toBeUndefined()
+    expect(status.connectUrl).toBe("https://dev.jitda.io/auth/github?team_id=7")
+    expect(status.repo?.name).toBe("jitda-app")
+  })
+
+  test("a token GitHub rejects is dropped so the team can connect again", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({ enabled: true, connected: true, login: "octocat", token: "gho_1" })
+    const original = globalThis.fetch
+    const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
+      String(input).startsWith("https://api.github.com")
+        ? Promise.resolve(Response.json({ message: "Bad credentials" }, { status: 401 }))
+        : original(input, init)) as typeof fetch)
+
+    try {
+      await expect(GitHub.create(tmp.path, { name: "jitda-app" })).rejects.toMatchObject({ code: "revoked" })
+      expect(rails.reports).toEqual([{ revoked: true }])
+    } finally {
+      github.mockRestore()
+    }
   })
 })
 

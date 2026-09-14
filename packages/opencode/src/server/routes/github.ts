@@ -70,16 +70,6 @@ export const GitHubRoutes = lazy(() =>
       }),
       (c) => handle(c, () => GitHub.status(Instance.directory)),
     )
-    .get(
-      "/repos",
-      describeRoute({
-        summary: "List GitHub repositories",
-        description: "Repositories owned by the linked account, most recently pushed first.",
-        operationId: "github.repos",
-        responses: { ...ok("Repositories", Repo.array()), ...failures(409, 502) },
-      }),
-      (c) => handle(c, () => GitHub.repos()),
-    )
     .post(
       "/repo",
       describeRoute({
@@ -90,17 +80,6 @@ export const GitHubRoutes = lazy(() =>
       }),
       validator("json", z.object({ name: RepoName })),
       (c) => handle(c, () => GitHub.create(Instance.directory, c.req.valid("json"))),
-    )
-    .put(
-      "/repo",
-      describeRoute({
-        summary: "Bind GitHub repository",
-        description: "Bind an existing repository of the linked account to this project.",
-        operationId: "github.repo.bind",
-        responses: { ...ok("Link status", Status), ...failures(404, 409, 502) },
-      }),
-      validator("json", z.object({ owner: z.string().min(1).max(100), name: RepoName })),
-      (c) => handle(c, () => GitHub.bind(Instance.directory, c.req.valid("json"))),
     )
     .post(
       "/push",
