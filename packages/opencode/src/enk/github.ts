@@ -211,12 +211,6 @@ export namespace GitHub {
     return status(dir)
   }
 
-  export async function unbind(dir: string) {
-    await linked()
-    await report({ repo_owner: null, repo_name: null, repo_url: null })
-    return status(dir)
-  }
-
   function auth(token: string) {
     return {
       GIT_TERMINAL_PROMPT: "0",

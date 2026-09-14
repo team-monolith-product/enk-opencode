@@ -102,16 +102,6 @@ export const GitHubRoutes = lazy(() =>
       validator("json", z.object({ owner: z.string().min(1).max(100), name: RepoName })),
       (c) => handle(c, () => GitHub.bind(Instance.directory, c.req.valid("json"))),
     )
-    .delete(
-      "/repo",
-      describeRoute({
-        summary: "Unbind GitHub repository",
-        description: "Stop pushing this project to its bound repository.",
-        operationId: "github.repo.unbind",
-        responses: { ...ok("Link status", Status), ...failures(409) },
-      }),
-      (c) => handle(c, () => GitHub.unbind(Instance.directory)),
-    )
     .post(
       "/push",
       describeRoute({
