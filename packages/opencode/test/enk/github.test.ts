@@ -33,7 +33,7 @@ async function workspace(root: string) {
   const gitdir = path.join(root, "gitdir")
   await mkdir(path.join(work, ".git"), { recursive: true })
   await writeFile(path.join(work, ".git", "opencode"), "team-1-project")
-  await $`git init --quiet --bare ${remote}`.quiet()
+  await $`git init --quiet --bare --initial-branch=main ${remote}`.quiet()
   return {
     work,
     remote,
@@ -114,7 +114,7 @@ describe("GitHub.publish", () => {
     await put(ws.work, { "index.html": "a" })
     await ws.publish("first")
     const other = path.join(tmp.path, "other")
-    await $`git clone --quiet ${ws.remote} ${other}`.quiet()
+    await $`git clone --quiet --branch main ${ws.remote} ${other}`.quiet()
     await writeFile(path.join(other, "README.md"), "edited on github")
     await $`git -C ${other} -c user.name=o -c user.email=o@o add README.md`.quiet()
     await $`git -C ${other} -c user.name=o -c user.email=o@o commit --quiet -m theirs`.quiet()
