@@ -39,8 +39,10 @@ names=$(awk 'BEGIN { for (k in ENVIRON) print k }' < /dev/null | sort)
 scrub=""
 for name in $names; do
   keep=0
+  # 키워드는 src/util/child-env.ts 의 DENY_RE 와 맞춘다. 한쪽만 아는 이름이 생기면
+  # "자식 환경에서는 걸러지는데 /proc/<pid>/environ 에는 남는" 틈이 된다.
   case "$name" in
-  *TOKEN* | *KEY* | *SECRET* | *PASSWORD* | *PASSWD* | *CREDENTIAL* | *PRIVATE*) keep=1 ;;
+  *TOKEN* | *KEY* | *SECRET* | *PASSWORD* | *PASSWD* | *CREDENTIAL* | *PRIVATE* | *AUTH*) keep=1 ;;
   esac
   case ",$extra," in
   *",$name,"*) keep=1 ;;
