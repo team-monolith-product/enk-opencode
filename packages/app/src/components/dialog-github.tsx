@@ -88,14 +88,17 @@ export function DialogGitHub() {
   }
   onMount(() => void refetch())
 
-  // 연결은 짓다 앱의 새 창에서 끝난다. 돌아와 창에 포커스가 잡히면 그때 한 번만 다시 읽는다.
   const back = () => {
-    if (!state.waiting) return
+    if (!state.waiting || document.visibilityState !== "visible") return
     setState("waiting", false)
     void refetch()
   }
   window.addEventListener("focus", back)
-  onCleanup(() => window.removeEventListener("focus", back))
+  document.addEventListener("visibilitychange", back)
+  onCleanup(() => {
+    window.removeEventListener("focus", back)
+    document.removeEventListener("visibilitychange", back)
+  })
 
   const connect = () => {
     const url = state.status?.connectUrl

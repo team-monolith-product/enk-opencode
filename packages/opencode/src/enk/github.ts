@@ -55,6 +55,7 @@ export namespace GitHub {
     connected: boolean
     connect_url?: string
     login?: string
+    github_user_id?: number
     linked_by?: string
     token?: string
     repo?: { owner: string; name: string; url: string }
@@ -244,7 +245,7 @@ export namespace GitHub {
         message: input.message?.trim() || "Update from Jitda",
         author: {
           name: input.member?.name || hit.login || "Jitda",
-          email: `${hit.login}@users.noreply.github.com`,
+          email: `${hit.github_user_id ? `${hit.github_user_id}+` : ""}${hit.login}@users.noreply.github.com`,
         },
         env: auth(hit.token!),
       }),
