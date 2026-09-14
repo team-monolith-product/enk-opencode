@@ -6,13 +6,14 @@ import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
 import { createMemo, Match, onCleanup, onMount, Show, Switch as Branch } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Link } from "@/components/link"
 import { useLanguage } from "@/context/language"
-import { parentUser, readonlyViewer } from "@/context/parent-params"
+import { readonlyViewer } from "@/context/parent-params"
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { getRelativeTime } from "@/utils/time"
-import { createGitHubRepo, getGitHubStatus, githubCode, pushGitHub, type GitHubStatus } from "@/utils/server"
+import { createGitHubRepo, getGitHubStatus, githubCode, type GitHubStatus } from "@/utils/server"
 
 const NAME = /^[A-Za-z0-9._-]{1,100}$/
 
@@ -35,8 +36,6 @@ export function DialogGitHub() {
   const sdk = useSDK()
   const platform = usePlatform()
   const spectator = readonlyViewer()
-  const user = parentUser()
-  const member = user ? { id: user.id, name: user.name } : undefined
 
   const opts = () => {
     const conn = server.current
@@ -108,26 +107,6 @@ export function DialogGitHub() {
     if (!o || spectator) return
     const status = await run(() => createGitHubRepo(o, { name: state.name.trim() }))
     if (status) setState("status", status)
-  }
-
-  const push = async () => {
-    const o = opts()
-    if (!o || spectator) return
-    const message = language.t("github.push.defaultMessage")
-    const result = await run(() => pushGitHub(o, { message, member }))
-    if (!result) return void refetch()
-    showToast({
-      variant: result.sha ? "success" : "default",
-      icon: result.sha ? "circle-check" : undefined,
-      title: language.t(result.sha ? "github.push.done" : "github.push.unchanged"),
-      description: result.skipped.length
-        ? language.t("github.push.skipped", { files: result.skipped.join(", ") })
-        : undefined,
-      actions: result.sha
-        ? [{ label: language.t("github.push.open"), onClick: () => window.open(result.url, "_blank", "noopener") }]
-        : undefined,
-    })
-    void refetch()
   }
 
   const view = createMemo(() => {
@@ -221,14 +200,13 @@ export function DialogGitHub() {
 
               <Show when={view() === "push"}>
                 <div class="github-panel flex flex-col gap-1.5">
-                  <a
-                    class="github-link truncate"
-                    href={state.status?.repo?.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {state.status?.repo?.name}
-                  </a>
+                  <Show when={state.status?.repo}>
+                    {(repo) => (
+                      <Link class="github-link truncate" href={repo().url}>
+                        {repo().name}
+                      </Link>
+                    )}
+                  </Show>
                   <span class="text-12-regular text-text-weak">{pushed()}</span>
                 </div>
               </Show>
@@ -267,18 +245,6 @@ export function DialogGitHub() {
                 onClick={() => void create()}
               >
                 {language.t("github.repo.create")}
-              </Button>
-            </Match>
-            <Match when={view() === "push"}>
-              <Button
-                type="button"
-                size="normal"
-                variant="primary"
-                icon="cloud-upload"
-                disabled={spectator || state.busy}
-                onClick={() => void push()}
-              >
-                {state.busy ? language.t("github.push.pending") : language.t("github.push.submit")}
               </Button>
             </Match>
           </Branch>
