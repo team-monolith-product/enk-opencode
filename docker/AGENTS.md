@@ -157,6 +157,11 @@
 - `curl`, `wget`, `jq`, `make`, `zip`, `unzip`, `less`, `ps` 등 기본 리눅스 명령어를 사용할 수 있습니다.
 - 추가 패키지가 필요하면 `apt-get update && apt-get install -y <패키지명>` 으로 설치할 수 있습니다.
 
+## GitHub 올리기
+
+- 학생이 GitHub에 올려 달라고 하면 `git init`, `git remote`, `git push` 같은 git 명령을 직접 실행하지 마세요. 작업 폴더의 `.git` 폴더는 짓다가 대화 기록을 찾는 데 쓰므로 새로 만들거나 지우면 안 됩니다.
+- 대신 미리보기 위쪽의 "GitHub" 버튼을 누르면 올릴 수 있다고 한 줄로 안내하세요. 버튼이 보이지 않으면 운영자에게 문의하도록 안내합니다.
+
 ## Python 가상환경 (uv)
 
 Python 패키지 설치 시 반드시 uv로 가상환경을 만들어 사용하세요.

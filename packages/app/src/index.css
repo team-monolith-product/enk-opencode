@@ -1590,7 +1590,7 @@
    않도록 다크에서만 잡아준다. */
 :root[data-color-scheme="dark"]
   [data-component="dialog"]
-  [data-slot="dialog-content"].env-keys-dialog
+  [data-slot="dialog-content"]:is(.env-keys-dialog, .github-dialog)
   [data-component="input"][data-variant="normal"]
   [data-slot="input-input"] {
   color: var(--env-text-ink);
@@ -1867,7 +1867,7 @@
 }
 
 /* 시안 jt-input: height 28 · padding 0 12 · font 13. Affine 전역 input 리셋이 패딩을 0으로 밀어 이겨 둔다. */
-[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"] {
+[data-component="dialog"] [data-slot="dialog-content"]:is(.env-keys-dialog, .github-dialog) [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"] {
   height: 28px;
   min-height: 28px;
   align-items: center;
@@ -1879,20 +1879,183 @@
 
 /* 디자인 시스템 §Input: ink 테두리 + 옐로우 2px 글로우 (c-helmet). */
 [data-component="dialog"]
-  [data-slot="dialog-content"].env-keys-dialog
+  [data-slot="dialog-content"]:is(.env-keys-dialog, .github-dialog)
   [data-component="input"][data-variant="normal"]
   [data-slot="input-wrapper"]:focus-within:not(:has([data-readonly])) {
   border-color: var(--text-strong) !important;
   box-shadow: 0 0 0 2px var(--focus-ring-color) !important;
 }
 
-[data-component="dialog"] [data-slot="dialog-content"].env-keys-dialog [data-component="input"][data-variant="normal"] [data-slot="input-input"] {
+[data-component="dialog"] [data-slot="dialog-content"]:is(.env-keys-dialog, .github-dialog) [data-component="input"][data-variant="normal"] [data-slot="input-input"] {
   height: 28px !important;
   padding: 0 12px !important;
   font-size: 13px !important;
   line-height: 28px !important;
   box-sizing: border-box;
   outline: none !important;
+}
+
+[data-component="dialog"]:has(.github-dialog) [data-slot="dialog-container"] {
+  width: min(520px, calc(100vw - 48px));
+}
+
+[data-component="dialog"] [data-slot="dialog-content"].github-dialog {
+  max-width: 520px;
+}
+
+.github-dialog .github-panel {
+  border: 1px solid var(--env-line);
+  border-radius: 4px;
+  background: var(--env-surface);
+  padding: 12px 14px;
+}
+
+.github-dialog .github-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 30px;
+  list-style: disc;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--env-text-strong);
+}
+
+.github-dialog .github-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--env-text-ink);
+  user-select: all;
+}
+
+.github-dialog .github-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--env-line);
+  border-radius: 4px;
+  color: var(--env-text-ink);
+}
+
+.github-dialog .github-hint {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--env-text-muted);
+}
+
+.github-dialog .github-hint a,
+.github-dialog .github-link {
+  color: var(--env-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.github-dialog .github-link {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.github-dialog .github-seg {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--env-line);
+  border-radius: 6px;
+  background: var(--env-surface);
+}
+
+.github-dialog .github-seg button {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--env-text-weak);
+  transition:
+    background-color 150ms cubic-bezier(0.2, 0, 0, 1),
+    color 150ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.github-dialog .github-seg button[aria-selected="true"] {
+  background: var(--background-stronger);
+  color: var(--env-text-ink);
+  box-shadow: 0 0 0 1px var(--env-line);
+}
+
+.github-dialog .github-repos {
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--env-line);
+  border-radius: 4px;
+  background: var(--env-surface);
+}
+
+.github-dialog .github-repo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--env-text-ink);
+}
+
+.github-dialog .github-repo + .github-repo {
+  border-top: 1px solid var(--env-line);
+}
+
+.github-dialog .github-repo:hover:not(:disabled) {
+  background: var(--env-hover);
+}
+
+.github-dialog .github-repo[aria-pressed="true"] {
+  background: var(--env-pending);
+}
+
+.github-dialog .github-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--env-text-muted);
+}
+
+.github-dialog .github-pill {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  background: #e7eefc;
+  color: #1863dc;
+}
+
+.github-dialog .github-pill[data-private="true"] {
+  background: #eeece7;
+  color: #4a4a55;
+}
+
+:root[data-color-scheme="dark"] .github-dialog .github-pill {
+  background: color-mix(in srgb, #1863dc 35%, var(--background-strong));
+  color: var(--text-strong);
+}
+
+:root[data-color-scheme="dark"] .github-dialog .github-pill[data-private="true"] {
+  background: var(--background-stronger);
+  color: var(--text-weak);
 }
 
 /* 세션 지우기 확인 모달 — 외부 연동 관리와 같은 해저드 셸. 묻는 말 하나뿐이라 폭만 좁힌다. */
