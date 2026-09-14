@@ -1,4 +1,4 @@
-import { mkdir, lstat, writeFile } from "fs/promises"
+import { mkdir, lstat, readFile, writeFile } from "fs/promises"
 import path from "path"
 import { Global } from "../global"
 import { EnvFile } from "../util/env-file"
@@ -14,6 +14,8 @@ export namespace GitHub {
   const agent = "jitda-opencode"
   const route = "/api/v1/opencode/github"
   const limit = 100 * 1024 * 1024
+  const bridge = "__preview-bridge.js"
+  const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
   const exclude = [
     ".env",
     ".env.*",
@@ -323,7 +325,7 @@ export namespace GitHub {
       await must(["read-tree", "--empty"])
       const files = await Promise.all(
         (await scan(""))
-          .filter((file) => !EnvFile.isSecretFile(file))
+          .filter((file) => !EnvFile.isSecretFile(file) && path.posix.basename(file) !== bridge)
           .map(async (file) => ({
             file,
             size: (await lstat(path.join(input.worktree, file)).catch(() => undefined))?.size,
@@ -331,8 +333,27 @@ export namespace GitHub {
       )
       const keep = files.filter((item) => item.size !== undefined && item.size <= limit).map((item) => item.file)
       if (keep.length === 0) throw new Failure("empty", 422)
-      for (let i = 0; i < keep.length; i += 200) {
-        await must(["update-index", "--add", "--remove", "--", ...keep.slice(i, i + 200)])
+      const stripped = (
+        await Promise.all(
+          keep
+            .filter((file) => /\.html?$/i.test(file))
+            .map(async (file) => {
+              const text = await readFile(path.join(input.worktree, file), "utf8").catch(() => "")
+              const clean = text.replace(tag, "")
+              return clean === text ? undefined : { file, clean }
+            }),
+        )
+      ).filter((item) => item !== undefined)
+      const dirty = new Set(stripped.map((item) => item.file))
+      const plain = keep.filter((file) => !dirty.has(file))
+      for (let i = 0; i < plain.length; i += 200) {
+        await must(["update-index", "--add", "--remove", "--", ...plain.slice(i, i + 200)])
+      }
+      for (const item of stripped) {
+        const tmp = path.join(input.gitdir, "stripped")
+        await writeFile(tmp, item.clean)
+        const blob = (await must(["hash-object", "-w", "--no-filters", "--", tmp])).trim()
+        await must(["update-index", "--add", "--cacheinfo", `100644,${blob},${item.file}`])
       }
       return {
         tree: (await must(["write-tree"])).trim(),

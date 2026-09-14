@@ -167,6 +167,27 @@ describe("GitHub.publish", () => {
     expect(await ws.files()).toEqual(["index.html"])
   })
 
+  test("the platform preview bridge stays out of the repository", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    const page = '<body>\n  <h1>hi</h1>\n  <script src="/__preview-bridge.js" data-preview-bridge></script>\n</body>\n'
+    await put(ws.work, {
+      "index.html": page,
+      "about.html": "<p>no bridge</p>\n",
+      "__preview-bridge.js": "bridge",
+      "public/__preview-bridge.js": "bridge",
+    })
+
+    await ws.publish("first")
+
+    expect(await ws.files()).toEqual(["about.html", "index.html"])
+    expect(await $`git --git-dir=${ws.remote} show main:index.html`.quiet().text()).toBe(
+      "<body>\n  <h1>hi</h1>\n</body>\n",
+    )
+    expect(await Bun.file(path.join(ws.work, "index.html")).text()).toBe(page)
+    expect((await ws.publish("again")).sha).toBeUndefined()
+  })
+
   test("a workspace with nothing but secrets is refused", async () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)
