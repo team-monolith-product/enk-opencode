@@ -6,6 +6,7 @@ import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
 import { createMemo, Match, onCleanup, onMount, Show, Switch as Branch } from "solid-js"
 import { createStore } from "solid-js/store"
+import { Link } from "@/components/link"
 import { useLanguage } from "@/context/language"
 import { parentUser, readonlyViewer } from "@/context/parent-params"
 import { usePlatform } from "@/context/platform"
@@ -221,14 +222,13 @@ export function DialogGitHub() {
 
               <Show when={view() === "push"}>
                 <div class="github-panel flex flex-col gap-1.5">
-                  <a
-                    class="github-link truncate"
-                    href={state.status?.repo?.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {state.status?.repo?.name}
-                  </a>
+                  <Show when={state.status?.repo}>
+                    {(repo) => (
+                      <Link class="github-link truncate" href={repo().url}>
+                        {repo().name}
+                      </Link>
+                    )}
+                  </Show>
                   <span class="text-12-regular text-text-weak">{pushed()}</span>
                 </div>
               </Show>
