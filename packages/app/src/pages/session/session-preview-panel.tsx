@@ -17,6 +17,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import {
   getDevServerLogs,
   getDevServerStatus,
+  getGitHubStatus,
   listEnvKeys,
   restartDevServer,
   type DevServerLogsResult,
@@ -636,6 +637,21 @@ export function SessionBrowserChrome(props: {
       .then((x) => dialog.show(() => <x.DialogEnvKeys />, refreshEnvCount))
       .catch(() => showToast({ title: language.t("common.requestFailed") }))
   }
+
+  const [github, setGithub] = createSignal(false)
+  onMount(() => {
+    const conn = server.current
+    if (!conn) return
+    void getGitHubStatus({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
+      .then((status) => setGithub(status.enabled))
+      .catch(() => setGithub(false))
+  })
+
+  const openGitHub = () => {
+    import("@/components/dialog-github")
+      .then((x) => dialog.show(() => <x.DialogGitHub />))
+      .catch(() => showToast({ title: language.t("common.requestFailed") }))
+  }
   let copyTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => copyTimer && clearTimeout(copyTimer))
 
@@ -863,6 +879,21 @@ export function SessionBrowserChrome(props: {
             </span>
           </Show>
         </button>
+        <Show when={github()}>
+          <button
+            type="button"
+            class={
+              ghostBtn +
+              " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap @max-[380px]/chrome:hidden"
+            }
+            onClick={openGitHub}
+            aria-label={language.t("command.github")}
+            title={language.t("command.github.description")}
+          >
+            <Icon name="github" size="small" />
+            <span class="@max-[520px]/chrome:hidden">{language.t("command.github")}</span>
+          </button>
+        </Show>
         <Show when={props.showErrorButton}>
           <button
             type="button"
@@ -916,6 +947,11 @@ export function SessionBrowserChrome(props: {
                     <Show when={envCount() > 0}> ({envCount()})</Show>
                   </DropdownMenu.ItemLabel>
                 </DropdownMenu.Item>
+                <Show when={github()}>
+                  <DropdownMenu.Item onSelect={openGitHub}>
+                    <DropdownMenu.ItemLabel>{language.t("command.github")}</DropdownMenu.ItemLabel>
+                  </DropdownMenu.Item>
+                </Show>
                 <DropdownMenu.Item disabled={previewBlocked() || !props.url} onSelect={openInNewTab}>
                   <DropdownMenu.ItemLabel>{language.t("common.openInNewTab")}</DropdownMenu.ItemLabel>
                 </DropdownMenu.Item>
