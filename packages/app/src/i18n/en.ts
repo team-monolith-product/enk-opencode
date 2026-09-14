@@ -118,7 +118,7 @@ export const dict = {
   "github.title": "Push to GitHub",
   "github.description.unlinked": "Link a GitHub account to push this project to a repository.",
   "github.description.choose": "Name the repository to push this project to.",
-  "github.description.linked": "Anyone on the team can push the project to the repository below.",
+  "github.description.linked": "Each time a conversation with the AI finishes, changes are pushed to this repository automatically.",
   "github.intro.team": "Only one person per team links GitHub in Jitda. Repositories are created in that person's account, and anyone on the team can push.",
   "github.intro.secret": "Values saved in External services (.env) and folders like node_modules are never pushed.",
   "github.connect": "Link GitHub in Jitda",

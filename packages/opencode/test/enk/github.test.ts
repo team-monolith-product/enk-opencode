@@ -195,6 +195,40 @@ describe("GitHub.publish", () => {
     expect((await ws.publish("again")).sha).toBeUndefined()
   })
 
+  test("a generated message sees what changed since the last push", async () => {
+    await using tmp = await tmpdir()
+    const repo = await workspace(tmp.path)
+    await put(repo.work, { "index.html": "<h1>hi</h1>", "old.txt": "bye" })
+    await repo.publish("first")
+    await put(repo.work, { "index.html": "<h1>hello</h1>", "new.txt": "hi" })
+    await rm(path.join(repo.work, "old.txt"))
+    const seen: GitHub.Change[][] = []
+    const publish = () =>
+      GitHub.publish({
+        gitdir: path.join(tmp.path, "gitdir"),
+        worktree: repo.work,
+        remote: repo.remote,
+        branch: "main",
+        author,
+        message: async (changes) => {
+          seen.push(changes)
+          return "second"
+        },
+      })
+
+    await publish()
+    await publish()
+
+    expect(seen).toEqual([
+      [
+        { status: "M", file: "index.html" },
+        { status: "A", file: "new.txt" },
+        { status: "D", file: "old.txt" },
+      ],
+    ])
+    expect(await repo.log()).toEqual(["second", "first"])
+  })
+
   test("a workspace with nothing but secrets is refused", async () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)

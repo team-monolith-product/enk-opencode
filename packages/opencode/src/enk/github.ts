@@ -41,6 +41,8 @@ export namespace GitHub {
     push?: Push
   }
   export type Result = { sha?: string; skipped: string[] }
+  export type Change = { status: "A" | "M" | "D"; file: string }
+  export type Describe = (changes: Change[]) => Promise<string>
   export type Code =
     | "disabled"
     | "unlinked"
@@ -206,7 +208,7 @@ export namespace GitHub {
     }
   }
 
-  export async function push(dir: string, input: { message?: string; member?: Member }) {
+  export async function push(dir: string, input: { message?: string | Describe; member?: Member }) {
     const hit = await linked()
     if (!hit.repo) throw new Failure("norepo", 409)
     const remote = await request<Remote>(
@@ -222,7 +224,7 @@ export namespace GitHub {
         worktree: dir,
         remote: `${web}/${hit.repo!.owner}/${hit.repo!.name}.git`,
         branch: remote.default_branch || "main",
-        message: input.message?.trim() || "Update from Jitda",
+        message: typeof input.message === "function" ? input.message : input.message?.trim() || "Update from Jitda",
         author: {
           name: input.member?.name || hit.login || "Jitda",
           email: `${hit.github_user_id ? `${hit.github_user_id}+` : ""}${hit.login}@users.noreply.github.com`,
@@ -242,7 +244,7 @@ export namespace GitHub {
     worktree: string
     remote: string
     branch: string
-    message: string
+    message: string | Describe
     author: { name: string; email: string }
     env?: Record<string, string>
   }): Promise<Result> {
@@ -339,6 +341,23 @@ export namespace GitHub {
       }
     }
 
+    const changes = async (parent: string | undefined, tree: string): Promise<Change[]> => {
+      if (!parent) {
+        const files = (await must(["ls-tree", "-r", "-z", "--name-only", tree])).split("\0").filter(Boolean)
+        return files.map((file) => ({ status: "A", file }))
+      }
+      const out = (await must(["diff-tree", "-r", "-z", "--no-renames", "--name-status", `${parent}^{tree}`, tree]))
+        .split("\0")
+        .filter(Boolean)
+      const list: Change[] = []
+      for (let i = 0; i + 1 < out.length; i += 2) {
+        const status = out[i]
+        list.push({ status: status === "A" || status === "D" ? status : "M", file: out[i + 1]! })
+      }
+      return list
+    }
+
+    let message: string | undefined
     const attempt = async (retry: boolean): Promise<Result> => {
       const heads = await must(["ls-remote", input.remote, ref])
       const found = heads.split("\n").some((line) => line.endsWith(`\t${ref}`))
@@ -348,11 +367,12 @@ export namespace GitHub {
       if (parent && staged.tree === (await must(["rev-parse", `${parent}^{tree}`])).trim()) {
         return { skipped: staged.skipped }
       }
+      message ??=
+        typeof input.message === "string" ? input.message : await input.message(await changes(parent, staged.tree))
       const sha = (
-        await must(
-          ["commit-tree", "--no-gpg-sign", staged.tree, ...(parent ? ["-p", parent] : []), "-m", input.message],
-          { env: who },
-        )
+        await must(["commit-tree", "--no-gpg-sign", staged.tree, ...(parent ? ["-p", parent] : []), "-m", message], {
+          env: who,
+        })
       ).trim()
       const out = await run(["push", "--quiet", input.remote, `${sha}:${ref}`])
       if (out.exitCode === 0) return { sha, skipped: staged.skipped }
