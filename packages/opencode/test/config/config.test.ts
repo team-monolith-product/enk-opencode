@@ -22,6 +22,7 @@ import { ProjectID } from "../../src/project/schema"
 import { Filesystem } from "../../src/util/filesystem"
 import * as Network from "../../src/util/network"
 import { BunProc } from "../../src/bun"
+import { Process } from "../../src/util/process"
 
 const emptyAccount = Layer.mock(Account.Service)({
   active: () => Effect.succeed(Option.none()),
@@ -797,6 +798,26 @@ test("installs dependencies in writable OPENCODE_CONFIG_DIR", async () => {
     run.mockRestore()
     if (prev === undefined) delete process.env.OPENCODE_CONFIG_DIR
     else process.env.OPENCODE_CONFIG_DIR = prev
+  }
+})
+
+test("does not query the registry when the plugin is already installed", async () => {
+  await using tmp = await tmpdir()
+  const mod = path.join(tmp.path, "node_modules", "@opencode-ai", "plugin")
+  await fs.mkdir(mod, { recursive: true })
+  await Filesystem.writeJson(path.join(tmp.path, "package.json"), {
+    dependencies: { "@opencode-ai/plugin": "0.0.1" },
+  })
+
+  const online = spyOn(Network, "online").mockReturnValue(true)
+  const spawn = spyOn(Process, "run")
+
+  try {
+    expect(await Config.needsInstall(tmp.path)).toBe(false)
+    expect(spawn).not.toHaveBeenCalled()
+  } finally {
+    online.mockRestore()
+    spawn.mockRestore()
   }
 })
 

@@ -29,8 +29,7 @@ import { Bus } from "@/bus"
 import { GlobalBus } from "@/bus/global"
 import { Event } from "../server/event"
 import { Glob } from "../util/glob"
-import { PackageRegistry } from "@/bun/registry"
-import { online, proxied } from "@/util/network"
+import { proxied } from "@/util/network"
 import { iife } from "@/util/iife"
 import { Account } from "@/account"
 import { isRecord } from "@/util/record"
@@ -199,19 +198,8 @@ export namespace Config {
     const depVersion = dependencies["@opencode-ai/plugin"]
     if (!depVersion) return true
 
-    const targetVersion = Installation.isLocal() ? "latest" : Installation.VERSION
-    if (targetVersion === "latest") {
-      if (!online()) return false
-      const stale = await PackageRegistry.isOutdated("@opencode-ai/plugin", depVersion, dir)
-      if (!stale) return false
-      log.info("Cached version is outdated, proceeding with install", {
-        pkg: "@opencode-ai/plugin",
-        cachedVersion: depVersion,
-      })
-      return true
-    }
-    if (depVersion === targetVersion) return false
-    return true
+    if (Installation.isLocal()) return false
+    return depVersion !== Installation.VERSION
   }
 
   function rel(item: string, patterns: string[]) {
