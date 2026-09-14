@@ -320,6 +320,21 @@ describe("GitHub.status", () => {
   })
 })
 
+describe("GitHub.push", () => {
+  test("pushing without a link is refused", async () => {
+    await using tmp = await tmpdir()
+
+    await expect(GitHub.push(tmp.path, { message: "x" })).rejects.toMatchObject({ code: "unlinked" })
+  })
+
+  test("pushing without a repository is refused", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({ enabled: true, connected: true, login: "octocat", token: "gho_1" })
+
+    await expect(GitHub.push(tmp.path, { message: "x" })).rejects.toMatchObject({ code: "norepo" })
+  })
+})
+
 describe("GitHubRoutes", () => {
   const request = (dir: string, method: string, route: string, body?: unknown) =>
     Instance.provide({
@@ -338,24 +353,5 @@ describe("GitHubRoutes", () => {
     const res = await request(tmp.path, "GET", "/")
 
     expect(await res.json()).toEqual({ enabled: false })
-  })
-
-  test("pushing without a link is refused", async () => {
-    await using tmp = await tmpdir()
-
-    const res = await request(tmp.path, "POST", "/push", {})
-
-    expect(res.status).toBe(409)
-    expect((await res.json()).code).toBe("unlinked")
-  })
-
-  test("pushing without a repository is refused", async () => {
-    await using tmp = await tmpdir()
-    await using rails = serve({ enabled: true, connected: true, login: "octocat", token: "gho_1" })
-
-    const res = await request(tmp.path, "POST", "/push", {})
-
-    expect(res.status).toBe(409)
-    expect((await res.json()).code).toBe("norepo")
   })
 })

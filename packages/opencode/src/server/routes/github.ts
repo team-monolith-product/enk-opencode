@@ -5,7 +5,6 @@ import { GitHub } from "../../enk/github"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
 
-const Member = z.object({ id: z.string().min(1).max(128), name: z.string().min(1).max(64) })
 const Repo = z.object({
   owner: z.string(),
   name: z.string(),
@@ -22,9 +21,6 @@ const Status = z
     push: z.object({ sha: z.string(), time: z.number(), by: z.string().optional() }).optional(),
   })
   .meta({ ref: "GitHubStatus" })
-const Pushed = z
-  .object({ sha: z.string().optional(), url: z.string(), skipped: z.string().array() })
-  .meta({ ref: "GitHubPush" })
 const Failure = z.object({ code: z.string(), message: z.string() }).meta({ ref: "GitHubError" })
 const RepoName = z
   .string()
@@ -80,17 +76,5 @@ export const GitHubRoutes = lazy(() =>
       }),
       validator("json", z.object({ name: RepoName })),
       (c) => handle(c, () => GitHub.create(Instance.directory, c.req.valid("json"))),
-    )
-    .post(
-      "/push",
-      describeRoute({
-        summary: "Push to GitHub",
-        description:
-          "Commit a snapshot of this project on top of the bound branch and push it without force. .env files, node_modules and files over 100MB are left out.",
-        operationId: "github.push",
-        responses: { ...ok("Push result", Pushed), ...failures(409, 422, 502) },
-      }),
-      validator("json", z.object({ message: z.string().max(500).optional(), member: Member.optional() })),
-      (c) => handle(c, () => GitHub.push(Instance.directory, c.req.valid("json"))),
     ),
 )

@@ -29,7 +29,6 @@ export namespace GitHub {
     ".DS_Store",
   ]
 
-  export type Member = { id: string; name: string }
   export type Repo = { owner: string; name: string; url: string; private?: boolean }
   export type Push = { sha: string; time: number; by?: string }
   export type Status = {
@@ -208,7 +207,7 @@ export namespace GitHub {
     }
   }
 
-  export async function push(dir: string, input: { message?: string | Describe; member?: Member }) {
+  export async function push(dir: string, input: { message: string | Describe }) {
     const hit = await linked()
     if (!hit.repo) throw new Failure("norepo", 409)
     const remote = await request<Remote>(
@@ -224,16 +223,16 @@ export namespace GitHub {
         worktree: dir,
         remote: `${web}/${hit.repo!.owner}/${hit.repo!.name}.git`,
         branch: remote.default_branch || "main",
-        message: typeof input.message === "function" ? input.message : input.message?.trim() || "Update from Jitda",
+        message: input.message,
         author: {
-          name: input.member?.name || hit.login || "Jitda",
+          name: hit.login || "Jitda",
           email: `${hit.github_user_id ? `${hit.github_user_id}+` : ""}${hit.login}@users.noreply.github.com`,
         },
         env: auth(hit.token!),
       }),
     )
     if (result.sha) {
-      await report({ pushed_sha: result.sha, pushed_by: input.member?.name ?? null }).catch(() => undefined)
+      await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
       log.info("pushed", { sha: result.sha })
     }
     return { ...result, url: result.sha ? `${hit.repo.url}/commit/${result.sha}` : hit.repo.url }

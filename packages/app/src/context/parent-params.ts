@@ -84,8 +84,6 @@ export const readonlyViewer = (): boolean => captured.readonly
 
 export const parentLocale = () => captured.locale
 
-export const parentUser = (): IdName | undefined => captured.user[0]
-
 export const { use: useParentParams, provider: ParentParamsProvider } = createSimpleContext({
   name: "ClientEnv",
   init: (): ParentParams => captured,

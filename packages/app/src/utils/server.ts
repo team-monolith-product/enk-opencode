@@ -132,7 +132,6 @@ export function deleteEnvKey(opts: EnvFileOpts, name: string): Promise<string[]>
 }
 
 type GitHubOpts = EnvFileOpts
-export type GitHubMember = { id: string; name: string }
 export type GitHubRepo = { owner: string; name: string; url: string; private?: boolean }
 export type GitHubStatus = {
   enabled: boolean
@@ -142,7 +141,6 @@ export type GitHubStatus = {
   repo?: GitHubRepo
   push?: { sha: string; time: number; by?: string }
 }
-export type GitHubPush = { sha?: string; url: string; skipped: string[] }
 
 export function githubCode(err: unknown) {
   if (typeof err !== "object" || err === null || !("code" in err)) return
@@ -159,10 +157,4 @@ export function createGitHubRepo(opts: GitHubOpts, input: { name: string }): Pro
   return devServerClient(opts)
     .post({ url: "/github/repo", body: input })
     .then((res) => res.data as GitHubStatus)
-}
-
-export function pushGitHub(opts: GitHubOpts, input: { message?: string; member?: GitHubMember }): Promise<GitHubPush> {
-  return devServerClient(opts)
-    .post({ url: "/github/push", body: input })
-    .then((res) => res.data as GitHubPush)
 }
