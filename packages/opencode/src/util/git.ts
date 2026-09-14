@@ -13,12 +13,16 @@ export interface GitResult {
  * Uses Process helpers with stdin ignored to avoid protocol pipe inheritance
  * issues in embedded/client environments.
  */
-export async function git(args: string[], opts: { cwd: string; env?: Record<string, string> }): Promise<GitResult> {
+export async function git(
+  args: string[],
+  opts: { cwd: string; env?: Record<string, string>; abort?: AbortSignal },
+): Promise<GitResult> {
   return Process.run(["git", ...args], {
     cwd: opts.cwd,
     env: opts.env,
     stdin: "ignore",
     nothrow: true,
+    abort: opts.abort,
   })
     .then((result) => ({
       exitCode: result.code,
