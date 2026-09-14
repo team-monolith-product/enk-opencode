@@ -269,6 +269,7 @@ describe("GitHub.status", () => {
   })
 
   test("a token GitHub rejects is dropped so the team can connect again", async () => {
+    await using tmp = await tmpdir()
     await using rails = serve({ enabled: true, connected: true, login: "octocat", token: "gho_1" })
     const original = globalThis.fetch
     const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
@@ -277,7 +278,7 @@ describe("GitHub.status", () => {
         : original(input, init)) as typeof fetch)
 
     try {
-      await expect(GitHub.repos()).rejects.toMatchObject({ code: "revoked" })
+      await expect(GitHub.create(tmp.path, { name: "jitda-app" })).rejects.toMatchObject({ code: "revoked" })
       expect(rails.reports).toEqual([{ revoked: true }])
     } finally {
       github.mockRestore()

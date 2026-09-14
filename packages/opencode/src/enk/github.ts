@@ -186,30 +186,11 @@ export namespace GitHub {
     private: remote.private,
   })
 
-  export async function repos() {
-    const hit = await linked()
-    const list = await request<Remote[]>(hit.token!, "GET", "/user/repos?affiliation=owner&sort=pushed&per_page=100")
-    return list.map(shape)
-  }
-
   export async function create(dir: string, input: { name: string }) {
     const hit = await linked()
     const repo = shape(
       await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
     )
-    await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
-    return status(dir)
-  }
-
-  export async function bind(dir: string, input: { owner: string; name: string }) {
-    const hit = await linked()
-    const remote = await request<Remote>(
-      hit.token!,
-      "GET",
-      `/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.name)}`,
-    )
-    if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
-    const repo = shape(remote)
     await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
     return status(dir)
   }
