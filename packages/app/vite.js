@@ -1,9 +1,14 @@
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import path from "node:path"
 import solidPlugin from "vite-plugin-solid"
 import tailwindcss from "@tailwindcss/vite"
 import { fileURLToPath } from "url"
 
 const theme = fileURLToPath(new URL("./public/oc-theme-preload.js", import.meta.url))
+const pdfjs = path.dirname(
+  createRequire(fileURLToPath(new URL("../ui/package.json", import.meta.url))).resolve("pdfjs-dist/package.json"),
+)
 
 /**
  * @type {import("vite").PluginOption}
@@ -60,6 +65,22 @@ export default [
           "$1/site.webmanifest$2",
         )
       },
+    },
+  },
+  {
+    name: "opencode-desktop:pdfjs-resources",
+    apply: "build",
+    generateBundle() {
+      const { version } = JSON.parse(readFileSync(path.join(pdfjs, "package.json"), "utf8"))
+      for (const dir of ["cmaps", "standard_fonts", "wasm", "iccs"]) {
+        for (const name of readdirSync(path.join(pdfjs, dir))) {
+          this.emitFile({
+            type: "asset",
+            fileName: `assets/pdfjs-${version}/${dir}/${name}`,
+            source: readFileSync(path.join(pdfjs, dir, name)),
+          })
+        }
+      }
     },
   },
   tailwindcss(),
