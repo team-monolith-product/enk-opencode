@@ -128,7 +128,6 @@ export namespace File {
     "xz",
     "lz",
     "z",
-    "pdf",
     "doc",
     "docx",
     "ppt",
@@ -211,6 +210,8 @@ export namespace File {
     "x3f",
   ])
 
+  const preview = new Set([...image, "pdf"])
+
   const text = new Set([
     "ts",
     "tsx",
@@ -284,18 +285,19 @@ export namespace File {
     jxl: "image/jxl",
     heic: "image/heic",
     heif: "image/heif",
+    pdf: "application/pdf",
   }
 
   type Entry = { files: string[]; dirs: string[] }
 
   const ext = (file: string) => path.extname(file).toLowerCase().slice(1)
   const name = (file: string) => path.basename(file).toLowerCase()
-  const isImageByExtension = (file: string) => image.has(ext(file))
+  const isPreviewByExtension = (file: string) => preview.has(ext(file))
   const isTextByExtension = (file: string) => text.has(ext(file))
   const isTextByName = (file: string) => textName.has(name(file))
   const isBinaryByExtension = (file: string) => binary.has(ext(file))
   const isImage = (mimeType: string) => mimeType.startsWith("image/")
-  const getImageMimeType = (file: string) => mime[ext(file)] || "image/" + ext(file)
+  const getPreviewMimeType = (file: string) => mime[ext(file)] || "image/" + ext(file)
 
   function shouldEncode(mimeType: string) {
     const type = mimeType.toLowerCase()
@@ -527,14 +529,14 @@ export namespace File {
           return { type: "text" as const, content: EnvFile.mask(raw).trim() }
         }
 
-        if (isImageByExtension(file)) {
+        if (isPreviewByExtension(file)) {
           const exists = yield* appFs.existsSafe(full)
           if (exists) {
             const bytes = yield* appFs.readFile(full).pipe(Effect.catch(() => Effect.succeed(new Uint8Array())))
             return {
               type: "text" as const,
               content: Buffer.from(bytes).toString("base64"),
-              mimeType: getImageMimeType(file),
+              mimeType: getPreviewMimeType(file),
               encoding: "base64" as const,
             }
           }
