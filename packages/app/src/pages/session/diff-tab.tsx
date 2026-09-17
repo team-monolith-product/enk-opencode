@@ -272,7 +272,7 @@ export function DiffTabContent(props: { tab: string }) {
           </Match>
           <Match when={item()}>
             {(diff) => (
-              <div class="relative overflow-hidden pb-40 px-3">
+              <div class="relative overflow-hidden px-3" classList={{ "pb-40": mediaKind() !== "pdf" }}>
                 <Show when={tooLarge()}>
                   <div data-slot="session-review-large-diff" class="py-4">
                     <div data-slot="session-review-large-diff-title">

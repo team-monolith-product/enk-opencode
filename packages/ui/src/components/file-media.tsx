@@ -1,5 +1,5 @@
 import type { FileContent } from "@opencode-ai/sdk/v2"
-import { createEffect, createMemo, createResource, Match, on, Show, Switch, type JSX } from "solid-js"
+import { createEffect, createMemo, createResource, lazy, Match, on, Show, Suspense, Switch, type JSX } from "solid-js"
 import { useI18n } from "../context/i18n"
 import {
   dataUrlFromMediaValue,
@@ -8,7 +8,15 @@ import {
   mediaKindFromPath,
   normalizeMimeType,
   svgTextFromValue,
+  type MediaKind,
 } from "../pierre/media"
+
+const PdfViewer = lazy(() => import("./pdf-viewer"))
+
+type LoadableKind = Exclude<MediaKind, "svg">
+
+const loadable = (kind: MediaKind | undefined): kind is LoadableKind =>
+  kind === "image" || kind === "audio" || kind === "pdf"
 
 export type FileMediaOptions = {
   mode?: "auto" | "off"
@@ -18,10 +26,10 @@ export type FileMediaOptions = {
   after?: unknown
   readFile?: (path: string) => Promise<FileContent | undefined>
   onLoad?: () => void
-  onError?: (ctx: { kind: "image" | "audio" | "svg" }) => void
+  onError?: (ctx: { kind: MediaKind }) => void
 }
 
-function mediaValue(cfg: FileMediaOptions, mode: "image" | "audio") {
+function mediaValue(cfg: FileMediaOptions, mode: LoadableKind) {
   if (cfg.current !== undefined) return cfg.current
   if (mode === "image") return cfg.after ?? cfg.before
   return cfg.after ?? cfg.before
@@ -57,14 +65,14 @@ export function FileMedia(props: { media?: FileMediaOptions; fallback: () => JSX
   const direct = createMemo(() => {
     const media = cfg()
     const k = kind()
-    if (!media || (k !== "image" && k !== "audio")) return
+    if (!media || !loadable(k)) return
     return dataUrlFromMediaValue(mediaValue(media, k), k)
   })
 
   const request = createMemo(() => {
     const media = cfg()
     const k = kind()
-    if (!media || (k !== "image" && k !== "audio")) return
+    if (!media || !loadable(k)) return
     if (media.current !== undefined) return
     if (deleted()) return
     if (direct()) return
@@ -154,18 +162,17 @@ export function FileMedia(props: { media?: FileMediaOptions; fallback: () => JSX
     ),
   )
 
-  const kindLabel = (value: "image" | "audio") =>
-    i18n.t(value === "image" ? "ui.fileMedia.kind.image" : "ui.fileMedia.kind.audio")
+  const kindLabel = (value: LoadableKind) => i18n.t(`ui.fileMedia.kind.${value}`)
 
   return (
     <Switch>
-      <Match when={kind() === "image" || kind() === "audio"}>
+      <Match when={loadable(kind())}>
         <Show
           when={src()}
           fallback={(() => {
             const media = cfg()
             const k = kind()
-            if (!media || (k !== "image" && k !== "audio")) return props.fallback()
+            if (!media || !loadable(k)) return props.fallback()
             const label = kindLabel(k)
 
             if (deleted()) {
@@ -198,7 +205,21 @@ export function FileMedia(props: { media?: FileMediaOptions; fallback: () => JSX
         >
           {(value) => {
             const k = kind()
-            if (k !== "image" && k !== "audio") return props.fallback()
+            if (!loadable(k)) return props.fallback()
+            if (k === "pdf") {
+              const name = cfg()?.path?.split("/").pop()
+              return (
+                <Suspense
+                  fallback={
+                    <div class="flex min-h-40 items-center justify-center px-6 py-4 text-center text-text-weak">
+                      {i18n.t("ui.fileMedia.state.loading", { kind: kindLabel(k) })}
+                    </div>
+                  }
+                >
+                  <PdfViewer src={value()} name={name} onLoad={onLoad} />
+                </Suspense>
+              )
+            }
             if (k === "image") {
               return (
                 <div class="flex justify-center bg-background-stronger px-6 py-4">

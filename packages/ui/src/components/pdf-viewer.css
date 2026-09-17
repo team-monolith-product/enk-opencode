@@ -1,0 +1,397 @@
+[data-component="pdf-viewer"] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: min(80vh, 48rem);
+  min-height: 20rem;
+  background: var(--background-stronger);
+  color: var(--text-strong);
+
+  [data-slot="pdf-viewer-skip"] {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    z-index: 2;
+    padding: 4px 8px;
+    border-radius: var(--radius-md);
+    background: var(--surface-raised-stronger-non-alpha);
+    color: var(--text-strong);
+    font-size: 12px;
+    transform: translateY(-200%);
+
+    &:focus-visible {
+      transform: none;
+      outline: 2px solid var(--border-interactive-focus, var(--border-selected));
+    }
+  }
+
+  [data-slot="pdf-viewer-toolbar"] {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border-weak-base);
+  }
+
+  [data-slot="pdf-viewer-toolbar"] [data-slot="dropdown-menu-trigger"] {
+    gap: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  [data-slot="pdf-viewer-divider"] {
+    width: 1px;
+    height: 20px;
+    margin: 0 2px;
+    background: var(--border-weak-base);
+  }
+
+  [data-slot="pdf-viewer-body"] {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  [data-slot="pdf-viewer-thumbnails"] {
+    flex: 0 0 200px;
+    overflow: auto;
+    border-right: 1px solid var(--border-weak-base);
+    background: var(--background-stronger);
+
+    ol {
+      display: flex;
+      flex-direction: column;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+  }
+
+  [data-slot="pdf-viewer-thumbnail"] {
+    margin: 20px auto 0;
+    padding: 4px;
+    cursor: pointer;
+    border-radius: var(--radius-md);
+
+    &:last-child {
+      margin-bottom: 20px;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--border-selected);
+    }
+  }
+
+  [data-slot="pdf-viewer-thumbnail-frame"] {
+    position: relative;
+    width: 138px;
+    overflow: hidden;
+    border: 1px solid var(--border-base);
+    border-radius: 4px;
+    background: #fff;
+  }
+
+  [data-slot="pdf-viewer-thumbnail"][data-active="true"] [data-slot="pdf-viewer-thumbnail-frame"] {
+    margin: -2px;
+    border: 3px solid var(--border-selected);
+  }
+
+  [data-slot="pdf-viewer-thumbnail-layer"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+
+  [data-slot="pdf-viewer-thumbnail-number"] {
+    margin: 8px 0 0;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-base);
+  }
+
+  [data-slot="pdf-viewer-thumbnail"][data-active="true"] [data-slot="pdf-viewer-thumbnail-number"] {
+    color: var(--text-interactive-base);
+    font-weight: 600;
+  }
+
+  [data-slot="pdf-viewer-content"] {
+    position: relative;
+    flex: 1 0 0;
+    min-width: 0;
+    background: var(--surface-inset-base);
+
+    &:focus {
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--border-selected);
+      outline-offset: -2px;
+    }
+
+    &:fullscreen {
+      background: var(--background-base);
+    }
+  }
+
+  [data-slot="pdf-viewer-scroll"] {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+  }
+
+  [data-slot="pdf-viewer-pages"] {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: fit-content;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  [data-slot="pdf-viewer-page"] {
+    padding: 4px;
+    list-style: none;
+  }
+
+  [data-slot="pdf-viewer-page-frame"] {
+    position: relative;
+    overflow: hidden;
+    background: #fff;
+    box-shadow:
+      0 1px 2px rgba(19, 16, 16, 0.12),
+      0 4px 12px rgba(19, 16, 16, 0.08);
+  }
+
+  [data-slot="pdf-viewer-layer"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform: scale(var(--pdf-layer-scale, 1));
+    transform-origin: 0 0;
+    --user-unit: 1;
+    --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
+    --scale-round-x: 1px;
+    --scale-round-y: 1px;
+
+    canvas {
+      display: block;
+    }
+  }
+
+  [data-slot="pdf-viewer-page-error"] {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6f6f6f;
+    font-size: 13px;
+  }
+
+  [data-slot="pdf-viewer-state"] {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    height: 100%;
+    padding: 24px;
+    text-align: center;
+    color: var(--text-base);
+  }
+
+  [data-slot="pdf-viewer-state-name"] {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: var(--text-strong);
+    word-break: break-all;
+  }
+
+  [data-slot="pdf-viewer-state-title"] {
+    font-weight: 600;
+    color: var(--text-strong);
+  }
+
+  [data-slot="pdf-viewer-navigation"] {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px;
+    border-top: 1px solid var(--border-weak-base);
+  }
+
+  [data-slot="pdf-viewer-indicator"] {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    font-weight: 600;
+    color: var(--text-weak);
+    font-variant-numeric: tabular-nums;
+  }
+
+  [data-slot="pdf-viewer-page-field"] {
+    display: flex;
+    height: 28px;
+    padding: 0 16px;
+    border: 1px solid var(--border-base);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised-stronger-non-alpha);
+
+    &:focus-within {
+      border-color: var(--border-selected);
+    }
+
+    &[data-invalid="true"] {
+      border-color: var(--surface-critical-strong);
+    }
+
+    input {
+      width: 100%;
+      min-width: 0;
+      color: var(--text-strong);
+      font: inherit;
+      text-align: center;
+
+      &:focus {
+        outline: none;
+      }
+
+      &:disabled {
+        color: var(--text-weak);
+      }
+    }
+  }
+
+  .textLayer {
+    position: absolute;
+    text-align: initial;
+    inset: 0;
+    overflow: clip;
+    opacity: 1;
+    line-height: 1;
+    letter-spacing: normal;
+    word-spacing: normal;
+    text-size-adjust: none;
+    forced-color-adjust: none;
+    transform-origin: 0 0;
+    caret-color: CanvasText;
+    z-index: 0;
+    --min-font-size: 1;
+    --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+    --min-font-size-inv: calc(1 / var(--min-font-size));
+
+    :is(span, br) {
+      color: transparent;
+      position: absolute;
+      white-space: pre;
+      cursor: text;
+      transform-origin: 0% 0%;
+      user-select: text;
+    }
+
+    > :not(.markedContent),
+    .markedContent span:not(.markedContent) {
+      z-index: 1;
+      --font-height: 0;
+      font-size: calc(var(--text-scale-factor) * var(--font-height));
+      --scale-x: 1;
+      --rotate: 0deg;
+      transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+    }
+
+    .markedContent {
+      display: contents;
+    }
+
+    span[role="img"] {
+      user-select: none;
+      cursor: default;
+    }
+
+    ::selection {
+      background: rgba(0 0 255 / 0.25);
+      background: color-mix(in srgb, AccentColor, transparent 50%);
+      color: transparent;
+    }
+
+    br::selection {
+      background: transparent;
+    }
+
+    .endOfContent {
+      display: block;
+      position: absolute;
+      inset: 100% 0 0;
+      z-index: 0;
+      cursor: default;
+      user-select: none;
+    }
+
+    &.selecting .endOfContent {
+      top: 0;
+    }
+  }
+
+  .annotationLayer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    transform-origin: 0 0;
+
+    section {
+      position: absolute;
+      text-align: initial;
+      pointer-events: auto;
+      box-sizing: border-box;
+      transform-origin: 0 0;
+      user-select: none;
+    }
+
+    .annotationContent {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    :is(.linkAnnotation, .buttonWidgetAnnotation.pushButton) > a {
+      position: absolute;
+      font-size: 1em;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    :is(.linkAnnotation, .buttonWidgetAnnotation.pushButton):not(.hasBorder) > a:hover {
+      opacity: 0.2;
+      background-color: rgb(255 255 0);
+    }
+
+    .linkAnnotation.hasBorder:hover {
+      background-color: rgb(255 255 0 / 0.2);
+    }
+
+    .hasBorder {
+      background-size: 100% 100%;
+    }
+  }
+
+  .textLayer.selecting ~ .annotationLayer section {
+    pointer-events: none;
+  }
+}

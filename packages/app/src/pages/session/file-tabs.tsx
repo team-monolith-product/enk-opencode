@@ -4,6 +4,7 @@ import { Dynamic } from "solid-js/web"
 import type { FileSearchHandle } from "@opencode-ai/ui/file"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
 import { cloneSelectedLineRange, previewSelectedLines } from "@opencode-ai/ui/pierre/selection-bridge"
+import { mediaKindFromPath, type MediaKind } from "@opencode-ai/ui/pierre/media"
 import { createLineCommentController } from "@opencode-ai/ui/line-comment-annotations"
 import { sampledChecksum } from "@opencode-ai/util/encode"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
@@ -421,7 +422,7 @@ export function FileTabContent(props: { tab: string }) {
   })
 
   const renderFile = (source: string) => (
-    <div class="relative overflow-hidden pb-40">
+    <div class="relative overflow-hidden" classList={{ "pb-40": mediaKindFromPath(path()) !== "pdf" }}>
       <Dynamic
         component={fileComponent}
         mode="text"
@@ -454,7 +455,7 @@ export function FileTabContent(props: { tab: string }) {
           path: path(),
           current: state()?.content,
           onLoad: scrollSync.queueRestore,
-          onError: (args: { kind: "image" | "audio" | "svg" }) => {
+          onError: (args: { kind: MediaKind }) => {
             if (args.kind !== "svg") return
             showToast({
               variant: "error",

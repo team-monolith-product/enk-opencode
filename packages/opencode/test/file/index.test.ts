@@ -105,6 +105,23 @@ describe("file/index Filesystem patterns", () => {
       })
     })
 
+    test("reads pdf files as base64 for preview", async () => {
+      await using tmp = await tmpdir()
+      const content = Buffer.from("%PDF-1.7\n%âãÏÓ\n")
+      await fs.writeFile(path.join(tmp.path, "Report.PDF"), content)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const result = await File.read("Report.PDF")
+          expect(result.type).toBe("text")
+          expect(result.encoding).toBe("base64")
+          expect(result.mimeType).toBe("application/pdf")
+          expect(result.content).toBe(content.toString("base64"))
+        },
+      })
+    })
+
     test("returns empty for binary non-image files", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "binary.so")
