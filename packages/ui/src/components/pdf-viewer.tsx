@@ -159,7 +159,7 @@ function renderPage(input: {
     canvas.height = Math.floor(viewport.height * output.sy)
     canvas.style.width = layer.style.width
     canvas.style.height = layer.style.height
-    layer.append(canvas)
+    layer.appendChild(canvas)
 
     task = page.render({
       canvas,
@@ -175,7 +175,8 @@ function renderPage(input: {
     textDiv.className = "textLayer"
     const annotationDiv = document.createElement("div")
     annotationDiv.className = "annotationLayer"
-    layer.append(textDiv, annotationDiv)
+    layer.appendChild(textDiv)
+    layer.appendChild(annotationDiv)
 
     text = new TextLayer({
       textContentSource: page.streamTextContent({ includeMarkedContent: true, disableNormalization: true }),
@@ -247,7 +248,7 @@ function PdfPage(props: {
         if (job !== current) return
         shown?.remove()
         shown = layer
-        frame.append(layer)
+        frame.appendChild(layer)
         batch(() => {
           setDrawn(scale)
           setFailed(false)
@@ -329,7 +330,7 @@ function Thumbnail(props: {
     layer.dataset.slot = "pdf-viewer-thumbnail-layer"
     const job = renderPage({ pdf: props.pdf, number: props.number, scale: THUMBNAIL_WIDTH / props.size.width, layer })
     job.promise.then(
-      () => frame.append(layer),
+      () => frame.appendChild(layer),
       () => {},
     )
     onCleanup(() => {
