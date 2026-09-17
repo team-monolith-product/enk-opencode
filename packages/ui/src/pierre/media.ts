@@ -1,6 +1,6 @@
 import type { FileContent } from "@opencode-ai/sdk/v2"
 
-export type MediaKind = "image" | "audio" | "svg"
+export type MediaKind = "image" | "audio" | "svg" | "pdf"
 
 const imageExtensions = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "heic"])
 const audioExtensions = new Set(["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"])
@@ -36,6 +36,7 @@ export function fileExtension(path: string | undefined) {
 export function mediaKindFromPath(path: string | undefined): MediaKind | undefined {
   const ext = fileExtension(path)
   if (ext === "svg") return "svg"
+  if (ext === "pdf") return "pdf"
   if (imageExtensions.has(ext)) return "image"
   if (audioExtensions.has(ext)) return "audio"
 }
@@ -47,6 +48,7 @@ export function isBinaryContent(value: MediaValue) {
 function validDataUrl(value: string, kind: MediaKind) {
   if (kind === "svg") return value.startsWith("data:image/svg+xml") ? value : undefined
   if (kind === "image") return value.startsWith("data:image/") ? value : undefined
+  if (kind === "pdf") return value.startsWith("data:application/pdf;") ? value : undefined
   if (value.startsWith("data:audio/x-aac;")) return value.replace("data:audio/x-aac;", "data:audio/aac;")
   if (value.startsWith("data:audio/x-m4a;")) return value.replace("data:audio/x-m4a;", "data:audio/mp4;")
   if (value.startsWith("data:audio/")) return value
@@ -75,6 +77,7 @@ export function dataUrlFromMediaValue(value: MediaValue, kind: MediaKind) {
 
   if (kind === "image" && !mime.startsWith("image/")) return
   if (kind === "audio" && !mime.startsWith("audio/")) return
+  if (kind === "pdf" && mime !== "application/pdf") return
   if (record.encoding !== "base64") return
 
   return `data:${mime};base64,${record.content}`
