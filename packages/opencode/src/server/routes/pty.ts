@@ -165,6 +165,7 @@ export const PtyRoutes = lazy(() =>
 
         type Socket = {
           readyState: number
+          data?: unknown
           send: (data: string | Uint8Array | ArrayBuffer) => void
           close: (code?: number, reason?: string) => void
         }
@@ -187,7 +188,20 @@ export const PtyRoutes = lazy(() =>
               ws.close()
               return
             }
-            handler = await Pty.connect(id, socket, cursor)
+            const tracked = {
+              get readyState() {
+                return socket.readyState
+              },
+              get data() {
+                return socket.data
+              },
+              send: (data: string | Uint8Array | ArrayBuffer) => {
+                HubActivity.touch()
+                socket.send(data)
+              },
+              close: (code?: number, reason?: string) => socket.close(code, reason),
+            }
+            handler = await Pty.connect(id, tracked, cursor)
             ready = true
             for (const msg of pending) handler?.onMessage(msg)
             pending.length = 0

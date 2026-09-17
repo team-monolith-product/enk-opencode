@@ -7,30 +7,40 @@ import { HubAuth } from "./hub-auth"
 export namespace HubActivity {
   const log = Log.create({ service: "hub-activity" })
 
-  const INTERVAL = 300_000
-  const PASSIVE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
+  const DEFAULT_INTERVAL = 300
 
   type Event = { directory?: string; payload?: { type?: string; properties?: any } }
 
+  const untracked = new WeakSet<Request>()
   const busy = new Map<string, Set<string>>()
-  let last: Date | undefined
-  let sent: Date | undefined
-  let timer: ReturnType<typeof setTimeout> | undefined
+  let last = new Date()
+  let started = false
+
+  function interval() {
+    return Flag.JUPYTERHUB_ACTIVITY_INTERVAL ?? DEFAULT_INTERVAL
+  }
 
   export function enabled() {
-    return HubAuth.enabled() && !!Flag.JUPYTERHUB_ACTIVITY_URL
+    return HubAuth.enabled() && !!Flag.JUPYTERHUB_ACTIVITY_URL && interval() > 0
   }
 
   export function touch(at = new Date()) {
-    if (!last || at > last) last = at
+    if (at > last) last = at
+  }
+
+  export function untrack(req: Request) {
+    untracked.add(req)
   }
 
   export function track(): MiddlewareHandler {
     return async (c, next) => {
       await next()
-      if (PASSIVE_METHODS.has(c.req.method) || c.req.path === "/log") return
+      if (c.req.method === "OPTIONS") return
       if (c.req.header(HubAuth.INTERNAL_HEADER) === HubAuth.INTERNAL_TOKEN) return
-      if (c.res.status >= 400) return
+      if (c.req.header("upgrade")) return
+      if (untracked.has(c.req.raw)) return
+      if (c.req.query("no_track_activity") !== undefined) return
+      if (c.res.headers.get("content-type")?.startsWith("text/event-stream")) return
       touch()
     }
   }
@@ -49,15 +59,22 @@ export namespace HubActivity {
       touch()
       return
     }
-    if (type === "server.instance.disposed") busy.delete(directory)
-    if (type === "global.disposed") busy.clear()
+    if (type === "server.instance.disposed") {
+      busy.delete(directory)
+      return
+    }
+    if (type === "global.disposed") {
+      busy.clear()
+      return
+    }
+    if (busy.has(directory)) touch()
   }
 
-  export async function report(now = new Date()) {
-    if (busy.size > 0) touch(now)
-    if (!last || (sent && last <= sent)) return
-    const at = last
-    const timestamp = at.toISOString()
+  function sleep(ms: number) {
+    return new Promise<void>((resolve) => setTimeout(resolve, ms).unref?.())
+  }
+
+  async function notify(timestamp: string) {
     try {
       const res = await fetch(Flag.JUPYTERHUB_ACTIVITY_URL!, {
         method: "POST",
@@ -70,23 +87,44 @@ export namespace HubActivity {
           last_activity: timestamp,
         }),
       })
-      if (!res.ok) {
-        log.warn("activity report rejected", { status: res.status })
-        return
-      }
-      sent = at
+      if (res.ok) return true
+      log.error("error notifying hub of activity", { status: res.status })
     } catch (error) {
-      log.warn("activity report failed", { error })
+      log.error("error notifying hub of activity", { error })
     }
+    return false
+  }
+
+  async function backoff(pass: () => Promise<boolean>, input: { startWait: number; maxWait: number; timeout: number }) {
+    const tolerance = 0.1 * input.timeout
+    const deadline = performance.now() + (input.timeout + (Math.random() * 2 - 1) * tolerance) * 1000
+    let scale = 1
+    while (true) {
+      if (await pass()) return
+      const remaining = deadline - performance.now()
+      if (remaining < 0) break
+      const limit = Math.min(input.maxWait, input.startWait * scale)
+      if (limit < input.maxWait) scale *= 2
+      await sleep(Math.min(remaining, Math.random() * limit * 1000))
+    }
+    throw new Error("Failed to notify Hub of activity")
+  }
+
+  export async function report(timeout = 60) {
+    const timestamp = last.toISOString()
+    await backoff(() => notify(timestamp), { startWait: 1, maxWait: 15, timeout })
   }
 
   export function start() {
-    if (timer || !enabled()) return
+    if (started || !enabled()) return
+    started = true
     GlobalBus.on("event", observe)
-    const schedule = () => {
-      timer = setTimeout(() => void report().finally(schedule), INTERVAL * (0.9 + Math.random() * 0.2))
-      timer.unref?.()
-    }
-    schedule()
+    log.info("updating hub with activity", { interval: interval() })
+    void (async () => {
+      while (true) {
+        await report().catch((error) => log.error("error notifying hub of activity", { error }))
+        await sleep(interval() * 1000 * (1 + 0.2 * (Math.random() - 0.5)))
+      }
+    })()
   }
 }

@@ -46,6 +46,7 @@
     "@blocksuite/store": "0.0.0-canary-20250316001624",
     "@blocksuite/sync": "0.0.0-canary-20250316001624",
     "@kobalte/core": "catalog:",
+    "@lumino/polling": "2.1.4",
     "@opencode-ai/sdk": "workspace:*",
     "@opencode-ai/ui": "workspace:*",
     "@opencode-ai/util": "workspace:*",
