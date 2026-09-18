@@ -252,9 +252,44 @@ export function createPromptDocSession(): PromptDocSession {
     onCleanup(unsub)
   })
 
+  /**
+   * 스트림이 다시 붙을 때마다 서버에 지금의 프롬프트 doc 을 되묻는다.
+   *
+   * doc 교체는 `doc.prompt.rotated` 이벤트 한 번으로만 알려지고 재연결 재생이 없다. 그래서 전송이
+   * 일어난 순간 자리를 비웠던(네트워크 끊김·탭 절전) 클라이언트만 옛 doc 에 남는다. 남은 쪽은 팀이
+   * 보지 못하는 문서를 편집하고, 제출 소켓도 옛 doc 에 붙어 있어 이후 동의 투표에서 통째로 빠진다 —
+   * "그 기기에만 동의 창이 안 뜬다"의 정체다. 세션 삭제에 이미 같은 되묻기가 있다(directory-layout).
+   */
+  createEffect(() => {
+    const id = params.id
+    if (!id) return
+    void globalSDK.event.start()
+    const unsub = globalSDK.event.listen((event) => {
+      if (event.name !== "global") return
+      if ((event.details as { type?: string } | undefined)?.type !== "server.connected") return
+      if (params.id !== id) return
+      const previous = doc.docID()
+      void doc
+        .refresh(id)
+        .then((next) => {
+          // 자리를 비운 사이 교체가 있었다면 그 전송은 이미 나간 것이다. rotated 를 받은 경로와 같이
+          // 컴포저를 비운다(이미 비어 있으면 아무 일도 하지 않는다).
+          if (!next || next === previous) return
+          if (mode() === "doc") clearComposer()
+        })
+        .catch(() => {})
+    })
+    onCleanup(unsub)
+  })
+
   const [approval, setApproval] = createSignal<DocSubmitState | undefined>()
   const [approvalSession, setApprovalSession] = createSignal<string | undefined>()
   let approvalID: string | undefined
+  // The dialog handle we opened. The shared provider replaces a dialog without telling its owner
+  // (show() disposes the active one), so `approvalID` alone can claim a dialog that is long gone —
+  // and then every later cast for that vote is swallowed as "already shown". Comparing handles is
+  // what makes a consent dialog come back after something else (a question vote, a picker) stole it.
+  let approvalDialog: unknown
   let finalizedID: string | undefined
 
   // 투표가 도는 동안에는 다른 합의를 시작할 수 없다(서버도 지우기 합의에 대해 같은 규칙을 건다).
@@ -263,37 +298,55 @@ export function createPromptDocSession(): PromptDocSession {
   const closeApproval = () => {
     dialog.close()
     approvalID = undefined
+    approvalDialog = undefined
     setApproval(undefined)
   }
-  const showApproval = (state: DocSubmitState) => {
+  /** Is this vote's dialog the one actually on screen right now? */
+  const dialogOpen = (submitID: string) => approvalID === submitID && dialog.active === approvalDialog
+  /**
+   * `local` marks a state this client invented rather than heard from the server — today only the
+   * countdown's expiry fallback. Such a state is display-only: it must NOT count as the vote being
+   * resolved, because the server may still be running it (every join/leave tops the deadline up, and
+   * a client that was offline for that top-up expires early). Recording it as final was what left the
+   * dialog frozen at "0초": the real 'sent'/'expired' cast arrived afterwards and was discarded.
+   */
+  const showApproval = (state: DocSubmitState, opts?: { local?: boolean }) => {
     const actorID = doc.actorID()
     if (!actorID) return
     // No membership gate here: the server casts only to connected peers and joins any connected
     // non-member to a pending vote (dynamic membership), so every state we receive is ours to
     // render. The old gate silently dropped casts when membership drifted — the "dialog never
     // appeared" bug.
-    // Terminal states are handled exactly once per submit: a server replay on reconnect (or a
-    // duplicate cast) for an already-resolved submit must not re-clear context or re-open a dialog.
     if (state.status !== "pending") {
-      if (finalizedID === state.submitID) return
-      finalizedID = state.submitID
+      // A server-sent ending is handled exactly once per submit: a replay on reconnect (or a
+      // duplicate cast) must not re-clear context or re-open a dialog.
+      if (!opts?.local) {
+        if (finalizedID === state.submitID) return
+        finalizedID = state.submitID
+      }
       // A 'stop' vote shows no terminal screen — any resolution just closes. Stopping the response
       // and the response finishing on its own are the same end state, so there's nothing to show:
       // on approval the server already cancelled the run; a reject/expire simply does nothing.
       if (state.targetKind === "stop") {
-        if (approvalID === state.submitID) closeApproval()
+        if (dialogOpen(state.submitID)) closeApproval()
         return
       }
-    }
-    if (state.status === "sent") {
-      // Only a doc send reaches this — a 'stop' vote returned above, and question votes run on their
-      // own socket (session-question-dock) — so the composer is safe to clear wholesale.
-      clearComposer()
-      if (approvalID === state.submitID) closeApproval()
+      if (state.status === "sent") {
+        // Only a doc send reaches this — a 'stop' vote returned above, and question votes run on
+        // their own socket (session-question-dock) — so the composer is safe to clear wholesale.
+        clearComposer()
+        if (dialogOpen(state.submitID)) closeApproval()
+        return
+      }
+      // Cancelled/expired/left: show the outcome to whoever is looking at this vote. With no dialog
+      // on screen there is nothing to resolve — opening one now would announce the end of a vote the
+      // user never saw (and, after a local expiry, announce it twice).
+      if (!dialogOpen(state.submitID)) return
+      setApproval(state)
       return
     }
     setApproval(state)
-    if (approvalID === state.submitID) return
+    if (dialogOpen(state.submitID)) return
     approvalID = state.submitID
     dialog.show(
       () => (
@@ -314,7 +367,10 @@ export function createPromptDocSession(): PromptDocSession {
               actorID,
               action: "approve",
             })
-              .then(setApproval)
+              // Through showApproval, not setApproval: responding to an already finished vote
+              // answers with its terminal state, which has to close the dialog (and clear the
+              // composer on a send) instead of leaving a dead "수락/거절" frame on screen.
+              .then((next) => showApproval(next))
               .catch(() =>
                 showToast({
                   title: language.t("docSubmit.toast.approveFailed"),
@@ -333,7 +389,10 @@ export function createPromptDocSession(): PromptDocSession {
               actorID,
               action: "cancel",
             })
-              .then(setApproval)
+              // Through showApproval, not setApproval: responding to an already finished vote
+              // answers with its terminal state, which has to close the dialog (and clear the
+              // composer on a send) instead of leaving a dead "수락/거절" frame on screen.
+              .then((next) => showApproval(next))
               .catch(() =>
                 showToast({
                   title: language.t("docSubmit.toast.cancelFailed"),
@@ -352,7 +411,10 @@ export function createPromptDocSession(): PromptDocSession {
               actorID,
               action: "exclude",
             })
-              .then(setApproval)
+              // Through showApproval, not setApproval: responding to an already finished vote
+              // answers with its terminal state, which has to close the dialog (and clear the
+              // composer on a send) instead of leaving a dead "수락/거절" frame on screen.
+              .then((next) => showApproval(next))
               .catch(() =>
                 showToast({
                   title: language.t("docSubmit.toast.sendFailed"),
@@ -362,11 +424,11 @@ export function createPromptDocSession(): PromptDocSession {
           }}
           close={closeApproval}
           onExpire={() => {
-            // Server terminal cast never arrived — drive the same "expired" transition locally so the
-            // dialog resolves instead of freezing at 0초. Routed through showApproval so finalizedID is
-            // set: a late server cast for this submit is then ignored rather than re-opening the dialog.
+            // The deadline passed with no word from the server — show the timeout locally so the
+            // dialog resolves instead of freezing at 0초. Marked `local`: the server may have topped
+            // the deadline up while we were offline, so its own verdict still gets the last word.
             const current = approval()
-            if (current?.status === "pending") showApproval({ ...current, status: "expired" })
+            if (current?.status === "pending") showApproval({ ...current, status: "expired" }, { local: true })
           }}
         />
       ),
@@ -374,6 +436,7 @@ export function createPromptDocSession(): PromptDocSession {
         const current = approval()
         if (current?.status === "pending") {
           approvalID = undefined
+          approvalDialog = undefined
           window.setTimeout(() => {
             const next = approval()
             if (next?.status === "pending") showApproval(next)
@@ -381,9 +444,11 @@ export function createPromptDocSession(): PromptDocSession {
           return
         }
         approvalID = undefined
+        approvalDialog = undefined
         setApproval(undefined)
       },
     )
+    approvalDialog = dialog.active
   }
 
   // Stopping the AI mid-response is a shared action in a collaborative doc: gate it behind the same
