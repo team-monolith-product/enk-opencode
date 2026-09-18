@@ -8,24 +8,32 @@ export namespace HubActivity {
   const log = Log.create({ service: "hub-activity" })
 
   const DEFAULT_INTERVAL = 300
+  const RETRY_MAX_WAIT = 15
+  const RETRY_TIMEOUT = 60
+
+  export type Target = { url: string; token: string; server: string; interval: number }
 
   type Event = { directory?: string; payload?: { type?: string; properties?: any } }
 
   const untracked = new WeakSet<Request>()
   const busy = new Map<string, Set<string>>()
-  let last = new Date()
+  let last = Date.now()
   let started = false
 
-  function interval() {
-    return Flag.JUPYTERHUB_ACTIVITY_INTERVAL ?? DEFAULT_INTERVAL
+  export function target(): Target | undefined {
+    if (!HubAuth.enabled() || !Flag.JUPYTERHUB_ACTIVITY_URL) return
+    const interval = Flag.JUPYTERHUB_ACTIVITY_INTERVAL ?? DEFAULT_INTERVAL
+    if (interval <= 0) return
+    return {
+      url: Flag.JUPYTERHUB_ACTIVITY_URL,
+      token: Flag.JUPYTERHUB_API_TOKEN!,
+      server: Flag.JUPYTERHUB_SERVER_NAME ?? "",
+      interval,
+    }
   }
 
-  export function enabled() {
-    return HubAuth.enabled() && !!Flag.JUPYTERHUB_ACTIVITY_URL && interval() > 0
-  }
-
-  export function touch(at = new Date()) {
-    if (at > last) last = at
+  export function touch() {
+    last = Date.now()
   }
 
   export function untrack(req: Request) {
@@ -74,16 +82,16 @@ export namespace HubActivity {
     return new Promise<void>((resolve) => setTimeout(resolve, ms).unref?.())
   }
 
-  async function notify(timestamp: string) {
+  async function notify(target: Target, timestamp: string) {
     try {
-      const res = await fetch(Flag.JUPYTERHUB_ACTIVITY_URL!, {
+      const res = await fetch(target.url, {
         method: "POST",
         headers: {
-          Authorization: `token ${Flag.JUPYTERHUB_API_TOKEN}`,
+          Authorization: `token ${target.token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          servers: { [Flag.JUPYTERHUB_SERVER_NAME ?? ""]: { last_activity: timestamp } },
+          servers: { [target.server]: { last_activity: timestamp } },
           last_activity: timestamp,
         }),
       })
@@ -95,35 +103,28 @@ export namespace HubActivity {
     return false
   }
 
-  async function backoff(pass: () => Promise<boolean>, input: { startWait: number; maxWait: number; timeout: number }) {
-    const tolerance = 0.1 * input.timeout
-    const deadline = performance.now() + (input.timeout + (Math.random() * 2 - 1) * tolerance) * 1000
+  export async function report(target: Target, timeout = RETRY_TIMEOUT) {
+    const timestamp = new Date(last).toISOString()
+    const deadline = performance.now() + (timeout + (Math.random() * 2 - 1) * 0.1 * timeout) * 1000
     let scale = 1
-    while (true) {
-      if (await pass()) return
+    while (!(await notify(target, timestamp))) {
       const remaining = deadline - performance.now()
-      if (remaining < 0) break
-      const limit = Math.min(input.maxWait, input.startWait * scale)
-      if (limit < input.maxWait) scale *= 2
+      if (remaining < 0) throw new Error("Failed to notify Hub of activity")
+      const limit = Math.min(RETRY_MAX_WAIT, scale)
+      if (limit < RETRY_MAX_WAIT) scale *= 2
       await sleep(Math.min(remaining, Math.random() * limit * 1000))
     }
-    throw new Error("Failed to notify Hub of activity")
   }
 
-  export async function report(timeout = 60) {
-    const timestamp = last.toISOString()
-    await backoff(() => notify(timestamp), { startWait: 1, maxWait: 15, timeout })
-  }
-
-  export function start() {
-    if (started || !enabled()) return
+  export function start(target: Target) {
+    if (started) return
     started = true
     GlobalBus.on("event", observe)
-    log.info("updating hub with activity", { interval: interval() })
+    log.info("updating hub with activity", { interval: target.interval })
     void (async () => {
       while (true) {
-        await report().catch((error) => log.error("error notifying hub of activity", { error }))
-        await sleep(interval() * 1000 * (1 + 0.2 * (Math.random() - 0.5)))
+        await report(target).catch((error) => log.error("error notifying hub of activity", { error }))
+        await sleep(target.interval * 1000 * (1 + 0.2 * (Math.random() - 0.5)))
       }
     })()
   }

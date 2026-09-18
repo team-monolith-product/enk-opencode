@@ -322,7 +322,8 @@ export namespace Server {
       log.warn("mDNS enabled but hostname is loopback; skipping mDNS publish")
     }
 
-    HubActivity.start()
+    const activity = HubActivity.target()
+    if (activity) HubActivity.start(activity)
 
     const originalStop = server.stop.bind(server)
     server.stop = async (closeActiveConnections?: boolean) => {

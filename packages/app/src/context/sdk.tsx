@@ -1,8 +1,8 @@
-import { Poll } from "@lumino/polling"
 import type { Event } from "@opencode-ai/sdk/v2/client"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { type Accessor, createEffect, createMemo, onCleanup } from "solid-js"
+import { createHubActivityPoll } from "@/utils/hub-activity-poll"
 import { useGlobalSDK } from "./global-sdk"
 
 type SDKEventMap = {
@@ -31,15 +31,9 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       onCleanup(unsub)
     })
 
-    const running = new Poll({
-      auto: false,
-      factory: () => client().session.status(),
-      frequency: { interval: 10 * 1000, backoff: true, max: 300 * 1000 },
-      name: "SDK#running",
-      standby: "when-hidden",
-    })
-    void running.start()
-    onCleanup(() => running.dispose())
+    const activity = createHubActivityPoll(client)
+    void activity.start()
+    onCleanup(() => activity.dispose())
 
     return {
       get directory() {

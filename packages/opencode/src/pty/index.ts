@@ -3,6 +3,7 @@ import { Bus } from "@/bus"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { Instance } from "@/project/instance"
+import { HubActivity } from "@/server/hub-activity"
 import { type IPty } from "bun-pty"
 import z from "zod"
 import { Log } from "../util/log"
@@ -229,6 +230,7 @@ export namespace Pty {
           proc.onData(
             Instance.bind((chunk) => {
               session.cursor += chunk.length
+              HubActivity.touch()
 
               for (const [key, ws] of session.subscribers.entries()) {
                 if (ws.readyState !== 1) {
