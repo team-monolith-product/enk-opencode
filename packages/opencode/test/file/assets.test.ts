@@ -285,3 +285,92 @@ describe("Assets.exclude", () => {
     })
   })
 })
+
+describe("Assets ledger", () => {
+  /** Primes the cached walk without writing anything, so a test can then change the folder behind it. */
+  function prime() {
+    const claim = Assets.claim(0)
+    if (typeof claim === "string") throw new Error(claim)
+    Assets.settle(claim)
+  }
+
+  test("a claim is visible to the next one, so overlapping uploads cannot each take the last slot", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        // The whole folder, taken by one upload that has not written a byte yet.
+        const first = Assets.claim(Assets.MAX_TOTAL_BYTES)
+        expect(first).not.toBe("total")
+
+        // A plain read of the folder would still say it is empty. The claim is what stops this one.
+        expect(Assets.claim(1)).toBe("total")
+      },
+    })
+  })
+
+  test("hands room back when the upload stored nothing", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const claim = Assets.claim(Assets.MAX_TOTAL_BYTES)
+        if (typeof claim === "string") throw new Error(claim)
+        Assets.settle(claim)
+
+        // A failed upload that kept its claim would shrink the folder's capacity permanently.
+        expect(Assets.claim(Assets.MAX_TOTAL_BYTES)).not.toBe("total")
+      },
+    })
+  })
+
+  test("keeps a stored file counted before the next walk catches up", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const claim = Assets.claim(0)
+        if (typeof claim === "string") throw new Error(claim)
+        // Declared nothing, wrote 500 — what the file cost has to survive the claim being released.
+        Assets.settle(claim, 500)
+
+        expect(Assets.claim(Assets.MAX_TOTAL_BYTES - 499)).toBe("total")
+      },
+    })
+  })
+
+  test("refuses past the file count cap, including when claims overlap", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        fs.mkdirSync(Assets.root(), { recursive: true })
+        for (let i = 0; i < Assets.MAX_FILE_COUNT - 1; i++) fs.writeFileSync(path.join(Assets.root(), `f${i}.txt`), "x")
+
+        // One slot left and four uploads reaching for it at once.
+        const claims = [Assets.claim(1), Assets.claim(1), Assets.claim(1), Assets.claim(1)]
+        expect(claims.filter((claim) => claim === "count")).toHaveLength(3)
+        expect(claims.filter((claim) => typeof claim !== "string")).toHaveLength(1)
+      },
+    })
+  })
+
+  test("invalidate picks up a file this module did not write", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        prime()
+
+        // The agent's own write tool, or a shell, putting something in the folder.
+        fs.mkdirSync(Assets.root(), { recursive: true })
+        fs.writeFileSync(path.join(Assets.root(), "outside.bin"), Buffer.alloc(1024))
+
+        // Before this the cached walk still says the folder is empty; the cache is time-bound, so
+        // only the invalidated read is asserted here rather than a race against the TTL.
+        Assets.invalidate()
+        expect(Assets.claim(Assets.MAX_TOTAL_BYTES - 1023)).toBe("total")
+      },
+    })
+  })
+})

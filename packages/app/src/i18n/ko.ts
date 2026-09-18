@@ -610,6 +610,12 @@ export const dict = {
   "session.files.upload.done": "{{count}}개 파일을 업로드했어요",
   "session.files.upload.partial": "{{count}}개 업로드, {{failed}}개 실패",
   "session.files.upload.tooLarge": "100MB를 넘는 파일은 건너뛰었어요.",
+  "session.files.upload.tooMany.title": "파일이 너무 많아요",
+  "session.files.upload.tooMany.description":
+    "업로드 폴더는 최대 {{limit}}개까지인데 지금 {{used}}개가 있어서, 고른 {{selected}}개를 올리지 않았어요.",
+  "session.files.upload.full.title": "업로드 폴더에 공간이 부족해요",
+  "session.files.upload.full.description":
+    "업로드 폴더는 최대 {{limit}}까지인데 지금 {{used}}를 쓰고 있어서, 고른 {{selected}}를 올리지 않았어요.",
   "session.files.binaryContent": "바이너리 파일 (내용을 표시할 수 없음)",
   "session.messages.renderEarlier": "이전 메시지 렌더링",
   "session.messages.loadingEarlier": "이전 메시지 로드 중...",

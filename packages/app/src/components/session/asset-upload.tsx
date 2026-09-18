@@ -10,6 +10,9 @@ import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import {
   ASSETS_DIR,
+  assetBatch,
+  assetCapacity,
+  assetRefusal,
   assetRelativePath,
   assetSubtree,
   deleteAsset,
@@ -32,9 +35,12 @@ export function createAssetUpload() {
   const dialog = useDialog()
 
   const [progress, setProgress] = createSignal<{ done: number; total: number }>()
+  const [checking, setChecking] = createSignal(false)
   const [dragging, setDragging] = createSignal(false)
 
-  const uploading = () => !!progress()
+  // The capacity read happens before there is a count to show, so it cannot use `progress` — but it
+  // still has to disable the pickers and the drop zone, or a second batch lands mid-check.
+  const uploading = () => !!progress() || checking()
 
   /**
    * Re-lists the folders a batch touched, given paths relative to the upload folder. The tree
@@ -65,6 +71,42 @@ export function createAssetUpload() {
     // drop zone are both disabled while uploading, so this only catches a race.
     if (uploading()) return
 
+    // The folder's caps are the server's, and it rejects one upload at a time: a batch past them
+    // would send every file, store some arbitrary prefix of them and fail the rest with nothing to
+    // say why. So the batch is weighed first and refused whole — an over-cap pick uploads nothing.
+    const batch = assetBatch(files)
+    // Nothing left to weigh once the oversized files are set aside; uploadAssets reports each one.
+    if (batch.count > 0) {
+      setChecking(true)
+      const capacity = await assetCapacity({ client: sdk.client, directory: sdk.directory })
+      setChecking(false)
+      // An unreadable capacity is not a full folder: fall through and let the server have the say.
+      const refusal = capacity && assetRefusal(capacity, batch)
+      if (refusal) {
+        showToast(
+          refusal === "count"
+            ? {
+                title: language.t("session.files.upload.tooMany.title"),
+                description: language.t("session.files.upload.tooMany.description", {
+                  limit: capacity.files.limit.toLocaleString(),
+                  used: capacity.files.used.toLocaleString(),
+                  selected: batch.count.toLocaleString(),
+                }),
+              }
+            : {
+                title: language.t("session.files.upload.full.title"),
+                description: language.t("session.files.upload.full.description", {
+                  limit: formatBytes(capacity.bytes.limit),
+                  used: formatBytes(capacity.bytes.used),
+                  selected: formatBytes(batch.bytes),
+                }),
+              },
+        )
+        return
+      }
+    }
+
+    // No await between the check and the upload, so the disabled state never lapses in between.
     setProgress({ done: 0, total: files.length })
     const result = await uploadAssets({
       client: sdk.client,
@@ -222,7 +264,9 @@ function AssetDeleteDialog(props: {
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024).toLocaleString()} KB`
-  return `${(Math.round((bytes / (1024 * 1024)) * 10) / 10).toLocaleString()} MB`
+  // GB matters here: the folder's own cap is measured in them, and "2,048 MB" names it badly.
+  if (bytes < 1024 * 1024 * 1024) return `${(Math.round((bytes / (1024 * 1024)) * 10) / 10).toLocaleString()} MB`
+  return `${(Math.round((bytes / (1024 * 1024 * 1024)) * 10) / 10).toLocaleString()} GB`
 }
 
 export type AssetUpload = ReturnType<typeof createAssetUpload>

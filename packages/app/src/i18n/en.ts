@@ -689,6 +689,12 @@ export const dict = {
   "session.files.upload.done": "Uploaded {{count}} files",
   "session.files.upload.partial": "Uploaded {{count}} files, {{failed}} failed",
   "session.files.upload.tooLarge": "Files over 100 MB were skipped.",
+  "session.files.upload.tooMany.title": "Too many files",
+  "session.files.upload.tooMany.description":
+    "The upload folder holds at most {{limit}} files and already has {{used}}, so the {{selected}} you picked were not uploaded.",
+  "session.files.upload.full.title": "Not enough room",
+  "session.files.upload.full.description":
+    "The upload folder holds at most {{limit}} and already uses {{used}}, so the {{selected}} you picked were not uploaded.",
   "session.files.binaryContent": "Binary file (content cannot be displayed)",
 
   "session.messages.renderEarlier": "Render earlier messages",
