@@ -98,6 +98,11 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
     if (e.details?.type !== "server.connected") return
     const id = params.id
     if (!id) return
+    // 끊겨 있던 동안의 이벤트는 다시 오지 않는다(부트스트랩은 세션 상태만 받아 온다). 그래서 그 사이
+    // 오간 메시지는 물론, 응답이 끝났다는 사실조차 화면에 반영되지 않는다 — 답이 끝난 대화가 계속
+    // "생각 중"으로 남고, 컴포저의 전송 버튼이 중지 버튼에 묶인 채 풀리지 않는다. 지금 보고 있는
+    // 세션만 통째로 다시 받아 맞춘다.
+    void sync.session.sync(id, { force: true }).catch(() => {})
     if (!sync.data.config.ensureSession) return
     void sdk.client.session
       .get({ sessionID: id })

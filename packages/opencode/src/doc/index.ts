@@ -488,6 +488,12 @@ export namespace Doc {
   // group has time to react — capped at one full timeout window so churn can't keep a vote alive
   // indefinitely past what a fresh vote would get.
   const EXTEND = 3_000
+  // ...and capped again over the vote's whole life. The per-top-up cap only limits how far ahead the
+  // deadline can sit; it does nothing against a flapping connection, where every drop and every
+  // re-join buys another EXTEND. One device on bad wifi kept a 30s vote pending for 150s that way,
+  // and a pending vote swallows every new send (create() returns the one in progress), so the team
+  // could not send anything at all. Past this line the vote expires and the group starts a fresh one.
+  const MAX_EXTEND = 30_000
   const MAX_NAME = 64
   // How long after a submit resolves we still replay its terminal state to a (re)connecting
   // participant, so a client that blipped offline exactly at the transition can catch up.
@@ -878,10 +884,12 @@ export namespace Doc {
   }
 
   // Top up a pending vote's deadline after a membership change, capped at one full timeout window
-  // from now. Reschedules the expiry timer when the deadline actually moved.
+  // from now and at MAX_EXTEND past the original deadline. Reschedules the expiry timer when the
+  // deadline actually moved.
   function extend(row: SubmitRow, now = Date.now()) {
     if (row.status !== "pending") return row
-    const deadline = Math.min(row.expires_at + EXTEND, now + row.timeout_ms)
+    const limit = row.time_created + row.timeout_ms + MAX_EXTEND
+    const deadline = Math.min(row.expires_at + EXTEND, now + row.timeout_ms, limit)
     if (deadline <= row.expires_at) return row
     const next = Database.use((db) =>
       db
