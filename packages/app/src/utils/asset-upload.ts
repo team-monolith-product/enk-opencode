@@ -123,6 +123,65 @@ function requestOptions(file: File, signal?: AbortSignal): CreateOptions {
   } as unknown as CreateOptions
 }
 
+/** What the upload folder holds now against what it may hold, on both budgets. */
+export type AssetCapacity = {
+  files: { used: number; limit: number }
+  bytes: { used: number; limit: number }
+}
+
+/**
+ * The folder's totals and the server's caps, read together so a batch can be judged before any of
+ * it is sent. The caps live on the server (Assets.MAX_FILE_COUNT, Assets.MAX_TOTAL_BYTES) and are
+ * not mirrored here: the totals have to be fetched anyway, and a second copy of each number would
+ * be one more thing to drift. Only the per-file cap is mirrored, because it is checked per file
+ * without asking anyone.
+ *
+ * Returns undefined when the listing fails, which the caller must treat as "unknown, carry on"
+ * rather than as a full folder — the server rejects an over-cap upload either way, so a flaky list
+ * request must not be what stops someone uploading.
+ */
+export async function assetCapacity(input: {
+  client: OpencodeClient
+  directory: string
+}): Promise<AssetCapacity | undefined> {
+  try {
+    const res = await input.client.file.asset.list({ directory: input.directory })
+    const usage = res.data?.usage
+    const limits = res.data?.limits
+    if (!usage || !limits) return undefined
+    return {
+      files: { used: usage.count, limit: limits.count },
+      bytes: { used: usage.bytes, limit: limits.total },
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/** What a batch would add to the folder. */
+export type AssetBatch = { count: number; bytes: number }
+
+/**
+ * What a pick actually costs the folder. Files over the per-file cap are left out: they are skipped
+ * one by one during the upload, so counting them here would refuse a batch over room it never
+ * needed.
+ */
+export function assetBatch(files: PickedFile[]): AssetBatch {
+  return files
+    .filter((item) => item.file.size <= MAX_ASSET_BYTES)
+    .reduce<AssetBatch>((acc, item) => ({ count: acc.count + 1, bytes: acc.bytes + item.file.size }), {
+      count: 0,
+      bytes: 0,
+    })
+}
+
+/** Which cap a batch would break, or undefined when it fits. */
+export function assetRefusal(capacity: AssetCapacity, batch: AssetBatch): "count" | "bytes" | undefined {
+  if (capacity.files.used + batch.count > capacity.files.limit) return "count"
+  if (capacity.bytes.used + batch.bytes > capacity.bytes.limit) return "bytes"
+  return undefined
+}
+
 type UploadInput = {
   client: OpencodeClient
   /** Which workspace to store into. Passed explicitly, the same way doc asset uploads do it. */
