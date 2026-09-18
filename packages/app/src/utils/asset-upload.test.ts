@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test"
 import {
   MAX_ASSET_BYTES,
   UPLOAD_CONCURRENCY,
+  assetBatch,
+  assetCapacity,
+  assetRefusal,
   assetRelativePath,
   assetSubtree,
   deleteAsset,
@@ -210,6 +213,83 @@ describe("isAssetPath / assetRelativePath", () => {
   test("returns undefined outside the folder so a delete cannot be built for it", () => {
     expect(assetRelativePath("src/index.ts")).toBeUndefined()
     expect(assetRelativePath("__assets__x/a.txt")).toBeUndefined()
+  })
+})
+
+describe("assetCapacity / assetBatch / assetRefusal", () => {
+  const GB = 1024 * 1024 * 1024
+
+  function listing(usage: { count: number; bytes: number }, calls?: string[]) {
+    return {
+      file: {
+        asset: {
+          list: async ({ directory }: { directory: string }) => {
+            calls?.push(directory)
+            return { data: { files: [], usage, limits: { file: MAX_ASSET_BYTES, total: 2 * GB, count: 1000 } } }
+          },
+        },
+      },
+    } as any
+  }
+
+  test("reads both budgets as used-against-limit pairs", async () => {
+    const calls: string[] = []
+    const capacity = await assetCapacity({
+      client: listing({ count: 940, bytes: GB }, calls),
+      directory: "/tmp/project",
+    })
+
+    expect(capacity).toEqual({
+      files: { used: 940, limit: 1000 },
+      bytes: { used: GB, limit: 2 * GB },
+    })
+    expect(calls).toEqual(["/tmp/project"])
+  })
+
+  test("a failed listing reads as unknown, not as a full folder", async () => {
+    const client = {
+      file: {
+        asset: {
+          list: async () => {
+            throw new Error("offline")
+          },
+        },
+      },
+    } as any
+
+    // The caller must let the upload through on undefined — a flaky list request is not a reason to
+    // refuse a batch the server would have accepted.
+    expect(await assetCapacity({ client, directory: "/tmp/project" })).toBeUndefined()
+  })
+
+  test("weighs only the files that will actually be sent", () => {
+    // The oversized one is skipped per-file during the upload, so it must not take room in the
+    // budget that decides whether the rest may go at all.
+    expect(assetBatch([picked("a.txt", 100), picked("big.bin", MAX_ASSET_BYTES + 1), picked("b.txt", 200)])).toEqual({
+      count: 2,
+      bytes: 300,
+    })
+  })
+
+  test("counts a batch against what is already stored, not against the cap alone", () => {
+    const capacity = { files: { used: 940, limit: 1000 }, bytes: { used: 0, limit: 2 * GB } }
+
+    // 60 files fit on their own, but not on top of the 940 already there.
+    expect(assetRefusal(capacity, { count: 60, bytes: 0 })).toBeUndefined()
+    expect(assetRefusal(capacity, { count: 61, bytes: 0 })).toBe("count")
+  })
+
+  test("refuses a batch that does not fit the byte budget", () => {
+    const capacity = { files: { used: 0, limit: 1000 }, bytes: { used: GB, limit: 2 * GB } }
+
+    expect(assetRefusal(capacity, { count: 1, bytes: GB })).toBeUndefined()
+    expect(assetRefusal(capacity, { count: 1, bytes: GB + 1 })).toBe("bytes")
+  })
+
+  test("names the count first when a batch breaks both budgets", () => {
+    // Both are true; the file count is the one the user can act on by picking fewer files.
+    const capacity = { files: { used: 1000, limit: 1000 }, bytes: { used: 2 * GB, limit: 2 * GB } }
+    expect(assetRefusal(capacity, { count: 1, bytes: 1 })).toBe("count")
   })
 })
 
