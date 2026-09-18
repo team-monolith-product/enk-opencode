@@ -130,3 +130,31 @@ export function deleteEnvKey(opts: EnvFileOpts, name: string): Promise<string[]>
     .delete({ url: `/env-file/${name}` })
     .then((res) => (res.data as EnvFileKeys).keys)
 }
+
+type GitHubOpts = EnvFileOpts
+export type GitHubRepo = { owner: string; name: string; url: string; private?: boolean }
+export type GitHubStatus = {
+  enabled: boolean
+  connectUrl?: string
+  login?: string
+  linkedBy?: string
+  repo?: GitHubRepo
+  push?: { sha: string; time: number; by?: string }
+}
+
+export function githubCode(err: unknown) {
+  if (typeof err !== "object" || err === null || !("code" in err)) return
+  return typeof err.code === "string" ? err.code : undefined
+}
+
+export function getGitHubStatus(opts: GitHubOpts): Promise<GitHubStatus> {
+  return devServerClient(opts)
+    .get({ url: "/github" })
+    .then((res) => res.data as GitHubStatus)
+}
+
+export function createGitHubRepo(opts: GitHubOpts, input: { name: string }): Promise<GitHubStatus> {
+  return devServerClient(opts)
+    .post({ url: "/github/repo", body: input })
+    .then((res) => res.data as GitHubStatus)
+}
