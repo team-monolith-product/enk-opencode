@@ -164,11 +164,119 @@ export namespace Assets {
 
   export type Usage = { count: number; bytes: number }
 
-  export function usage(): Usage {
-    return list().reduce<Usage>((acc, entry) => ({ count: acc.count + 1, bytes: acc.bytes + entry.size }), {
+  function total(entries: Entry[]): Usage {
+    return entries.reduce<Usage>((acc, entry) => ({ count: acc.count + 1, bytes: acc.bytes + entry.size }), {
       count: 0,
       bytes: 0,
     })
+  }
+
+  /** A walk of the folder, totalled. The truth, and the only thing that sees writes made elsewhere. */
+  export function usage(): Usage {
+    return total(list())
+  }
+
+  /** The listing and its totals in one walk, refreshing the cached totals on the way through. */
+  export function snapshot(): { files: Entry[]; usage: Usage } {
+    const files = list()
+    const walked = total(files)
+    const state = ledger()
+    state.walked = { ...walked }
+    state.at = Date.now()
+    return { files, usage: walked }
+  }
+
+  /**
+   * How long a walk is reused. The caps have to be checked before every single upload, and walking
+   * the folder for each one makes a batch of N files cost O(N²) stats — the rejected tail of an
+   * over-cap batch pays it too, on a folder that is by then at its fullest.
+   *
+   * Short, because the walk is the only thing that sees writes this module did not make: the agent's
+   * own write tool, or the user in a terminal, can put files here. Two seconds collapses a burst of
+   * uploads onto one walk while keeping that blind spot to about a blink.
+   */
+  const USAGE_TTL_MS = 2_000
+
+  type Ledger = {
+    /** The last walk, and when it was taken. */
+    walked?: Usage
+    at: number
+    /** Room granted to uploads that have not finished writing yet. */
+    pending: Usage
+  }
+
+  const ledger = Instance.state<Ledger>(() => ({ at: 0, pending: { count: 0, bytes: 0 } }))
+
+  /** Totals as far as this module knows: the last walk, refreshed if stale, plus what is in flight. */
+  function projected(): Usage {
+    const state = ledger()
+    if (!state.walked || Date.now() - state.at > USAGE_TTL_MS) {
+      state.walked = usage()
+      state.at = Date.now()
+    }
+    return { count: state.walked.count + state.pending.count, bytes: state.walked.bytes + state.pending.bytes }
+  }
+
+  /** Room taken for one file that is about to be written. */
+  export type Claim = { bytes: number }
+
+  /** Which cap stopped a claim. */
+  export type Refusal = "count" | "total"
+
+  /**
+   * Room for one more file of `bytes`, taken before a byte of it is written, or the cap that
+   * refused it.
+   *
+   * Claiming up front is what makes the caps hold when uploads overlap. The client sends four at a
+   * time; four requests that each read "999 files, room for one more" are each right and together
+   * wrong. A claim is visible to the next caller immediately, so the fourth one sees 1002.
+   *
+   * Every claim must be handed back with `settle`, including on the paths that fail.
+   */
+  export function claim(bytes: number): Claim | Refusal {
+    const state = ledger()
+    const now = projected()
+    if (now.count + 1 > MAX_FILE_COUNT) return "count"
+    if (now.bytes + bytes > MAX_TOTAL_BYTES) return "total"
+    state.pending.count += 1
+    state.pending.bytes += bytes
+    return { bytes }
+  }
+
+  /**
+   * What the folder would hold if the file behind `claim` ended at `written` bytes — its own claim
+   * swapped for what it has actually produced, with every other upload's claim left standing. This
+   * is what a streaming write checks against, because `content-length` is a hint the client chooses.
+   */
+  export function projectedBytes(claim: Claim, written: number): number {
+    const state = ledger()
+    return (state.walked?.bytes ?? 0) + state.pending.bytes - claim.bytes + written
+  }
+
+  /**
+   * Hands a claim back. `written` is the size the file ended up at, or undefined when nothing was
+   * stored.
+   *
+   * A stored file moves into the walked column rather than simply dropping out of the pending one:
+   * the walk that would otherwise account for it may be up to USAGE_TTL_MS old, and a file that is
+   * in neither column is a file the caps do not know about. Counting it twice for the rest of that
+   * window — which happens when a walk caught it mid-write — only makes the caps stricter, and the
+   * next walk settles it.
+   */
+  export function settle(claim: Claim, written?: number): void {
+    const state = ledger()
+    state.pending.count -= 1
+    state.pending.bytes -= claim.bytes
+    if (written === undefined || !state.walked) return
+    state.walked.count += 1
+    state.walked.bytes += written
+  }
+
+  /** Drops the cached walk, for a change to the folder this module did not account for. */
+  export function invalidate(): void {
+    const state = ledger()
+    state.walked = undefined
+    state.at = 0
   }
 
   /**

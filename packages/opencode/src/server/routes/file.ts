@@ -241,15 +241,10 @@ export const FileRoutes = lazy(() =>
         },
       }),
       async (c) => {
-        const files = Assets.list()
-        return c.json({
-          files,
-          usage: files.reduce((acc, f) => ({ count: acc.count + 1, bytes: acc.bytes + f.size }), {
-            count: 0,
-            bytes: 0,
-          }),
-          limits: limits(),
-        })
+        // The client calls this right before a batch to see whether it fits, so the walk it costs is
+        // also the one that primes the upload path's cached totals.
+        const { files, usage } = Assets.snapshot()
+        return c.json({ files, usage, limits: limits() })
       },
     )
     .post(
@@ -298,61 +293,76 @@ export const FileRoutes = lazy(() =>
         const target = Assets.resolve(c.req.valid("query").path)
         if (!target) throw new HTTPException(400, { message: "Invalid upload path" })
 
-        const usage = Assets.usage()
-        if (usage.count + 1 > Assets.MAX_FILE_COUNT)
-          throw new HTTPException(400, { message: `Upload folder holds at most ${Assets.MAX_FILE_COUNT} files` })
-
         // Content-Length is a hint, not a guarantee — it lets an oversized upload fail before any
         // bytes are written, but the streaming loop below is what actually enforces the cap.
         const declared = Number(c.req.header("content-length") ?? 0)
         if (declared > Assets.MAX_FILE_BYTES) throw new HTTPException(400, { message: "File is too large" })
-        if (usage.bytes + declared > Assets.MAX_TOTAL_BYTES)
-          throw new HTTPException(400, { message: "Upload folder is full" })
 
-        const body = c.req.raw.body
-        if (!body) throw new HTTPException(400, { message: "Missing request body" })
+        // Room is taken now, not merely checked: the client uploads several at a time, and a check
+        // that only reads leaves every one of them believing it is the file that still fits.
+        const claim = Assets.claim(declared)
+        if (claim === "count")
+          throw new HTTPException(400, { message: `Upload folder holds at most ${Assets.MAX_FILE_COUNT} files` })
+        if (claim === "total") throw new HTTPException(400, { message: "Upload folder is full" })
 
-        if (!Assets.prepare(target)) throw new HTTPException(400, { message: "Invalid upload path" })
-        Assets.exclude()
-
-        // "wx" fails if the destination exists and does not follow a symlink at the final segment,
-        // so a name computed a moment ago cannot be turned into a write somewhere else.
-        let destination = Assets.unique(target)
-        let handle = await fs.open(destination, "wx", 0o644).catch(() => undefined)
-        // Two people uploading the same name at once both compute the same free name; whoever
-        // loses the open just takes the next one.
-        for (let attempt = 0; !handle && attempt < 5; attempt++) {
-          destination = Assets.unique(target)
-          handle = await fs.open(destination, "wx", 0o644).catch(() => undefined)
-        }
-        if (!handle) throw new HTTPException(400, { message: "Could not create file" })
-
-        let written = 0
+        // Whatever happens from here, the room goes back — as a stored file if one was stored, and
+        // as nothing at all otherwise. A leaked claim would shrink the folder's capacity for good.
+        let stored: number | undefined
         try {
-          const reader = body.getReader()
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            written += value.byteLength
-            if (written > Assets.MAX_FILE_BYTES || usage.bytes + written > Assets.MAX_TOTAL_BYTES) {
-              await reader.cancel().catch(() => {})
-              throw new HTTPException(400, { message: "File is too large" })
-            }
-            await handle.write(value)
-          }
-        } catch (error) {
-          await handle.close().catch(() => {})
-          // A partial file would look like a successful upload to the agent, so it must not survive.
-          await fs.rm(destination, { force: true }).catch(() => {})
-          throw error
-        }
-        await handle.close()
+          const body = c.req.raw.body
+          if (!body) throw new HTTPException(400, { message: "Missing request body" })
 
-        return c.json({
-          path: path.relative(Assets.root(), destination).split(path.sep).join("/"),
-          size: written,
-          modified: Date.now(),
-        })
+          if (!Assets.prepare(target)) throw new HTTPException(400, { message: "Invalid upload path" })
+          Assets.exclude()
+
+          // "wx" fails if the destination exists and does not follow a symlink at the final segment,
+          // so a name computed a moment ago cannot be turned into a write somewhere else.
+          let destination = Assets.unique(target)
+          let handle = await fs.open(destination, "wx", 0o644).catch(() => undefined)
+          // Two people uploading the same name at once both compute the same free name; whoever
+          // loses the open just takes the next one.
+          for (let attempt = 0; !handle && attempt < 5; attempt++) {
+            destination = Assets.unique(target)
+            handle = await fs.open(destination, "wx", 0o644).catch(() => undefined)
+          }
+          if (!handle) throw new HTTPException(400, { message: "Could not create file" })
+
+          let written = 0
+          try {
+            const reader = body.getReader()
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              written += value.byteLength
+              if (written > Assets.MAX_FILE_BYTES) {
+                await reader.cancel().catch(() => {})
+                throw new HTTPException(400, { message: "File is too large" })
+              }
+              // Against the claim, not the snapshot: a client that understated content-length gets
+              // caught here, and the uploads running beside this one still hold their own room.
+              if (Assets.projectedBytes(claim, written) > Assets.MAX_TOTAL_BYTES) {
+                await reader.cancel().catch(() => {})
+                throw new HTTPException(400, { message: "Upload folder is full" })
+              }
+              await handle.write(value)
+            }
+          } catch (error) {
+            await handle.close().catch(() => {})
+            // A partial file would look like a successful upload to the agent, so it must not survive.
+            await fs.rm(destination, { force: true }).catch(() => {})
+            throw error
+          }
+          await handle.close()
+          stored = written
+
+          return c.json({
+            path: path.relative(Assets.root(), destination).split(path.sep).join("/"),
+            size: written,
+            modified: Date.now(),
+          })
+        } finally {
+          Assets.settle(claim, stored)
+        }
       },
     )
     .delete(
@@ -383,12 +393,15 @@ export const FileRoutes = lazy(() =>
         const requested = c.req.valid("query").path
         if (!requested) {
           await fs.rm(Assets.root(), { recursive: true, force: true })
+          // The cached totals describe a folder that is no longer there.
+          Assets.invalidate()
           return c.json(true)
         }
 
         const target = Assets.resolve(requested)
         if (!target) throw new HTTPException(400, { message: "Invalid path" })
         await fs.rm(target, { recursive: true, force: true })
+        Assets.invalidate()
         return c.json(true)
       },
     ),

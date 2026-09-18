@@ -126,6 +126,46 @@ describe("POST /file/asset", () => {
     })
   })
 
+  test("refuses an upload once the folder holds its cap of files", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await upload("seed.txt", "x")
+        for (let i = 0; i < Assets.MAX_FILE_COUNT - 1; i++) fs.writeFileSync(path.join(Assets.root(), `f${i}.txt`), "x")
+        // Seeded straight onto disk rather than through the route, which is exactly the kind of
+        // write the cached totals do not see until they are dropped.
+        Assets.invalidate()
+
+        const res = await upload("over.txt", "x")
+        expect(res.status).toBe(400)
+        expect(await res.text()).toContain(String(Assets.MAX_FILE_COUNT))
+        expect(fs.existsSync(path.join(Assets.root(), "over.txt"))).toBe(false)
+      },
+    })
+  })
+
+  test("overlapping uploads cannot each take the last remaining slot", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        await upload("seed.txt", "x")
+        // One slot short of the cap, which is where the client's parallel uploads land at the end
+        // of a large batch.
+        for (let i = 0; i < Assets.MAX_FILE_COUNT - 2; i++) fs.writeFileSync(path.join(Assets.root(), `f${i}.txt`), "x")
+        Assets.invalidate()
+
+        const statuses = await Promise.all(
+          Array.from({ length: 5 }, async (_, i) => (await upload(`c${i}.txt`, "x")).status),
+        )
+
+        expect(statuses.filter((status) => status === 200)).toHaveLength(1)
+        expect(Assets.usage().count).toBe(Assets.MAX_FILE_COUNT)
+      },
+    })
+  })
+
   test("rejects an empty path", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
