@@ -6,6 +6,7 @@ import { Pty } from "@/pty"
 import { PtyID } from "@/pty/schema"
 import { NotFoundError } from "../../storage/db"
 import { errors } from "../error"
+import { HubActivity } from "../hub-activity"
 import { lazy } from "../../util/lazy"
 
 export const PtyRoutes = lazy(() =>
@@ -193,6 +194,7 @@ export const PtyRoutes = lazy(() =>
           },
           onMessage(event) {
             if (typeof event.data !== "string") return
+            HubActivity.touch()
             if (!ready) {
               pending.push(event.data)
               return

@@ -33,6 +33,7 @@ import { DocRoutes } from "../doc/routes"
 import { SessionDocRoutes } from "../doc/session-routes"
 import { errorHandler } from "./middleware"
 import { csp, themePreloadHash } from "./csp"
+import { HubActivity } from "./hub-activity"
 
 const log = Log.create({ service: "server" })
 
@@ -256,6 +257,7 @@ export const InstanceRoutes = (app?: Hono) =>
       },
     )
     .all("/*", async (c) => {
+      HubActivity.untrack(c.req.raw)
       const embeddedWebUI = await embeddedUIPromise
       const { basePath } = await import("../server/server").then((m) => m.Server)
       const rawPath = c.req.path
