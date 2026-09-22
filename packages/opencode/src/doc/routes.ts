@@ -6,6 +6,7 @@ import z from "zod"
 import { Doc } from "./index"
 import { AssetID, CycleID, DocID } from "./schema"
 import { errors } from "../server/error"
+import { HubActivity } from "../server/hub-activity"
 import { lazy } from "../util/lazy"
 import * as Room from "./room"
 
@@ -305,6 +306,7 @@ export const DocRoutes = lazy(() =>
             const msg = Room.decode(raw, docID)
             if (!msg) return
             if (msg.type === Room.MSG_DOC) {
+              HubActivity.touch()
               Doc.syncPush({ docID, guid: msg.guid, data: new Uint8Array(msg.data), peer })
               return
             }

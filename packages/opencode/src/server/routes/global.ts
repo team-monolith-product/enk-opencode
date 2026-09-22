@@ -12,6 +12,7 @@ import { Log } from "../../util/log"
 import { lazy } from "../../util/lazy"
 import { Config } from "../../config/config"
 import { errors } from "../error"
+import { HubActivity } from "../hub-activity"
 
 const log = Log.create({ service: "server" })
 
@@ -87,6 +88,7 @@ export const GlobalRoutes = lazy(() =>
         },
       }),
       async (c) => {
+        HubActivity.untrack(c.req.raw)
         return c.json({ healthy: true, version: Installation.VERSION })
       },
     )

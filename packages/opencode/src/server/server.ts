@@ -7,6 +7,7 @@ import z from "zod"
 import { Auth } from "../auth"
 import { Flag } from "../flag/flag"
 import { HubAuth } from "./hub-auth"
+import { HubActivity } from "./hub-activity"
 import { ProviderID } from "../provider/schema"
 import { WorkspaceRouterMiddleware } from "./router"
 import { websocket } from "hono/bun"
@@ -46,6 +47,7 @@ export namespace Server {
       .onError(errorHandler(log))
       .use(HubAuth.auth())
       .get("/oauth_callback", (c) => HubAuth.callback(c))
+      .use(HubActivity.track())
       .use(async (c, next) => {
         const skip = c.req.path === "/log"
         if (!skip) {
@@ -319,6 +321,9 @@ export namespace Server {
     } else if (opts.mdns) {
       log.warn("mDNS enabled but hostname is loopback; skipping mDNS publish")
     }
+
+    const activity = HubActivity.target()
+    if (activity) HubActivity.start(activity)
 
     const originalStop = server.stop.bind(server)
     server.stop = async (closeActiveConnections?: boolean) => {
