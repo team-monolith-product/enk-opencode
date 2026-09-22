@@ -134,6 +134,30 @@ export function createMissingRegistry(input: MissingRegistryInput) {
   }
 }
 
+/**
+ * Asks the server — once — which assets it already holds, and marks them stored on the tracker.
+ *
+ * Deferred to the first attachment rather than run when the editor is built: the answer only decides
+ * whether an attachment's bytes need sending, so an editor nobody attaches to must not pay a round
+ * trip for it — least of all the empty doc every send rotates to, whose list comes back empty by
+ * construction.
+ *
+ * A failed query resolves instead of rejecting. Not knowing means the next upload sends bytes that
+ * may already be up there, which is the harmless direction; failing the attach would not be.
+ */
+export function createStoredSeed(input: { list: () => Promise<string[]>; markStored: (key: string) => void }) {
+  let asked: Promise<void> | undefined
+  return () => {
+    asked ??= input
+      .list()
+      .then((keys) => {
+        for (const key of keys) input.markStored(key)
+      })
+      .catch(() => {})
+    return asked
+  }
+}
+
 export type UploadTrackerInput = {
   upload: (key: string, blob: Blob, opts: BlobUploadOpts) => Promise<unknown>
   onChange: () => void
@@ -158,8 +182,9 @@ export function createUploadTracker(input: UploadTrackerInput) {
   // without asking the user to pick the file again. Keyed by asset id: undo may restore the block
   // under a fresh id, but the sourceId it carries is the one we uploaded under.
   const blobs = new Map<string, { name: string; blob: Blob }>()
-  // Assets whose bytes reached the server. Nothing removes them: the asset store is per doc and
-  // never deletes, so re-attaching one of these files is a no-op upload.
+  // Assets whose bytes are on the server: uploads that landed here, plus whatever the caller seeded
+  // via markStored(). Nothing removes them: the asset store is per doc and never deletes, so
+  // re-attaching one of these files is a no-op upload.
   const stored = new Set<string>()
 
   const emit = () => input.onChange()
@@ -295,6 +320,19 @@ export function createUploadTracker(input: UploadTrackerInput) {
     cancel,
     resume,
     list,
+    /**
+     * Record an asset as already on the server without uploading it.
+     *
+     * A tracker only learns a key from an upload IT ran, and it is rebuilt with the editor — so on a
+     * fresh mount (reload, session switch) every asset the doc already carries looks unknown, and
+     * re-attaching one of those files would send its bytes a second time. The caller seeds those keys
+     * here. Only for assets whose bytes are known to have landed: a key marked stored is one nothing
+     * will ever upload, so marking one that is still on the wire would leave the doc referencing an
+     * asset the server does not have.
+     */
+    markStored: (key: string) => {
+      stored.add(key)
+    },
     /** True while any upload is still in flight or failed — the prompt must not be sent yet. */
     active: () => entries.size > 0,
     dispose: () => {
