@@ -83,6 +83,140 @@ const handlePing = (socket: WebSocket, data: string) => {
   return true
 }
 
+const RETRY_MS = 500
+// The mirror image of the server's reaper (Doc PING_INTERVAL 2s / PING_TIMEOUT 4.5s). A socket can
+// die without ever firing `close` — a wifi handover, a NAT rebinding, a proxy dropping the tunnel —
+// and the browser then reports OPEN for minutes while the server has already dropped us from the
+// vote. That is exactly the device where "the consent dialog never appeared": it is not in `peers`
+// any more, it receives no casts, and nothing ever makes it reconnect. Hearing nothing (not even a
+// ping) for this long means the connection is gone, whatever readyState claims.
+const SILENT_MS = 8_000
+// On a wake-up (network back, tab visible again) don't sit out the silence window — but leave a
+// socket that just heard something alone.
+const FRESH_MS = 4_000
+
+/**
+ * A websocket that keeps itself alive: retries on close/error, and — unlike a plain reconnecting
+ * socket — gives up on a connection that has gone quiet instead of trusting `readyState`.
+ */
+export function liveSocket(input: {
+  url: URL
+  onMessage: (data: string) => void
+  /** Runs on every (re)connect once open: replay whatever the server must know about us. */
+  onOpen?: (socket: WebSocket) => void
+  /** How long silence means death. Overridable so tests don't have to sit out the real window. */
+  silenceMs?: number
+}) {
+  const silenceMs = input.silenceMs ?? SILENT_MS
+  let closed = false
+  let retryTimer: ReturnType<typeof setTimeout> | undefined
+  let silence: ReturnType<typeof setTimeout> | undefined
+  let ws: WebSocket | undefined
+  let lastSeen = Date.now()
+
+  const clearSilence = () => {
+    if (silence === undefined) return
+    clearTimeout(silence)
+    silence = undefined
+  }
+
+  const drop = () => {
+    const dead = ws
+    ws = undefined
+    clearSilence()
+    if (!dead) return
+    // Detached before closing: a half-open socket can take seconds to fire `close`, or never fire it
+    // at all, and the reconnect must not wait for that.
+    if (dead.readyState !== WebSocket.CLOSED && dead.readyState !== WebSocket.CLOSING) dead.close()
+  }
+
+  const retry = (delay = RETRY_MS) => {
+    if (closed || retryTimer) return
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined
+      connect()
+    }, delay)
+  }
+
+  const heard = () => {
+    lastSeen = Date.now()
+    clearSilence()
+    silence = setTimeout(() => {
+      drop()
+      retry(0)
+    }, silenceMs)
+  }
+
+  const connect = () => {
+    if (closed) return
+    const socket = new WebSocket(input.url)
+    ws = socket
+    // Armed from the attempt, not from the first message: a handshake that never completes is just
+    // as dead as a silent socket.
+    heard()
+    socket.addEventListener("open", () => {
+      if (ws !== socket) return
+      heard()
+      input.onOpen?.(socket)
+    })
+    socket.addEventListener("message", (event) => {
+      if (ws !== socket || typeof event.data !== "string") return
+      heard()
+      if (handlePing(socket, event.data)) return
+      input.onMessage(event.data)
+    })
+    socket.addEventListener("close", () => {
+      if (ws !== socket) return
+      ws = undefined
+      clearSilence()
+      retry()
+    })
+    socket.addEventListener("error", () => {
+      if (ws !== socket) return
+      drop()
+      retry()
+    })
+  }
+
+  const wake = () => {
+    if (closed) return
+    if (ws && Date.now() - lastSeen < FRESH_MS) return
+    drop()
+    if (retryTimer !== undefined) {
+      clearTimeout(retryTimer)
+      retryTimer = undefined
+    }
+    retry(0)
+  }
+  const onVisible = () => {
+    if (typeof document === "undefined" || document.visibilityState !== "visible") return
+    wake()
+  }
+  if (typeof window !== "undefined") window.addEventListener("online", wake)
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible)
+
+  connect()
+
+  return {
+    send: (data: string) => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return false
+      ws.send(data)
+      return true
+    },
+    close: () => {
+      closed = true
+      clearSilence()
+      if (retryTimer !== undefined) clearTimeout(retryTimer)
+      retryTimer = undefined
+      if (typeof window !== "undefined") window.removeEventListener("online", wake)
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible)
+      const socket = ws
+      ws = undefined
+      if (socket && socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close(1000)
+    },
+  }
+}
+
 const json = async (url: URL, body: unknown) => {
   const res = await fetch(url, {
     method: "POST",
@@ -223,7 +357,7 @@ type QuestionSocketInput = {
   observer?: boolean
 }
 
-// Reconnecting websocket for question-reply consent lifecycle events (mirrors connectSubmit).
+// Self-healing websocket for question-reply consent lifecycle events (mirrors connectSubmit).
 export function connectQuestionSubmit(input: QuestionSocketInput) {
   const url = path(input, `/session/${input.sessionID}/question/submit/connect`)
   url.searchParams.set("requestID", input.requestID)
@@ -231,45 +365,15 @@ export function connectQuestionSubmit(input: QuestionSocketInput) {
   if (input.observer) url.searchParams.set("observer", "true")
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
 
-  let closed = false
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let ws: WebSocket | undefined
-
-  const retry = () => {
-    if (closed || timer) return
-    timer = setTimeout(() => {
-      timer = undefined
-      connect()
-    }, 500)
-  }
-
-  const connect = () => {
-    if (closed) return
-    const socket = new WebSocket(url)
-    ws = socket
-    socket.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") return
-      if (handlePing(socket, event.data)) return
-      const next = parse(event.data)
+  const socket = liveSocket({
+    url,
+    onMessage: (data) => {
+      const next = parse(data)
       if (next) input.event(next)
-    })
-    socket.addEventListener("close", () => {
-      if (ws === socket) ws = undefined
-      retry()
-    })
-    socket.addEventListener("error", () => {
-      if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close()
-      retry()
-    })
-  }
+    },
+  })
 
-  connect()
-
-  return () => {
-    closed = true
-    if (timer) clearTimeout(timer)
-    if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
-  }
+  return socket.close
 }
 
 // ── Shared answer draft + presence (bidirectional channel) ───────────────────────────────────────
@@ -337,9 +441,6 @@ export function connectQuestionDraft(input: DraftSocketInput): QuestionDraftChan
   url.searchParams.set("actorID", input.actorID)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
 
-  let closed = false
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let ws: WebSocket | undefined
   // Buffer outbound ops while (re)connecting so a click never gets dropped mid-handshake.
   let queue: string[] = []
   // Our latest presence, replayed on every (re)connect. A backgrounded tab that the browser froze
@@ -348,67 +449,35 @@ export function connectQuestionDraft(input: DraftSocketInput): QuestionDraftChan
   // click.
   let lastPresence: string | undefined
 
-  const flush = () => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    for (const data of queue) ws.send(data)
-    queue = []
-  }
-
-  const onOpen = () => {
-    if (lastPresence && ws?.readyState === WebSocket.OPEN) ws.send(lastPresence)
-    flush()
-  }
-
-  const push = (msg: unknown) => {
-    queue.push(JSON.stringify(msg))
-    flush()
-  }
-
-  const retry = () => {
-    if (closed || timer) return
-    timer = setTimeout(() => {
-      timer = undefined
-      connect()
-    }, 500)
-  }
-
-  const connect = () => {
-    if (closed) return
-    const socket = new WebSocket(url)
-    ws = socket
-    socket.addEventListener("open", onOpen)
-    socket.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") return
-      if (handlePing(socket, event.data)) return
-      const next = draftMessage(event.data)
+  const socket = liveSocket({
+    url,
+    onOpen: () => {
+      if (lastPresence) socket.send(lastPresence)
+      const pending = queue
+      queue = []
+      for (const data of pending) if (!socket.send(data)) queue.push(data)
+    },
+    onMessage: (data) => {
+      const next = draftMessage(data)
       if (!next) return
       if (next.type === "draft") input.onDraft(next.draft)
       else input.onPresence(next.presence)
-    })
-    socket.addEventListener("close", () => {
-      if (ws === socket) ws = undefined
-      retry()
-    })
-    socket.addEventListener("error", () => {
-      if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close()
-      retry()
-    })
-  }
+    },
+  })
 
-  connect()
+  const push = (msg: unknown) => {
+    const data = JSON.stringify(msg)
+    if (!socket.send(data)) queue.push(data)
+  }
 
   return {
     sendOp: (op) => push({ type: "op", op }),
     sendPresence: (entry) => {
       // Remember it so onOpen can replay it after a reconnect; send now if we're already connected.
       lastPresence = JSON.stringify({ type: "presence", entry })
-      if (ws?.readyState === WebSocket.OPEN) ws.send(lastPresence)
+      socket.send(lastPresence)
     },
-    close: () => {
-      closed = true
-      if (timer) clearTimeout(timer)
-      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
-    },
+    close: socket.close,
   }
 }
 
@@ -462,75 +531,42 @@ export function connectEnvDraft(input: EnvDraftSocketInput): EnvDraftChannel {
   url.searchParams.set("key", input.key)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
 
-  let closed = false
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let ws: WebSocket | undefined
   let queue: string[] = []
   let lastPresence: string | undefined
 
-  const flush = () => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    for (const data of queue) ws.send(data)
-    queue = []
-  }
-
-  const onOpen = () => {
-    if (lastPresence && ws?.readyState === WebSocket.OPEN) ws.send(lastPresence)
-    flush()
-  }
-
-  const push = (msg: unknown) => {
-    queue.push(JSON.stringify(msg))
-    flush()
-  }
-
-  const retry = () => {
-    if (closed || timer) return
-    timer = setTimeout(() => {
-      timer = undefined
-      connect()
-    }, 500)
-  }
-
-  const connect = () => {
-    if (closed) return
-    const socket = new WebSocket(url)
-    ws = socket
-    socket.addEventListener("open", onOpen)
-    socket.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") return
-      if (handlePing(socket, event.data)) return
-      const next = envDraftMessage(event.data)
+  const socket = liveSocket({
+    url,
+    onOpen: () => {
+      if (lastPresence) socket.send(lastPresence)
+      const pending = queue
+      queue = []
+      for (const data of pending) if (!socket.send(data)) queue.push(data)
+    },
+    onMessage: (data) => {
+      const next = envDraftMessage(data)
       if (!next) return
       if (next.type === "draft") input.onDraft(next.draft)
       else input.onPresence(next.presence)
-    })
-    socket.addEventListener("close", () => {
-      if (ws === socket) ws = undefined
-      retry()
-    })
-    socket.addEventListener("error", () => {
-      if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close()
-      retry()
-    })
-  }
+    },
+  })
 
-  connect()
+  const push = (msg: unknown) => {
+    const data = JSON.stringify(msg)
+    if (!socket.send(data)) queue.push(data)
+  }
 
   return {
     sendOp: (op) => push({ type: "op", op }),
     sendPresence: (entry) => {
       lastPresence = JSON.stringify({ type: "presence", entry })
-      if (ws?.readyState === WebSocket.OPEN) ws.send(lastPresence)
+      socket.send(lastPresence)
     },
-    close: () => {
-      closed = true
-      if (timer) clearTimeout(timer)
-      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
-    },
+    close: socket.close,
   }
 }
 
+// This socket IS our membership in the consent vote (the server derives `peers` from it), so it has
+// to notice its own death — see liveSocket.
 export function connectSubmit(input: SocketInput) {
   const url = path(input, `/session/${input.sessionID}/prompt-doc/submit/connect`)
   url.searchParams.set("docID", input.docID)
@@ -538,43 +574,13 @@ export function connectSubmit(input: SocketInput) {
   if (input.observer) url.searchParams.set("observer", "true")
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
 
-  let closed = false
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let ws: WebSocket | undefined
-
-  const retry = () => {
-    if (closed || timer) return
-    timer = setTimeout(() => {
-      timer = undefined
-      connect()
-    }, 500)
-  }
-
-  const connect = () => {
-    if (closed) return
-    const socket = new WebSocket(url)
-    ws = socket
-    socket.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") return
-      if (handlePing(socket, event.data)) return
-      const next = parse(event.data)
+  const socket = liveSocket({
+    url,
+    onMessage: (data) => {
+      const next = parse(data)
       if (next) input.event(next)
-    })
-    socket.addEventListener("close", () => {
-      if (ws === socket) ws = undefined
-      retry()
-    })
-    socket.addEventListener("error", () => {
-      if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close()
-      retry()
-    })
-  }
+    },
+  })
 
-  connect()
-
-  return () => {
-    closed = true
-    if (timer) clearTimeout(timer)
-    if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) ws.close(1000)
-  }
+  return socket.close
 }

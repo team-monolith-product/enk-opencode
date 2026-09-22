@@ -384,6 +384,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   // Direct question reply in flight (replaces the old send-consent vote).
   const [submitting, setSubmitting] = createSignal(false)
   let approvalID: string | undefined
+  // See context/prompt-doc-session: the shared dialog provider swaps dialogs without notifying the
+  // owner, so the id alone can point at a dialog that is no longer on screen.
+  let approvalDialog: unknown
   let finalizedID: string | undefined
 
   const sending = createMemo(() => pendingSend() || approval()?.status === "pending")
@@ -407,10 +410,14 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const closeApproval = () => {
     dialog.close()
     approvalID = undefined
+    approvalDialog = undefined
     setApproval(undefined)
   }
 
-  const showApproval = (state: DocSubmitState) => {
+  /** Is this vote's dialog the one actually on screen right now? */
+  const dialogOpen = (submitID: string) => approvalID === submitID && dialog.active === approvalDialog
+
+  const showApproval = (state: DocSubmitState, opts?: { local?: boolean }) => {
     const a = actor()
     if (!a) return
     // No membership gate: the server casts only to connected peers and joins any connected
@@ -424,18 +431,27 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
             ? "question-back"
             : "question-send",
       )
-    // Terminal states handled exactly once: a reconnect replay must not re-open or re-fire.
     if (state.status !== "pending") {
-      if (finalizedID === state.submitID) return
-      finalizedID = state.submitID
-    }
-    if (state.status === "sent") {
-      if (approvalID === state.submitID) closeApproval()
-      props.onSubmit()
+      // A server-sent ending is handled exactly once: a reconnect replay must not re-open or re-fire.
+      // A locally invented one (the countdown fallback) is display-only — the server may have topped
+      // the deadline up while we were offline, so its verdict still has to get through afterwards.
+      if (!opts?.local) {
+        if (finalizedID === state.submitID) return
+        finalizedID = state.submitID
+      }
+      if (state.status === "sent") {
+        if (dialogOpen(state.submitID)) closeApproval()
+        props.onSubmit()
+        return
+      }
+      // Cancelled/expired/left: resolve the dialog for whoever is looking at this vote; with none on
+      // screen there is nothing to resolve.
+      if (!dialogOpen(state.submitID)) return
+      setApproval(state)
       return
     }
     setApproval(state)
-    if (approvalID === state.submitID) return
+    if (dialogOpen(state.submitID)) return
     approvalID = state.submitID
     dialog.show(
       () => (
@@ -456,7 +472,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               actorID: a.actorID,
               action: "approve",
             })
-              .then(setApproval)
+              // Through showApproval: responding to an already finished vote answers with its
+              // terminal state, which must close the dialog rather than leave a dead frame up.
+              .then((next) => showApproval(next))
               .catch(() => showToast({ title: language.t("docSubmit.toast.approveFailed"), description: language.t("common.requestFailed") }))
           }}
           cancel={() => {
@@ -470,7 +488,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               actorID: a.actorID,
               action: "cancel",
             })
-              .then(setApproval)
+              // Through showApproval: responding to an already finished vote answers with its
+              // terminal state, which must close the dialog rather than leave a dead frame up.
+              .then((next) => showApproval(next))
               .catch(() => showToast({ title: language.t("docSubmit.toast.cancelFailed"), description: language.t("common.requestFailed") }))
           }}
           exclude={() => {
@@ -484,16 +504,18 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               actorID: a.actorID,
               action: "exclude",
             })
-              .then(setApproval)
+              // Through showApproval: responding to an already finished vote answers with its
+              // terminal state, which must close the dialog rather than leave a dead frame up.
+              .then((next) => showApproval(next))
               .catch(() => showToast({ title: language.t("docSubmit.toast.sendFailed"), description: language.t("common.requestFailed") }))
           }}
           close={closeApproval}
           onExpire={() => {
-            // Server terminal cast never arrived — drive the same "expired" transition locally so the
-            // dialog resolves instead of freezing at 0초. Routed through showApproval so finalizedID is
-            // set: a late server cast for this submit is then ignored rather than re-opening the dialog.
+            // The deadline passed with no word from the server — show the timeout locally so the
+            // dialog resolves instead of freezing at 0초. Marked `local` so the server's own verdict
+            // still gets the last word (it may have extended the deadline while we were offline).
             const current = approval()
-            if (current?.status === "pending") showApproval({ ...current, status: "expired" })
+            if (current?.status === "pending") showApproval({ ...current, status: "expired" }, { local: true })
           }}
         />
       ),
@@ -501,6 +523,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
         const current = approval()
         if (current?.status === "pending") {
           approvalID = undefined
+          approvalDialog = undefined
           window.setTimeout(() => {
             const next = approval()
             if (next?.status === "pending") showApproval(next)
@@ -508,9 +531,11 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
           return
         }
         approvalID = undefined
+        approvalDialog = undefined
         setApproval(undefined)
       },
     )
+    approvalDialog = dialog.active
   }
 
   // Display names only — vote membership is decided server-side from connected submit peers.

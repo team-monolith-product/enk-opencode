@@ -1110,6 +1110,71 @@ describe("doc", () => {
     }
   })
 
+  test("membership churn cannot push the deadline past the original + 30s", async () => {
+    await using tmp = await tmpdir()
+    try {
+      await Instance.provide({
+        directory: tmp.path,
+        init: InstanceBootstrap,
+        fn: async () => {
+          await Project.fromDirectory(tmp.path)
+          const session = await Session.create({})
+          const { docID } = Doc.prompt(session.id)
+          const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+          const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+
+          const t0 = 1_000_000
+          setSystemTime(t0)
+          // Two connected peers: a lone sender skips the vote entirely.
+          const stops = [alice, bob].map((actor) =>
+            Doc.submitConnect({
+              sessionID: session.id,
+              docID,
+              actorID: actor.actorID,
+              peer: { send: () => undefined },
+            }),
+          )
+
+          const state = Doc.submitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            prompt,
+            timeoutMs: 10_000,
+          })
+          expect(state.expiresAt).toBe(t0 + 10_000)
+
+          // Every join tops the countdown up. Unbounded, this is how a flapping connection kept one
+          // vote — and with it the whole team's ability to send anything — alive indefinitely.
+          const active = () => Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })
+          for (let i = 1; i <= 18; i++) {
+            setSystemTime(t0 + i * 2_000)
+            if (!active()) break
+            const joiner = Doc.actorUpsert({ sessionID: session.id, name: `Joiner ${i}` })
+            stops.push(
+              Doc.submitConnect({
+                sessionID: session.id,
+                docID,
+                actorID: joiner.actorID,
+                peer: { send: () => undefined },
+              }),
+            )
+          }
+
+          // 18 joins over 36s: unbounded this would read t0 + 64s, and every one of those seconds is
+          // a second in which nobody on the team can start any other vote.
+          expect(active()?.expiresAt).toBe(t0 + 40_000)
+          setSystemTime(t0 + 40_001)
+          expect(active()).toBeUndefined()
+
+          for (const stop of stops) stop()
+        },
+      })
+    } finally {
+      setSystemTime()
+    }
+  })
+
   test("a late joiner is added to the pending vote and can complete it", async () => {
     spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
     await using tmp = await tmpdir()
