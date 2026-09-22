@@ -51,6 +51,9 @@ export namespace Flag {
   export const JUPYTERHUB_OAUTH_CALLBACK_URL = process.env["JUPYTERHUB_OAUTH_CALLBACK_URL"]
   export const JUPYTERHUB_BASE_URL = process.env["JUPYTERHUB_BASE_URL"]
   export const JUPYTERHUB_SERVICE_PREFIX = process.env["JUPYTERHUB_SERVICE_PREFIX"]
+  export const JUPYTERHUB_ACTIVITY_URL = process.env["JUPYTERHUB_ACTIVITY_URL"]
+  export const JUPYTERHUB_ACTIVITY_INTERVAL = nonNegativeNumber("JUPYTERHUB_ACTIVITY_INTERVAL")
+  export const JUPYTERHUB_SERVER_NAME = process.env["JUPYTERHUB_SERVER_NAME"]
   // enk-hackathon-rails AI usage reporting (ai_usages API)
   export const ENK_HACKATHON_RAILS_URL = process.env["ENK_HACKATHON_RAILS_URL"]
   export const ENK_AI_USAGE_TOKEN = process.env["ENK_AI_USAGE_TOKEN"]
