@@ -178,16 +178,20 @@ describe("GitHub.publish", () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)
     const page = '<body>\n  <h1>hi</h1>\n  <script src="/__preview-bridge.js" data-preview-bridge></script>\n</body>\n'
+    const nested =
+      '<p>a</p>\n<scr<script src="/__preview-bridge.js" data-preview-bridge></script>ipt data-preview-bridge></script>\n'
     await put(ws.work, {
       "index.html": page,
       "about.html": "<p>no bridge</p>\n",
+      "nested.html": nested,
       "__preview-bridge.js": "bridge",
       "public/__preview-bridge.js": "bridge",
     })
 
     await ws.publish("first")
 
-    expect(await ws.files()).toEqual(["about.html", "index.html"])
+    expect(await ws.files()).toEqual(["about.html", "index.html", "nested.html"])
+    expect(await $`git --git-dir=${ws.remote} show main:nested.html`.quiet().text()).toBe("<p>a</p>\n")
     expect(await $`git --git-dir=${ws.remote} show main:index.html`.quiet().text()).toBe(
       "<body>\n  <h1>hi</h1>\n</body>\n",
     )
@@ -307,7 +311,7 @@ describe("GitHub.status", () => {
     await using rails = serve({ enabled: true, connected: true, login: "octocat", token: "gho_1" })
     const original = globalThis.fetch
     const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
-      String(input).startsWith("https://api.github.com")
+      new URL(input instanceof Request ? input.url : String(input)).host === "api.github.com"
         ? Promise.resolve(Response.json({ message: "Bad credentials" }, { status: 401 }))
         : original(input, init)) as typeof fetch)
 

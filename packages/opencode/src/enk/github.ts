@@ -238,6 +238,15 @@ export namespace GitHub {
     return { ...result, url: result.sha ? `${hit.repo.url}/commit/${result.sha}` : hit.repo.url }
   }
 
+  function strip(text: string) {
+    let clean = text
+    for (let previous = ""; previous !== clean; ) {
+      previous = clean
+      clean = clean.replace(tag, "")
+    }
+    return clean
+  }
+
   export async function publish(input: {
     gitdir: string
     worktree: string
@@ -318,7 +327,7 @@ export namespace GitHub {
             .filter((file) => /\.html?$/i.test(file))
             .map(async (file) => {
               const text = await readFile(path.join(input.worktree, file), "utf8").catch(() => "")
-              const clean = text.replace(tag, "")
+              const clean = strip(text)
               return clean === text ? undefined : { file, clean }
             }),
         )
