@@ -10,6 +10,7 @@ import { SessionStatus } from "@/session/status"
 import { Log } from "@/util/log"
 import { GitHub } from "./github"
 import { Locale } from "./locale"
+import { Vercel } from "./vercel"
 
 export namespace GitHubSync {
   const log = Log.create({ service: "github-sync" })
@@ -40,6 +41,9 @@ export namespace GitHubSync {
     if (session.parentID) return
     const turn = latest(await Session.messages({ sessionID }))
     if (!turn) return
+    await Vercel.sync(dir).catch((err) =>
+      log.warn("vercel env sync failed", { error: err instanceof Error ? err.message : String(err) }),
+    )
     const result = await GitHub.push(dir, { message: (changes) => describe(turn, changes) })
     if (result.sha) log.info("pushed", { sessionID, sha: result.sha })
   }

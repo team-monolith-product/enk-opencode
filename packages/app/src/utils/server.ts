@@ -158,3 +158,26 @@ export function createGitHubRepo(opts: GitHubOpts, input: { name: string }): Pro
     .post({ url: "/github/repo", body: input })
     .then((res) => res.data as GitHubStatus)
 }
+
+export type VercelStatus = {
+  enabled: boolean
+  connectUrl?: string
+  username?: string
+  linkedBy?: string
+  project?: { id: string; name: string; url?: string }
+  deployment?: { state: string; url?: string; time: number; blocked?: string }
+  backend?: boolean
+  exposed?: string[]
+}
+
+export function getVercelStatus(opts: GitHubOpts): Promise<VercelStatus> {
+  return devServerClient(opts)
+    .get({ url: "/vercel" })
+    .then((res) => res.data as VercelStatus)
+}
+
+export function createVercelProject(opts: GitHubOpts): Promise<VercelStatus> {
+  return devServerClient(opts)
+    .post({ url: "/vercel/project" })
+    .then((res) => res.data as VercelStatus)
+}
