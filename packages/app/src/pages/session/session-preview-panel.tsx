@@ -475,6 +475,7 @@ export function SessionPreviewPanel(props: {
             src={src()}
             class="w-full h-full border-0"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            allow="camera; microphone; geolocation"
           />
         )}
       </Show>
