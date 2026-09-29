@@ -87,6 +87,7 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
           ...(head.source ? { source: head.source } : {}),
           ...(head.docID ? { docID: head.docID } : {}),
           ...(head.actorID ? { actorID: head.actorID } : {}),
+          ...(head.imageRequest ? { imageRequest: true } : {}),
         }
       : undefined
   const requestParts: PromptRequestPart[] = [

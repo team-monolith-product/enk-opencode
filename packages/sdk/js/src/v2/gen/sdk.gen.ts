@@ -76,6 +76,9 @@ import type {
   FindSymbolsResponses,
   FindTextResponses,
   FormatterStatusResponses,
+  GithubRepoCreateErrors,
+  GithubRepoCreateResponses,
+  GithubStatusResponses,
   GlobalConfigGetResponses,
   GlobalConfigUpdateErrors,
   GlobalConfigUpdateResponses,
@@ -85,6 +88,14 @@ import type {
   GlobalSyncEventSubscribeResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
+  ImageRequestApproveErrors,
+  ImageRequestApproveResponses,
+  ImageRequestListResponses,
+  ImageRequestQuotaResponses,
+  ImageRequestRejectErrors,
+  ImageRequestRejectResponses,
+  ImageRequestSkipErrors,
+  ImageRequestSkipResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -1354,6 +1365,173 @@ export class EnvRequest extends HeyApiClient {
   }
 }
 
+export class ImageRequest extends HeyApiClient {
+  /**
+   * List pending image requests
+   *
+   * Get all image generations waiting for the user's approval.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ImageRequestListResponses, unknown, ThrowOnError>({
+      url: "/image-request",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Image generation quota
+   *
+   * Whether image generation is available here and how many images the team has left.
+   */
+  public quota<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ImageRequestQuotaResponses, unknown, ThrowOnError>({
+      url: "/image-request/quota",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Approve image request
+   *
+   * Generate the image, optionally with a prompt the user edited.
+   */
+  public approve<ThrowOnError extends boolean = false>(
+    parameters: {
+      requestID: string
+      directory?: string
+      workspace?: string
+      prompt?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "prompt" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<ImageRequestApproveResponses, ImageRequestApproveErrors, ThrowOnError>(
+      {
+        url: "/image-request/{requestID}/approve",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Skip image request
+   *
+   * Do not generate this image.
+   */
+  public skip<ThrowOnError extends boolean = false>(
+    parameters: {
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<ImageRequestSkipResponses, ImageRequestSkipErrors, ThrowOnError>({
+      url: "/image-request/{requestID}/skip",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Reject image request
+   *
+   * Close the image request without an answer.
+   */
+  public reject<ThrowOnError extends boolean = false>(
+    parameters: {
+      requestID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "requestID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<ImageRequestRejectResponses, ImageRequestRejectErrors, ThrowOnError>({
+      url: "/image-request/{requestID}/reject",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class DevServer extends HeyApiClient {
   /**
    * Preview dev server status
@@ -1443,6 +1621,82 @@ export class DevServer extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+}
+
+export class Repo extends HeyApiClient {
+  /**
+   * Create GitHub repository
+   *
+   * Create a public repository under the linked account and bind it to this project.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      name?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GithubRepoCreateResponses, GithubRepoCreateErrors, ThrowOnError>({
+      url: "/github/repo",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Github extends HeyApiClient {
+  /**
+   * GitHub link status
+   *
+   * The GitHub account the team linked in Jitda and the repository bound to it. Linking itself happens in the Jitda app, so this never returns an access token.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<GithubStatusResponses, unknown, ThrowOnError>({
+      url: "/github",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _repo?: Repo
+  get repo(): Repo {
+    return (this._repo ??= new Repo({ client: this.client }))
   }
 }
 
@@ -5662,9 +5916,19 @@ export class OpencodeClient extends HeyApiClient {
     return (this._envRequest ??= new EnvRequest({ client: this.client }))
   }
 
+  private _imageRequest?: ImageRequest
+  get imageRequest(): ImageRequest {
+    return (this._imageRequest ??= new ImageRequest({ client: this.client }))
+  }
+
   private _devServer?: DevServer
   get devServer(): DevServer {
     return (this._devServer ??= new DevServer({ client: this.client }))
+  }
+
+  private _github?: Github
+  get github(): Github {
+    return (this._github ??= new Github({ client: this.client }))
   }
 
   private _tool?: Tool

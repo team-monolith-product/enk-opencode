@@ -24,6 +24,7 @@ import { ConfigRoutes } from "./routes/config"
 import { EnvRoutes } from "./routes/env"
 import { EnvFileRoutes } from "./routes/env-file"
 import { EnvRequestRoutes } from "./routes/env-request"
+import { ImageRequestRoutes } from "./routes/image-request"
 import { DevServerRoutes } from "./routes/dev-server"
 import { GitHubRoutes } from "./routes/github"
 import { ExperimentalRoutes } from "./routes/experimental"
@@ -52,6 +53,7 @@ export const InstanceRoutes = (app?: Hono) =>
     .route("/env", EnvRoutes())
     .route("/env-file", EnvFileRoutes())
     .route("/env-request", EnvRequestRoutes())
+    .route("/image-request", ImageRequestRoutes())
     .route("/dev-server", DevServerRoutes())
     .route("/github", GitHubRoutes())
     .route("/experimental", ExperimentalRoutes())

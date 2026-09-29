@@ -18,6 +18,7 @@ export interface TextPart extends PartBase {
   source?: "doc"
   docID?: string
   actorID?: string
+  imageRequest?: boolean
 }
 
 export interface FileAttachmentPart extends PartBase {

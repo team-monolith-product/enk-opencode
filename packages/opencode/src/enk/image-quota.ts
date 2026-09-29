@@ -34,6 +34,19 @@ export namespace ImageQuota {
     return { status: "reserved", quota }
   }
 
+  // 팀 작업 공간이 아니면 null, rails 설정이 없는 로컬이면 undefined(제한 없음).
+  export async function status(): Promise<Quota | null | undefined> {
+    const rails = backend()
+    if (!rails) return
+    const res = await fetch(rails.url, {
+      headers: { Authorization: `token ${rails.token}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (res.status === 403) return null
+    if (!res.ok) throw new Error(`image quota ${res.status}`)
+    return (await res.json()) as Quota
+  }
+
   export async function release(callID: string) {
     const rails = backend()
     if (!rails) return
