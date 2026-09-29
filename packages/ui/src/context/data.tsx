@@ -29,6 +29,8 @@ export type SessionHrefFn = (sessionID: string) => string
 
 export type AssetUrlFn = (url: string) => string
 
+export type ReadFileFn = (path: string) => Promise<unknown>
+
 export const { use: useData, provider: DataProvider } = createSimpleContext({
   name: "Data",
   init: (props: {
@@ -43,6 +45,8 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
      * host knows how to reach; without a resolver the url is used as-is.
      */
     onAssetUrl?: AssetUrlFn
+    /** Reads a project file (the `file.read` content) so tool renderers can show files a tool wrote. */
+    onReadFile?: ReadFileFn
     /**
      * Hides errors the session recovers from on its own — file tool failures and the rate-limit
      * retry banner. The turn's final error card (every fallback model exhausted) always renders.
@@ -64,6 +68,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       sessionHref: props.onSessionHref,
       doc: props.doc,
       assetUrl: (url: string) => props.onAssetUrl?.(url) ?? url,
+      readFile: props.onReadFile,
     }
   },
 })
