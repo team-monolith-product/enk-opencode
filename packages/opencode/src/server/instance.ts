@@ -26,7 +26,6 @@ import { EnvFileRoutes } from "./routes/env-file"
 import { EnvRequestRoutes } from "./routes/env-request"
 import { DevServerRoutes } from "./routes/dev-server"
 import { GitHubRoutes } from "./routes/github"
-import { VercelRoutes } from "./routes/vercel"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProjectSummaryRoutes } from "./routes/project-summary"
 import { ProviderRoutes } from "./routes/provider"
@@ -55,7 +54,6 @@ export const InstanceRoutes = (app?: Hono) =>
     .route("/env-request", EnvRequestRoutes())
     .route("/dev-server", DevServerRoutes())
     .route("/github", GitHubRoutes())
-    .route("/vercel", VercelRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/project-summary", ProjectSummaryRoutes())
     .route("/session", SessionRoutes().route("/", SessionDocRoutes()))

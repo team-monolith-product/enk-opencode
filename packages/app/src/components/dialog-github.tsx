@@ -14,7 +14,6 @@ import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { getRelativeTime } from "@/utils/time"
 import { createGitHubRepo, getGitHubStatus, githubCode, type GitHubStatus } from "@/utils/server"
-import { VercelPanel } from "@/components/vercel-panel"
 
 const NAME = /^[A-Za-z0-9._-]{1,100}$/
 
@@ -210,7 +209,6 @@ export function DialogGitHub() {
                   </Show>
                   <span class="text-12-regular text-text-weak">{pushed()}</span>
                 </div>
-                <VercelPanel />
               </Show>
             </Match>
           </Branch>
