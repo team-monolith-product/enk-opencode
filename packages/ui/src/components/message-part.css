@@ -987,6 +987,125 @@
   }
 }
 
+[data-component="dock-prompt"][data-kind="image"] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  /* 시안 카드: hairline-strong(#B8B4A6) · 라운드 10 · 그림자 한 겹 */
+  border: 1px solid var(--border-strong-base);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 6px 22px rgba(15, 15, 20, 0.06);
+  background-color: var(--input-base);
+
+  [data-slot="image-body"][data-dock-surface="shell"],
+  [data-slot="image-body"][data-dock-surface="shell"]:focus-within {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    /* dock-surface 기본 overflow:hidden 이 인풋 포커스 링·아래쪽을 잘라낸다. */
+    overflow: visible;
+  }
+
+  [data-slot="image-footer"][data-dock-surface="tray"] {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  [data-slot="image-body"] {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    flex: 1;
+    min-height: 0;
+    padding: 14px 14px 12px;
+    overflow: visible;
+  }
+
+  [data-slot="image-header"] {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  /* 타이포 — 시안 고정값(12.5/700, 11.5/muted). 앱 유틸리티 클래스는 한 치수 크다. */
+  [data-slot="image-title"] {
+    font-size: 12.5px;
+    font-weight: var(--font-weight-bold);
+    line-height: 1.45;
+    color: var(--text-strong);
+  }
+
+  [data-slot="image-subtitle"],
+  [data-slot="image-note"] {
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+
+  [data-slot="image-content"] {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    flex: 1;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  [data-slot="image-footer"] {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    /* 위 간격은 body padding-bottom 이 담당. 좌우·아래만 시안 14 */
+    padding: 0 14px 14px;
+    margin-top: 0;
+  }
+
+  [data-component="input"] [data-slot="input-wrapper"] {
+    border-radius: 4px;
+    border-color: var(--border-strong-base);
+  }
+
+  [data-component="input"] [data-slot="input-wrapper"]:focus-within {
+    border-color: var(--text-strong) !important;
+    box-shadow: var(--focus-ring-soft) !important;
+  }
+
+  [data-component="input"] textarea {
+    min-height: 64px;
+    max-height: 160px;
+    padding: 8px 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    resize: none;
+  }
+
+  [data-component="button"] {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 4px;
+    box-shadow: none;
+  }
+
+  [data-component="button"][data-variant="primary"] {
+    box-shadow: 0 1px 2px rgba(15, 15, 20, 0.04);
+  }
+
+  [data-component="button"][data-variant="secondary"] {
+    border-color: var(--border-strong-base);
+    box-shadow: none;
+  }
+}
+
 [data-component="dock-prompt"][data-kind="question"] {
   position: relative;
   display: flex;

@@ -27,10 +27,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "healthy",
-                    "version"
-                  ]
+                  "required": ["healthy", "version"]
                 }
               }
             }
@@ -209,10 +206,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "success",
-                        "version"
-                      ]
+                      "required": ["success", "version"]
                     },
                     {
                       "type": "object",
@@ -225,10 +219,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "success",
-                        "error"
-                      ]
+                      "required": ["success", "error"]
                     }
                   ]
                 }
@@ -421,12 +412,7 @@
                   "level": {
                     "description": "Log level",
                     "type": "string",
-                    "enum": [
-                      "debug",
-                      "info",
-                      "error",
-                      "warn"
-                    ]
+                    "enum": ["debug", "info", "error", "warn"]
                   },
                   "message": {
                     "description": "Log message",
@@ -441,11 +427,7 @@
                     "additionalProperties": {}
                   }
                 },
-                "required": [
-                  "service",
-                  "level",
-                  "message"
-                ]
+                "required": ["service", "level", "message"]
               }
             }
           }
@@ -947,10 +929,7 @@
                         "type": "number"
                       }
                     },
-                    "required": [
-                      "rows",
-                      "cols"
-                    ]
+                    "required": ["rows", "cols"]
                   }
                 }
               }
@@ -1227,10 +1206,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "providers",
-                    "default"
-                  ]
+                  "required": ["providers", "default"]
                 }
               }
             }
@@ -1386,9 +1362,7 @@
                     }
                   }
                 },
-                "required": [
-                  "values"
-                ]
+                "required": ["values"]
               }
             }
           }
@@ -1656,9 +1630,7 @@
                     "maxLength": 8192
                   }
                 },
-                "required": [
-                  "value"
-                ]
+                "required": ["value"]
               }
             }
           }
@@ -1811,6 +1783,316 @@
         ]
       }
     },
+    "/image-request": {
+      "get": {
+        "operationId": "imageRequest.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "List pending image requests",
+        "description": "Get all image generations waiting for the user's approval.",
+        "responses": {
+          "200": {
+            "description": "List of pending image requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImageRequest"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/image-request/quota": {
+      "get": {
+        "operationId": "imageRequest.quota",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Image generation quota",
+        "description": "Whether image generation is available here and how many images the team has left.",
+        "responses": {
+          "200": {
+            "description": "Quota",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageQuotaStatus"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.quota({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/image-request/{requestID}/approve": {
+      "post": {
+        "operationId": "imageRequest.approve",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestID",
+            "schema": {
+              "type": "string",
+              "pattern": "^img.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Approve image request",
+        "description": "Generate the image, optionally with a prompt the user edited.",
+        "responses": {
+          "200": {
+            "description": "Image request approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "maxLength": 4000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.approve({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/image-request/{requestID}/skip": {
+      "post": {
+        "operationId": "imageRequest.skip",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestID",
+            "schema": {
+              "type": "string",
+              "pattern": "^img.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Skip image request",
+        "description": "Do not generate this image.",
+        "responses": {
+          "200": {
+            "description": "Image request skipped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.skip({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/image-request/{requestID}/reject": {
+      "post": {
+        "operationId": "imageRequest.reject",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "requestID",
+            "schema": {
+              "type": "string",
+              "pattern": "^img.*"
+            },
+            "required": true
+          }
+        ],
+        "summary": "Reject image request",
+        "description": "Close the image request without an answer.",
+        "responses": {
+          "200": {
+            "description": "Image request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.reject({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/dev-server/status": {
       "get": {
         "operationId": "devServer.status",
@@ -1930,6 +2212,136 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.devServer.logs({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/github": {
+      "get": {
+        "operationId": "github.status",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "GitHub link status",
+        "description": "The GitHub account the team linked in Jitda and the repository bound to it. Linking itself happens in the Jitda app, so this never returns an access token.",
+        "responses": {
+          "200": {
+            "description": "Link status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubStatus"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.github.status({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/github/repo": {
+      "post": {
+        "operationId": "github.repo.create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Create GitHub repository",
+        "description": "Create a public repository under the linked account and bind it to this project.",
+        "responses": {
+          "200": {
+            "description": "Link status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubStatus"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "GitHub error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "GitHub error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitHubError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[A-Za-z0-9._-]+$"
+                  }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.github.repo.create({\n  ...\n})"
           }
         ]
       }
@@ -2127,11 +2539,7 @@
                     ]
                   }
                 },
-                "required": [
-                  "type",
-                  "branch",
-                  "extra"
-                ]
+                "required": ["type", "branch", "extra"]
               }
             }
           }
@@ -2676,9 +3084,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "sessionID"
-                ]
+                "required": ["sessionID"]
               }
             }
           }
@@ -2929,9 +3335,7 @@
         ],
         "summary": "Get session",
         "description": "Retrieve detailed information about a specific OpenCode session.",
-        "tags": [
-          "Session"
-        ],
+        "tags": ["Session"],
         "responses": {
           "200": {
             "description": "Get session",
@@ -3159,9 +3563,7 @@
           }
         ],
         "summary": "Get session children",
-        "tags": [
-          "Session"
-        ],
+        "tags": ["Session"],
         "description": "Retrieve all child sessions that were forked from the specified parent session.",
         "responses": {
           "200": {
@@ -3358,11 +3760,7 @@
                     "pattern": "^msg.*"
                   }
                 },
-                "required": [
-                  "modelID",
-                  "providerID",
-                  "messageID"
-                ]
+                "required": ["modelID", "providerID", "messageID"]
               }
             }
           }
@@ -3788,10 +4186,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "providerID",
-                  "modelID"
-                ]
+                "required": ["providerID", "modelID"]
               }
             }
           }
@@ -3871,10 +4266,7 @@
                         }
                       }
                     },
-                    "required": [
-                      "info",
-                      "parts"
-                    ]
+                    "required": ["info", "parts"]
                   }
                 }
               }
@@ -3955,10 +4347,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "info",
-                    "parts"
-                  ]
+                  "required": ["info", "parts"]
                 }
               }
             }
@@ -4004,10 +4393,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "providerID",
-                      "modelID"
-                    ]
+                    "required": ["providerID", "modelID"]
                   },
                   "agent": {
                     "type": "string"
@@ -4030,6 +4416,9 @@
                   },
                   "system": {
                     "type": "string"
+                  },
+                  "locale": {
+                    "$ref": "#/components/schemas/PromptLocale"
                   },
                   "variant": {
                     "type": "string"
@@ -4054,9 +4443,7 @@
                     }
                   }
                 },
-                "required": [
-                  "parts"
-                ]
+                "required": ["parts"]
               }
             }
           }
@@ -4126,10 +4513,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "info",
-                    "parts"
-                  ]
+                  "required": ["info", "parts"]
                 }
               }
             }
@@ -4496,10 +4880,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "providerID",
-                      "modelID"
-                    ]
+                    "required": ["providerID", "modelID"]
                   },
                   "agent": {
                     "type": "string"
@@ -4522,6 +4903,9 @@
                   },
                   "system": {
                     "type": "string"
+                  },
+                  "locale": {
+                    "$ref": "#/components/schemas/PromptLocale"
                   },
                   "variant": {
                     "type": "string"
@@ -4546,9 +4930,7 @@
                     }
                   }
                 },
-                "required": [
-                  "parts"
-                ]
+                "required": ["parts"]
               }
             }
           }
@@ -4609,10 +4991,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "info",
-                    "parts"
-                  ]
+                  "required": ["info", "parts"]
                 }
               }
             }
@@ -4663,6 +5042,9 @@
                   "variant": {
                     "type": "string"
                   },
+                  "locale": {
+                    "$ref": "#/components/schemas/PromptLocale"
+                  },
                   "parts": {
                     "type": "array",
                     "items": {
@@ -4694,20 +5076,13 @@
                               "$ref": "#/components/schemas/FilePartSource"
                             }
                           },
-                          "required": [
-                            "type",
-                            "mime",
-                            "url"
-                          ]
+                          "required": ["type", "mime", "url"]
                         }
                       ]
                     }
                   }
                 },
-                "required": [
-                  "arguments",
-                  "command"
-                ]
+                "required": ["arguments", "command"]
               }
             }
           }
@@ -4801,19 +5176,13 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "providerID",
-                      "modelID"
-                    ]
+                    "required": ["providerID", "modelID"]
                   },
                   "command": {
                     "type": "string"
                   }
                 },
-                "required": [
-                  "agent",
-                  "command"
-                ]
+                "required": ["agent", "command"]
               }
             }
           }
@@ -4903,9 +5272,7 @@
                     "pattern": "^prt.*"
                   }
                 },
-                "required": [
-                  "messageID"
-                ]
+                "required": ["messageID"]
               }
             }
           }
@@ -5068,16 +5435,10 @@
                 "properties": {
                   "response": {
                     "type": "string",
-                    "enum": [
-                      "once",
-                      "always",
-                      "reject"
-                    ]
+                    "enum": ["once", "always", "reject"]
                   }
                 },
-                "required": [
-                  "response"
-                ]
+                "required": ["response"]
               }
             }
           }
@@ -5293,9 +5654,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "docID"
-                ]
+                "required": ["docID"]
               }
             }
           }
@@ -5417,10 +5776,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "providerID",
-                          "modelID"
-                        ]
+                        "required": ["providerID", "modelID"]
                       },
                       "agent": {
                         "type": "string"
@@ -5443,6 +5799,9 @@
                       },
                       "system": {
                         "type": "string"
+                      },
+                      "locale": {
+                        "$ref": "#/components/schemas/PromptLocale"
                       },
                       "variant": {
                         "type": "string"
@@ -5467,19 +5826,13 @@
                         }
                       }
                     },
-                    "required": [
-                      "parts"
-                    ]
+                    "required": ["parts"]
                   },
                   "timeoutMs": {
                     "type": "number"
                   }
                 },
-                "required": [
-                  "docID",
-                  "actorID",
-                  "prompt"
-                ]
+                "required": ["docID", "actorID", "prompt"]
               }
             }
           }
@@ -5588,10 +5941,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "docID",
-                  "actorID"
-                ]
+                "required": ["docID", "actorID"]
               }
             }
           }
@@ -5700,10 +6050,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "docID",
-                  "actorID"
-                ]
+                "required": ["docID", "actorID"]
               }
             }
           }
@@ -5799,17 +6146,10 @@
                   },
                   "action": {
                     "type": "string",
-                    "enum": [
-                      "approve",
-                      "cancel",
-                      "exclude"
-                    ]
+                    "enum": ["approve", "cancel", "exclude"]
                   }
                 },
-                "required": [
-                  "actorID",
-                  "action"
-                ]
+                "required": ["actorID", "action"]
               }
             }
           }
@@ -6030,19 +6370,13 @@
                         "type": "number"
                       }
                     },
-                    "required": [
-                      "requestID"
-                    ]
+                    "required": ["requestID"]
                   },
                   "timeoutMs": {
                     "type": "number"
                   }
                 },
-                "required": [
-                  "requestID",
-                  "actorID",
-                  "payload"
-                ]
+                "required": ["requestID", "actorID", "payload"]
               }
             }
           }
@@ -6138,17 +6472,10 @@
                   },
                   "action": {
                     "type": "string",
-                    "enum": [
-                      "approve",
-                      "cancel",
-                      "exclude"
-                    ]
+                    "enum": ["approve", "cancel", "exclude"]
                   }
                 },
-                "required": [
-                  "actorID",
-                  "action"
-                ]
+                "required": ["actorID", "action"]
               }
             }
           }
@@ -6787,9 +7114,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "data"
-                      ]
+                      "required": ["data"]
                     },
                     {
                       "type": "null"
@@ -6874,9 +7199,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "data"
-                ]
+                "required": ["data"]
               }
             }
           }
@@ -6970,10 +7293,7 @@
                     "minLength": 1
                   }
                 },
-                "required": [
-                  "mime",
-                  "data"
-                ]
+                "required": ["mime", "data"]
               }
             }
           }
@@ -7185,19 +7505,13 @@
                 "properties": {
                   "reply": {
                     "type": "string",
-                    "enum": [
-                      "once",
-                      "always",
-                      "reject"
-                    ]
+                    "enum": ["once", "always", "reject"]
                   },
                   "message": {
                     "type": "string"
                   }
                 },
-                "required": [
-                  "reply"
-                ]
+                "required": ["reply"]
               }
             }
           }
@@ -7374,9 +7688,7 @@
                     }
                   }
                 },
-                "required": [
-                  "answers"
-                ]
+                "required": ["answers"]
               }
             }
           }
@@ -7554,15 +7866,10 @@
                                       "properties": {
                                         "field": {
                                           "type": "string",
-                                          "enum": [
-                                            "reasoning_content",
-                                            "reasoning_details"
-                                          ]
+                                          "enum": ["reasoning_content", "reasoning_details"]
                                         }
                                       },
-                                      "required": [
-                                        "field"
-                                      ],
+                                      "required": ["field"],
                                       "additionalProperties": false
                                     }
                                   ]
@@ -7598,16 +7905,10 @@
                                           "type": "number"
                                         }
                                       },
-                                      "required": [
-                                        "input",
-                                        "output"
-                                      ]
+                                      "required": ["input", "output"]
                                     }
                                   },
-                                  "required": [
-                                    "input",
-                                    "output"
-                                  ]
+                                  "required": ["input", "output"]
                                 },
                                 "limit": {
                                   "type": "object",
@@ -7622,10 +7923,7 @@
                                       "type": "number"
                                     }
                                   },
-                                  "required": [
-                                    "context",
-                                    "output"
-                                  ]
+                                  "required": ["context", "output"]
                                 },
                                 "modalities": {
                                   "type": "object",
@@ -7634,44 +7932,25 @@
                                       "type": "array",
                                       "items": {
                                         "type": "string",
-                                        "enum": [
-                                          "text",
-                                          "audio",
-                                          "image",
-                                          "video",
-                                          "pdf"
-                                        ]
+                                        "enum": ["text", "audio", "image", "video", "pdf"]
                                       }
                                     },
                                     "output": {
                                       "type": "array",
                                       "items": {
                                         "type": "string",
-                                        "enum": [
-                                          "text",
-                                          "audio",
-                                          "image",
-                                          "video",
-                                          "pdf"
-                                        ]
+                                        "enum": ["text", "audio", "image", "video", "pdf"]
                                       }
                                     }
                                   },
-                                  "required": [
-                                    "input",
-                                    "output"
-                                  ]
+                                  "required": ["input", "output"]
                                 },
                                 "experimental": {
                                   "type": "boolean"
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": [
-                                    "alpha",
-                                    "beta",
-                                    "deprecated"
-                                  ]
+                                  "enum": ["alpha", "beta", "deprecated"]
                                 },
                                 "options": {
                                   "type": "object",
@@ -7728,12 +8007,7 @@
                             }
                           }
                         },
-                        "required": [
-                          "name",
-                          "env",
-                          "id",
-                          "models"
-                        ]
+                        "required": ["name", "env", "id", "models"]
                       }
                     },
                     "default": {
@@ -7752,11 +8026,7 @@
                       }
                     }
                   },
-                  "required": [
-                    "all",
-                    "default",
-                    "connected"
-                  ]
+                  "required": ["all", "default", "connected"]
                 }
               }
             }
@@ -7893,9 +8163,7 @@
                     }
                   }
                 },
-                "required": [
-                  "method"
-                ]
+                "required": ["method"]
               }
             }
           }
@@ -7975,9 +8243,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "method"
-                ]
+                "required": ["method"]
               }
             }
           }
@@ -8036,9 +8302,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "text"
-                        ]
+                        "required": ["text"]
                       },
                       "lines": {
                         "type": "object",
@@ -8047,9 +8311,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "text"
-                        ]
+                        "required": ["text"]
                       },
                       "line_number": {
                         "type": "number"
@@ -8069,9 +8331,7 @@
                                   "type": "string"
                                 }
                               },
-                              "required": [
-                                "text"
-                              ]
+                              "required": ["text"]
                             },
                             "start": {
                               "type": "number"
@@ -8080,21 +8340,11 @@
                               "type": "number"
                             }
                           },
-                          "required": [
-                            "match",
-                            "start",
-                            "end"
-                          ]
+                          "required": ["match", "start", "end"]
                         }
                       }
                     },
-                    "required": [
-                      "path",
-                      "lines",
-                      "line_number",
-                      "absolute_offset",
-                      "submatches"
-                    ]
+                    "required": ["path", "lines", "line_number", "absolute_offset", "submatches"]
                   }
                 }
               }
@@ -8140,10 +8390,7 @@
             "name": "dirs",
             "schema": {
               "type": "string",
-              "enum": [
-                "true",
-                "false"
-              ]
+              "enum": ["true", "false"]
             }
           },
           {
@@ -8151,10 +8398,7 @@
             "name": "type",
             "schema": {
               "type": "string",
-              "enum": [
-                "file",
-                "directory"
-              ]
+              "enum": ["file", "directory"]
             }
           },
           {
@@ -8712,10 +8956,7 @@
                     ]
                   }
                 },
-                "required": [
-                  "name",
-                  "config"
-                ]
+                "required": ["name", "config"]
               }
             }
           }
@@ -8770,9 +9011,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "authorizationUrl"
-                  ]
+                  "required": ["authorizationUrl"]
                 }
               }
             }
@@ -8846,9 +9085,7 @@
                       "const": true
                     }
                   },
-                  "required": [
-                    "success"
-                  ]
+                  "required": ["success"]
                 }
               }
             }
@@ -8944,9 +9181,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "code"
-                ]
+                "required": ["code"]
               }
             }
           }
@@ -9177,9 +9412,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "text"
-                ]
+                "required": ["text"]
               }
             }
           }
@@ -9491,9 +9724,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "command"
-                ]
+                "required": ["command"]
               }
             }
           }
@@ -9553,12 +9784,7 @@
                   },
                   "variant": {
                     "type": "string",
-                    "enum": [
-                      "info",
-                      "success",
-                      "warning",
-                      "error"
-                    ]
+                    "enum": ["info", "success", "warning", "error"]
                   },
                   "duration": {
                     "description": "Duration in milliseconds",
@@ -9566,10 +9792,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "message",
-                  "variant"
-                ]
+                "required": ["message", "variant"]
               }
             }
           }
@@ -9720,9 +9943,7 @@
                     "pattern": "^ses.*"
                   }
                 },
-                "required": [
-                  "sessionID"
-                ]
+                "required": ["sessionID"]
               }
             }
           }
@@ -9769,10 +9990,7 @@
                     },
                     "body": {}
                   },
-                  "required": [
-                    "path",
-                    "body"
-                  ]
+                  "required": ["path", "body"]
                 }
               }
             }
@@ -10089,12 +10307,7 @@
                         "type": "string"
                       }
                     },
-                    "required": [
-                      "name",
-                      "description",
-                      "location",
-                      "content"
-                    ]
+                    "required": ["name", "description", "location", "content"]
                   }
                 }
               }
@@ -10214,15 +10427,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "version"
-            ]
+            "required": ["version"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.installation.update-available": {
         "type": "object",
@@ -10238,15 +10446,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "version"
-            ]
+            "required": ["version"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Project": {
         "type": "object",
@@ -10300,10 +10503,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created",
-              "updated"
-            ]
+            "required": ["created", "updated"]
           },
           "sandboxes": {
             "type": "array",
@@ -10312,12 +10512,7 @@
             }
           }
         },
-        "required": [
-          "id",
-          "worktree",
-          "time",
-          "sandboxes"
-        ]
+        "required": ["id", "worktree", "time", "sandboxes"]
       },
       "Event.project.updated": {
         "type": "object",
@@ -10330,10 +10525,7 @@
             "$ref": "#/components/schemas/Project"
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.server.instance.disposed": {
         "type": "object",
@@ -10349,15 +10541,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "directory"
-            ]
+            "required": ["directory"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.server.connected": {
         "type": "object",
@@ -10371,10 +10558,7 @@
             "properties": {}
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.global.disposed": {
         "type": "object",
@@ -10388,10 +10572,7 @@
             "properties": {}
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.lsp.client.diagnostics": {
         "type": "object",
@@ -10410,16 +10591,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "serverID",
-              "path"
-            ]
+            "required": ["serverID", "path"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.lsp.updated": {
         "type": "object",
@@ -10433,10 +10608,7 @@
             "properties": {}
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.message.part.delta": {
         "type": "object",
@@ -10467,19 +10639,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "sessionID",
-              "messageID",
-              "partID",
-              "field",
-              "delta"
-            ]
+            "required": ["sessionID", "messageID", "partID", "field", "delta"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "PermissionRequest": {
         "type": "object",
@@ -10525,20 +10688,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "messageID",
-              "callID"
-            ]
+            "required": ["messageID", "callID"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "permission",
-          "patterns",
-          "metadata",
-          "always"
-        ]
+        "required": ["id", "sessionID", "permission", "patterns", "metadata", "always"]
       },
       "Event.permission.asked": {
         "type": "object",
@@ -10551,10 +10704,7 @@
             "$ref": "#/components/schemas/PermissionRequest"
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.permission.replied": {
         "type": "object",
@@ -10576,24 +10726,13 @@
               },
               "reply": {
                 "type": "string",
-                "enum": [
-                  "once",
-                  "always",
-                  "reject"
-                ]
+                "enum": ["once", "always", "reject"]
               }
             },
-            "required": [
-              "sessionID",
-              "requestID",
-              "reply"
-            ]
+            "required": ["sessionID", "requestID", "reply"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "SessionStatus": {
         "anyOf": [
@@ -10605,9 +10744,7 @@
                 "const": "idle"
               }
             },
-            "required": [
-              "type"
-            ]
+            "required": ["type"]
           },
           {
             "type": "object",
@@ -10626,12 +10763,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "type",
-              "attempt",
-              "message",
-              "next"
-            ]
+            "required": ["type", "attempt", "message", "next"]
           },
           {
             "type": "object",
@@ -10641,9 +10773,7 @@
                 "const": "busy"
               }
             },
-            "required": [
-              "type"
-            ]
+            "required": ["type"]
           }
         ]
       },
@@ -10665,16 +10795,10 @@
                 "$ref": "#/components/schemas/SessionStatus"
               }
             },
-            "required": [
-              "sessionID",
-              "status"
-            ]
+            "required": ["sessionID", "status"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.session.idle": {
         "type": "object",
@@ -10691,15 +10815,10 @@
                 "pattern": "^ses.*"
               }
             },
-            "required": [
-              "sessionID"
-            ]
+            "required": ["sessionID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "QuestionOption": {
         "type": "object",
@@ -10713,10 +10832,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "label",
-          "description"
-        ]
+        "required": ["label", "description"]
       },
       "QuestionInfo": {
         "type": "object",
@@ -10745,11 +10861,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "question",
-          "header",
-          "options"
-        ]
+        "required": ["question", "header", "options"]
       },
       "QuestionRequest": {
         "type": "object",
@@ -10780,17 +10892,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "messageID",
-              "callID"
-            ]
+            "required": ["messageID", "callID"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "questions"
-        ]
+        "required": ["id", "sessionID", "questions"]
       },
       "Event.question.asked": {
         "type": "object",
@@ -10803,10 +10908,7 @@
             "$ref": "#/components/schemas/QuestionRequest"
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "QuestionAnswer": {
         "type": "array",
@@ -10839,17 +10941,10 @@
                 }
               }
             },
-            "required": [
-              "sessionID",
-              "requestID",
-              "answers"
-            ]
+            "required": ["sessionID", "requestID", "answers"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.question.rejected": {
         "type": "object",
@@ -10870,16 +10965,10 @@
                 "pattern": "^que.*"
               }
             },
-            "required": [
-              "sessionID",
-              "requestID"
-            ]
+            "required": ["sessionID", "requestID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.session.compacted": {
         "type": "object",
@@ -10896,15 +10985,10 @@
                 "pattern": "^ses.*"
               }
             },
-            "required": [
-              "sessionID"
-            ]
+            "required": ["sessionID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.file.edited": {
         "type": "object",
@@ -10920,15 +11004,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "file"
-            ]
+            "required": ["file"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.file.watcher.updated": {
         "type": "object",
@@ -10960,16 +11039,10 @@
                 ]
               }
             },
-            "required": [
-              "file",
-              "event"
-            ]
+            "required": ["file", "event"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Todo": {
         "type": "object",
@@ -10987,11 +11060,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "content",
-          "status",
-          "priority"
-        ]
+        "required": ["content", "status", "priority"]
       },
       "Event.todo.updated": {
         "type": "object",
@@ -11014,16 +11083,10 @@
                 }
               }
             },
-            "required": [
-              "sessionID",
-              "todos"
-            ]
+            "required": ["sessionID", "todos"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "EnvRequest": {
         "type": "object",
@@ -11072,18 +11135,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "messageID",
-              "callID"
-            ]
+            "required": ["messageID", "callID"]
           }
         },
-        "required": [
-          "name",
-          "label",
-          "id",
-          "sessionID"
-        ]
+        "required": ["name", "label", "id", "sessionID"]
       },
       "Event.env.request.asked": {
         "type": "object",
@@ -11096,18 +11151,11 @@
             "$ref": "#/components/schemas/EnvRequest"
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "EnvRequestStatus": {
         "type": "string",
-        "enum": [
-          "saved",
-          "skipped",
-          "canceled"
-        ]
+        "enum": ["saved", "skipped", "canceled"]
       },
       "Event.env.request.resolved": {
         "type": "object",
@@ -11134,18 +11182,111 @@
                 "$ref": "#/components/schemas/EnvRequestStatus"
               }
             },
-            "required": [
-              "sessionID",
-              "requestID",
-              "name",
-              "status"
-            ]
+            "required": ["sessionID", "requestID", "name", "status"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
+      },
+      "ImageQuota": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number"
+          },
+          "used": {
+            "type": "number"
+          },
+          "remaining": {
+            "type": "number"
+          }
+        },
+        "required": ["limit", "used", "remaining"]
+      },
+      "ImageRequest": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string"
+          },
+          "background": {
+            "type": "string"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/ImageQuota"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^img.*"
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses.*"
+          },
+          "tool": {
+            "type": "object",
+            "properties": {
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg.*"
+              },
+              "callID": {
+                "type": "string"
+              }
+            },
+            "required": ["messageID", "callID"]
+          }
+        },
+        "required": ["prompt", "path", "size", "background", "id", "sessionID"]
+      },
+      "Event.image.request.asked": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "image.request.asked"
+          },
+          "properties": {
+            "$ref": "#/components/schemas/ImageRequest"
+          }
+        },
+        "required": ["type", "properties"]
+      },
+      "ImageRequestStatus": {
+        "type": "string",
+        "enum": ["approved", "skipped", "canceled"]
+      },
+      "Event.image.request.resolved": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "image.request.resolved"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "requestID": {
+                "type": "string",
+                "pattern": "^img.*"
+              },
+              "status": {
+                "$ref": "#/components/schemas/ImageRequestStatus"
+              }
+            },
+            "required": ["sessionID", "requestID", "status"]
+          }
+        },
+        "required": ["type", "properties"]
       },
       "Event.tui.prompt.append": {
         "type": "object",
@@ -11161,15 +11302,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "text"
-            ]
+            "required": ["text"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.tui.command.execute": {
         "type": "object",
@@ -11210,15 +11346,10 @@
                 ]
               }
             },
-            "required": [
-              "command"
-            ]
+            "required": ["command"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.tui.toast.show": {
         "type": "object",
@@ -11238,12 +11369,7 @@
               },
               "variant": {
                 "type": "string",
-                "enum": [
-                  "info",
-                  "success",
-                  "warning",
-                  "error"
-                ]
+                "enum": ["info", "success", "warning", "error"]
               },
               "duration": {
                 "description": "Duration in milliseconds",
@@ -11251,16 +11377,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "message",
-              "variant"
-            ]
+            "required": ["message", "variant"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.tui.session.select": {
         "type": "object",
@@ -11278,15 +11398,10 @@
                 "pattern": "^ses.*"
               }
             },
-            "required": [
-              "sessionID"
-            ]
+            "required": ["sessionID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.mcp.tools.changed": {
         "type": "object",
@@ -11302,15 +11417,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "server"
-            ]
+            "required": ["server"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.mcp.browser.open.failed": {
         "type": "object",
@@ -11329,16 +11439,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "mcpName",
-              "url"
-            ]
+            "required": ["mcpName", "url"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.command.executed": {
         "type": "object",
@@ -11365,18 +11469,10 @@
                 "pattern": "^msg.*"
               }
             },
-            "required": [
-              "name",
-              "sessionID",
-              "arguments",
-              "messageID"
-            ]
+            "required": ["name", "sessionID", "arguments", "messageID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "FileDiff": {
         "type": "object",
@@ -11398,20 +11494,10 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "added",
-              "deleted",
-              "modified"
-            ]
+            "enum": ["added", "deleted", "modified"]
           }
         },
-        "required": [
-          "file",
-          "before",
-          "after",
-          "additions",
-          "deletions"
-        ]
+        "required": ["file", "before", "after", "additions", "deletions"]
       },
       "Event.session.diff": {
         "type": "object",
@@ -11434,16 +11520,10 @@
                 }
               }
             },
-            "required": [
-              "sessionID",
-              "diff"
-            ]
+            "required": ["sessionID", "diff"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "ProviderAuthError": {
         "type": "object",
@@ -11462,16 +11542,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "providerID",
-              "message"
-            ]
+            "required": ["providerID", "message"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "UnknownError": {
         "type": "object",
@@ -11487,15 +11561,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "message"
-            ]
+            "required": ["message"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "MessageOutputLengthError": {
         "type": "object",
@@ -11509,10 +11578,7 @@
             "properties": {}
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "MessageAbortedError": {
         "type": "object",
@@ -11528,15 +11594,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "message"
-            ]
+            "required": ["message"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "StructuredOutputError": {
         "type": "object",
@@ -11555,16 +11616,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "message",
-              "retries"
-            ]
+            "required": ["message", "retries"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "ContextOverflowError": {
         "type": "object",
@@ -11583,15 +11638,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "message"
-            ]
+            "required": ["message"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "APIError": {
         "type": "object",
@@ -11634,16 +11684,10 @@
                 }
               }
             },
-            "required": [
-              "message",
-              "isRetryable"
-            ]
+            "required": ["message", "isRetryable"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "Event.session.error": {
         "type": "object",
@@ -11687,10 +11731,7 @@
             }
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.doc.prompt.rotated": {
         "type": "object",
@@ -11717,16 +11758,10 @@
                 "type": "boolean"
               }
             },
-            "required": [
-              "sessionID",
-              "docID"
-            ]
+            "required": ["sessionID", "docID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.vcs.branch.updated": {
         "type": "object",
@@ -11744,10 +11779,7 @@
             }
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.workspace.ready": {
         "type": "object",
@@ -11763,15 +11795,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "name"
-            ]
+            "required": ["name"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.workspace.failed": {
         "type": "object",
@@ -11787,15 +11814,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "message"
-            ]
+            "required": ["message"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Pty": {
         "type": "object",
@@ -11821,24 +11843,13 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "running",
-              "exited"
-            ]
+            "enum": ["running", "exited"]
           },
           "pid": {
             "type": "number"
           }
         },
-        "required": [
-          "id",
-          "title",
-          "command",
-          "args",
-          "cwd",
-          "status",
-          "pid"
-        ]
+        "required": ["id", "title", "command", "args", "cwd", "status", "pid"]
       },
       "Event.pty.created": {
         "type": "object",
@@ -11854,15 +11865,10 @@
                 "$ref": "#/components/schemas/Pty"
               }
             },
-            "required": [
-              "info"
-            ]
+            "required": ["info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.pty.updated": {
         "type": "object",
@@ -11878,15 +11884,10 @@
                 "$ref": "#/components/schemas/Pty"
               }
             },
-            "required": [
-              "info"
-            ]
+            "required": ["info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.pty.exited": {
         "type": "object",
@@ -11906,16 +11907,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "id",
-              "exitCode"
-            ]
+            "required": ["id", "exitCode"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.pty.deleted": {
         "type": "object",
@@ -11932,15 +11927,10 @@
                 "pattern": "^pty.*"
               }
             },
-            "required": [
-              "id"
-            ]
+            "required": ["id"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.worktree.ready": {
         "type": "object",
@@ -11959,16 +11949,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "name",
-              "branch"
-            ]
+            "required": ["name", "branch"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.worktree.failed": {
         "type": "object",
@@ -11984,15 +11968,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "message"
-            ]
+            "required": ["message"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "OutputFormatText": {
         "type": "object",
@@ -12002,9 +11981,7 @@
             "const": "text"
           }
         },
-        "required": [
-          "type"
-        ]
+        "required": ["type"]
       },
       "JSONSchema": {
         "type": "object",
@@ -12030,10 +12007,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "type",
-          "schema"
-        ]
+        "required": ["type", "schema"]
       },
       "OutputFormat": {
         "anyOf": [
@@ -12044,6 +12018,10 @@
             "$ref": "#/components/schemas/OutputFormatJsonSchema"
           }
         ]
+      },
+      "PromptLocale": {
+        "type": "string",
+        "enum": ["ko", "en"]
       },
       "UserMessage": {
         "type": "object",
@@ -12067,9 +12045,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created"
-            ]
+            "required": ["created"]
           },
           "format": {
             "$ref": "#/components/schemas/OutputFormat"
@@ -12090,9 +12066,7 @@
                 }
               }
             },
-            "required": [
-              "diffs"
-            ]
+            "required": ["diffs"]
           },
           "agent": {
             "type": "string"
@@ -12107,13 +12081,13 @@
                 "type": "string"
               }
             },
-            "required": [
-              "providerID",
-              "modelID"
-            ]
+            "required": ["providerID", "modelID"]
           },
           "system": {
             "type": "string"
+          },
+          "locale": {
+            "$ref": "#/components/schemas/PromptLocale"
           },
           "tools": {
             "type": "object",
@@ -12128,14 +12102,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "role",
-          "time",
-          "agent",
-          "model"
-        ]
+        "required": ["id", "sessionID", "role", "time", "agent", "model"]
       },
       "AssistantMessage": {
         "type": "object",
@@ -12162,9 +12129,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created"
-            ]
+            "required": ["created"]
           },
           "error": {
             "anyOf": [
@@ -12217,10 +12182,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "cwd",
-              "root"
-            ]
+            "required": ["cwd", "root"]
           },
           "summary": {
             "type": "boolean"
@@ -12253,18 +12215,10 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "read",
-                  "write"
-                ]
+                "required": ["read", "write"]
               }
             },
-            "required": [
-              "input",
-              "output",
-              "reasoning",
-              "cache"
-            ]
+            "required": ["input", "output", "reasoning", "cache"]
           },
           "structured": {},
           "variant": {
@@ -12317,16 +12271,10 @@
                 "$ref": "#/components/schemas/Message"
               }
             },
-            "required": [
-              "sessionID",
-              "info"
-            ]
+            "required": ["sessionID", "info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.message.removed": {
         "type": "object",
@@ -12347,16 +12295,10 @@
                 "pattern": "^msg.*"
               }
             },
-            "required": [
-              "sessionID",
-              "messageID"
-            ]
+            "required": ["sessionID", "messageID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "TextPart": {
         "type": "object",
@@ -12396,9 +12338,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start"
-            ]
+            "required": ["start"]
           },
           "metadata": {
             "type": "object",
@@ -12408,13 +12348,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "text"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "text"]
       },
       "SubtaskPart": {
         "type": "object",
@@ -12454,24 +12388,13 @@
                 "type": "string"
               }
             },
-            "required": [
-              "providerID",
-              "modelID"
-            ]
+            "required": ["providerID", "modelID"]
           },
           "command": {
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "prompt",
-          "description",
-          "agent"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "prompt", "description", "agent"]
       },
       "ReasoningPart": {
         "type": "object",
@@ -12512,19 +12435,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start"
-            ]
+            "required": ["start"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "text",
-          "time"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "text", "time"]
       },
       "FilePartSourceText": {
         "type": "object",
@@ -12543,11 +12457,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "value",
-          "start",
-          "end"
-        ]
+        "required": ["value", "start", "end"]
       },
       "FileSource": {
         "type": "object",
@@ -12563,11 +12473,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text",
-          "type",
-          "path"
-        ]
+        "required": ["text", "type", "path"]
       },
       "Range": {
         "type": "object",
@@ -12582,10 +12488,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "line",
-              "character"
-            ]
+            "required": ["line", "character"]
           },
           "end": {
             "type": "object",
@@ -12597,16 +12500,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "line",
-              "character"
-            ]
+            "required": ["line", "character"]
           }
         },
-        "required": [
-          "start",
-          "end"
-        ]
+        "required": ["start", "end"]
       },
       "SymbolSource": {
         "type": "object",
@@ -12633,14 +12530,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "text",
-          "type",
-          "path",
-          "range",
-          "name",
-          "kind"
-        ]
+        "required": ["text", "type", "path", "range", "name", "kind"]
       },
       "ResourceSource": {
         "type": "object",
@@ -12659,12 +12549,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "text",
-          "type",
-          "clientName",
-          "uri"
-        ]
+        "required": ["text", "type", "clientName", "uri"]
       },
       "FilePartSource": {
         "anyOf": [
@@ -12714,14 +12599,7 @@
             "$ref": "#/components/schemas/FilePartSource"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "mime",
-          "url"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "mime", "url"]
       },
       "ToolStatePending": {
         "type": "object",
@@ -12741,11 +12619,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "status",
-          "input",
-          "raw"
-        ]
+        "required": ["status", "input", "raw"]
       },
       "ToolStateRunning": {
         "type": "object",
@@ -12778,16 +12652,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start"
-            ]
+            "required": ["start"]
           }
         },
-        "required": [
-          "status",
-          "input",
-          "time"
-        ]
+        "required": ["status", "input", "time"]
       },
       "ToolStateCompleted": {
         "type": "object",
@@ -12829,10 +12697,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start",
-              "end"
-            ]
+            "required": ["start", "end"]
           },
           "attachments": {
             "type": "array",
@@ -12841,14 +12706,7 @@
             }
           }
         },
-        "required": [
-          "status",
-          "input",
-          "output",
-          "title",
-          "metadata",
-          "time"
-        ]
+        "required": ["status", "input", "output", "title", "metadata", "time"]
       },
       "ToolStateError": {
         "type": "object",
@@ -12884,18 +12742,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start",
-              "end"
-            ]
+            "required": ["start", "end"]
           }
         },
-        "required": [
-          "status",
-          "input",
-          "error",
-          "time"
-        ]
+        "required": ["status", "input", "error", "time"]
       },
       "ToolState": {
         "anyOf": [
@@ -12949,15 +12799,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "callID",
-          "tool",
-          "state"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "callID", "tool", "state"]
       },
       "StepStartPart": {
         "type": "object",
@@ -12982,12 +12824,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type"
-        ]
+        "required": ["id", "sessionID", "messageID", "type"]
       },
       "StepFinishPart": {
         "type": "object",
@@ -13042,29 +12879,13 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "read",
-                  "write"
-                ]
+                "required": ["read", "write"]
               }
             },
-            "required": [
-              "input",
-              "output",
-              "reasoning",
-              "cache"
-            ]
+            "required": ["input", "output", "reasoning", "cache"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "reason",
-          "cost",
-          "tokens"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "reason", "cost", "tokens"]
       },
       "SnapshotPart": {
         "type": "object",
@@ -13089,13 +12910,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "snapshot"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "snapshot"]
       },
       "PatchPart": {
         "type": "object",
@@ -13126,14 +12941,7 @@
             }
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "hash",
-          "files"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "hash", "files"]
       },
       "AgentPart": {
         "type": "object",
@@ -13174,20 +12982,10 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": [
-              "value",
-              "start",
-              "end"
-            ]
+            "required": ["value", "start", "end"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "name"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "name"]
       },
       "RetryPart": {
         "type": "object",
@@ -13221,20 +13019,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created"
-            ]
+            "required": ["created"]
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "attempt",
-          "error",
-          "time"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "attempt", "error", "time"]
       },
       "CompactionPart": {
         "type": "object",
@@ -13266,13 +13054,7 @@
             "pattern": "^msg.*"
           }
         },
-        "required": [
-          "id",
-          "sessionID",
-          "messageID",
-          "type",
-          "auto"
-        ]
+        "required": ["id", "sessionID", "messageID", "type", "auto"]
       },
       "Part": {
         "anyOf": [
@@ -13335,17 +13117,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "sessionID",
-              "part",
-              "time"
-            ]
+            "required": ["sessionID", "part", "time"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.message.part.removed": {
         "type": "object",
@@ -13370,25 +13145,14 @@
                 "pattern": "^prt.*"
               }
             },
-            "required": [
-              "sessionID",
-              "messageID",
-              "partID"
-            ]
+            "required": ["sessionID", "messageID", "partID"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "PermissionAction": {
         "type": "string",
-        "enum": [
-          "allow",
-          "deny",
-          "ask"
-        ]
+        "enum": ["allow", "deny", "ask"]
       },
       "PermissionRule": {
         "type": "object",
@@ -13403,11 +13167,7 @@
             "$ref": "#/components/schemas/PermissionAction"
           }
         },
-        "required": [
-          "permission",
-          "pattern",
-          "action"
-        ]
+        "required": ["permission", "pattern", "action"]
       },
       "PermissionRuleset": {
         "type": "array",
@@ -13458,11 +13218,7 @@
                 }
               }
             },
-            "required": [
-              "additions",
-              "deletions",
-              "files"
-            ]
+            "required": ["additions", "deletions", "files"]
           },
           "share": {
             "type": "object",
@@ -13471,9 +13227,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "url"
-            ]
+            "required": ["url"]
           },
           "title": {
             "type": "string"
@@ -13497,10 +13251,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created",
-              "updated"
-            ]
+            "required": ["created", "updated"]
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
@@ -13523,20 +13274,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "messageID"
-            ]
+            "required": ["messageID"]
           }
         },
-        "required": [
-          "id",
-          "slug",
-          "projectID",
-          "directory",
-          "title",
-          "version",
-          "time"
-        ]
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time"]
       },
       "Event.session.created": {
         "type": "object",
@@ -13556,16 +13297,10 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": [
-              "sessionID",
-              "info"
-            ]
+            "required": ["sessionID", "info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.session.updated": {
         "type": "object",
@@ -13585,16 +13320,10 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": [
-              "sessionID",
-              "info"
-            ]
+            "required": ["sessionID", "info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event.session.deleted": {
         "type": "object",
@@ -13614,16 +13343,10 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": [
-              "sessionID",
-              "info"
-            ]
+            "required": ["sessionID", "info"]
           }
         },
-        "required": [
-          "type",
-          "properties"
-        ]
+        "required": ["type", "properties"]
       },
       "Event": {
         "anyOf": [
@@ -13692,6 +13415,12 @@
           },
           {
             "$ref": "#/components/schemas/Event.env.request.resolved"
+          },
+          {
+            "$ref": "#/components/schemas/Event.image.request.asked"
+          },
+          {
+            "$ref": "#/components/schemas/Event.image.request.resolved"
           },
           {
             "$ref": "#/components/schemas/Event.tui.prompt.append"
@@ -13783,10 +13512,7 @@
             "$ref": "#/components/schemas/Event"
           }
         },
-        "required": [
-          "directory",
-          "payload"
-        ]
+        "required": ["directory", "payload"]
       },
       "SyncEvent.message.updated": {
         "type": "object",
@@ -13810,17 +13536,10 @@
                 "$ref": "#/components/schemas/Message"
               }
             },
-            "required": [
-              "sessionID",
-              "info"
-            ]
+            "required": ["sessionID", "info"]
           }
         },
-        "required": [
-          "type",
-          "aggregate",
-          "data"
-        ]
+        "required": ["type", "aggregate", "data"]
       },
       "SyncEvent.message.removed": {
         "type": "object",
@@ -13845,17 +13564,10 @@
                 "pattern": "^msg.*"
               }
             },
-            "required": [
-              "sessionID",
-              "messageID"
-            ]
+            "required": ["sessionID", "messageID"]
           }
         },
-        "required": [
-          "type",
-          "aggregate",
-          "data"
-        ]
+        "required": ["type", "aggregate", "data"]
       },
       "SyncEvent.message.part.updated": {
         "type": "object",
@@ -13882,18 +13594,10 @@
                 "type": "number"
               }
             },
-            "required": [
-              "sessionID",
-              "part",
-              "time"
-            ]
+            "required": ["sessionID", "part", "time"]
           }
         },
-        "required": [
-          "type",
-          "aggregate",
-          "data"
-        ]
+        "required": ["type", "aggregate", "data"]
       },
       "SyncEvent.message.part.removed": {
         "type": "object",
@@ -13922,18 +13626,10 @@
                 "pattern": "^prt.*"
               }
             },
-            "required": [
-              "sessionID",
-              "messageID",
-              "partID"
-            ]
+            "required": ["sessionID", "messageID", "partID"]
           }
         },
-        "required": [
-          "type",
-          "aggregate",
-          "data"
-        ]
+        "required": ["type", "aggregate", "data"]
       },
       "SyncEvent.session.created": {
         "type": "object",
@@ -13957,17 +13653,10 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": [
-              "sessionID",
-              "info"
-            ]
+            "required": ["sessionID", "info"]
           }
         },
-        "required": [
-          "type",
-          "aggregate",
-          "data"
-        ]
+        "required": ["type", "aggregate", "data"]
       },
       "SyncEvent.session.updated": {
         "type": "object",
@@ -14074,11 +13763,7 @@
                             }
                           }
                         },
-                        "required": [
-                          "additions",
-                          "deletions",
-                          "files"
-                        ]
+                        "required": ["additions", "deletions", "files"]
                       },
                       {
                         "type": "null"
@@ -14099,9 +13784,7 @@
                         ]
                       }
                     },
-                    "required": [
-                      "url"
-                    ]
+                    "required": ["url"]
                   },
                   "title": {
                     "anyOf": [
@@ -14167,12 +13850,7 @@
                         ]
                       }
                     },
-                    "required": [
-                      "created",
-                      "updated",
-                      "compacting",
-                      "archived"
-                    ]
+                    "required": ["created", "updated", "compacting", "archived"]
                   },
                   "permission": {
                     "anyOf": [
@@ -14204,9 +13882,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "messageID"
-                        ]
+                        "required": ["messageID"]
                       },
                       {
                         "type": "null"
@@ -14229,17 +13905,10 @@
                 ]
               }
             },
-            "required": [
-              "sessionID",
-              "info"
-            ]
+            "required": ["sessionID", "info"]
           }
         },
-        "required": [
-          "type",
-          "aggregate",
-          "data"
-        ]
+        "required": ["type", "aggregate", "data"]
       },
       "SyncEvent.session.deleted": {
         "type": "object",
@@ -14263,17 +13932,10 @@
                 "$ref": "#/components/schemas/Session"
               }
             },
-            "required": [
-              "sessionID",
-              "info"
-            ]
+            "required": ["sessionID", "info"]
           }
         },
-        "required": [
-          "type",
-          "aggregate",
-          "data"
-        ]
+        "required": ["type", "aggregate", "data"]
       },
       "SyncEvent": {
         "type": "object",
@@ -14282,19 +13944,12 @@
             "$ref": "#/components/schemas/SyncEvent"
           }
         },
-        "required": [
-          "payload"
-        ]
+        "required": ["payload"]
       },
       "LogLevel": {
         "description": "Log level",
         "type": "string",
-        "enum": [
-          "DEBUG",
-          "INFO",
-          "WARN",
-          "ERROR"
-        ]
+        "enum": ["DEBUG", "INFO", "WARN", "ERROR"]
       },
       "ServerConfig": {
         "description": "Server configuration for opencode serve and web commands",
@@ -14334,11 +13989,7 @@
       },
       "PermissionActionConfig": {
         "type": "string",
-        "enum": [
-          "ask",
-          "allow",
-          "deny"
-        ]
+        "enum": ["ask", "allow", "deny"]
       },
       "PermissionObjectConfig": {
         "type": "object",
@@ -14466,11 +14117,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "subagent",
-              "primary",
-              "all"
-            ]
+            "enum": ["subagent", "primary", "all"]
           },
           "hidden": {
             "description": "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
@@ -14492,15 +14139,7 @@
               },
               {
                 "type": "string",
-                "enum": [
-                  "primary",
-                  "secondary",
-                  "accent",
-                  "success",
-                  "warning",
-                  "error",
-                  "info"
-                ]
+                "enum": ["primary", "secondary", "accent", "success", "warning", "error", "info"]
               }
             ]
           },
@@ -14586,15 +14225,10 @@
                       "properties": {
                         "field": {
                           "type": "string",
-                          "enum": [
-                            "reasoning_content",
-                            "reasoning_details"
-                          ]
+                          "enum": ["reasoning_content", "reasoning_details"]
                         }
                       },
-                      "required": [
-                        "field"
-                      ],
+                      "required": ["field"],
                       "additionalProperties": false
                     }
                   ]
@@ -14630,16 +14264,10 @@
                           "type": "number"
                         }
                       },
-                      "required": [
-                        "input",
-                        "output"
-                      ]
+                      "required": ["input", "output"]
                     }
                   },
-                  "required": [
-                    "input",
-                    "output"
-                  ]
+                  "required": ["input", "output"]
                 },
                 "limit": {
                   "type": "object",
@@ -14654,10 +14282,7 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "context",
-                    "output"
-                  ]
+                  "required": ["context", "output"]
                 },
                 "modalities": {
                   "type": "object",
@@ -14666,44 +14291,25 @@
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": [
-                          "text",
-                          "audio",
-                          "image",
-                          "video",
-                          "pdf"
-                        ]
+                        "enum": ["text", "audio", "image", "video", "pdf"]
                       }
                     },
                     "output": {
                       "type": "array",
                       "items": {
                         "type": "string",
-                        "enum": [
-                          "text",
-                          "audio",
-                          "image",
-                          "video",
-                          "pdf"
-                        ]
+                        "enum": ["text", "audio", "image", "video", "pdf"]
                       }
                     }
                   },
-                  "required": [
-                    "input",
-                    "output"
-                  ]
+                  "required": ["input", "output"]
                 },
                 "experimental": {
                   "type": "boolean"
                 },
                 "status": {
                   "type": "string",
-                  "enum": [
-                    "alpha",
-                    "beta",
-                    "deprecated"
-                  ]
+                  "enum": ["alpha", "beta", "deprecated"]
                 },
                 "options": {
                   "type": "object",
@@ -14845,10 +14451,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "type",
-          "command"
-        ],
+        "required": ["type", "command"],
         "additionalProperties": false
       },
       "McpOAuthConfig": {
@@ -14914,19 +14517,13 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "type",
-          "url"
-        ],
+        "required": ["type", "url"],
         "additionalProperties": false
       },
       "LayoutConfig": {
         "description": "@deprecated Always uses stretch layout.",
         "type": "string",
-        "enum": [
-          "auto",
-          "stretch"
-        ]
+        "enum": ["auto", "stretch"]
       },
       "Config": {
         "type": "object",
@@ -14966,9 +14563,7 @@
                   "type": "boolean"
                 }
               },
-              "required": [
-                "template"
-              ]
+              "required": ["template"]
             }
           },
           "skills": {
@@ -15034,11 +14629,7 @@
           "share": {
             "description": "Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing",
             "type": "string",
-            "enum": [
-              "manual",
-              "auto",
-              "disabled"
-            ]
+            "enum": ["manual", "auto", "disabled"]
           },
           "autoshare": {
             "description": "@deprecated Use 'share' field instead. Share newly created sessions automatically",
@@ -15166,9 +14757,7 @@
                       "type": "boolean"
                     }
                   },
-                  "required": [
-                    "enabled"
-                  ],
+                  "required": ["enabled"],
                   "additionalProperties": false
                 }
               ]
@@ -15238,9 +14827,7 @@
                           "const": true
                         }
                       },
-                      "required": [
-                        "disabled"
-                      ]
+                      "required": ["disabled"]
                     },
                     {
                       "type": "object",
@@ -15277,9 +14864,7 @@
                           "additionalProperties": {}
                         }
                       },
-                      "required": [
-                        "command"
-                      ]
+                      "required": ["command"]
                     }
                   ]
                 }
@@ -15428,11 +15013,7 @@
             "const": false
           }
         },
-        "required": [
-          "data",
-          "errors",
-          "success"
-        ]
+        "required": ["data", "errors", "success"]
       },
       "OAuth": {
         "type": "object",
@@ -15457,12 +15038,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "refresh",
-          "access",
-          "expires"
-        ]
+        "required": ["type", "refresh", "access", "expires"]
       },
       "ApiAuth": {
         "type": "object",
@@ -15475,10 +15051,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "key"
-        ]
+        "required": ["type", "key"]
       },
       "WellKnownAuth": {
         "type": "object",
@@ -15494,11 +15067,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "key",
-          "token"
-        ]
+        "required": ["type", "key", "token"]
       },
       "Auth": {
         "anyOf": [
@@ -15527,15 +15096,10 @@
                 "type": "string"
               }
             },
-            "required": [
-              "message"
-            ]
+            "required": ["message"]
           }
         },
-        "required": [
-          "name",
-          "data"
-        ]
+        "required": ["name", "data"]
       },
       "Model": {
         "type": "object",
@@ -15559,11 +15123,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "id",
-              "url",
-              "npm"
-            ]
+            "required": ["id", "url", "npm"]
           },
           "name": {
             "type": "string"
@@ -15605,13 +15165,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "text",
-                  "audio",
-                  "image",
-                  "video",
-                  "pdf"
-                ]
+                "required": ["text", "audio", "image", "video", "pdf"]
               },
               "output": {
                 "type": "object",
@@ -15632,13 +15186,7 @@
                     "type": "boolean"
                   }
                 },
-                "required": [
-                  "text",
-                  "audio",
-                  "image",
-                  "video",
-                  "pdf"
-                ]
+                "required": ["text", "audio", "image", "video", "pdf"]
               },
               "interleaved": {
                 "anyOf": [
@@ -15650,28 +15198,15 @@
                     "properties": {
                       "field": {
                         "type": "string",
-                        "enum": [
-                          "reasoning_content",
-                          "reasoning_details"
-                        ]
+                        "enum": ["reasoning_content", "reasoning_details"]
                       }
                     },
-                    "required": [
-                      "field"
-                    ]
+                    "required": ["field"]
                   }
                 ]
               }
             },
-            "required": [
-              "temperature",
-              "reasoning",
-              "attachment",
-              "toolcall",
-              "input",
-              "output",
-              "interleaved"
-            ]
+            "required": ["temperature", "reasoning", "attachment", "toolcall", "input", "output", "interleaved"]
           },
           "cost": {
             "type": "object",
@@ -15692,10 +15227,7 @@
                     "type": "number"
                   }
                 },
-                "required": [
-                  "read",
-                  "write"
-                ]
+                "required": ["read", "write"]
               },
               "experimentalOver200K": {
                 "type": "object",
@@ -15716,24 +15248,13 @@
                         "type": "number"
                       }
                     },
-                    "required": [
-                      "read",
-                      "write"
-                    ]
+                    "required": ["read", "write"]
                   }
                 },
-                "required": [
-                  "input",
-                  "output",
-                  "cache"
-                ]
+                "required": ["input", "output", "cache"]
               }
             },
-            "required": [
-              "input",
-              "output",
-              "cache"
-            ]
+            "required": ["input", "output", "cache"]
           },
           "limit": {
             "type": "object",
@@ -15748,19 +15269,11 @@
                 "type": "number"
               }
             },
-            "required": [
-              "context",
-              "output"
-            ]
+            "required": ["context", "output"]
           },
           "status": {
             "type": "string",
-            "enum": [
-              "alpha",
-              "beta",
-              "deprecated",
-              "active"
-            ]
+            "enum": ["alpha", "beta", "deprecated", "active"]
           },
           "options": {
             "type": "object",
@@ -15820,12 +15333,7 @@
           },
           "source": {
             "type": "string",
-            "enum": [
-              "env",
-              "config",
-              "custom",
-              "api"
-            ]
+            "enum": ["env", "config", "custom", "api"]
           },
           "env": {
             "type": "array",
@@ -15853,14 +15361,7 @@
             }
           }
         },
-        "required": [
-          "id",
-          "name",
-          "source",
-          "env",
-          "options",
-          "models"
-        ]
+        "required": ["id", "name", "source", "env", "options", "models"]
       },
       "Env": {
         "type": "object",
@@ -15907,10 +15408,7 @@
             }
           }
         },
-        "required": [
-          "keys",
-          "empty"
-        ]
+        "required": ["keys", "empty"]
       },
       "EnvFileValue": {
         "type": "object",
@@ -15922,23 +15420,26 @@
             "type": "string"
           }
         },
-        "required": [
-          "name",
-          "value"
-        ]
+        "required": ["name", "value"]
+      },
+      "ImageQuotaStatus": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/ImageQuota"
+          }
+        },
+        "required": ["enabled"]
       },
       "DevServerStatus": {
         "type": "object",
         "properties": {
           "state": {
             "type": "string",
-            "enum": [
-              "none",
-              "starting",
-              "startable",
-              "ready",
-              "errored"
-            ]
+            "enum": ["none", "starting", "startable", "ready", "errored"]
           },
           "port": {
             "type": "number"
@@ -15950,22 +15451,14 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "state"
-        ]
+        "required": ["state"]
       },
       "DevServerRestart": {
         "type": "object",
         "properties": {
           "status": {
             "type": "string",
-            "enum": [
-              "already_running",
-              "started",
-              "failed",
-              "no_command",
-              "already_starting"
-            ]
+            "enum": ["already_running", "started", "failed", "no_command", "already_starting"]
           },
           "url": {
             "type": "string"
@@ -15980,10 +15473,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "status",
-          "ms"
-        ]
+        "required": ["status", "ms"]
       },
       "DevServerLogs": {
         "type": "object",
@@ -16001,9 +15491,70 @@
             "type": "number"
           }
         },
-        "required": [
-          "lines"
-        ]
+        "required": ["lines"]
+      },
+      "GitHubStatus": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "connectUrl": {
+            "type": "string"
+          },
+          "login": {
+            "type": "string"
+          },
+          "linkedBy": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "object",
+            "properties": {
+              "owner": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "private": {
+                "type": "boolean"
+              }
+            },
+            "required": ["owner", "name", "url"]
+          },
+          "push": {
+            "type": "object",
+            "properties": {
+              "sha": {
+                "type": "string"
+              },
+              "time": {
+                "type": "number"
+              },
+              "by": {
+                "type": "string"
+              }
+            },
+            "required": ["sha", "time"]
+          }
+        },
+        "required": ["enabled"]
+      },
+      "GitHubError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["code", "message"]
       },
       "ToolIDs": {
         "type": "array",
@@ -16022,11 +15573,7 @@
           },
           "parameters": {}
         },
-        "required": [
-          "id",
-          "description",
-          "parameters"
-        ]
+        "required": ["id", "description", "parameters"]
       },
       "ToolList": {
         "type": "array",
@@ -16086,15 +15633,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "id",
-          "type",
-          "branch",
-          "name",
-          "directory",
-          "extra",
-          "projectID"
-        ]
+        "required": ["id", "type", "branch", "name", "directory", "extra", "projectID"]
       },
       "Worktree": {
         "type": "object",
@@ -16109,11 +15648,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "name",
-          "branch",
-          "directory"
-        ]
+        "required": ["name", "branch", "directory"]
       },
       "WorktreeCreateInput": {
         "type": "object",
@@ -16134,9 +15669,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "directory"
-        ]
+        "required": ["directory"]
       },
       "WorktreeResetInput": {
         "type": "object",
@@ -16145,9 +15678,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "directory"
-        ]
+        "required": ["directory"]
       },
       "ProjectSummary": {
         "type": "object",
@@ -16162,11 +15693,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "title",
-          "description",
-          "usage"
-        ]
+        "required": ["title", "description", "usage"]
       },
       "GlobalSession": {
         "type": "object",
@@ -16211,11 +15738,7 @@
                 }
               }
             },
-            "required": [
-              "additions",
-              "deletions",
-              "files"
-            ]
+            "required": ["additions", "deletions", "files"]
           },
           "share": {
             "type": "object",
@@ -16224,9 +15747,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "url"
-            ]
+            "required": ["url"]
           },
           "title": {
             "type": "string"
@@ -16250,10 +15771,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "created",
-              "updated"
-            ]
+            "required": ["created", "updated"]
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
@@ -16276,9 +15794,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "messageID"
-            ]
+            "required": ["messageID"]
           },
           "project": {
             "anyOf": [
@@ -16291,16 +15807,7 @@
             ]
           }
         },
-        "required": [
-          "id",
-          "slug",
-          "projectID",
-          "directory",
-          "title",
-          "version",
-          "time",
-          "project"
-        ]
+        "required": ["id", "slug", "projectID", "directory", "title", "version", "time", "project"]
       },
       "McpResource": {
         "type": "object",
@@ -16321,11 +15828,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "name",
-          "uri",
-          "client"
-        ]
+        "required": ["name", "uri", "client"]
       },
       "TextPartInput": {
         "type": "object",
@@ -16357,9 +15860,7 @@
                 "type": "number"
               }
             },
-            "required": [
-              "start"
-            ]
+            "required": ["start"]
           },
           "metadata": {
             "type": "object",
@@ -16369,10 +15870,7 @@
             "additionalProperties": {}
           }
         },
-        "required": [
-          "type",
-          "text"
-        ]
+        "required": ["type", "text"]
       },
       "FilePartInput": {
         "type": "object",
@@ -16401,11 +15899,7 @@
             "$ref": "#/components/schemas/FilePartSource"
           }
         },
-        "required": [
-          "type",
-          "mime",
-          "url"
-        ]
+        "required": ["type", "mime", "url"]
       },
       "AgentPartInput": {
         "type": "object",
@@ -16438,17 +15932,10 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": [
-              "value",
-              "start",
-              "end"
-            ]
+            "required": ["value", "start", "end"]
           }
         },
-        "required": [
-          "type",
-          "name"
-        ]
+        "required": ["type", "name"]
       },
       "SubtaskPartInput": {
         "type": "object",
@@ -16480,21 +15967,13 @@
                 "type": "string"
               }
             },
-            "required": [
-              "providerID",
-              "modelID"
-            ]
+            "required": ["providerID", "modelID"]
           },
           "command": {
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "prompt",
-          "description",
-          "agent"
-        ]
+        "required": ["type", "prompt", "description", "agent"]
       },
       "SessionPromptDoc": {
         "type": "object",
@@ -16508,29 +15987,15 @@
             "pattern": "^ses.*"
           }
         },
-        "required": [
-          "docID",
-          "sessionID"
-        ]
+        "required": ["docID", "sessionID"]
       },
       "DocSubmitTargetKind": {
         "type": "string",
-        "enum": [
-          "doc",
-          "question",
-          "stop",
-          "clear"
-        ]
+        "enum": ["doc", "question", "stop", "clear"]
       },
       "DocSubmitStatus": {
         "type": "string",
-        "enum": [
-          "pending",
-          "sent",
-          "cancelled",
-          "expired",
-          "left"
-        ]
+        "enum": ["pending", "sent", "cancelled", "expired", "left"]
       },
       "DocSubmitActor": {
         "type": "object",
@@ -16547,19 +16012,10 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "pending",
-              "approved",
-              "left"
-            ]
+            "enum": ["pending", "approved", "left"]
           }
         },
-        "required": [
-          "actorID",
-          "name",
-          "color",
-          "status"
-        ]
+        "required": ["actorID", "name", "color", "status"]
       },
       "DocSubmit": {
         "type": "object",
@@ -16580,11 +16036,7 @@
           },
           "questionAction": {
             "type": "string",
-            "enum": [
-              "send",
-              "dismiss",
-              "back"
-            ]
+            "enum": ["send", "dismiss", "back"]
           },
           "actorID": {
             "type": "string",
@@ -16642,12 +16094,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "actorID",
-          "sessionID",
-          "name",
-          "color"
-        ]
+        "required": ["actorID", "sessionID", "name", "color"]
       },
       "PromptCycleInput": {
         "type": "object",
@@ -16729,9 +16176,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "mime"
-                  ]
+                  "required": ["mime"]
                 }
               },
               {
@@ -16794,12 +16239,7 @@
       },
       "PromptCycleStatus": {
         "type": "string",
-        "enum": [
-          "running",
-          "completed",
-          "aborted",
-          "error"
-        ]
+        "enum": ["running", "completed", "aborted", "error"]
       },
       "PromptCycle": {
         "type": "object",
@@ -17012,13 +16452,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "assetID",
-          "docID",
-          "mime",
-          "size",
-          "url"
-        ]
+        "required": ["assetID", "docID", "mime", "size", "url"]
       },
       "ProviderAuthMethod": {
         "type": "object",
@@ -17080,18 +16514,10 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "key",
-                        "op",
-                        "value"
-                      ]
+                      "required": ["key", "op", "value"]
                     }
                   },
-                  "required": [
-                    "type",
-                    "key",
-                    "message"
-                  ]
+                  "required": ["type", "key", "message"]
                 },
                 {
                   "type": "object",
@@ -17121,10 +16547,7 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "label",
-                          "value"
-                        ]
+                        "required": ["label", "value"]
                       }
                     },
                     "when": {
@@ -17149,28 +16572,16 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "key",
-                        "op",
-                        "value"
-                      ]
+                      "required": ["key", "op", "value"]
                     }
                   },
-                  "required": [
-                    "type",
-                    "key",
-                    "message",
-                    "options"
-                  ]
+                  "required": ["type", "key", "message", "options"]
                 }
               ]
             }
           }
         },
-        "required": [
-          "type",
-          "label"
-        ]
+        "required": ["type", "label"]
       },
       "ProviderAuthAuthorization": {
         "type": "object",
@@ -17194,11 +16605,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "url",
-          "method",
-          "instructions"
-        ]
+        "required": ["url", "method", "instructions"]
       },
       "Symbol": {
         "type": "object",
@@ -17219,17 +16626,10 @@
                 "$ref": "#/components/schemas/Range"
               }
             },
-            "required": [
-              "uri",
-              "range"
-            ]
+            "required": ["uri", "range"]
           }
         },
-        "required": [
-          "name",
-          "kind",
-          "location"
-        ]
+        "required": ["name", "kind", "location"]
       },
       "FileNode": {
         "type": "object",
@@ -17245,32 +16645,20 @@
           },
           "type": {
             "type": "string",
-            "enum": [
-              "file",
-              "directory"
-            ]
+            "enum": ["file", "directory"]
           },
           "ignored": {
             "type": "boolean"
           }
         },
-        "required": [
-          "name",
-          "path",
-          "absolute",
-          "type",
-          "ignored"
-        ]
+        "required": ["name", "path", "absolute", "type", "ignored"]
       },
       "FileContent": {
         "type": "object",
         "properties": {
           "type": {
             "type": "string",
-            "enum": [
-              "text",
-              "binary"
-            ]
+            "enum": ["text", "binary"]
           },
           "content": {
             "type": "string"
@@ -17317,24 +16705,14 @@
                       }
                     }
                   },
-                  "required": [
-                    "oldStart",
-                    "oldLines",
-                    "newStart",
-                    "newLines",
-                    "lines"
-                  ]
+                  "required": ["oldStart", "oldLines", "newStart", "newLines", "lines"]
                 }
               },
               "index": {
                 "type": "string"
               }
             },
-            "required": [
-              "oldFileName",
-              "newFileName",
-              "hunks"
-            ]
+            "required": ["oldFileName", "newFileName", "hunks"]
           },
           "encoding": {
             "type": "string",
@@ -17344,10 +16722,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "type",
-          "content"
-        ]
+        "required": ["type", "content"]
       },
       "File": {
         "type": "object",
@@ -17367,19 +16742,10 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "added",
-              "deleted",
-              "modified"
-            ]
+            "enum": ["added", "deleted", "modified"]
           }
         },
-        "required": [
-          "path",
-          "added",
-          "removed",
-          "status"
-        ]
+        "required": ["path", "added", "removed", "status"]
       },
       "AssetEntry": {
         "type": "object",
@@ -17398,11 +16764,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "path",
-          "size",
-          "modified"
-        ]
+        "required": ["path", "size", "modified"]
       },
       "AssetList": {
         "type": "object",
@@ -17427,10 +16789,7 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": [
-              "count",
-              "bytes"
-            ]
+            "required": ["count", "bytes"]
           },
           "limits": {
             "type": "object",
@@ -17451,18 +16810,10 @@
                 "maximum": 9007199254740991
               }
             },
-            "required": [
-              "file",
-              "total",
-              "count"
-            ]
+            "required": ["file", "total", "count"]
           }
         },
-        "required": [
-          "files",
-          "usage",
-          "limits"
-        ]
+        "required": ["files", "usage", "limits"]
       },
       "MCPStatusConnected": {
         "type": "object",
@@ -17472,9 +16823,7 @@
             "const": "connected"
           }
         },
-        "required": [
-          "status"
-        ]
+        "required": ["status"]
       },
       "MCPStatusDisabled": {
         "type": "object",
@@ -17484,9 +16833,7 @@
             "const": "disabled"
           }
         },
-        "required": [
-          "status"
-        ]
+        "required": ["status"]
       },
       "MCPStatusFailed": {
         "type": "object",
@@ -17499,10 +16846,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "status",
-          "error"
-        ]
+        "required": ["status", "error"]
       },
       "MCPStatusNeedsAuth": {
         "type": "object",
@@ -17512,9 +16856,7 @@
             "const": "needs_auth"
           }
         },
-        "required": [
-          "status"
-        ]
+        "required": ["status"]
       },
       "MCPStatusNeedsClientRegistration": {
         "type": "object",
@@ -17527,10 +16869,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "status",
-          "error"
-        ]
+        "required": ["status", "error"]
       },
       "MCPStatus": {
         "anyOf": [
@@ -17570,13 +16909,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "home",
-          "state",
-          "config",
-          "worktree",
-          "directory"
-        ]
+        "required": ["home", "state", "config", "worktree", "directory"]
       },
       "VcsInfo": {
         "type": "object",
@@ -17603,11 +16936,7 @@
           },
           "source": {
             "type": "string",
-            "enum": [
-              "command",
-              "mcp",
-              "skill"
-            ]
+            "enum": ["command", "mcp", "skill"]
           },
           "template": {
             "anyOf": [
@@ -17629,11 +16958,7 @@
             }
           }
         },
-        "required": [
-          "name",
-          "template",
-          "hints"
-        ]
+        "required": ["name", "template", "hints"]
       },
       "Agent": {
         "type": "object",
@@ -17646,11 +16971,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "subagent",
-              "primary",
-              "all"
-            ]
+            "enum": ["subagent", "primary", "all"]
           },
           "native": {
             "type": "boolean"
@@ -17680,10 +17001,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "modelID",
-              "providerID"
-            ]
+            "required": ["modelID", "providerID"]
           },
           "variant": {
             "type": "string"
@@ -17704,12 +17022,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "name",
-          "mode",
-          "permission",
-          "options"
-        ]
+        "required": ["name", "mode", "permission", "options"]
       },
       "LSPStatus": {
         "type": "object",
@@ -17736,12 +17049,7 @@
             ]
           }
         },
-        "required": [
-          "id",
-          "name",
-          "root",
-          "status"
-        ]
+        "required": ["id", "name", "root", "status"]
       },
       "FormatterStatus": {
         "type": "object",
@@ -17759,11 +17067,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "name",
-          "extensions",
-          "enabled"
-        ]
+        "required": ["name", "extensions", "enabled"]
       }
     }
   }

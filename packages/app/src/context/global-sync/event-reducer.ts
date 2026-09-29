@@ -2,6 +2,7 @@ import { Binary } from "@opencode-ai/util/binary"
 import { produce, reconcile, type SetStoreFunction, type Store } from "solid-js/store"
 import type {
   EnvRequest,
+  ImageRequest,
   FileDiff,
   Message,
   Part,
@@ -396,6 +397,42 @@ export function applyDirectoryEvent(input: {
       if (!result.found) break
       input.setStore(
         "env_request",
+        props.sessionID,
+        produce((draft) => {
+          draft.splice(result.index, 1)
+        }),
+      )
+      break
+    }
+    case "image.request.asked": {
+      const request = event.properties as ImageRequest
+      const list = input.store.image_request[request.sessionID]
+      if (!list) {
+        input.setStore("image_request", request.sessionID, [request])
+        break
+      }
+      const result = Binary.search(list, request.id, (item) => item.id)
+      if (result.found) {
+        input.setStore("image_request", request.sessionID, result.index, reconcile(request))
+        break
+      }
+      input.setStore(
+        "image_request",
+        request.sessionID,
+        produce((draft) => {
+          draft.splice(result.index, 0, request)
+        }),
+      )
+      break
+    }
+    case "image.request.resolved": {
+      const props = event.properties as { sessionID: string; requestID: string }
+      const list = input.store.image_request[props.sessionID]
+      if (!list) break
+      const result = Binary.search(list, props.requestID, (item) => item.id)
+      if (!result.found) break
+      input.setStore(
+        "image_request",
         props.sessionID,
         produce((draft) => {
           draft.splice(result.index, 1)

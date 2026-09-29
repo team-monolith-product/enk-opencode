@@ -1,6 +1,16 @@
 import { useFilteredList } from "@opencode-ai/ui/hooks"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
-import { createEffect, on, Component, Show, onCleanup, onMount, createMemo, createSignal } from "solid-js"
+import {
+  createEffect,
+  on,
+  Component,
+  Show,
+  onCleanup,
+  onMount,
+  createMemo,
+  createSignal,
+  createResource,
+} from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { Binary } from "@opencode-ai/util/binary"
@@ -21,6 +31,7 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
+import { DialogGenerateImage } from "@/components/dialog-generate-image"
 import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
@@ -1664,6 +1675,31 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   })
 
+  const [imageStatus] = createResource(
+    () => sdk.directory,
+    (directory) =>
+      sdk.client.imageRequest
+        .quota({ directory })
+        .then((x) => x.data)
+        .catch(() => undefined),
+  )
+
+  const openImageDialog = () => {
+    dialog.show(() => (
+      <DialogGenerateImage
+        onSubmit={(text) => {
+          const draft = prompt.current()
+          void handleSubmit(undefined, [
+            { type: "text", content: text, start: 0, end: text.length, imageRequest: true },
+          ]).finally(() => {
+            if (promptLength(draft) === 0) return
+            prompt.set(draft, promptLength(draft))
+          })
+        }}
+      />
+    ))
+  }
+
   const { abort, handleSubmit } = createPromptSubmit({
     info,
     imageAttachments,
@@ -2158,9 +2194,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       >
         <PromptDragOverlay
           type={store.draggingType}
-          label={language.t(
-            store.draggingType === "@mention" ? "prompt.dropzone.file.label" : "prompt.dropzone.label",
-          )}
+          label={language.t(store.draggingType === "@mention" ? "prompt.dropzone.file.label" : "prompt.dropzone.label")}
         />
         <PromptContextItems
           items={contextItems()}
@@ -2196,7 +2230,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             if (!(target instanceof HTMLElement)) return
             if (
               target.closest(
-                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-normal"], [data-action="prompt-doc"], [data-action="prompt-doc-exit"], [data-action="prompt-permissions"]',
+                '[data-action="prompt-attach"], [data-action="prompt-generate-image"], [data-action="prompt-submit"], [data-action="prompt-normal"], [data-action="prompt-doc"], [data-action="prompt-doc-exit"], [data-action="prompt-permissions"]',
               )
             ) {
               return
@@ -2258,6 +2292,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }
           >
             <PromptDocShell
+              generateImage={
+                imageStatus()?.enabled ? { disabled: working(), onOpen: openImageDialog } : undefined
+              }
               doc={doc}
               readonly={readonly}
               submitIcon={submitIcon()}
@@ -2266,8 +2303,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               maxLength={MAX_PROMPT_DOC_CHARS}
               shake={countShake()}
               submitDisabled={
-                readonly ||
-                (submitAction() === "send" && (!hasDraft() || doc.uploading() || doc.missing().length > 0))
+                readonly || (submitAction() === "send" && (!hasDraft() || doc.uploading() || doc.missing().length > 0))
               }
               tip={tip()}
               onExit={exitDoc}
@@ -2316,8 +2352,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     data-action="prompt-submit"
                     type="submit"
                     disabled={
-                      docMode() === "shell" ||
-                      (docMode() === "normal" && !hasDraft() && submitAction() === "send")
+                      docMode() === "shell" || (docMode() === "normal" && !hasDraft() && submitAction() === "send")
                     }
                     tabIndex={docMode() === "shell" ? -1 : undefined}
                     icon={submitIcon()}
@@ -2355,6 +2390,22 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       <Icon name="plus" class="size-4.5" />
                     </Button>
                   </TooltipKeybind>
+                  <Show when={imageStatus()?.enabled}>
+                    <Tooltip placement="top" value={language.t("prompt.action.generateImage")}>
+                      <Button
+                        data-action="prompt-generate-image"
+                        type="button"
+                        variant="ghost"
+                        class="size-7.5 p-0"
+                        style={buttons()}
+                        onClick={openImageDialog}
+                        disabled={working()}
+                        aria-label={language.t("prompt.action.generateImage")}
+                      >
+                        <Icon name="photo" class="size-4.5" />
+                      </Button>
+                    </Tooltip>
+                  </Show>
                   {modeButtons()}
                 </div>
               </Show>

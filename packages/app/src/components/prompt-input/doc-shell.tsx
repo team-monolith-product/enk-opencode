@@ -45,6 +45,10 @@ type ShellProps = {
     enabled: boolean
     onToggle: () => void
   }
+  generateImage?: {
+    disabled: boolean
+    onOpen: () => void
+  }
 }
 
 export const PromptDocShell: Component<ShellProps> = (props) => {
@@ -286,6 +290,23 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               aria-expanded={attachOpen()}
             />
           </div>
+          <Show when={props.generateImage}>
+            {(image) => (
+              <Tooltip placement="top" value={language.t("prompt.action.generateImage")}>
+                <IconButton
+                  data-action="prompt-generate-image"
+                  type="button"
+                  icon="photo"
+                  variant="ghost"
+                  class="size-7.5"
+                  disabled={props.readonly || image().disabled}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => image().onOpen()}
+                  aria-label={language.t("prompt.action.generateImage")}
+                />
+              </Tooltip>
+            )}
+          </Show>
 
           {/* | 구분자 */}
           <span class="mx-1 h-4 w-px shrink-0 bg-border-weaker-base" />

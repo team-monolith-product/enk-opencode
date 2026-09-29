@@ -11,6 +11,8 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { AiUsage } from "../enk/ai-usage"
 import { ImageQuota } from "../enk/image-quota"
+import { ImageRequest } from "../image-request"
+import type { MessageV2 } from "../session/message-v2"
 import { assertExternalDirectory } from "./external-directory"
 
 export namespace GenerateImage {
@@ -29,7 +31,7 @@ export namespace GenerateImage {
   }
 
   export type Metadata = {
-    status: "generated" | "blocked" | "limited" | "disabled" | "unavailable"
+    status: "generated" | "blocked" | "limited" | "disabled" | "unavailable" | "skipped" | "canceled"
     path: string
     prompt: string
     size: string
@@ -60,6 +62,17 @@ export namespace GenerateImage {
 
   export function available() {
     return endpoint() !== undefined
+  }
+
+  // 입력창의 이미지 버튼으로 보낸 메시지는 학생이 이미 요청한 것이라 확인 카드 없이 한 장을 만든다.
+  const approvedMessages = new Set<string>()
+
+  export function preapproved(messages: MessageV2.WithParts[]) {
+    const user = messages.findLast((m) => m.info.role === "user")
+    if (!user || approvedMessages.has(user.info.id)) return false
+    const requested = user.parts.some((p) => p.type === "text" && p.metadata?.["imageRequest"] === true)
+    if (requested) approvedMessages.add(user.info.id)
+    return requested
   }
 
   export function mime(format: string) {
@@ -106,21 +119,12 @@ export const GenerateImageTool = Tool.define("generate_image", {
       quality: params.quality,
       background: params.background,
     }
-    const callID = ctx.callID || randomUUID()
-    const reservation = await ImageQuota.reserve(callID)
-    if (reservation.status !== "reserved") {
-      const status =
-        reservation.status === "unavailable" ? "unavailable" : reservation.quota.limit === 0 ? "disabled" : "limited"
-      const metadata: GenerateImage.Metadata = {
-        ...base,
-        status,
-        ms: Date.now() - startedAt,
-        quota: reservation.status === "exhausted" ? reservation.quota : undefined,
-      }
+    const refuse = (status: "limited" | "disabled" | "unavailable", quota?: ImageQuota.Quota) => {
+      const metadata: GenerateImage.Metadata = { ...base, status, ms: Date.now() - startedAt, quota }
       const output = {
         unavailable: "이 작업 공간에서는 이미지 생성을 쓸 수 없습니다.",
         disabled: "이 해커톤에서는 이미지 생성을 사용하지 않습니다.",
-        limited: `이 팀이 만들 수 있는 이미지 ${metadata.quota?.limit}장을 모두 사용했습니다.`,
+        limited: `이 팀이 만들 수 있는 이미지 ${quota?.limit}장을 모두 사용했습니다.`,
       }[status]
       return {
         title: relative,
@@ -128,6 +132,51 @@ export const GenerateImageTool = Tool.define("generate_image", {
         metadata,
       }
     }
+    const exhausted = (quota: ImageQuota.Quota) => refuse(quota.limit === 0 ? "disabled" : "limited", quota)
+
+    const callID = ctx.callID || randomUUID()
+
+    if (!GenerateImage.preapproved(ctx.messages)) {
+      const current = await ImageQuota.status().catch(() => undefined)
+      if (current === null) return refuse("unavailable")
+      if (current && current.remaining <= 0) return exhausted(current)
+
+      ctx.metadata({ title: relative, metadata: { ...base, status: "waiting", quota: current } })
+      const pending = ImageRequest.ask({
+        sessionID: ctx.sessionID,
+        info: {
+          prompt: params.prompt,
+          path: relative,
+          size: params.size,
+          background: params.background,
+          quota: current,
+        },
+        tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
+      })
+      const onAbort = () =>
+        ImageRequest.list().then((items) =>
+          items.filter((item) => item.tool?.callID === callID).forEach((item) => ImageRequest.reject(item.id)),
+        )
+      ctx.abort.addEventListener("abort", onAbort, { once: true })
+      const answer = await pending.finally(() => ctx.abort.removeEventListener("abort", onAbort))
+
+      if (answer.status !== "approved") {
+        const metadata: GenerateImage.Metadata = { ...base, status: answer.status, ms: Date.now() - startedAt }
+        return {
+          title: relative,
+          output:
+            answer.status === "skipped"
+              ? "학생이 이 이미지를 만들지 않기로 했습니다. 같은 이미지를 다시 제안하지 말고, 이미지 없이 작업을 이어가세요."
+              : "이미지 생성 확인이 취소되었습니다. 다시 호출하지 마세요.",
+          metadata,
+        }
+      }
+      base.prompt = answer.prompt
+    }
+
+    const reservation = await ImageQuota.reserve(callID)
+    if (reservation.status === "unavailable") return refuse("unavailable")
+    if (reservation.status === "exhausted") return exhausted(reservation.quota)
     const remaining = reservation.quota?.remaining
 
     ctx.metadata({ title: relative, metadata: { ...base, status: "generating" } })
@@ -180,7 +229,7 @@ export const GenerateImageTool = Tool.define("generate_image", {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${openai.key}` },
         body: JSON.stringify({
           model: GenerateImage.MODEL,
-          prompt: params.prompt,
+          prompt: base.prompt,
           n: 1,
           size: params.size,
           quality: params.quality,

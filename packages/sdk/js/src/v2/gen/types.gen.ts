@@ -314,6 +314,42 @@ export type EventEnvRequestResolved = {
   }
 }
 
+export type ImageQuota = {
+  limit: number
+  used: number
+  remaining: number
+}
+
+export type ImageRequest = {
+  prompt: string
+  path: string
+  size: string
+  background: string
+  quota?: ImageQuota
+  id: string
+  sessionID: string
+  tool?: {
+    messageID: string
+    callID: string
+  }
+}
+
+export type EventImageRequestAsked = {
+  type: "image.request.asked"
+  properties: ImageRequest
+}
+
+export type ImageRequestStatus = "approved" | "skipped" | "canceled"
+
+export type EventImageRequestResolved = {
+  type: "image.request.resolved"
+  properties: {
+    sessionID: string
+    requestID: string
+    status: ImageRequestStatus
+  }
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -1047,6 +1083,8 @@ export type Event =
   | EventTodoUpdated
   | EventEnvRequestAsked
   | EventEnvRequestResolved
+  | EventImageRequestAsked
+  | EventImageRequestResolved
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -1856,6 +1894,11 @@ export type EnvFileValue = {
   value: string
 }
 
+export type ImageQuotaStatus = {
+  enabled: boolean
+  quota?: ImageQuota
+}
+
 export type DevServerStatus = {
   state: "none" | "starting" | "startable" | "ready" | "errored"
   port?: number
@@ -1875,6 +1918,29 @@ export type DevServerLogs = {
   lines: Array<string>
   cmd?: string
   port?: number
+}
+
+export type GitHubStatus = {
+  enabled: boolean
+  connectUrl?: string
+  login?: string
+  linkedBy?: string
+  repo?: {
+    owner: string
+    name: string
+    url: string
+    private?: boolean
+  }
+  push?: {
+    sha: string
+    time: number
+    by?: string
+  }
+}
+
+export type GitHubError = {
+  code: string
+  message: string
 }
 
 export type ToolIds = Array<string>
@@ -3158,6 +3224,148 @@ export type EnvRequestRejectResponses = {
 
 export type EnvRequestRejectResponse = EnvRequestRejectResponses[keyof EnvRequestRejectResponses]
 
+export type ImageRequestListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/image-request"
+}
+
+export type ImageRequestListResponses = {
+  /**
+   * List of pending image requests
+   */
+  200: Array<ImageRequest>
+}
+
+export type ImageRequestListResponse = ImageRequestListResponses[keyof ImageRequestListResponses]
+
+export type ImageRequestQuotaData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/image-request/quota"
+}
+
+export type ImageRequestQuotaResponses = {
+  /**
+   * Quota
+   */
+  200: ImageQuotaStatus
+}
+
+export type ImageRequestQuotaResponse = ImageRequestQuotaResponses[keyof ImageRequestQuotaResponses]
+
+export type ImageRequestApproveData = {
+  body?: {
+    prompt?: string
+  }
+  path: {
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/image-request/{requestID}/approve"
+}
+
+export type ImageRequestApproveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ImageRequestApproveError = ImageRequestApproveErrors[keyof ImageRequestApproveErrors]
+
+export type ImageRequestApproveResponses = {
+  /**
+   * Image request approved
+   */
+  200: boolean
+}
+
+export type ImageRequestApproveResponse = ImageRequestApproveResponses[keyof ImageRequestApproveResponses]
+
+export type ImageRequestSkipData = {
+  body?: never
+  path: {
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/image-request/{requestID}/skip"
+}
+
+export type ImageRequestSkipErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ImageRequestSkipError = ImageRequestSkipErrors[keyof ImageRequestSkipErrors]
+
+export type ImageRequestSkipResponses = {
+  /**
+   * Image request skipped
+   */
+  200: boolean
+}
+
+export type ImageRequestSkipResponse = ImageRequestSkipResponses[keyof ImageRequestSkipResponses]
+
+export type ImageRequestRejectData = {
+  body?: never
+  path: {
+    requestID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/image-request/{requestID}/reject"
+}
+
+export type ImageRequestRejectErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type ImageRequestRejectError = ImageRequestRejectErrors[keyof ImageRequestRejectErrors]
+
+export type ImageRequestRejectResponses = {
+  /**
+   * Image request rejected
+   */
+  200: boolean
+}
+
+export type ImageRequestRejectResponse = ImageRequestRejectResponses[keyof ImageRequestRejectResponses]
+
 export type DevServerStatusData = {
   body?: never
   path?: never
@@ -3214,6 +3422,63 @@ export type DevServerLogsResponses = {
 }
 
 export type DevServerLogsResponse = DevServerLogsResponses[keyof DevServerLogsResponses]
+
+export type GithubStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/github"
+}
+
+export type GithubStatusResponses = {
+  /**
+   * Link status
+   */
+  200: GitHubStatus
+}
+
+export type GithubStatusResponse = GithubStatusResponses[keyof GithubStatusResponses]
+
+export type GithubRepoCreateData = {
+  body?: {
+    name: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/github/repo"
+}
+
+export type GithubRepoCreateErrors = {
+  /**
+   * GitHub error
+   */
+  409: GitHubError
+  /**
+   * GitHub error
+   */
+  422: GitHubError
+  /**
+   * GitHub error
+   */
+  502: GitHubError
+}
+
+export type GithubRepoCreateError = GithubRepoCreateErrors[keyof GithubRepoCreateErrors]
+
+export type GithubRepoCreateResponses = {
+  /**
+   * Link status
+   */
+  200: GitHubStatus
+}
+
+export type GithubRepoCreateResponse = GithubRepoCreateResponses[keyof GithubRepoCreateResponses]
 
 export type ToolIdsData = {
   body?: never

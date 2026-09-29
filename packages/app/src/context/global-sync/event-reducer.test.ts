@@ -90,6 +90,7 @@ const baseState = (input: Partial<State> = {}) =>
     permission: {},
     question: {},
     env_request: {},
+    image_request: {},
     mcp: {},
     lsp: [],
     vcs: undefined,
@@ -709,5 +710,20 @@ describe("applyDirectoryEvent", () => {
       loadLsp() {},
     })
     expect(store.env_request[sessionID]).toEqual([])
+  })
+  test("tracks image request lifecycle", () => {
+    const sessionID = "ses_1"
+    const [store, setStore] = createStore(baseState({}))
+    const apply = (event: unknown) =>
+      applyDirectoryEvent({ event: event as never, store, setStore, push() {}, directory: "/tmp", loadLsp() {} })
+
+    apply({
+      type: "image.request.asked",
+      properties: { id: "img_1", sessionID, prompt: "cat", path: "cat.png", size: "1024x1024", background: "auto" },
+    })
+    expect(store.image_request[sessionID]?.map((x) => x.id)).toEqual(["img_1"])
+
+    apply({ type: "image.request.resolved", properties: { sessionID, requestID: "img_1", status: "approved" } })
+    expect(store.image_request[sessionID]).toEqual([])
   })
 })
