@@ -145,6 +145,7 @@ function DirectoryDataProvider(props: ParentProps<{ directory: string }>) {
       }
       onSessionHref={(sessionID: string) => `/${slug()}/session/${sessionID}${location.search}`}
       onAssetUrl={(url: string) => attachmentSrc({ baseUrl: sdk.url, directory: sdk.directory, url })}
+      onReadFile={(path: string) => sdk.client.file.read({ path }).then((x) => x.data)}
       hideMinorErrors={env.disableMinorErrors()}
       doc={(props) => <DocMessage id={props.id} fallback={props.fallback} />}
     >
