@@ -102,30 +102,57 @@ test("다음에를 누르면 skip 을 보낸다", async ({ page }) => {
   await skip
 })
 
-test("입력창의 이미지 버튼은 imageRequest 표시가 붙은 메시지를 보낸다", async ({ page }) => {
+const toggle = '[data-action="prompt-image-toggle"]'
+
+async function send(page: Page, text: string) {
+  await page.locator('[data-action="prompt-normal"]').click()
+  const editor = page.locator('[data-component="prompt-input"]')
+  await editor.click()
+  await page.keyboard.type(text)
+  const prompt = page.waitForRequest((r) => /\/session\/[^/]+\/prompt_async/.test(r.url()))
+  await page.keyboard.press("Enter")
+  return (await prompt).postDataJSON()
+}
+
+test("이미지 만들기 토글은 사용 개수와 팀 한도를 보여준다", async ({ page }) => {
   await open(page)
 
-  await page.locator('[data-action="prompt-generate-image"]').click()
-  const dialog = page.getByRole("dialog")
-  await expect(dialog).toContainText("이미지 만들기")
-  await expect(dialog).toContainText("7/10장 남음")
-  await dialog.locator("textarea").fill("게임 주인공 고양이 캐릭터")
-  await dialog.getByText("가로", { exact: true }).click()
-  await page.screenshot({ path: "e2e/test-results/image-request-dialog.png" })
+  const button = page.locator(toggle)
+  await expect(button).toContainText("이미지 만들기")
+  await expect(button).toContainText("3/10")
+  await expect(button).toHaveAttribute("aria-checked", "false")
 
-  const prompt = page.waitForRequest((r) => /\/session\/[^/]+\/prompt_async/.test(r.url()))
-  await dialog.getByRole("button", { name: "만들기" }).click()
-  const body = (await prompt).postDataJSON()
-  expect(body.parts[0].metadata).toEqual({ imageRequest: true })
-  expect(body.parts[0].text).toContain("게임 주인공 고양이 캐릭터")
-  expect(body.parts[0].text).toContain("모양: 가로")
+  await button.hover()
+  await expect(page.getByText("팀당 10장까지 만들 수 있어요(7장 남음)")).toBeVisible()
+
+  await button.click()
+  await expect(button).toHaveAttribute("aria-checked", "true")
+  await expect(page.getByText("다음 메시지로 이미지를 만들어요")).toBeVisible()
+  await page.screenshot({ path: "e2e/test-results/image-toggle.png" })
+  await button.screenshot({ path: "e2e/test-results/image-toggle-on.png" })
 })
 
-test("한도를 다 쓰면 만들기 버튼이 막힌다", async ({ page }) => {
+test("토글을 켜고 보낸 메시지에만 imageRequest 표시가 붙고 보낸 뒤 꺼진다", async ({ page }) => {
+  await open(page)
+
+  await page.locator(toggle).click()
+  const flagged = await send(page, "게임 주인공 고양이 캐릭터")
+  expect(flagged.parts[0].metadata).toEqual({ imageRequest: true })
+  expect(flagged.parts[0].text).toContain("게임 주인공 고양이 캐릭터")
+  await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "false")
+})
+
+test("토글이 꺼져 있으면 일반 메시지로 보낸다", async ({ page }) => {
+  await open(page)
+
+  const plain = await send(page, "버튼 색 바꿔줘")
+  expect(plain.parts[0].metadata).toBeUndefined()
+})
+
+test("한도를 다 쓰면 토글이 막힌다", async ({ page }) => {
   await open(page, { limit: 10, used: 10, remaining: 0 })
 
-  await page.locator('[data-action="prompt-generate-image"]').click()
-  const dialog = page.getByRole("dialog")
-  await expect(dialog).toContainText("10장을 모두 사용했어요")
-  await expect(dialog.getByRole("button", { name: "만들기" })).toBeDisabled()
+  const button = page.locator(toggle)
+  await expect(button).toContainText("10/10")
+  await expect(button).toBeDisabled()
 })
