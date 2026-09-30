@@ -28,8 +28,6 @@ interface FetchDecompressionError extends Error {
 }
 
 export namespace MessageV2 {
-  export const IMAGE_REQUEST_NOTE =
-    "<image_generation>이미지 만들기가 켜져 있습니다. 결과물에 그림이 필요하면 generate_image 로 만들 수 있습니다.</image_generation>"
 
   const log = Log.create({ service: "session.message-v2" })
 
@@ -721,9 +719,6 @@ export namespace MessageV2 {
                   ? stripTextPlaceholder(part.text.length)
                   : part.text,
             })
-          // 토글 표시는 metadata 라 모델에게 보이지 않는다. 모델이 알 수 있게 이 메시지에만 한 줄을 덧붙인다.
-          if (part.type === "text" && !part.ignored && part.metadata?.["imageRequest"] === true)
-            userMessage.parts.push({ type: "text", text: IMAGE_REQUEST_NOTE })
           // text/plain and directory files are converted into text parts, ignore them
           if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
             if (isMedia(part.mime) && (options?.stripMedia || !supportsMedia || deferMedia(part))) {

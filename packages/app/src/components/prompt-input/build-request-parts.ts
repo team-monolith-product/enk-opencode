@@ -78,12 +78,6 @@ const toOptimisticPart = (part: PromptRequestPart, sessionID: string, messageID:
   }
 }
 
-export function markImageRequest(prompt: Prompt): Prompt {
-  const head = prompt.findIndex((part) => part.type === "text")
-  if (head < 0) return prompt
-  return prompt.map((part, index) => (index === head && part.type === "text" ? { ...part, imageRequest: true } : part))
-}
-
 export function buildRequestParts(input: BuildRequestPartsInput) {
   const head = input.prompt.find((part) => part.type === "text")
   const meta =
@@ -93,7 +87,6 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
           ...(head.source ? { source: head.source } : {}),
           ...(head.docID ? { docID: head.docID } : {}),
           ...(head.actorID ? { actorID: head.actorID } : {}),
-          ...(head.imageRequest ? { imageRequest: true } : {}),
         }
       : undefined
   const requestParts: PromptRequestPart[] = [

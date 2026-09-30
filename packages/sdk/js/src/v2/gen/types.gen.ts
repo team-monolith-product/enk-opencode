@@ -3192,24 +3192,24 @@ export type EnvRequestRejectResponses = {
 
 export type EnvRequestRejectResponse = EnvRequestRejectResponses[keyof EnvRequestRejectResponses]
 
-export type ImageRequestQuotaData = {
+export type ImageQuotaGetData = {
   body?: never
   path?: never
   query?: {
     directory?: string
     workspace?: string
   }
-  url: "/image-request/quota"
+  url: "/image-quota"
 }
 
-export type ImageRequestQuotaResponses = {
+export type ImageQuotaGetResponses = {
   /**
    * Quota
    */
   200: ImageQuotaStatus
 }
 
-export type ImageRequestQuotaResponse = ImageRequestQuotaResponses[keyof ImageRequestQuotaResponses]
+export type ImageQuotaGetResponse = ImageQuotaGetResponses[keyof ImageQuotaGetResponses]
 
 export type DevServerStatusData = {
   body?: never
@@ -4236,6 +4236,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     locale?: PromptLocale
+    imageGeneration?: boolean
     variant?: string
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
@@ -4437,6 +4438,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     locale?: PromptLocale
+    imageGeneration?: boolean
     variant?: string
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
@@ -4796,6 +4798,7 @@ export type SessionPromptDocSubmitData = {
       format?: OutputFormat
       system?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       variant?: string
       parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     }

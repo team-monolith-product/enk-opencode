@@ -108,32 +108,6 @@ function basePart(messageID: string, id: string) {
 }
 
 describe("session.message-v2.toModelMessage", () => {
-  test("tells the model when image generation is on", async () => {
-    const input: MessageV2.WithParts[] = [
-      {
-        info: userInfo("m-image"),
-        parts: [
-          { ...basePart("m-image", "p1"), type: "text", text: "고양이 그려줘", metadata: { imageRequest: true } },
-        ] as MessageV2.Part[],
-      },
-      {
-        info: userInfo("m-plain"),
-        parts: [{ ...basePart("m-plain", "p2"), type: "text", text: "버튼 색 바꿔줘" }] as MessageV2.Part[],
-      },
-    ]
-
-    expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([
-      {
-        role: "user",
-        content: [
-          { type: "text", text: "고양이 그려줘" },
-          { type: "text", text: MessageV2.IMAGE_REQUEST_NOTE },
-        ],
-      },
-      { role: "user", content: [{ type: "text", text: "버튼 색 바꿔줘" }] },
-    ])
-  })
-
   test("filters out messages with no parts", async () => {
     const input: MessageV2.WithParts[] = [
       {

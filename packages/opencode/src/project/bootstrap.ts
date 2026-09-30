@@ -14,6 +14,7 @@ import { Log } from "@/util/log"
 import { ShareNext } from "@/share/share-next"
 import { ensureSession } from "../session/ensure"
 import { GitHubSync } from "../enk/github-sync"
+import { ImageQuota } from "../enk/image-quota"
 
 export async function InstanceBootstrap() {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
@@ -26,6 +27,7 @@ export async function InstanceBootstrap() {
   Vcs.init()
   Snapshot.init()
   GitHubSync.init()
+  ImageQuota.init()
   Doc.recover()
 
   Bus.subscribe(Command.Event.Executed, async (payload) => {

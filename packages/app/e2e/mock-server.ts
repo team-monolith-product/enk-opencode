@@ -92,7 +92,7 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     if (path === "/global/health") return json(route, { healthy: true })
     if (path === "/permission") return json(route, config.permissions?.() ?? [])
     if (path === "/question") return json(route, config.questions?.() ?? [])
-    if (path === "/image-request/quota") {
+    if (path === "/image-quota") {
       if (config.imageQuotaDelay) await new Promise((r) => setTimeout(r, config.imageQuotaDelay))
       return json(route, config.imageQuota?.() ?? { enabled: false })
     }

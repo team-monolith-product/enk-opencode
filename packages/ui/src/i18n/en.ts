@@ -130,7 +130,6 @@ export const dict: Record<string, string> = {
   "ui.tool.generateImage.generating": "Drawing…",
   "ui.tool.generateImage.blocked": "Could not create this image because of the safety policy.",
   "ui.tool.generateImage.open": "Open image",
-  "ui.tool.generateImage.unrequested": "\"Create image\" is off, so no image was made.",
   "ui.tool.generateImage.disabled": "Image generation is turned off for this hackathon.",
   "ui.tool.generateImage.unavailable": "Image generation is not available in this workspace.",
   "ui.tool.generateImage.limited": "Your team has used all {{limit}} images.",

@@ -15,7 +15,7 @@ import { useSync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { promptLocale, type PromptLocale } from "@/utils/prompt-locale"
-import { buildRequestParts, markImageRequest } from "./build-request-parts"
+import { buildRequestParts } from "./build-request-parts"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 
@@ -35,6 +35,7 @@ export type FollowupDraft = {
   model: { providerID: string; modelID: string }
   variant?: string
   locale?: PromptLocale
+  imageGeneration?: boolean
 }
 
 type FollowupSendInput = {
@@ -58,6 +59,7 @@ export type PromptApprovalInput = {
   model: { providerID: string; modelID: string }
   variant?: string
   locale?: PromptLocale
+  imageGeneration?: boolean
   parts: RequestParts
 }
 
@@ -173,6 +175,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       parts: requestParts,
       variant: input.draft.variant,
       locale: input.draft.locale,
+      imageGeneration: input.draft.imageGeneration,
     })
     return true
   } catch (err) {
@@ -203,7 +206,7 @@ type PromptSubmitInput = {
   onQueued?: (input: { sessionID: string; mode: "normal" | "shell" | "doc" }) => void | Promise<void>
   onAbort?: () => void
   onSubmit?: () => void
-  imageRequest?: Accessor<boolean>
+  imageGeneration?: Accessor<boolean | undefined>
   approve?: (input: PromptApprovalInput) => Promise<boolean> | boolean
 }
 
@@ -390,7 +393,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
         // Preserve the query string (notably the host-passed ?user=id||name identity) on the new
         // session url so the identity is not dropped when a session is created from the prompt.
-        navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}${window.location.search}${window.location.hash}`)
+        navigate(
+          `/${base64Encode(sessionDirectory)}/session/${session.id}${window.location.search}${window.location.hash}`,
+        )
       }
     }
     if (!session) {
@@ -401,14 +406,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    let prepared = !Array.isArray(override) && override?.prepare ? await override.prepare(session.id) : currentPrompt
-    if (mode !== "shell" && input.imageRequest?.()) {
-      prepared = markImageRequest(prepared)
-    }
+    const prepared = !Array.isArray(override) && override?.prepare ? await override.prepare(session.id) : currentPrompt
     const body = prepared.map((part) => ("content" in part ? part.content : "")).join("")
-    const files = !Array.isArray(override) && override?.prepare
-      ? prepared.filter((part): part is ImageAttachmentPart => part.type === "image")
-      : images
+    const files =
+      !Array.isArray(override) && override?.prepare
+        ? prepared.filter((part): part is ImageAttachmentPart => part.type === "image")
+        : images
 
     const model = {
       modelID: currentModel.id,
@@ -426,6 +429,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       model,
       variant,
       locale,
+      imageGeneration: input.imageGeneration?.(),
     }
 
     const clearInput = () => {
@@ -532,6 +536,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         model,
         variant,
         locale,
+        imageGeneration: draft.imageGeneration,
         parts: requestParts,
       })
     ) {

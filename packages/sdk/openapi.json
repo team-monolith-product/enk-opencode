@@ -1783,9 +1783,9 @@
         ]
       }
     },
-    "/image-request/quota": {
+    "/image-quota": {
       "get": {
-        "operationId": "imageRequest.quota",
+        "operationId": "imageQuota.get",
         "parameters": [
           {
             "in": "query",
@@ -1819,7 +1819,7 @@
         "x-codeSamples": [
           {
             "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.quota({\n  ...\n})"
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageQuota.get({\n  ...\n})"
           }
         ]
       }
@@ -4151,6 +4151,9 @@
                   "locale": {
                     "$ref": "#/components/schemas/PromptLocale"
                   },
+                  "imageGeneration": {
+                    "type": "boolean"
+                  },
                   "variant": {
                     "type": "string"
                   },
@@ -4637,6 +4640,9 @@
                   },
                   "locale": {
                     "$ref": "#/components/schemas/PromptLocale"
+                  },
+                  "imageGeneration": {
+                    "type": "boolean"
                   },
                   "variant": {
                     "type": "string"
@@ -5533,6 +5539,9 @@
                       },
                       "locale": {
                         "$ref": "#/components/schemas/PromptLocale"
+                      },
+                      "imageGeneration": {
+                        "type": "boolean"
                       },
                       "variant": {
                         "type": "string"
