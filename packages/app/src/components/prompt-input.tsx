@@ -9,7 +9,6 @@ import {
   onMount,
   createMemo,
   createSignal,
-  createResource,
 } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/util/encode"
@@ -31,7 +30,7 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
-import { ImageToggle } from "@/components/prompt-input/image-toggle"
+import { ImageToggle, type ImageQuota } from "@/components/prompt-input/image-toggle"
 import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
@@ -1675,14 +1674,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   })
 
-  const [imageStatus, { refetch: refetchImageStatus }] = createResource(
-    () => sdk.directory,
-    (directory) =>
-      sdk.client.imageRequest
-        .quota({ directory })
-        .then((x) => x.data)
-        .catch(() => undefined),
-  )
+  // createResource 는 루트 Suspense 를 걸어 조회가 끝날 때까지 화면 전체를 가린다. 신호로만 둔다.
+  const [imageStatus, setImageStatus] = createSignal<{ enabled: boolean; quota?: ImageQuota }>()
+  const refetchImageStatus = () => {
+    const directory = sdk.directory
+    return sdk.client.imageRequest
+      .quota({ directory })
+      .then((x) => {
+        if (sdk.directory === directory) setImageStatus(x.data)
+      })
+      .catch(() => undefined)
+  }
+  createEffect(on(() => sdk.directory, () => void refetchImageStatus()))
   const [imageMode, setImageMode] = createSignal(false)
   const imageQuota = () => imageStatus()?.quota
   const imageExhausted = () => (imageQuota()?.remaining ?? 1) <= 0
@@ -1697,18 +1700,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     ),
   )
 
-  const toggleImageMode = () => {
-    const next = !imageMode()
-    setImageMode(next)
-    if (!next) return
-    const quota = imageQuota()
-    showToast({
-      title: language.t("prompt.imageToggle.on.title"),
-      description: quota
-        ? language.t("prompt.imageToggle.hintLimit", { limit: quota.limit, remaining: quota.remaining })
-        : language.t("prompt.imageToggle.hint"),
-    })
-  }
+  const toggleImageMode = () => setImageMode(!imageMode())
 
   const { abort, handleSubmit } = createPromptSubmit({
     info,

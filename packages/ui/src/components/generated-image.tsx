@@ -1,4 +1,4 @@
-import { createMemo, createResource, Match, Show, Switch } from "solid-js"
+import { createEffect, createMemo, createSignal, Match, on, Show, Switch } from "solid-js"
 import { useData } from "../context"
 import { useDialog } from "../context/dialog"
 import { useI18n } from "../context/i18n"
@@ -46,9 +46,20 @@ export function GeneratedImage(props: ToolProps) {
   })
   const ready = createMemo(() => props.status === "completed" && props.metadata.status === "generated")
 
-  const [src] = createResource(
-    () => (ready() && data.readFile && path() ? path() : false),
-    async (file) => dataUrlFromMediaValue((await data.readFile!(file)) as never, "image"),
+  const [src, setSrc] = createSignal<string>()
+  createEffect(
+    on(
+      () => (ready() && data.readFile && path() ? path() : undefined),
+      (file) => {
+        setSrc(undefined)
+        if (!file) return
+        void data.readFile!(file)
+          .then((content) => {
+            if (path() === file) setSrc(dataUrlFromMediaValue(content as never, "image"))
+          })
+          .catch(() => undefined)
+      },
+    ),
   )
 
   const open = () => {
