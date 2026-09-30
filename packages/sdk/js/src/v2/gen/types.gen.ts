@@ -2087,7 +2087,7 @@ export type SessionPromptDoc = {
   sessionID: string
 }
 
-export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear"
+export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear" | "image"
 
 export type DocSubmitStatus = "pending" | "sent" | "cancelled" | "expired" | "left"
 
@@ -2104,6 +2104,8 @@ export type DocSubmit = {
   targetKind: DocSubmitTargetKind
   targetID: string
   questionAction?: "send" | "dismiss" | "back"
+  imageAction?: "approve" | "skip"
+  imagePrompt?: string
   actorID: string
   status: DocSubmitStatus
   actors: Array<DocSubmitActor>
@@ -5029,6 +5031,53 @@ export type SessionPromptDocStopResponses = {
 }
 
 export type SessionPromptDocStopResponse = SessionPromptDocStopResponses[keyof SessionPromptDocStopResponses]
+
+export type SessionPromptDocImageData = {
+  body?: {
+    docID: string
+    actorID: string
+    actorIDs?: Array<string>
+    names?: {
+      [key: string]: string
+    }
+    timeoutMs?: number
+    payload: {
+      requestID: string
+      action: "approve" | "skip"
+      prompt?: string
+    }
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/prompt-doc/image"
+}
+
+export type SessionPromptDocImageErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionPromptDocImageError = SessionPromptDocImageErrors[keyof SessionPromptDocImageErrors]
+
+export type SessionPromptDocImageResponses = {
+  /**
+   * Submit approval state
+   */
+  200: DocSubmit
+}
+
+export type SessionPromptDocImageResponse = SessionPromptDocImageResponses[keyof SessionPromptDocImageResponses]
 
 export type SessionPromptDocClearData = {
   body?: {

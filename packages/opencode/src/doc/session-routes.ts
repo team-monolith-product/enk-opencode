@@ -157,6 +157,31 @@ export const SessionDocRoutes = () =>
       },
     )
     .post(
+      "/:sessionID/prompt-doc/image",
+      describeRoute({
+        summary: "Create image request approval",
+        description: "Create a collaborative consent vote to approve or skip the AI's image generation request.",
+        operationId: "session.promptDoc.image",
+        responses: {
+          200: {
+            description: "Submit approval state",
+            content: { "application/json": { schema: resolver(Doc.SubmitState) } },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ sessionID: SessionID.zod })),
+      validator("json", Doc.ImageSubmitCreateInput.omit({ sessionID: true })),
+      async (c) => {
+        return c.json(
+          Doc.imageSubmitCreate({
+            ...c.req.valid("json"),
+            sessionID: c.req.valid("param").sessionID,
+          }),
+        )
+      },
+    )
+    .post(
       "/:sessionID/prompt-doc/clear",
       describeRoute({
         summary: "Create session clear approval",

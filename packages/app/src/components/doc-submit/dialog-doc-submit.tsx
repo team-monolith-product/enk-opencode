@@ -11,7 +11,15 @@ import { useCountdown } from "./use-countdown"
 import "./doc-submit.css"
 
 // What the vote will do once approved — drives the dialog copy.
-export type DocSubmitKind = "doc" | "question-send" | "question-dismiss" | "question-back" | "stop" | "clear"
+export type DocSubmitKind =
+  | "doc"
+  | "question-send"
+  | "question-dismiss"
+  | "question-back"
+  | "stop"
+  | "clear"
+  | "image-approve"
+  | "image-skip"
 
 // For question votes: the question(s) and the answer(s) being agreed on, shown so everyone sees
 // exactly what is about to be sent (or which question is being dismissed).
@@ -59,6 +67,8 @@ const headline = copyKey(
     "question-back": "docSubmit.headline.questionBack",
     stop: "docSubmit.headline.stop",
     clear: "docSubmit.headline.clear",
+    "image-approve": "docSubmit.headline.imageApprove",
+    "image-skip": "docSubmit.headline.imageSkip",
   } as const,
   "doc",
 )
@@ -70,6 +80,8 @@ const requestVerb = copyKey(
     "question-back": "docSubmit.requestVerb.questionBack",
     stop: "docSubmit.requestVerb.stop",
     clear: "docSubmit.requestVerb.clear",
+    "image-approve": "docSubmit.requestVerb.imageApprove",
+    "image-skip": "docSubmit.requestVerb.imageSkip",
   } as const,
   "doc",
 )
@@ -81,6 +93,8 @@ const approveLabel = copyKey(
     "question-back": "docSubmit.approve.questionBack",
     stop: "docSubmit.approve.stop",
     clear: "docSubmit.approve.clear",
+    "image-approve": "docSubmit.approve.imageApprove",
+    "image-skip": "docSubmit.approve.imageSkip",
   } as const,
   "doc",
 )
@@ -92,6 +106,8 @@ const excludeLabel = copyKey(
     "question-back": "docSubmit.exclude.questionBack",
     stop: "docSubmit.exclude.stop",
     clear: "docSubmit.exclude.clear",
+    "image-approve": "docSubmit.exclude.imageApprove",
+    "image-skip": "docSubmit.exclude.imageSkip",
   } as const,
   "doc",
 )
@@ -104,6 +120,8 @@ const proceedVerb = copyKey(
     "question-back": "docSubmit.proceed.questionBack",
     stop: "docSubmit.proceed.stop",
     clear: "docSubmit.proceed.clear",
+    "image-approve": "docSubmit.proceed.imageApprove",
+    "image-skip": "docSubmit.proceed.imageSkip",
   } as const,
   "doc",
 )
@@ -115,6 +133,8 @@ const warnText = copyKey(
     "question-back": "docSubmit.warn.questionBack",
     stop: "docSubmit.warn.stop",
     clear: "docSubmit.warn.clear",
+    "image-approve": "docSubmit.warn.imageApprove",
+    "image-skip": "docSubmit.warn.imageSkip",
   } as const,
   "doc",
 )
@@ -126,6 +146,8 @@ const hintText = copyKey(
     "question-back": "docSubmit.hint.questionBack",
     stop: "docSubmit.hint.stop",
     clear: "docSubmit.hint.clear",
+    "image-approve": "docSubmit.hint.imageApprove",
+    "image-skip": "docSubmit.hint.imageSkip",
   } as const,
   "doc",
 )

@@ -28,9 +28,10 @@ import {
   respondSubmit,
   startClearSubmit,
   startStopSubmit,
+  startImageSubmit,
   type DocSubmitState,
 } from "@/components/prompt-input/doc-submit"
-import { DialogDocSubmit } from "@/components/doc-submit/dialog-doc-submit"
+import { DialogDocSubmit, type DocSubmitKind } from "@/components/doc-submit/dialog-doc-submit"
 import { startRtcKeepalive } from "@/utils/rtc-keepalive"
 import { SessionClearVote } from "@/utils/session-clear-vote"
 
@@ -63,6 +64,8 @@ export type PromptDocSession = {
    * 기존 확인창 경로로 지운다.
    */
   requestClear: () => Promise<boolean>
+  /** 이미지 생성 [만들기]·[다음에]. 함께 쓰는 팀이면 만장일치 투표를 거치고, 혼자면 바로 보낸다. */
+  requestImage: (input: { requestID: string; action: "approve" | "skip"; prompt?: string }) => Promise<void>
   /** 진행 중인 합의가 있는지. 투표가 도는 동안에는 다른 합의를 시작할 수 없다. */
   votePending: Accessor<boolean>
   /** Render/refresh the consent dialog for a vote state received from the server. */
@@ -310,6 +313,12 @@ export function createPromptDocSession(): PromptDocSession {
    * a client that was offline for that top-up expires early). Recording it as final was what left the
    * dialog frozen at "0초": the real 'sent'/'expired' cast arrived afterwards and was discarded.
    */
+  const dialogKind = (state: DocSubmitState | undefined): DocSubmitKind => {
+    if (state?.targetKind === "stop" || state?.targetKind === "clear") return state.targetKind
+    if (state?.targetKind === "image") return state.imageAction === "skip" ? "image-skip" : "image-approve"
+    return "doc"
+  }
+
   const showApproval = (state: DocSubmitState, opts?: { local?: boolean }) => {
     const actorID = doc.actorID()
     if (!actorID) return
@@ -327,7 +336,7 @@ export function createPromptDocSession(): PromptDocSession {
       // A 'stop' vote shows no terminal screen — any resolution just closes. Stopping the response
       // and the response finishing on its own are the same end state, so there's nothing to show:
       // on approval the server already cancelled the run; a reject/expire simply does nothing.
-      if (state.targetKind === "stop") {
+      if (state.targetKind === "stop" || state.targetKind === "image") {
         if (dialogOpen(state.submitID)) closeApproval()
         return
       }
@@ -354,7 +363,12 @@ export function createPromptDocSession(): PromptDocSession {
           state={approval}
           actorID={actorID}
           spectator={readonly}
-          kind={approval()?.targetKind === "stop" || approval()?.targetKind === "clear" ? (approval()!.targetKind as "stop" | "clear") : "doc"}
+          kind={dialogKind(approval())}
+          preview={
+            approval()?.targetKind === "image" && approval()?.imagePrompt
+              ? () => [{ question: language.t("imageRequest.field.prompt"), answers: [approval()?.imagePrompt ?? ""] }]
+              : undefined
+          }
           sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
           approve={() => {
             const current = approval()
@@ -455,6 +469,48 @@ export function createPromptDocSession(): PromptDocSession {
   // consent vote as sending. Solo (or non-doc) falls straight through to a direct abort. The dialog
   // is driven by the vote, so it stays up even if the response finishes first; on resolution it just
   // closes (server already cancelled on approval, or nothing on reject — same end state either way).
+  const requestImage = async (input: { requestID: string; action: "approve" | "skip"; prompt?: string }) => {
+    const sessionID = params.id
+    const docID = doc.docID()
+    const actorID = doc.actorID()
+    const direct = () =>
+      input.action === "approve"
+        ? sdk.client.imageRequest.approve({
+            requestID: input.requestID,
+            directory: sdk.directory,
+            prompt: input.prompt,
+          })
+        : sdk.client.imageRequest.skip({ requestID: input.requestID, directory: sdk.directory })
+    if (mode() !== "doc" || !sessionID || !docID || !actorID) {
+      await direct()
+      return
+    }
+    const list = doc.actors()
+    const ids = Array.from(new Set([actorID, ...list.map((item) => item.actorID)]))
+    if (ids.length <= 1) {
+      await direct()
+      return
+    }
+    const names: Record<string, string> = {}
+    for (const item of list) {
+      const name = item.name?.trim()
+      if (name && name !== item.actorID) names[item.actorID] = name
+    }
+    const state = await startImageSubmit({
+      baseUrl: sdk.url,
+      directory: sdk.directory,
+      sessionID,
+      docID,
+      actorID,
+      names,
+      requestID: input.requestID,
+      action: input.action,
+      prompt: input.prompt,
+    })
+    setApprovalSession(sessionID)
+    showApproval(state)
+  }
+
   const requestStop = async () => {
     const sessionID = params.id
     const docID = doc.docID()
@@ -563,6 +619,7 @@ export function createPromptDocSession(): PromptDocSession {
     working,
     requestStop,
     requestClear,
+    requestImage,
     votePending,
     showApproval,
     approvalSession,
