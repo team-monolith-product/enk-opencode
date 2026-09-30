@@ -4,7 +4,6 @@ import type {
   Config,
   Env,
   EnvRequest,
-  ImageRequest,
   FileDiff,
   LspStatus,
   McpStatus,
@@ -65,9 +64,6 @@ export type State = {
   }
   env_request: {
     [sessionID: string]: EnvRequest[]
-  }
-  image_request: {
-    [sessionID: string]: ImageRequest[]
   }
   mcp_ready: boolean
   mcp: {

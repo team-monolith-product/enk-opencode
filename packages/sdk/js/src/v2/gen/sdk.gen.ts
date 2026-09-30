@@ -88,14 +88,7 @@ import type {
   GlobalSyncEventSubscribeResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
-  ImageRequestApproveErrors,
-  ImageRequestApproveResponses,
-  ImageRequestListResponses,
   ImageRequestQuotaResponses,
-  ImageRequestRejectErrors,
-  ImageRequestRejectResponses,
-  ImageRequestSkipErrors,
-  ImageRequestSkipResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -1367,36 +1360,6 @@ export class EnvRequest extends HeyApiClient {
 
 export class ImageRequest extends HeyApiClient {
   /**
-   * List pending image requests
-   *
-   * Get all image generations waiting for the user's approval.
-   */
-  public list<ThrowOnError extends boolean = false>(
-    parameters?: {
-      directory?: string
-      workspace?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).get<ImageRequestListResponses, unknown, ThrowOnError>({
-      url: "/image-request",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
    * Image generation quota
    *
    * Whether image generation is available here and how many images the team has left.
@@ -1421,111 +1384,6 @@ export class ImageRequest extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<ImageRequestQuotaResponses, unknown, ThrowOnError>({
       url: "/image-request/quota",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Approve image request
-   *
-   * Generate the image, optionally with a prompt the user edited.
-   */
-  public approve<ThrowOnError extends boolean = false>(
-    parameters: {
-      requestID: string
-      directory?: string
-      workspace?: string
-      prompt?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "requestID" },
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-            { in: "body", key: "prompt" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<ImageRequestApproveResponses, ImageRequestApproveErrors, ThrowOnError>(
-      {
-        url: "/image-request/{requestID}/approve",
-        ...options,
-        ...params,
-        headers: {
-          "Content-Type": "application/json",
-          ...options?.headers,
-          ...params.headers,
-        },
-      },
-    )
-  }
-
-  /**
-   * Skip image request
-   *
-   * Do not generate this image.
-   */
-  public skip<ThrowOnError extends boolean = false>(
-    parameters: {
-      requestID: string
-      directory?: string
-      workspace?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "requestID" },
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<ImageRequestSkipResponses, ImageRequestSkipErrors, ThrowOnError>({
-      url: "/image-request/{requestID}/skip",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Reject image request
-   *
-   * Close the image request without an answer.
-   */
-  public reject<ThrowOnError extends boolean = false>(
-    parameters: {
-      requestID: string
-      directory?: string
-      workspace?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "requestID" },
-            { in: "query", key: "directory" },
-            { in: "query", key: "workspace" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<ImageRequestRejectResponses, ImageRequestRejectErrors, ThrowOnError>({
-      url: "/image-request/{requestID}/reject",
       ...options,
       ...params,
     })

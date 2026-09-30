@@ -35,7 +35,6 @@ export interface MockServerConfig {
   pageMessages?: (sessionID: string, limit: number, before?: string) => { items: Json[]; cursor?: string }
   permissions?: () => Json[]
   questions?: () => Json[]
-  imageRequests?: () => Json[]
   imageQuota?: () => Json
   imageQuotaDelay?: number
 }
@@ -93,7 +92,6 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     if (path === "/global/health") return json(route, { healthy: true })
     if (path === "/permission") return json(route, config.permissions?.() ?? [])
     if (path === "/question") return json(route, config.questions?.() ?? [])
-    if (path === "/image-request") return json(route, config.imageRequests?.() ?? [])
     if (path === "/image-request/quota") {
       if (config.imageQuotaDelay) await new Promise((r) => setTimeout(r, config.imageQuotaDelay))
       return json(route, config.imageQuota?.() ?? { enabled: false })

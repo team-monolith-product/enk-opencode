@@ -11,7 +11,6 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { AiUsage } from "../enk/ai-usage"
 import { ImageQuota } from "../enk/image-quota"
-import { ImageRequest } from "../image-request"
 import type { MessageV2 } from "../session/message-v2"
 import { assertExternalDirectory } from "./external-directory"
 
@@ -31,8 +30,9 @@ export namespace GenerateImage {
   }
 
   export type Metadata = {
-    status: "generated" | "blocked" | "limited" | "disabled" | "unavailable" | "skipped" | "canceled"
+    status: "generated" | "blocked" | "limited" | "disabled" | "unavailable" | "unrequested"
     path: string
+    url?: string
     prompt: string
     size: string
     quality: string
@@ -64,15 +64,41 @@ export namespace GenerateImage {
     return endpoint() !== undefined
   }
 
-  // 입력창의 이미지 버튼으로 보낸 메시지는 학생이 이미 요청한 것이라 확인 카드 없이 한 장을 만든다.
+  // 이미지는 학생이 입력창의 '이미지 만들기' 토글을 켜고 보낸 메시지에서만, 그 메시지당 한 장 만든다.
   const approvedMessages = new Set<string>()
 
-  export function preapproved(messages: MessageV2.WithParts[]) {
+  export function requested(messages: MessageV2.WithParts[]) {
     const user = messages.findLast((m) => m.info.role === "user")
     if (!user || approvedMessages.has(user.info.id)) return false
     const requested = user.parts.some((p) => p.type === "text" && p.metadata?.["imageRequest"] === true)
     if (requested) approvedMessages.add(user.info.id)
     return requested
+  }
+
+  // AI 가 만든 이미지는 한 폴더에 모은다. public/ 이 있는 프레임워크(Vite·Next 등)는 그 아래에 두어야
+  // 브라우저가 /ai-images/... 로 바로 불러온다.
+  export async function location(name: string, ext: Extension) {
+    const served = await Filesystem.isDir(path.join(Instance.directory, "public"))
+    const folder = served ? path.join("public", FOLDER) : FOLDER
+    const stem = slug(name)
+    for (let n = 1; ; n++) {
+      const file = `${n === 1 ? stem : `${stem}-${n}`}${ext}`
+      const relative = path.join(folder, file)
+      if (await Filesystem.exists(path.join(Instance.directory, relative))) continue
+      return { relative, url: served ? `/${FOLDER}/${file}` : `${FOLDER}/${file}` }
+    }
+  }
+
+  export const FOLDER = "ai-images"
+
+  export function slug(name: string) {
+    const base = path.basename(name).replace(/\.[^.]*$/, "")
+    const cleaned = base
+      .normalize("NFC")
+      .replace(/[^\p{L}\p{N}_-]+/gu, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60)
+    return cleaned || "image"
   }
 
   export function mime(format: string) {
@@ -84,25 +110,44 @@ export const GenerateImageTool = Tool.define("generate_image", {
   description: DESCRIPTION,
   parameters: z.object({
     prompt: z.string().min(1).describe("그릴 내용을 구체적으로 묘사한 프롬프트"),
-    path: z.string().describe("저장할 파일 경로 (.png, .webp, .jpg). 예: public/images/hero.png"),
+    name: z.string().describe("파일 이름. 내용을 알 수 있는 짧은 영문 이름 (예: hero-cat). 폴더는 도구가 정한다"),
+    format: z.enum(["png", "webp", "jpg"]).default("png"),
     size: z.enum(["1024x1024", "1536x1024", "1024x1536"]).default("1024x1024"),
     quality: z.enum(["low", "medium", "high"]).default("medium"),
     background: z.enum(["auto", "transparent", "opaque"]).default("auto"),
   }),
   async execute(params, ctx) {
     const startedAt = Date.now()
-    const filepath = path.isAbsolute(params.path) ? params.path : path.join(Instance.directory, params.path)
-    const relative = path.relative(Instance.directory, filepath)
-    const ext = path.extname(filepath).toLowerCase()
-    if (!(ext in GenerateImage.FORMATS))
-      throw new Error(`지원하지 않는 확장자입니다: ${ext || "(없음)"}. .png, .webp, .jpg 중 하나로 저장하세요.`)
-    const format = GenerateImage.FORMATS[ext as GenerateImage.Extension]
+    const ext = `.${params.format}` as GenerateImage.Extension
+    const format = GenerateImage.FORMATS[ext]
     if (params.background === "transparent" && format === "jpeg")
-      throw new Error("투명 배경은 .png 또는 .webp 에서만 가능합니다. 확장자를 바꿔 다시 호출하세요.")
+      throw new Error("투명 배경은 png 또는 webp 에서만 가능합니다. format 을 바꿔 다시 호출하세요.")
 
     const api = GenerateImage.endpoint()
     if (!api) throw new Error("이미지 생성이 설정되지 않은 환경입니다 (OPENAI_BASE_URL / OPENAI_API_KEY 없음).")
     const openai = api
+
+    const { relative, url } = await GenerateImage.location(params.name, ext)
+    const filepath = path.join(Instance.directory, relative)
+
+    const base = {
+      path: relative,
+      url,
+      prompt: params.prompt,
+      size: params.size,
+      quality: params.quality,
+      background: params.background,
+    }
+
+    if (!GenerateImage.requested(ctx.messages)) {
+      const metadata: GenerateImage.Metadata = { ...base, status: "unrequested", ms: Date.now() - startedAt }
+      return {
+        title: relative,
+        output:
+          "이미지는 학생이 입력창의 '이미지 만들기'를 켜고 보낸 메시지에서만 만들 수 있습니다. 지금은 만들지 않았습니다. 다시 호출하지 말고, 이미지가 필요하면 학생에게 '이미지 만들기'를 켜고 원하는 그림을 설명해 달라고 짧게 안내하세요.",
+        metadata,
+      }
+    }
 
     await assertExternalDirectory(ctx, filepath)
     await ctx.ask({
@@ -112,13 +157,6 @@ export const GenerateImageTool = Tool.define("generate_image", {
       metadata: { filepath },
     })
 
-    const base = {
-      path: relative,
-      prompt: params.prompt,
-      size: params.size,
-      quality: params.quality,
-      background: params.background,
-    }
     const refuse = (status: "limited" | "disabled" | "unavailable", quota?: ImageQuota.Quota) => {
       const metadata: GenerateImage.Metadata = { ...base, status, ms: Date.now() - startedAt, quota }
       const output = {
@@ -135,44 +173,6 @@ export const GenerateImageTool = Tool.define("generate_image", {
     const exhausted = (quota: ImageQuota.Quota) => refuse(quota.limit === 0 ? "disabled" : "limited", quota)
 
     const callID = ctx.callID || randomUUID()
-
-    if (!GenerateImage.preapproved(ctx.messages)) {
-      const current = await ImageQuota.status().catch(() => undefined)
-      if (current === null) return refuse("unavailable")
-      if (current && current.remaining <= 0) return exhausted(current)
-
-      ctx.metadata({ title: relative, metadata: { ...base, status: "waiting", quota: current } })
-      const pending = ImageRequest.ask({
-        sessionID: ctx.sessionID,
-        info: {
-          prompt: params.prompt,
-          path: relative,
-          size: params.size,
-          background: params.background,
-          quota: current,
-        },
-        tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
-      })
-      const onAbort = () =>
-        ImageRequest.list().then((items) =>
-          items.filter((item) => item.tool?.callID === callID).forEach((item) => ImageRequest.reject(item.id)),
-        )
-      ctx.abort.addEventListener("abort", onAbort, { once: true })
-      const answer = await pending.finally(() => ctx.abort.removeEventListener("abort", onAbort))
-
-      if (answer.status !== "approved") {
-        const metadata: GenerateImage.Metadata = { ...base, status: answer.status, ms: Date.now() - startedAt }
-        return {
-          title: relative,
-          output:
-            answer.status === "skipped"
-              ? "학생이 이 이미지를 만들지 않기로 했습니다. 같은 이미지를 다시 제안하지 말고, 이미지 없이 작업을 이어가세요."
-              : "이미지 생성 확인이 취소되었습니다. 다시 호출하지 마세요.",
-          metadata,
-        }
-      }
-      base.prompt = answer.prompt
-    }
 
     const reservation = await ImageQuota.reserve(callID)
     if (reservation.status === "unavailable") return refuse("unavailable")
@@ -218,7 +218,7 @@ export const GenerateImageTool = Tool.define("generate_image", {
     return {
       title: relative,
       output:
-        `이미지를 ${relative} 에 저장했습니다 (${params.size}, ${format}). 코드에서는 이 경로로 참조하세요. 이미지는 학생 채팅 화면에 이미 표시되었습니다.` +
+        `이미지를 ${relative} 에 저장했습니다 (${params.size}, ${format}). 파일을 복사하거나 옮기지 말고, 웹 페이지 코드에서는 "${url}" 경로로 그대로 참조하세요. 이미지는 학생 채팅 화면에 이미 표시되었습니다.` +
         (remaining === undefined ? "" : ` 이 팀이 더 만들 수 있는 이미지는 ${remaining}장입니다.`),
       metadata,
     }

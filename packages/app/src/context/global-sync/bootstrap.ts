@@ -2,7 +2,6 @@ import type {
   Config,
   Env,
   EnvRequest,
-  ImageRequest,
   OpencodeClient,
   Path,
   PermissionRequest,
@@ -346,32 +345,6 @@ export async function bootstrapDirectory(input: {
               for (const [sessionID, requests] of Object.entries(grouped)) {
                 input.setStore(
                   "env_request",
-                  sessionID,
-                  reconcile(
-                    requests.sort((a, b) => cmp(a.id, b.id)),
-                    { key: "id" },
-                  ),
-                )
-              }
-            }),
-          )
-        }),
-      ),
-    () =>
-      retry(() =>
-        input.sdk.imageRequest.list().then((x) => {
-          const list = (x.data ?? []).filter((item): item is ImageRequest => !!item?.id && !!item.sessionID)
-          const ids = list.map((item) => item.sessionID)
-          const grouped = groupBySession(list)
-          return warmSessions({ ids, store: input.store, setStore: input.setStore, sdk: input.sdk }).then(() =>
-            batch(() => {
-              for (const sessionID of Object.keys(input.store.image_request)) {
-                if (grouped[sessionID]) continue
-                input.setStore("image_request", sessionID, [])
-              }
-              for (const [sessionID, requests] of Object.entries(grouped)) {
-                input.setStore(
-                  "image_request",
                   sessionID,
                   reconcile(
                     requests.sort((a, b) => cmp(a.id, b.id)),

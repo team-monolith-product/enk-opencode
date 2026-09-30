@@ -8,7 +8,6 @@ import { getSessionHandoff, setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { SessionPermissionDock } from "@/pages/session/composer/session-permission-dock"
 import { SessionEnvRequestDock } from "@/pages/session/composer/session-env-request-dock"
-import { SessionImageRequestDock } from "@/pages/session/composer/session-image-request-dock"
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
@@ -362,14 +361,6 @@ export function SessionComposerRegion(props: {
             {(request) => (
               <div>
                 <SessionEnvRequestDock request={request} onSubmit={props.onResponseSubmit} />
-              </div>
-            )}
-          </Show>
-
-          <Show when={props.state.imageRequest()} keyed>
-            {(request) => (
-              <div>
-                <SessionImageRequestDock request={request} onSubmit={props.onResponseSubmit} />
               </div>
             )}
           </Show>

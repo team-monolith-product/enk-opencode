@@ -21,25 +21,13 @@ const session: MockSession = {
   version: "dev",
   time: { created: 1_700_000_100_000, updated: 1_700_000_100_000 },
 }
-const request = {
-  id: "img_01",
-  sessionID,
-  prompt: "해 질 녘 언덕 위의 귀여운 주황 고양이, 파스텔 톤 플랫 일러스트",
-  path: "public/images/cat.png",
-  size: "1536x1024",
-  background: "auto",
-  quota: { limit: 10, used: 3, remaining: 7 },
-}
 
-const dock = '[data-component="dock-prompt"][data-kind="image"]'
 
 async function open(page: Page, quota = { limit: 10, used: 3, remaining: 7 }) {
-  const pending: unknown[] = []
   const mock = await mockOpenCodeServer(page, {
     directory,
     project,
     sessions: [session],
-    imageRequests: () => pending,
     imageQuota: () => ({ enabled: true, quota }),
     provider: {
       all: [
@@ -69,38 +57,10 @@ async function open(page: Page, quota = { limit: 10, used: 3, remaining: 7 }) {
   })
   await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
   await expect(page.locator('[data-component="session-prompt-dock"]')).toBeVisible()
-  return { mock, pending }
+  return { mock }
 }
 
 test.use({ viewport: { width: 1100, height: 800 }, locale: "ko-KR" })
-
-test("AI 가 제안한 이미지는 학생이 만들기를 눌러야 요청한다", async ({ page }) => {
-  const { mock } = await open(page)
-
-  mock.emit({ type: "image.request.asked", properties: request })
-  const card = page.locator(dock)
-  await expect(card).toBeVisible()
-  await expect(card).toContainText("이미지를 만들까요?")
-  await expect(card).toContainText("7/10장 남음")
-  await expect(card).toContainText("가로 · public/images/cat.png")
-  await page.screenshot({ path: "e2e/test-results/image-request-dock.png" })
-
-  const textarea = card.locator("textarea")
-  await textarea.fill("주황 고양이, 픽셀아트")
-  const approve = page.waitForRequest((r) => r.url().includes(`/image-request/${request.id}/approve`))
-  await card.getByRole("button", { name: "만들기" }).click()
-  expect((await approve).postDataJSON()).toMatchObject({ prompt: "주황 고양이, 픽셀아트" })
-})
-
-test("다음에를 누르면 skip 을 보낸다", async ({ page }) => {
-  const { mock } = await open(page)
-  mock.emit({ type: "image.request.asked", properties: request })
-  await expect(page.locator(dock)).toBeVisible()
-
-  const skip = page.waitForRequest((r) => r.url().includes(`/image-request/${request.id}/skip`))
-  await page.locator(dock).getByRole("button", { name: "다음에" }).click()
-  await skip
-})
 
 const toggle = '[data-action="prompt-image-toggle"]'
 

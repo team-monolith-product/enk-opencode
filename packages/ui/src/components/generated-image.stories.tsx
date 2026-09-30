@@ -41,7 +41,7 @@ function Frame(props) {
   )
 }
 
-const input = (extra = {}) => ({ prompt, path: "public/images/cat.png", size: "1024x1024", ...extra })
+const input = (extra = {}) => ({ prompt, path: "public/ai-images/cat.png", size: "1024x1024", ...extra })
 
 export const Generating = {
   render: () => (
@@ -57,7 +57,7 @@ export const GeneratingLandscape = {
       <mod.GeneratedImage
         tool="generate_image"
         status="running"
-        input={input({ size: "1536x1024", path: "public/images/hero.png" })}
+        input={input({ size: "1536x1024", path: "public/ai-images/hero.png" })}
         metadata={{}}
       />
     </Frame>
@@ -73,7 +73,7 @@ export const Ready = {
         input={input()}
         metadata={{
           status: "generated",
-          path: "public/images/cat.png",
+          path: "public/ai-images/cat.png",
           mime: "image/png",
           quota: { limit: 10, used: 3, remaining: 7 },
         }}
@@ -93,8 +93,8 @@ export const Transparent = {
       <mod.GeneratedImage
         tool="generate_image"
         status="completed"
-        input={input({ background: "transparent", path: "public/sprites/cat.png", prompt: "게임용 고양이 캐릭터 스프라이트, 투명 배경" })}
-        metadata={{ status: "generated", path: "public/sprites/cat.png" }}
+        input={input({ background: "transparent", path: "public/ai-images/cat-sprite.png", prompt: "게임용 고양이 캐릭터 스프라이트, 투명 배경" })}
+        metadata={{ status: "generated", path: "public/ai-images/cat-sprite.png" }}
       />
     </Frame>
   ),
@@ -113,7 +113,7 @@ export const Lifecycle = {
           tool="generate_image"
           status={status()}
           input={input()}
-          metadata={status() === "completed" ? { status: "generated", path: "public/images/cat.png" } : {}}
+          metadata={status() === "completed" ? { status: "generated", path: "public/ai-images/cat.png" } : {}}
         />
       </Frame>
     )
@@ -127,7 +127,7 @@ export const Blocked = {
         tool="generate_image"
         status="completed"
         input={input()}
-        metadata={{ status: "blocked", path: "public/images/cat.png" }}
+        metadata={{ status: "blocked", path: "public/ai-images/cat.png" }}
       />
     </Frame>
   ),
@@ -140,7 +140,7 @@ export const WithoutReader = {
         tool="generate_image"
         status="completed"
         input={input()}
-        metadata={{ status: "generated", path: "public/images/cat.png" }}
+        metadata={{ status: "generated", path: "public/ai-images/cat.png" }}
       />
     </DataProvider>
   ),
@@ -153,7 +153,7 @@ export const Limited = {
         tool="generate_image"
         status="completed"
         input={input()}
-        metadata={{ status: "limited", path: "public/images/cat.png", quota: { limit: 10, used: 10, remaining: 0 } }}
+        metadata={{ status: "limited", path: "public/ai-images/cat.png", quota: { limit: 10, used: 10, remaining: 0 } }}
       />
     </Frame>
   ),
@@ -166,7 +166,7 @@ export const Disabled = {
         tool="generate_image"
         status="completed"
         input={input()}
-        metadata={{ status: "disabled", path: "public/images/cat.png", quota: { limit: 0, used: 0, remaining: 0 } }}
+        metadata={{ status: "disabled", path: "public/ai-images/cat.png", quota: { limit: 0, used: 0, remaining: 0 } }}
       />
     </Frame>
   ),
