@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import path from "path"
+import { mkdir } from "node:fs/promises"
 import { Instance } from "../../src/project/instance"
 import { GenerateImage, GenerateImageTool } from "../../src/tool/generate-image"
 import { SessionID, MessageID } from "../../src/session/schema"
-import { ImageRequest } from "../../src/image-request"
 import { ImageQuota } from "../../src/enk/image-quota"
 import { tmpdir } from "../fixture/fixture"
 
@@ -64,30 +64,18 @@ afterEach(() => {
   }
 })
 
-type Answer = (request: ImageRequest.Request) => Promise<unknown>
-
-async function waitForRequest() {
-  for (let i = 0; i < 100; i++) {
-    const [request] = await ImageRequest.list()
-    if (request) return request
-    await Bun.sleep(10)
-  }
-  throw new Error("no image request was asked")
-}
-
 async function run(
   params: Record<string, unknown>,
-  options: { ctx?: ReturnType<typeof context>; answer?: Answer } = {},
+  options: { ctx?: ReturnType<typeof context>; setup?: (dir: string) => Promise<unknown> } = {},
 ) {
   await using dir = await tmpdir()
-  return Instance.provide({
+  await options.setup?.(dir.path)
+  return await Instance.provide({
     directory: dir.path,
     fn: async () => {
       const tool = await GenerateImageTool.init()
-      const execution = tool.execute(tool.parameters.parse(params), options.ctx ?? context())
-      if (options.answer) await options.answer(await waitForRequest())
-      const result = await execution
-      const saved = await Bun.file(path.join(dir.path, String(params.path)))
+      const result = await tool.execute(tool.parameters.parse(params), options.ctx ?? context())
+      const saved = await Bun.file(path.join(dir.path, String(result.metadata.path)))
         .bytes()
         .catch(() => undefined)
       return { result, saved }
@@ -110,7 +98,7 @@ describe("tool.generate_image", () => {
           }),
         ),
     )
-    const { result, saved } = await run({ prompt: "귀여운 고양이 픽셀아트", path: "public/images/cat.png" })
+    const { result, saved } = await run({ prompt: "귀여운 고양이 픽셀아트", name: "cat" })
 
     expect(requests).toHaveLength(1)
     expect(requests[0].url).toBe("http://proxy/openai/v1/images/generations")
@@ -126,27 +114,25 @@ describe("tool.generate_image", () => {
     expect(Buffer.from(saved!)).toEqual(PNG)
     expect(result.metadata).toMatchObject({
       status: "generated",
-      path: path.join("public", "images", "cat.png"),
+      path: path.join("ai-images", "cat.png"),
+      url: "ai-images/cat.png",
       mime: "image/png",
       bytes: PNG.length,
     })
   })
 
-  test("maps the extension to output_format", async () => {
+  test("maps the format to output_format", async () => {
     mockFetch(() => new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] })))
-    await run({ prompt: "sky", path: "bg.jpg", size: "1536x1024" })
+    await run({ prompt: "sky", name: "bg", format: "jpg", size: "1536x1024" })
     expect(requests[0].body).toMatchObject({ output_format: "jpeg", size: "1536x1024" })
   })
 
   test("rejects transparent background for jpeg before calling the API", async () => {
     mockFetch(() => new Response("{}"))
-    await expect(run({ prompt: "icon", path: "icon.jpg", background: "transparent" })).rejects.toThrow("투명 배경")
+    await expect(run({ prompt: "icon", name: "icon", format: "jpg", background: "transparent" })).rejects.toThrow(
+      "투명 배경",
+    )
     expect(requests).toHaveLength(0)
-  })
-
-  test("rejects unsupported extensions", async () => {
-    mockFetch(() => new Response("{}"))
-    await expect(run({ prompt: "icon", path: "icon.gif" })).rejects.toThrow("지원하지 않는 확장자")
   })
 
   test("returns a blocked result instead of throwing on moderation", async () => {
@@ -154,14 +140,14 @@ describe("tool.generate_image", () => {
       () =>
         new Response(JSON.stringify({ error: { code: "moderation_blocked", message: "blocked" } }), { status: 400 }),
     )
-    const { result, saved } = await run({ prompt: "x", path: "x.png" })
+    const { result, saved } = await run({ prompt: "x", name: "x" })
     expect(result.metadata.status).toBe("blocked")
     expect(saved).toBeUndefined()
   })
 
   test("throws with the provider message on other errors", async () => {
     mockFetch(() => new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 }))
-    await expect(run({ prompt: "x", path: "x.png" })).rejects.toThrow("rate limited")
+    await expect(run({ prompt: "x", name: "x" })).rejects.toThrow("rate limited")
   })
 })
 
@@ -179,7 +165,7 @@ describe("tool.generate_image quota", () => {
 
   test("reserves a slot with the call id before generating and reports what is left", async () => {
     mockFetch((url) => (url.startsWith(RAILS) ? quota(201, { limit: 10, used: 3, remaining: 7 }) : image()))
-    const { result, saved } = await run({ prompt: "cat", path: "cat.png" })
+    const { result, saved } = await run({ prompt: "cat", name: "cat" })
 
     expect(requests[0]).toMatchObject({
       url: RAILS,
@@ -195,7 +181,7 @@ describe("tool.generate_image quota", () => {
 
   test("does not call OpenAI once the team used up its images", async () => {
     mockFetch(() => quota(409, { limit: 10, used: 10, remaining: 0 }))
-    const { result, saved } = await run({ prompt: "cat", path: "cat.png" })
+    const { result, saved } = await run({ prompt: "cat", name: "cat" })
 
     expect(openai()).toHaveLength(0)
     expect(saved).toBeUndefined()
@@ -205,7 +191,7 @@ describe("tool.generate_image quota", () => {
 
   test("treats a limit of 0 as disabled", async () => {
     mockFetch(() => quota(409, { limit: 0, used: 0, remaining: 0 }))
-    const { result } = await run({ prompt: "cat", path: "cat.png" })
+    const { result } = await run({ prompt: "cat", name: "cat" })
 
     expect(openai()).toHaveLength(0)
     expect(result.metadata.status).toBe("disabled")
@@ -213,7 +199,7 @@ describe("tool.generate_image quota", () => {
 
   test("is unavailable for non-team workspaces", async () => {
     mockFetch(() => new Response("{}", { status: 403 }))
-    const { result } = await run({ prompt: "cat", path: "cat.png" })
+    const { result } = await run({ prompt: "cat", name: "cat" })
 
     expect(openai()).toHaveLength(0)
     expect(result.metadata.status).toBe("unavailable")
@@ -224,7 +210,7 @@ describe("tool.generate_image quota", () => {
       requests.push({ url: String(input), method: "POST", body: undefined })
       throw new Error("ECONNREFUSED")
     }) as unknown as typeof fetch
-    await expect(run({ prompt: "cat", path: "cat.png" })).rejects.toThrow("확인하지 못했습니다")
+    await expect(run({ prompt: "cat", name: "cat" })).rejects.toThrow("확인하지 못했습니다")
     expect(openai()).toHaveLength(0)
   })
 
@@ -234,7 +220,7 @@ describe("tool.generate_image quota", () => {
         ? quota(201, { limit: 10, used: 1, remaining: 9 })
         : new Response(JSON.stringify({ error: { message: "boom" } }), { status: 500 }),
     )
-    await expect(run({ prompt: "cat", path: "cat.png" })).rejects.toThrow("boom")
+    await expect(run({ prompt: "cat", name: "cat" })).rejects.toThrow("boom")
     expect(calls("DELETE")).toHaveLength(1)
     expect(calls("DELETE")[0].url).toBe(`${RAILS}/call_1`)
   })
@@ -245,96 +231,67 @@ describe("tool.generate_image quota", () => {
         ? quota(201, { limit: 10, used: 1, remaining: 9 })
         : new Response(JSON.stringify({ error: { code: "moderation_blocked", message: "no" } }), { status: 400 }),
     )
-    const { result } = await run({ prompt: "cat", path: "cat.png" })
+    const { result } = await run({ prompt: "cat", name: "cat" })
     expect(result.metadata.status).toBe("blocked")
     expect(calls("DELETE")).toHaveLength(1)
   })
 })
 
-describe("tool.generate_image approval", () => {
-  const RAILS = "http://rails/api/v1/opencode/image_generations"
+describe("tool.generate_image toggle and folder", () => {
   const image = () => new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] }))
-  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status })
-  const openai = () => requests.filter((r) => r.url.includes("/images/generations"))
-  const ask = () => context({ messages: [userMessage(false)] })
 
-  beforeEach(() => {
-    process.env["ENK_HACKATHON_RAILS_URL"] = "http://rails/"
-    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
-  })
-
-  test("asks the student with the remaining count and draws the prompt they approved", async () => {
-    mockFetch((url, method) => {
-      if (!url.startsWith(RAILS)) return image()
-      return method === "GET"
-        ? json(200, { limit: 10, used: 3, remaining: 7 })
-        : json(201, { limit: 10, used: 4, remaining: 6 })
-    })
-    let asked: ImageRequest.Request | undefined
+  test("does nothing unless the student sent the message with the toggle on", async () => {
+    mockFetch(image)
     const { result, saved } = await run(
-      { prompt: "cat", path: "cat.png" },
-      {
-        ctx: ask(),
-        answer: async (request) => {
-          asked = request
-          await ImageRequest.approve({ requestID: request.id, prompt: "주황 고양이" })
-        },
-      },
+      { prompt: "cat", name: "cat" },
+      { ctx: context({ messages: [userMessage(false)] }) },
     )
-
-    expect(asked).toMatchObject({ prompt: "cat", path: "cat.png", quota: { remaining: 7 }, tool: { callID: "call_1" } })
-    expect(openai()[0].body.prompt).toBe("주황 고양이")
-    expect(saved).toBeDefined()
-    expect(result.metadata).toMatchObject({ status: "generated", prompt: "주황 고양이" })
-  })
-
-  test("spends nothing when the student skips", async () => {
-    mockFetch((url) => (url.startsWith(RAILS) ? json(200, { limit: 10, used: 3, remaining: 7 }) : image()))
-    const { result, saved } = await run(
-      { prompt: "cat", path: "cat.png" },
-      { ctx: ask(), answer: (request) => ImageRequest.skip(request.id) },
-    )
-
-    expect(result.metadata.status).toBe("skipped")
-    expect(requests.filter((r) => r.method === "POST")).toHaveLength(0)
+    expect(result.metadata.status).toBe("unrequested")
+    expect(requests).toHaveLength(0)
     expect(saved).toBeUndefined()
   })
 
-  test("does not open a card when nothing is left", async () => {
-    mockFetch(() => json(200, { limit: 10, used: 10, remaining: 0 }))
-    const { result } = await run({ prompt: "cat", path: "cat.png" }, { ctx: ask() })
-
-    expect(result.metadata.status).toBe("limited")
-    expect(openai()).toHaveLength(0)
+  test("makes only one image per toggled message", async () => {
+    mockFetch(image)
+    const messages = [userMessage(true)]
+    const first = await run({ prompt: "cat", name: "cat" }, { ctx: context({ messages }) })
+    const second = await run({ prompt: "dog", name: "dog" }, { ctx: context({ messages }) })
+    expect(first.result.metadata.status).toBe("generated")
+    expect(second.result.metadata.status).toBe("unrequested")
   })
 
-  test("closes the card when the turn is aborted", async () => {
-    mockFetch(() => json(200, { limit: 10, used: 3, remaining: 7 }))
-    const controller = new AbortController()
+  test("saves under public/ai-images when the project serves public/", async () => {
+    mockFetch(image)
+    const { result, saved } = await run(
+      { prompt: "cat", name: "Hero Cat!" },
+      { setup: (dir) => mkdir(path.join(dir, "public"), { recursive: true }) },
+    )
+    expect(result.metadata).toMatchObject({
+      path: path.join("public", "ai-images", "Hero-Cat.png"),
+      url: "/ai-images/Hero-Cat.png",
+    })
+    expect(saved).toBeDefined()
+    expect(result.output).toContain('"/ai-images/Hero-Cat.png"')
+  })
+
+  test("never overwrites an earlier image", async () => {
+    mockFetch(image)
     const { result } = await run(
-      { prompt: "cat", path: "cat.png" },
+      { prompt: "cat", name: "cat" },
       {
-        ctx: context({ messages: [userMessage(false)], abort: controller.signal }),
-        answer: async () => controller.abort(),
+        setup: async (dir) => {
+          await mkdir(path.join(dir, "ai-images"), { recursive: true })
+          await Bun.write(path.join(dir, "ai-images", "cat.png"), "old")
+        },
       },
     )
-
-    expect(result.metadata.status).toBe("canceled")
-    expect(openai()).toHaveLength(0)
+    expect(result.metadata.path).toBe(path.join("ai-images", "cat-2.png"))
   })
 
-  test("the image button approves only one image per message", async () => {
-    mockFetch((url) => (url.startsWith(RAILS) ? json(201, { limit: 10, used: 1, remaining: 9 }) : image()))
-    const messages = [userMessage(true)]
-
-    const first = await run({ prompt: "cat", path: "cat.png" }, { ctx: context({ messages }) })
-    expect(first.result.metadata.status).toBe("generated")
-
-    const second = await run(
-      { prompt: "dog", path: "dog.png" },
-      { ctx: context({ messages }), answer: (request) => ImageRequest.skip(request.id) },
-    )
-    expect(second.result.metadata.status).toBe("skipped")
+  test("keeps only the file name the model passes", () => {
+    expect(GenerateImage.slug("../../etc/passwd")).toBe("passwd")
+    expect(GenerateImage.slug("고양이 캐릭터.png")).toBe("고양이-캐릭터")
+    expect(GenerateImage.slug("///")).toBe("image")
   })
 })
 

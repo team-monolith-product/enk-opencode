@@ -9,7 +9,6 @@ export namespace Identifier {
     permission: "per",
     question: "que",
     envRequest: "env",
-    imageRequest: "img",
     user: "usr",
     part: "prt",
     pty: "pty",

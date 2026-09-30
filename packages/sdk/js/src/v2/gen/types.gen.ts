@@ -314,42 +314,6 @@ export type EventEnvRequestResolved = {
   }
 }
 
-export type ImageQuota = {
-  limit: number
-  used: number
-  remaining: number
-}
-
-export type ImageRequest = {
-  prompt: string
-  path: string
-  size: string
-  background: string
-  quota?: ImageQuota
-  id: string
-  sessionID: string
-  tool?: {
-    messageID: string
-    callID: string
-  }
-}
-
-export type EventImageRequestAsked = {
-  type: "image.request.asked"
-  properties: ImageRequest
-}
-
-export type ImageRequestStatus = "approved" | "skipped" | "canceled"
-
-export type EventImageRequestResolved = {
-  type: "image.request.resolved"
-  properties: {
-    sessionID: string
-    requestID: string
-    status: ImageRequestStatus
-  }
-}
-
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -1083,8 +1047,6 @@ export type Event =
   | EventTodoUpdated
   | EventEnvRequestAsked
   | EventEnvRequestResolved
-  | EventImageRequestAsked
-  | EventImageRequestResolved
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -1892,6 +1854,12 @@ export type EnvFileKeys = {
 export type EnvFileValue = {
   name: string
   value: string
+}
+
+export type ImageQuota = {
+  limit: number
+  used: number
+  remaining: number
 }
 
 export type ImageQuotaStatus = {
@@ -3224,25 +3192,6 @@ export type EnvRequestRejectResponses = {
 
 export type EnvRequestRejectResponse = EnvRequestRejectResponses[keyof EnvRequestRejectResponses]
 
-export type ImageRequestListData = {
-  body?: never
-  path?: never
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/image-request"
-}
-
-export type ImageRequestListResponses = {
-  /**
-   * List of pending image requests
-   */
-  200: Array<ImageRequest>
-}
-
-export type ImageRequestListResponse = ImageRequestListResponses[keyof ImageRequestListResponses]
-
 export type ImageRequestQuotaData = {
   body?: never
   path?: never
@@ -3261,110 +3210,6 @@ export type ImageRequestQuotaResponses = {
 }
 
 export type ImageRequestQuotaResponse = ImageRequestQuotaResponses[keyof ImageRequestQuotaResponses]
-
-export type ImageRequestApproveData = {
-  body?: {
-    prompt?: string
-  }
-  path: {
-    requestID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/image-request/{requestID}/approve"
-}
-
-export type ImageRequestApproveErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * Not found
-   */
-  404: NotFoundError
-}
-
-export type ImageRequestApproveError = ImageRequestApproveErrors[keyof ImageRequestApproveErrors]
-
-export type ImageRequestApproveResponses = {
-  /**
-   * Image request approved
-   */
-  200: boolean
-}
-
-export type ImageRequestApproveResponse = ImageRequestApproveResponses[keyof ImageRequestApproveResponses]
-
-export type ImageRequestSkipData = {
-  body?: never
-  path: {
-    requestID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/image-request/{requestID}/skip"
-}
-
-export type ImageRequestSkipErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * Not found
-   */
-  404: NotFoundError
-}
-
-export type ImageRequestSkipError = ImageRequestSkipErrors[keyof ImageRequestSkipErrors]
-
-export type ImageRequestSkipResponses = {
-  /**
-   * Image request skipped
-   */
-  200: boolean
-}
-
-export type ImageRequestSkipResponse = ImageRequestSkipResponses[keyof ImageRequestSkipResponses]
-
-export type ImageRequestRejectData = {
-  body?: never
-  path: {
-    requestID: string
-  }
-  query?: {
-    directory?: string
-    workspace?: string
-  }
-  url: "/image-request/{requestID}/reject"
-}
-
-export type ImageRequestRejectErrors = {
-  /**
-   * Bad request
-   */
-  400: BadRequestError
-  /**
-   * Not found
-   */
-  404: NotFoundError
-}
-
-export type ImageRequestRejectError = ImageRequestRejectErrors[keyof ImageRequestRejectErrors]
-
-export type ImageRequestRejectResponses = {
-  /**
-   * Image request rejected
-   */
-  200: boolean
-}
-
-export type ImageRequestRejectResponse = ImageRequestRejectResponses[keyof ImageRequestRejectResponses]
 
 export type DevServerStatusData = {
   body?: never

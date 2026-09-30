@@ -28,12 +28,10 @@ export function GeneratedImage(props: ToolProps) {
     const value = props.metadata.prompt ?? props.input.prompt
     return typeof value === "string" ? value : ""
   })
-  const waiting = createMemo(() => pending() && props.metadata.status === "waiting")
   const notice = createMemo(() => {
     const status = props.metadata.status
     if (status === "blocked") return i18n.t("ui.tool.generateImage.blocked")
-    if (status === "skipped") return i18n.t("ui.tool.generateImage.skipped")
-    if (status === "canceled") return i18n.t("ui.tool.generateImage.canceled")
+    if (status === "unrequested") return i18n.t("ui.tool.generateImage.unrequested")
     if (status === "disabled") return i18n.t("ui.tool.generateImage.disabled")
     if (status === "unavailable") return i18n.t("ui.tool.generateImage.unavailable")
     if (status === "limited")
@@ -79,11 +77,6 @@ export function GeneratedImage(props: ToolProps) {
         }}
       />
       <Switch>
-        <Match when={waiting()}>
-          <div data-slot="generated-image-note">
-            <TextShimmer text={i18n.t("ui.tool.generateImage.waiting")} active />
-          </div>
-        </Match>
         <Match when={pending()}>
           <div
             data-slot="generated-image-frame"

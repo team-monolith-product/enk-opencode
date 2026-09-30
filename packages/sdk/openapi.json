@@ -1783,50 +1783,6 @@
         ]
       }
     },
-    "/image-request": {
-      "get": {
-        "operationId": "imageRequest.list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "directory",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "workspace",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "summary": "List pending image requests",
-        "description": "Get all image generations waiting for the user's approval.",
-        "responses": {
-          "200": {
-            "description": "List of pending image requests",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ImageRequest"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.list({\n  ...\n})"
-          }
-        ]
-      }
-    },
     "/image-request/quota": {
       "get": {
         "operationId": "imageRequest.quota",
@@ -1864,231 +1820,6 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.quota({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/image-request/{requestID}/approve": {
-      "post": {
-        "operationId": "imageRequest.approve",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "directory",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "workspace",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "requestID",
-            "schema": {
-              "type": "string",
-              "pattern": "^img.*"
-            },
-            "required": true
-          }
-        ],
-        "summary": "Approve image request",
-        "description": "Generate the image, optionally with a prompt the user edited.",
-        "responses": {
-          "200": {
-            "description": "Image request approved",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "boolean"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BadRequestError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotFoundError"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "prompt": {
-                    "type": "string",
-                    "maxLength": 4000
-                  }
-                }
-              }
-            }
-          }
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.approve({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/image-request/{requestID}/skip": {
-      "post": {
-        "operationId": "imageRequest.skip",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "directory",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "workspace",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "requestID",
-            "schema": {
-              "type": "string",
-              "pattern": "^img.*"
-            },
-            "required": true
-          }
-        ],
-        "summary": "Skip image request",
-        "description": "Do not generate this image.",
-        "responses": {
-          "200": {
-            "description": "Image request skipped",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "boolean"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BadRequestError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotFoundError"
-                }
-              }
-            }
-          }
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.skip({\n  ...\n})"
-          }
-        ]
-      }
-    },
-    "/image-request/{requestID}/reject": {
-      "post": {
-        "operationId": "imageRequest.reject",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "directory",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "workspace",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "requestID",
-            "schema": {
-              "type": "string",
-              "pattern": "^img.*"
-            },
-            "required": true
-          }
-        ],
-        "summary": "Reject image request",
-        "description": "Close the image request without an answer.",
-        "responses": {
-          "200": {
-            "description": "Image request rejected",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "boolean"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BadRequestError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotFoundError"
-                }
-              }
-            }
-          }
-        },
-        "x-codeSamples": [
-          {
-            "lang": "js",
-            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageRequest.reject({\n  ...\n})"
           }
         ]
       }
@@ -11187,107 +10918,6 @@
         },
         "required": ["type", "properties"]
       },
-      "ImageQuota": {
-        "type": "object",
-        "properties": {
-          "limit": {
-            "type": "number"
-          },
-          "used": {
-            "type": "number"
-          },
-          "remaining": {
-            "type": "number"
-          }
-        },
-        "required": ["limit", "used", "remaining"]
-      },
-      "ImageRequest": {
-        "type": "object",
-        "properties": {
-          "prompt": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "size": {
-            "type": "string"
-          },
-          "background": {
-            "type": "string"
-          },
-          "quota": {
-            "$ref": "#/components/schemas/ImageQuota"
-          },
-          "id": {
-            "type": "string",
-            "pattern": "^img.*"
-          },
-          "sessionID": {
-            "type": "string",
-            "pattern": "^ses.*"
-          },
-          "tool": {
-            "type": "object",
-            "properties": {
-              "messageID": {
-                "type": "string",
-                "pattern": "^msg.*"
-              },
-              "callID": {
-                "type": "string"
-              }
-            },
-            "required": ["messageID", "callID"]
-          }
-        },
-        "required": ["prompt", "path", "size", "background", "id", "sessionID"]
-      },
-      "Event.image.request.asked": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "image.request.asked"
-          },
-          "properties": {
-            "$ref": "#/components/schemas/ImageRequest"
-          }
-        },
-        "required": ["type", "properties"]
-      },
-      "ImageRequestStatus": {
-        "type": "string",
-        "enum": ["approved", "skipped", "canceled"]
-      },
-      "Event.image.request.resolved": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "const": "image.request.resolved"
-          },
-          "properties": {
-            "type": "object",
-            "properties": {
-              "sessionID": {
-                "type": "string",
-                "pattern": "^ses.*"
-              },
-              "requestID": {
-                "type": "string",
-                "pattern": "^img.*"
-              },
-              "status": {
-                "$ref": "#/components/schemas/ImageRequestStatus"
-              }
-            },
-            "required": ["sessionID", "requestID", "status"]
-          }
-        },
-        "required": ["type", "properties"]
-      },
       "Event.tui.prompt.append": {
         "type": "object",
         "properties": {
@@ -13417,12 +13047,6 @@
             "$ref": "#/components/schemas/Event.env.request.resolved"
           },
           {
-            "$ref": "#/components/schemas/Event.image.request.asked"
-          },
-          {
-            "$ref": "#/components/schemas/Event.image.request.resolved"
-          },
-          {
             "$ref": "#/components/schemas/Event.tui.prompt.append"
           },
           {
@@ -15421,6 +15045,21 @@
           }
         },
         "required": ["name", "value"]
+      },
+      "ImageQuota": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number"
+          },
+          "used": {
+            "type": "number"
+          },
+          "remaining": {
+            "type": "number"
+          }
+        },
+        "required": ["limit", "used", "remaining"]
       },
       "ImageQuotaStatus": {
         "type": "object",

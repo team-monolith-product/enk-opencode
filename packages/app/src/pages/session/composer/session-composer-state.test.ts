@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { EnvRequest, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
 import { todoDockAtBoundary, todoState } from "./session-composer-state"
-import {
-  sessionEnvRequest,
-  sessionImageRequest,
-  sessionPermissionRequest,
-  sessionQuestionRequest,
-} from "./session-request-tree"
+import { sessionEnvRequest, sessionPermissionRequest, sessionQuestionRequest } from "./session-request-tree"
 
 const session = (input: { id: string; parentID?: string }) =>
   ({
@@ -149,21 +144,6 @@ describe("sessionEnvRequest", () => {
     }
 
     expect(sessionEnvRequest(sessions, requests, "root")).toBeUndefined()
-  })
-})
-
-describe("sessionImageRequest", () => {
-  const image = (id: string, sessionID: string) =>
-    ({ id, sessionID, prompt: "cat", path: "cat.png", size: "1024x1024", background: "auto" }) as never
-
-  test("returns the image request of a child session", () => {
-    const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]
-    expect(sessionImageRequest(sessions, { child: [image("img-child", "child")] }, "root")?.id).toBe("img-child")
-  })
-
-  test("returns undefined without a matching tree request", () => {
-    const sessions = [session({ id: "root" })]
-    expect(sessionImageRequest(sessions, { other: [image("img-other", "other")] }, "root")).toBeUndefined()
   })
 })
 

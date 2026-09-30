@@ -1,4 +1,4 @@
-import type { EnvRequest, ImageRequest, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
+import type { EnvRequest, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
 
 function sessionTreeRequest<T>(
   session: Session[],
@@ -56,15 +56,6 @@ export function sessionEnvRequest(
   request: Record<string, EnvRequest[] | undefined>,
   sessionID?: string,
   include?: (item: EnvRequest) => boolean,
-) {
-  return sessionTreeRequest(session, request, sessionID, include)
-}
-
-export function sessionImageRequest(
-  session: Session[],
-  request: Record<string, ImageRequest[] | undefined>,
-  sessionID?: string,
-  include?: (item: ImageRequest) => boolean,
 ) {
   return sessionTreeRequest(session, request, sessionID, include)
 }

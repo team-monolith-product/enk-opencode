@@ -41,7 +41,6 @@ describe("app session cache", () => {
       permission: Record<string, PermissionRequest[] | undefined>
       question: Record<string, QuestionRequest[] | undefined>
       env_request: Record<string, EnvRequest[] | undefined>
-      image_request: Record<string, never[] | undefined>
     } = {
       session_status: { ses_1: { type: "busy" } as SessionStatus },
       session_diff: { ses_1: [] },
@@ -51,7 +50,6 @@ describe("app session cache", () => {
       permission: { ses_1: [] as PermissionRequest[] },
       question: { ses_1: [] as QuestionRequest[] },
       env_request: { ses_1: [] as EnvRequest[] },
-      image_request: { ses_1: [] },
     }
 
     dropSessionCaches(store, ["ses_1"])
@@ -76,7 +74,6 @@ describe("app session cache", () => {
       permission: Record<string, PermissionRequest[] | undefined>
       question: Record<string, QuestionRequest[] | undefined>
       env_request: Record<string, EnvRequest[] | undefined>
-      image_request: Record<string, never[] | undefined>
     } = {
       session_status: {},
       session_diff: {},
@@ -86,7 +83,6 @@ describe("app session cache", () => {
       permission: {},
       question: {},
       env_request: {},
-      image_request: {},
     }
 
     dropSessionCaches(store, ["ses_1"])
