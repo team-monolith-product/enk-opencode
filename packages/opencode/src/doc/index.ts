@@ -6,8 +6,6 @@ import { BusEvent } from "@/bus/bus-event"
 import { EnvRequest } from "@/env-request"
 import { Question } from "@/question"
 import { QuestionID } from "@/question/schema"
-import { ImageRequest } from "@/image-request"
-import { ImageRequestID } from "@/image-request/schema"
 import { Session } from "@/session"
 import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
@@ -519,10 +517,7 @@ export namespace Doc {
 
   // What a consent vote acts on once approved: send a prompt doc, reply/dismiss an AI question,
   // stop ('cancel') the session's in-flight AI response, or clear (archive) the session itself.
-  // 'image' approves or skips the AI's image generation request once the whole team agrees.
-  export const SubmitTargetKind = z
-    .enum(["doc", "question", "stop", "clear", "image"])
-    .meta({ ref: "DocSubmitTargetKind" })
+  export const SubmitTargetKind = z.enum(["doc", "question", "stop", "clear"]).meta({ ref: "DocSubmitTargetKind" })
   export type SubmitTargetKind = z.infer<typeof SubmitTargetKind>
 
   /** 지우기 합의와 다른 합의가 겹칠 때. 참가자가 서로 다른 것에 동의하는 상황을 막는다. */
@@ -543,8 +538,6 @@ export namespace Doc {
       // For 'question' votes: whether this vote sends a reply or dismisses the question — lets every
       // participant (not just the requester) see the right dialog copy.
       questionAction: z.enum(["send", "dismiss", "back"]).optional(),
-      imageAction: z.enum(["approve", "skip"]).optional(),
-      imagePrompt: z.string().optional(),
       actorID: ActorID.zod,
       status: SubmitStatus,
       actors: SubmitActorInfo.array(),
@@ -572,13 +565,6 @@ export namespace Doc {
     step: z.number().optional(),
   })
   export type QuestionPayload = z.infer<typeof QuestionPayload>
-
-  export const ImagePayload = z.object({
-    requestID: z.string(),
-    action: z.enum(["approve", "skip"]),
-    prompt: z.string().max(4000).optional(),
-  })
-  export type ImagePayload = z.infer<typeof ImagePayload>
 
   export const SubmitCreateInput = z.object({
     sessionID: SessionID.zod,
@@ -719,15 +705,12 @@ export namespace Doc {
       if (payload?.step !== undefined) return "back"
       return payload?.reject ? "dismiss" : "send"
     })()
-    const image = row.target_kind === "image" ? ImagePayload.safeParse(JSON.parse(row.prompt)).data : undefined
     return {
       submitID: row.id,
       sessionID: row.session_id,
       targetKind: SubmitTargetKind.parse(row.target_kind),
       targetID: row.target_id,
       questionAction,
-      imageAction: image?.action,
-      imagePrompt: image?.prompt,
       actorID: row.actor_id,
       status: SubmitStatus.parse(row.status),
       actors,
@@ -780,16 +763,6 @@ export namespace Doc {
       // Consensus to stop the AI: cancel the run. Idempotent — a no-op if it already finished
       // (which is why an agreed and a cancelled stop vote look the same once the response is done).
       SessionPrompt.cancel(row.session_id).catch((err) => fail(row, err))
-      return
-    }
-    if (row.target_kind === "image") {
-      const payload = ImagePayload.parse(JSON.parse(row.prompt))
-      const requestID = ImageRequestID.make(payload.requestID)
-      const run =
-        payload.action === "approve"
-          ? ImageRequest.approve({ requestID, prompt: payload.prompt })
-          : ImageRequest.skip(requestID)
-      run.catch((err) => fail(row, err))
       return
     }
     if (row.target_kind === "question") {
@@ -1130,25 +1103,6 @@ export namespace Doc {
       actorID: input.actorID,
       names: input.names,
       promptBlob: "{}",
-      timeoutMs: input.timeoutMs,
-    })
-  })
-
-  export const ImageSubmitCreateInput = StopSubmitCreateInput.extend({ payload: ImagePayload })
-
-  // 이미지 생성 [만들기]·[다음에] 합의. stop 처럼 프롬프트 docID 를 대상으로 삼아 같은 참가자에게 닿고,
-  // 합의가 서면 send() 가 요청을 승인하거나 건너뛴다.
-  export const imageSubmitCreate = fn(ImageSubmitCreateInput, (input) => {
-    Session.get(input.sessionID)
-    get(input.docID)
-    return create({
-      sessionID: input.sessionID,
-      targetKind: "image",
-      targetID: input.docID,
-      docID: input.docID,
-      actorID: input.actorID,
-      names: input.names,
-      promptBlob: JSON.stringify(input.payload),
       timeoutMs: input.timeoutMs,
     })
   })

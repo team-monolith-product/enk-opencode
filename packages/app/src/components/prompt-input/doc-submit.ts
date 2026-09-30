@@ -16,13 +16,10 @@ export type DocSubmitState = {
   // 'doc' → targetID is the prompt doc id; 'question' → the question request id; 'stop' → the prompt
   // doc id whose in-flight AI response a consensus would cancel; 'clear' → the prompt doc id of the
   // session a consensus would delete (archive).
-  targetKind: "doc" | "question" | "stop" | "clear" | "image"
+  targetKind: "doc" | "question" | "stop" | "clear"
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
-  // For 'image' votes: whether agreeing creates the image or skips it, and the prompt to draw.
-  imageAction?: "approve" | "skip"
-  imagePrompt?: string
   actorID: string
   status: "pending" | "sent" | "cancelled" | "expired" | "left"
   actors: DocSubmitActor[]
@@ -215,8 +212,7 @@ export function liveSocket(input: {
       if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible)
       const socket = ws
       ws = undefined
-      if (socket && socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING)
-        socket.close(1000)
+      if (socket && socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close(1000)
     },
   }
 }
@@ -270,20 +266,6 @@ export async function startClearSubmit(input: StopInput) {
     actorID: input.actorID,
     names: input.names,
     timeoutMs: input.timeoutMs,
-  })
-}
-
-// Start a consent vote to create or skip the AI's image generation request. Same socket and dialog
-// as a stop vote; on approval the server approves or skips the request.
-export async function startImageSubmit(
-  input: StopInput & { requestID: string; action: "approve" | "skip"; prompt?: string },
-) {
-  return json(path(input, `/session/${input.sessionID}/prompt-doc/image`), {
-    docID: input.docID,
-    actorID: input.actorID,
-    names: input.names,
-    timeoutMs: input.timeoutMs,
-    payload: { requestID: input.requestID, action: input.action, prompt: input.prompt },
   })
 }
 

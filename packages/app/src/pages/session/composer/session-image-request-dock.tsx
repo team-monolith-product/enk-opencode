@@ -7,11 +7,11 @@ import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useLanguage } from "@/context/language"
 import { useParentParams } from "@/context/parent-params"
-import { usePromptDocSession } from "@/context/prompt-doc-session"
+import { useSDK } from "@/context/sdk"
 
 export function SessionImageRequestDock(props: { request: ImageRequest; onSubmit?: () => void }) {
   const language = useLanguage()
-  const session = usePromptDocSession()
+  const sdk = useSDK()
   const readonly = useParentParams().readonly
 
   const [prompt, setPrompt] = createSignal(props.request.prompt)
@@ -24,7 +24,7 @@ export function SessionImageRequestDock(props: { request: ImageRequest; onSubmit
   })
 
   const run = async (action: () => Promise<unknown>) => {
-    if (locked()) return
+    if (busy() || readonly) return
     setBusy(true)
     try {
       await action()
@@ -32,20 +32,19 @@ export function SessionImageRequestDock(props: { request: ImageRequest; onSubmit
     } catch (err) {
       const description = err instanceof Error ? err.message : String(err)
       showToast({ title: language.t("common.requestFailed"), description })
+      setBusy(false)
     }
-    setBusy(false)
   }
 
   const approve = () =>
     run(() =>
-      session.requestImage({
+      sdk.client.imageRequest.approve({
         requestID: props.request.id,
-        action: "approve",
+        directory: sdk.directory,
         prompt: prompt().trim() || props.request.prompt,
       }),
     )
-  const skip = () => run(() => session.requestImage({ requestID: props.request.id, action: "skip" }))
-  const locked = () => busy() || readonly || session.votePending()
+  const skip = () => run(() => sdk.client.imageRequest.skip({ requestID: props.request.id, directory: sdk.directory }))
 
   return (
     <DockPrompt
@@ -74,14 +73,14 @@ export function SessionImageRequestDock(props: { request: ImageRequest; onSubmit
           </span>
           <div class="flex-1" />
           <div class="flex items-center gap-2 shrink-0">
-            <Button variant="secondary" size="small" onClick={() => void skip()} disabled={locked()}>
+            <Button variant="secondary" size="small" onClick={() => void skip()} disabled={busy() || readonly}>
               {language.t("imageRequest.skip")}
             </Button>
             <Button
               variant="primary"
               size="small"
               onClick={() => void approve()}
-              disabled={locked() || !prompt().trim()}
+              disabled={busy() || readonly || !prompt().trim()}
             >
               {language.t("imageRequest.approve")}
             </Button>
