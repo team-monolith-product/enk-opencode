@@ -188,6 +188,37 @@ describe("session.prompt missing file", () => {
   })
 })
 
+describe("session.prompt image generation toggle", () => {
+  test("turns the toggle into this message's generate_image override", async () => {
+    await using tmp = await tmpdir({ git: true, config: { agent: { build: { model: "openai/gpt-5.2" } } } })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const send = (imageGeneration?: boolean) =>
+          SessionPrompt.prompt({
+            sessionID: session.id,
+            agent: "build",
+            noReply: true,
+            imageGeneration,
+            parts: [{ type: "text", text: "고양이 그려줘" }],
+          })
+
+        const off = await send(false)
+        const on = await send(true)
+        const unset = await send()
+        if (off.info.role !== "user" || on.info.role !== "user" || unset.info.role !== "user")
+          throw new Error("expected user messages")
+        expect(off.info.tools).toEqual({ generate_image: false })
+        expect(on.info.tools).toEqual({ generate_image: true })
+        expect(unset.info.tools).toBeUndefined()
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+})
+
 describe("session.prompt uploaded text attachments", () => {
   function dataUrl(content: string) {
     return `data:text/plain;base64,${Buffer.from(content, "utf8").toString("base64")}`

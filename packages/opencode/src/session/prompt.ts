@@ -1110,7 +1110,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           role: "user",
           sessionID: input.sessionID,
           time: { created: Date.now() },
-          tools: input.tools,
+          tools:
+            input.imageGeneration === undefined
+              ? input.tools
+              : { ...input.tools, generate_image: input.imageGeneration },
           agent: ag.name,
           model,
           system: input.system,
@@ -2026,6 +2029,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     format: MessageV2.Format.optional(),
     system: z.string().optional(),
     locale: Locale.Schema.optional(),
+    // 입력창의 '이미지 만들기' 토글. false 면 이 메시지 턴에서 generate_image 를 모델에게 주지 않는다.
+    imageGeneration: z.boolean().optional(),
     variant: z.string().optional(),
     parts: z.array(
       z.discriminatedUnion("type", [

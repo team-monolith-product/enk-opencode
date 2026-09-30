@@ -28,6 +28,7 @@ interface FetchDecompressionError extends Error {
 }
 
 export namespace MessageV2 {
+
   const log = Log.create({ service: "session.message-v2" })
 
   export function isMedia(mime: string) {

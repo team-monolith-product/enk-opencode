@@ -1856,6 +1856,17 @@ export type EnvFileValue = {
   value: string
 }
 
+export type ImageQuota = {
+  limit: number
+  used: number
+  remaining: number
+}
+
+export type ImageQuotaStatus = {
+  enabled: boolean
+  quota?: ImageQuota
+}
+
 export type DevServerStatus = {
   state: "none" | "starting" | "startable" | "ready" | "errored"
   port?: number
@@ -1875,6 +1886,29 @@ export type DevServerLogs = {
   lines: Array<string>
   cmd?: string
   port?: number
+}
+
+export type GitHubStatus = {
+  enabled: boolean
+  connectUrl?: string
+  login?: string
+  linkedBy?: string
+  repo?: {
+    owner: string
+    name: string
+    url: string
+    private?: boolean
+  }
+  push?: {
+    sha: string
+    time: number
+    by?: string
+  }
+}
+
+export type GitHubError = {
+  code: string
+  message: string
 }
 
 export type ToolIds = Array<string>
@@ -3158,6 +3192,25 @@ export type EnvRequestRejectResponses = {
 
 export type EnvRequestRejectResponse = EnvRequestRejectResponses[keyof EnvRequestRejectResponses]
 
+export type ImageQuotaGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/image-quota"
+}
+
+export type ImageQuotaGetResponses = {
+  /**
+   * Quota
+   */
+  200: ImageQuotaStatus
+}
+
+export type ImageQuotaGetResponse = ImageQuotaGetResponses[keyof ImageQuotaGetResponses]
+
 export type DevServerStatusData = {
   body?: never
   path?: never
@@ -3214,6 +3267,63 @@ export type DevServerLogsResponses = {
 }
 
 export type DevServerLogsResponse = DevServerLogsResponses[keyof DevServerLogsResponses]
+
+export type GithubStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/github"
+}
+
+export type GithubStatusResponses = {
+  /**
+   * Link status
+   */
+  200: GitHubStatus
+}
+
+export type GithubStatusResponse = GithubStatusResponses[keyof GithubStatusResponses]
+
+export type GithubRepoCreateData = {
+  body?: {
+    name: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/github/repo"
+}
+
+export type GithubRepoCreateErrors = {
+  /**
+   * GitHub error
+   */
+  409: GitHubError
+  /**
+   * GitHub error
+   */
+  422: GitHubError
+  /**
+   * GitHub error
+   */
+  502: GitHubError
+}
+
+export type GithubRepoCreateError = GithubRepoCreateErrors[keyof GithubRepoCreateErrors]
+
+export type GithubRepoCreateResponses = {
+  /**
+   * Link status
+   */
+  200: GitHubStatus
+}
+
+export type GithubRepoCreateResponse = GithubRepoCreateResponses[keyof GithubRepoCreateResponses]
 
 export type ToolIdsData = {
   body?: never
@@ -4126,6 +4236,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     locale?: PromptLocale
+    imageGeneration?: boolean
     variant?: string
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
@@ -4327,6 +4438,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     locale?: PromptLocale
+    imageGeneration?: boolean
     variant?: string
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
@@ -4686,6 +4798,7 @@ export type SessionPromptDocSubmitData = {
       format?: OutputFormat
       system?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       variant?: string
       parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     }

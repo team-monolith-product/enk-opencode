@@ -1,6 +1,15 @@
 import { useFilteredList } from "@opencode-ai/ui/hooks"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
-import { createEffect, on, Component, Show, onCleanup, onMount, createMemo, createSignal } from "solid-js"
+import {
+  createEffect,
+  on,
+  Component,
+  Show,
+  onCleanup,
+  onMount,
+  createMemo,
+  createSignal,
+} from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { Binary } from "@opencode-ai/util/binary"
@@ -21,6 +30,7 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
+import { createImageGeneration } from "@/components/prompt-input/image-toggle"
 import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
@@ -1664,8 +1674,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   })
 
+  const imageGeneration = createImageGeneration({ sdk, working })
+
   const { abort, handleSubmit } = createPromptSubmit({
     info,
+    imageGeneration: imageGeneration.request,
     imageAttachments,
     commentCount,
     autoAccept: () => accepting(),
@@ -1725,6 +1738,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             model: input.model,
             variant: input.variant,
             locale: input.locale,
+            imageGeneration: input.imageGeneration,
             parts: input.parts,
           },
         })
@@ -2158,9 +2172,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       >
         <PromptDragOverlay
           type={store.draggingType}
-          label={language.t(
-            store.draggingType === "@mention" ? "prompt.dropzone.file.label" : "prompt.dropzone.label",
-          )}
+          label={language.t(store.draggingType === "@mention" ? "prompt.dropzone.file.label" : "prompt.dropzone.label")}
         />
         <PromptContextItems
           items={contextItems()}
@@ -2196,7 +2208,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             if (!(target instanceof HTMLElement)) return
             if (
               target.closest(
-                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-normal"], [data-action="prompt-doc"], [data-action="prompt-doc-exit"], [data-action="prompt-permissions"]',
+                '[data-action="prompt-attach"], [data-action="prompt-image-toggle"], [data-action="prompt-submit"], [data-action="prompt-normal"], [data-action="prompt-doc"], [data-action="prompt-doc-exit"], [data-action="prompt-permissions"]',
               )
             ) {
               return
@@ -2258,6 +2270,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }
           >
             <PromptDocShell
+              imageToggle={<imageGeneration.Toggle />}
               doc={doc}
               readonly={readonly}
               submitIcon={submitIcon()}
@@ -2266,8 +2279,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               maxLength={MAX_PROMPT_DOC_CHARS}
               shake={countShake()}
               submitDisabled={
-                readonly ||
-                (submitAction() === "send" && (!hasDraft() || doc.uploading() || doc.missing().length > 0))
+                readonly || (submitAction() === "send" && (!hasDraft() || doc.uploading() || doc.missing().length > 0))
               }
               tip={tip()}
               onExit={exitDoc}
@@ -2316,8 +2328,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     data-action="prompt-submit"
                     type="submit"
                     disabled={
-                      docMode() === "shell" ||
-                      (docMode() === "normal" && !hasDraft() && submitAction() === "send")
+                      docMode() === "shell" || (docMode() === "normal" && !hasDraft() && submitAction() === "send")
                     }
                     tabIndex={docMode() === "shell" ? -1 : undefined}
                     icon={submitIcon()}
@@ -2355,6 +2366,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       <Icon name="plus" class="size-4.5" />
                     </Button>
                   </TooltipKeybind>
+                  <imageGeneration.Toggle />
                   {modeButtons()}
                 </div>
               </Show>
