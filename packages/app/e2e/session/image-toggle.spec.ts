@@ -91,13 +91,16 @@ test("이미지 만들기 토글은 사용 개수와 팀 한도를 보여준다"
   await button.screenshot({ path: "e2e/test-results/image-toggle-on.png" })
 })
 
-test("토글을 켜고 보낸 메시지에만 imageRequest 표시가 붙고 보낸 뒤 꺼진다", async ({ page }) => {
+test("토글은 보낸 뒤에도 켜져 있고 사용자가 직접 꺼야 꺼진다", async ({ page }) => {
   await open(page)
 
   await page.locator(toggle).click()
-  const flagged = await send(page, "게임 주인공 고양이 캐릭터")
-  expect(flagged.parts[0].metadata).toEqual({ imageRequest: true })
-  expect(flagged.parts[0].text).toContain("게임 주인공 고양이 캐릭터")
+  const first = await send(page, "게임 주인공 고양이 캐릭터")
+  expect(first.parts[0].metadata).toEqual({ imageRequest: true })
+  expect(first.parts[0].text).toContain("게임 주인공 고양이 캐릭터")
+  await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "true")
+
+  await page.locator(toggle).click()
   await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "false")
 })
 

@@ -1705,7 +1705,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const { abort, handleSubmit } = createPromptSubmit({
     info,
     imageRequest: imageMode,
-    onImageRequestSent: () => setImageMode(false),
     imageAttachments,
     commentCount,
     autoAccept: () => accepting(),

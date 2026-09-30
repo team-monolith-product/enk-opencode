@@ -204,7 +204,6 @@ type PromptSubmitInput = {
   onAbort?: () => void
   onSubmit?: () => void
   imageRequest?: Accessor<boolean>
-  onImageRequestSent?: () => void
   approve?: (input: PromptApprovalInput) => Promise<boolean> | boolean
 }
 
@@ -405,7 +404,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     let prepared = !Array.isArray(override) && override?.prepare ? await override.prepare(session.id) : currentPrompt
     if (mode !== "shell" && input.imageRequest?.()) {
       prepared = markImageRequest(prepared)
-      input.onImageRequestSent?.()
     }
     const body = prepared.map((part) => ("content" in part ? part.content : "")).join("")
     const files = !Array.isArray(override) && override?.prepare
