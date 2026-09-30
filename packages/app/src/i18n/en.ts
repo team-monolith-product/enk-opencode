@@ -73,7 +73,6 @@ export const dict = {
   "prompt.imageToggle.hint": "Turn on and send a message to create one image from it.",
   "prompt.imageToggle.hintLimit": "Your team can create up to {{limit}} images ({{remaining}} left). Turn on and send a message to create one image from it.",
   "prompt.imageToggle.exhausted": "Your team has used all {{limit}} images.",
-  "prompt.imageToggle.on.title": "Your next message will create an image",
   "imageRequest.title": "Create this image?",
   "imageRequest.remaining": "{{remaining}}/{{limit}} left",
   "imageRequest.notice": "Creating uses 1 image from your team.",

@@ -37,6 +37,7 @@ export interface MockServerConfig {
   questions?: () => Json[]
   imageRequests?: () => Json[]
   imageQuota?: () => Json
+  imageQuotaDelay?: number
 }
 
 const emptyList = new Set(["/env-request", "/skill", "/command", "/lsp", "/formatter", "/vcs/status", "/vcs/diff", "/mcp/list"])
@@ -93,7 +94,10 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     if (path === "/permission") return json(route, config.permissions?.() ?? [])
     if (path === "/question") return json(route, config.questions?.() ?? [])
     if (path === "/image-request") return json(route, config.imageRequests?.() ?? [])
-    if (path === "/image-request/quota") return json(route, config.imageQuota?.() ?? { enabled: false })
+    if (path === "/image-request/quota") {
+      if (config.imageQuotaDelay) await new Promise((r) => setTimeout(r, config.imageQuotaDelay))
+      return json(route, config.imageQuota?.() ?? { enabled: false })
+    }
     if (emptyObject.has(path)) return json(route, {})
     if (emptyList.has(path)) return json(route, [])
 

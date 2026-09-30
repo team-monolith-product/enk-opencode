@@ -69,7 +69,6 @@ export const dict = {
   "prompt.imageToggle.hint": "켜고 메시지를 보내면 그 내용으로 이미지 1장을 만들어요.",
   "prompt.imageToggle.hintLimit": "팀당 {{limit}}장까지 만들 수 있어요({{remaining}}장 남음). 켜고 메시지를 보내면 그 내용으로 이미지 1장을 만들어요.",
   "prompt.imageToggle.exhausted": "우리 팀이 만들 수 있는 이미지 {{limit}}장을 모두 사용했어요.",
-  "prompt.imageToggle.on.title": "다음 메시지로 이미지를 만들어요",
   "imageRequest.title": "이미지를 만들까요?",
   "imageRequest.remaining": "{{remaining}}/{{limit}}장 남음",
   "imageRequest.notice": "만들면 팀 이미지 1장을 사용해요.",

@@ -127,7 +127,6 @@ test("이미지 만들기 토글은 사용 개수와 팀 한도를 보여준다"
 
   await button.click()
   await expect(button).toHaveAttribute("aria-checked", "true")
-  await expect(page.getByText("다음 메시지로 이미지를 만들어요")).toBeVisible()
   await page.screenshot({ path: "e2e/test-results/image-toggle.png" })
   await button.screenshot({ path: "e2e/test-results/image-toggle-on.png" })
 })
@@ -155,4 +154,17 @@ test("한도를 다 쓰면 토글이 막힌다", async ({ page }) => {
   const button = page.locator(toggle)
   await expect(button).toContainText("10/10")
   await expect(button).toBeDisabled()
+})
+
+test("느린 개수 조회가 대화 화면을 막지 않는다", async ({ page }) => {
+  await mockOpenCodeServer(page, {
+    directory,
+    project,
+    sessions: [session],
+    imageQuota: () => ({ enabled: true, quota: { limit: 10, used: 3, remaining: 7 } }),
+    imageQuotaDelay: 5_000,
+  })
+  await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
+  await expect(page.locator('[data-component="session-prompt-dock"]')).toBeVisible({ timeout: 3_000 })
+  await expect(page.locator('[data-action="prompt-image-toggle"]')).toContainText("3/10", { timeout: 10_000 })
 })
