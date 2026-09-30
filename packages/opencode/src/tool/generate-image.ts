@@ -137,7 +137,9 @@ export const GenerateImageTool = Tool.define("generate_image", {
     const callID = ctx.callID || randomUUID()
 
     if (!GenerateImage.preapproved(ctx.messages)) {
-      const current = await ImageQuota.status().catch(() => undefined)
+      const cached = ImageQuota.cached()
+      const current =
+        cached && cached.remaining > 0 ? cached : await ImageQuota.status().catch(() => cached ?? undefined)
       if (current === null) return refuse("unavailable")
       if (current && current.remaining <= 0) return exhausted(current)
 

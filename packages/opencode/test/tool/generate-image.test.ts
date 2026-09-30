@@ -4,6 +4,7 @@ import { Instance } from "../../src/project/instance"
 import { GenerateImage, GenerateImageTool } from "../../src/tool/generate-image"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { ImageRequest } from "../../src/image-request"
+import { ImageQuota } from "../../src/enk/image-quota"
 import { tmpdir } from "../fixture/fixture"
 
 let seq = 0
@@ -49,6 +50,7 @@ function mockFetch(respond: (url: string, method: string) => Response) {
 }
 
 beforeEach(() => {
+  ImageQuota.reset()
   requests = []
   for (const key of ENV_KEYS) delete process.env[key]
   process.env["OPENAI_BASE_URL"] = "http://proxy/openai/v1/"

@@ -46,7 +46,7 @@ export const ImageRequestRoutes = lazy(() =>
       }),
       async (c) => {
         if (!GenerateImage.available()) return c.json({ enabled: false })
-        const quota = await ImageQuota.status().catch(() => undefined)
+        const quota = ImageQuota.cached()
         if (quota === null) return c.json({ enabled: false })
         return c.json({ enabled: quota === undefined || quota.limit > 0, quota })
       },
