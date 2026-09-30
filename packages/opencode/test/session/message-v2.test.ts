@@ -108,7 +108,7 @@ function basePart(messageID: string, id: string) {
 }
 
 describe("session.message-v2.toModelMessage", () => {
-  test("tells the model when the image toggle was on", async () => {
+  test("tells the model when image generation is on", async () => {
     const input: MessageV2.WithParts[] = [
       {
         info: userInfo("m-image"),

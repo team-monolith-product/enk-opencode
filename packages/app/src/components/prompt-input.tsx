@@ -165,6 +165,8 @@ const DOC_HEIGHT = 300
 const DOC_RATIO = 0.8
 // 자동 확대: 입력창 포커스 시 기존 '확대(전체 너비 expanded)'로 자동 진입할지 여부. localStorage 영속.
 const AUTO_EXPAND_KEY = "prompt.doc.autoExpand"
+// 이미지 생성 허용 토글. 사용자가 한 번 고르면 그 값을 계속 따르고, 고른 적이 없으면 남은 개수가 있을 때 켜 둔다.
+const IMAGE_GENERATION_KEY = "prompt.imageGeneration"
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
@@ -1686,7 +1688,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       .catch(() => undefined)
   }
   createEffect(on(() => sdk.directory, () => void refetchImageStatus()))
-  const [imageMode, setImageMode] = createSignal(false)
+  const [imageChoice, setImageChoice] = createSignal<boolean | undefined>(
+    (() => {
+      try {
+        const value = localStorage.getItem(IMAGE_GENERATION_KEY)
+        return value === null ? undefined : value === "1"
+      } catch {
+        return undefined
+      }
+    })(),
+  )
   const imageQuota = () => imageStatus()?.quota
   const imageExhausted = () => (imageQuota()?.remaining ?? 1) <= 0
 
@@ -1700,11 +1711,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     ),
   )
 
-  const toggleImageMode = () => setImageMode(!imageMode())
+  const imageMode = () => !imageExhausted() && (imageChoice() ?? true)
+  const toggleImageMode = () => {
+    const next = !imageMode()
+    setImageChoice(next)
+    try {
+      localStorage.setItem(IMAGE_GENERATION_KEY, next ? "1" : "0")
+    } catch {}
+  }
 
   const { abort, handleSubmit } = createPromptSubmit({
     info,
-    imageRequest: imageMode,
+    imageRequest: () => !!imageStatus()?.enabled && imageMode(),
     imageAttachments,
     commentCount,
     autoAccept: () => accepting(),
@@ -2300,7 +2318,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   <ImageToggle
                     enabled={imageMode()}
                     quota={imageQuota()}
-                    disabled={!imageMode() && imageExhausted()}
+                    disabled={imageExhausted()}
                     onToggle={toggleImageMode}
                   />
                 ) : undefined
@@ -2404,7 +2422,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <ImageToggle
                       enabled={imageMode()}
                       quota={imageQuota()}
-                      disabled={!imageMode() && imageExhausted()}
+                      disabled={imageExhausted()}
                       onToggle={toggleImageMode}
                     />
                   </Show>

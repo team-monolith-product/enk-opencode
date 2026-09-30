@@ -240,7 +240,7 @@ describe("tool.generate_image quota", () => {
 describe("tool.generate_image toggle and folder", () => {
   const image = () => new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] }))
 
-  test("does nothing unless the student sent the message with the toggle on", async () => {
+  test("does nothing when the student turned image generation off", async () => {
     mockFetch(image)
     const { result, saved } = await run(
       { prompt: "cat", name: "cat" },
@@ -251,13 +251,13 @@ describe("tool.generate_image toggle and folder", () => {
     expect(saved).toBeUndefined()
   })
 
-  test("makes only one image per toggled message", async () => {
+  test("lets the AI make several images while the toggle is on", async () => {
     mockFetch(image)
     const messages = [userMessage(true)]
     const first = await run({ prompt: "cat", name: "cat" }, { ctx: context({ messages }) })
     const second = await run({ prompt: "dog", name: "dog" }, { ctx: context({ messages }) })
     expect(first.result.metadata.status).toBe("generated")
-    expect(second.result.metadata.status).toBe("unrequested")
+    expect(second.result.metadata.status).toBe("generated")
   })
 
   test("saves under public/ai-images when the project serves public/", async () => {
