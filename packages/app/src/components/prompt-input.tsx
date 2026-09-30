@@ -31,7 +31,7 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
-import { DialogGenerateImage } from "@/components/dialog-generate-image"
+import { ImageToggle } from "@/components/prompt-input/image-toggle"
 import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
@@ -1675,7 +1675,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   })
 
-  const [imageStatus] = createResource(
+  const [imageStatus, { refetch: refetchImageStatus }] = createResource(
     () => sdk.directory,
     (directory) =>
       sdk.client.imageRequest
@@ -1683,25 +1683,37 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         .then((x) => x.data)
         .catch(() => undefined),
   )
+  const [imageMode, setImageMode] = createSignal(false)
+  const imageQuota = () => imageStatus()?.quota
+  const imageExhausted = () => (imageQuota()?.remaining ?? 1) <= 0
 
-  const openImageDialog = () => {
-    dialog.show(() => (
-      <DialogGenerateImage
-        onSubmit={(text) => {
-          const draft = prompt.current()
-          void handleSubmit(undefined, [
-            { type: "text", content: text, start: 0, end: text.length, imageRequest: true },
-          ]).finally(() => {
-            if (promptLength(draft) === 0) return
-            prompt.set(draft, promptLength(draft))
-          })
-        }}
-      />
-    ))
+  createEffect(
+    on(
+      () => working(),
+      (busy, was) => {
+        if (was && !busy) void refetchImageStatus()
+      },
+      { defer: true },
+    ),
+  )
+
+  const toggleImageMode = () => {
+    const next = !imageMode()
+    setImageMode(next)
+    if (!next) return
+    const quota = imageQuota()
+    showToast({
+      title: language.t("prompt.imageToggle.on.title"),
+      description: quota
+        ? language.t("prompt.imageToggle.hintLimit", { limit: quota.limit, remaining: quota.remaining })
+        : language.t("prompt.imageToggle.hint"),
+    })
   }
 
   const { abort, handleSubmit } = createPromptSubmit({
     info,
+    imageRequest: imageMode,
+    onImageRequestSent: () => setImageMode(false),
     imageAttachments,
     commentCount,
     autoAccept: () => accepting(),
@@ -2230,7 +2242,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             if (!(target instanceof HTMLElement)) return
             if (
               target.closest(
-                '[data-action="prompt-attach"], [data-action="prompt-generate-image"], [data-action="prompt-submit"], [data-action="prompt-normal"], [data-action="prompt-doc"], [data-action="prompt-doc-exit"], [data-action="prompt-permissions"]',
+                '[data-action="prompt-attach"], [data-action="prompt-image-toggle"], [data-action="prompt-submit"], [data-action="prompt-normal"], [data-action="prompt-doc"], [data-action="prompt-doc-exit"], [data-action="prompt-permissions"]',
               )
             ) {
               return
@@ -2292,8 +2304,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }
           >
             <PromptDocShell
-              generateImage={
-                imageStatus()?.enabled ? { disabled: working(), onOpen: openImageDialog } : undefined
+              imageToggle={
+                imageStatus()?.enabled ? (
+                  <ImageToggle
+                    enabled={imageMode()}
+                    quota={imageQuota()}
+                    disabled={!imageMode() && imageExhausted()}
+                    onToggle={toggleImageMode}
+                  />
+                ) : undefined
               }
               doc={doc}
               readonly={readonly}
@@ -2391,20 +2410,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     </Button>
                   </TooltipKeybind>
                   <Show when={imageStatus()?.enabled}>
-                    <Tooltip placement="top" value={language.t("prompt.action.generateImage")}>
-                      <Button
-                        data-action="prompt-generate-image"
-                        type="button"
-                        variant="ghost"
-                        class="size-7.5 p-0"
-                        style={buttons()}
-                        onClick={openImageDialog}
-                        disabled={working()}
-                        aria-label={language.t("prompt.action.generateImage")}
-                      >
-                        <Icon name="photo" class="size-4.5" />
-                      </Button>
-                    </Tooltip>
+                    <ImageToggle
+                      enabled={imageMode()}
+                      quota={imageQuota()}
+                      disabled={!imageMode() && imageExhausted()}
+                      onToggle={toggleImageMode}
+                    />
                   </Show>
                   {modeButtons()}
                 </div>

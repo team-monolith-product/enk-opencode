@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { Prompt } from "@/context/prompt"
-import { buildRequestParts } from "./build-request-parts"
+import { buildRequestParts, markImageRequest } from "./build-request-parts"
 
 describe("buildRequestParts", () => {
   test("builds typed request and optimistic parts without cast path", () => {
@@ -346,5 +346,33 @@ describe("buildRequestParts", () => {
       // Should preserve .. segments (backend normalizes)
       expect(filePart.url).toContain("/..")
     }
+  })
+})
+
+describe("image request flag", () => {
+  test("marks only the head text part and carries it into metadata", () => {
+    const prompt: Prompt = [
+      { type: "text", content: "고양이 그려줘", start: 0, end: 7 },
+      { type: "text", content: " 픽셀아트", start: 7, end: 12 },
+    ]
+    const marked = markImageRequest(prompt)
+    expect(marked[0]).toMatchObject({ imageRequest: true })
+    expect(marked[1]).not.toHaveProperty("imageRequest")
+
+    const { requestParts } = buildRequestParts({
+      prompt: marked,
+      context: [],
+      images: [],
+      text: "고양이 그려줘 픽셀아트",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      sessionDirectory: "/repo",
+    })
+    expect(requestParts[0]).toMatchObject({ type: "text", metadata: { imageRequest: true } })
+  })
+
+  test("leaves prompts without text untouched", () => {
+    const prompt: Prompt = []
+    expect(markImageRequest(prompt)).toBe(prompt)
   })
 })

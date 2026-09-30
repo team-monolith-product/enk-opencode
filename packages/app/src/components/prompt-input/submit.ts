@@ -15,7 +15,7 @@ import { useSync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { promptLocale, type PromptLocale } from "@/utils/prompt-locale"
-import { buildRequestParts } from "./build-request-parts"
+import { buildRequestParts, markImageRequest } from "./build-request-parts"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 
@@ -203,6 +203,8 @@ type PromptSubmitInput = {
   onQueued?: (input: { sessionID: string; mode: "normal" | "shell" | "doc" }) => void | Promise<void>
   onAbort?: () => void
   onSubmit?: () => void
+  imageRequest?: Accessor<boolean>
+  onImageRequestSent?: () => void
   approve?: (input: PromptApprovalInput) => Promise<boolean> | boolean
 }
 
@@ -400,7 +402,11 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    const prepared = !Array.isArray(override) && override?.prepare ? await override.prepare(session.id) : currentPrompt
+    let prepared = !Array.isArray(override) && override?.prepare ? await override.prepare(session.id) : currentPrompt
+    if (mode !== "shell" && input.imageRequest?.()) {
+      prepared = markImageRequest(prepared)
+      input.onImageRequestSent?.()
+    }
     const body = prepared.map((part) => ("content" in part ? part.content : "")).join("")
     const files = !Array.isArray(override) && override?.prepare
       ? prepared.filter((part): part is ImageAttachmentPart => part.type === "image")
