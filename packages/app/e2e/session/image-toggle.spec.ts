@@ -74,12 +74,12 @@ async function send(page: Page, text: string) {
   return (await prompt).postDataJSON()
 }
 
-test("남은 개수가 있으면 기본으로 켜져 있고 사용 개수와 팀 한도를 보여준다", async ({ page }) => {
+test("남은 개수가 있으면 기본으로 켜져 있고 툴팁으로 팀 한도를 알려준다", async ({ page }) => {
   await open(page)
 
   const button = page.locator(toggle)
   await expect(button).toContainText("이미지 만들기")
-  await expect(button).toContainText("3/10")
+  await expect(button).not.toContainText("3/10")
   await expect(button).toHaveAttribute("aria-checked", "true")
 
   await button.hover()
@@ -113,7 +113,6 @@ test("한도를 다 쓰면 꺼진 채로 막힌다", async ({ page }) => {
   await open(page, { limit: 10, used: 10, remaining: 0 })
 
   const button = page.locator(toggle)
-  await expect(button).toContainText("10/10")
   await expect(button).toHaveAttribute("aria-checked", "false")
   await expect(button).toBeDisabled()
 })
@@ -128,5 +127,5 @@ test("느린 개수 조회가 대화 화면을 막지 않는다", async ({ page 
   })
   await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
   await expect(page.locator('[data-component="session-prompt-dock"]')).toBeVisible({ timeout: 3_000 })
-  await expect(page.locator('[data-action="prompt-image-toggle"]')).toContainText("3/10", { timeout: 10_000 })
+  await expect(page.locator('[data-action="prompt-image-toggle"]')).toBeVisible({ timeout: 10_000 })
 })

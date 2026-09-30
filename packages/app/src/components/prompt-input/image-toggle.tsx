@@ -1,4 +1,3 @@
-import { Show } from "solid-js"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useLanguage } from "@/context/language"
 
@@ -30,13 +29,6 @@ export function ImageToggle(props: { enabled: boolean; quota?: ImageQuota; disab
           <span class="oc-auto-thumb" />
         </span>
         <span class="oc-auto-label">{language.t("prompt.imageToggle.label")}</span>
-        <Show when={props.quota}>
-          {(quota) => (
-            <span class="oc-image-count" classList={{ "is-empty": quota().remaining <= 0 }}>
-              {quota().used}/{quota().limit}
-            </span>
-          )}
-        </Show>
       </button>
     </Tooltip>
   )
