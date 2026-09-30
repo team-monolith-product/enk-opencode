@@ -64,15 +64,10 @@ export namespace GenerateImage {
     return endpoint() !== undefined
   }
 
-  // 이미지는 학생이 입력창의 '이미지 만들기' 토글을 켜고 보낸 메시지에서만, 그 메시지당 한 장 만든다.
-  const approvedMessages = new Set<string>()
-
-  export function requested(messages: MessageV2.WithParts[]) {
+  // 학생이 입력창의 '이미지 만들기'를 켜 둔 채 보낸 메시지에서만 이미지를 만들 수 있다. 몇 장을 만들지는 AI 가 정하고 팀 한도가 상한이다.
+  export function allowed(messages: MessageV2.WithParts[]) {
     const user = messages.findLast((m) => m.info.role === "user")
-    if (!user || approvedMessages.has(user.info.id)) return false
-    const requested = user.parts.some((p) => p.type === "text" && p.metadata?.["imageRequest"] === true)
-    if (requested) approvedMessages.add(user.info.id)
-    return requested
+    return !!user?.parts.some((p) => p.type === "text" && p.metadata?.["imageRequest"] === true)
   }
 
   // AI 가 만든 이미지는 한 폴더에 모은다. public/ 이 있는 프레임워크(Vite·Next 등)는 그 아래에 두어야
@@ -139,12 +134,12 @@ export const GenerateImageTool = Tool.define("generate_image", {
       background: params.background,
     }
 
-    if (!GenerateImage.requested(ctx.messages)) {
+    if (!GenerateImage.allowed(ctx.messages)) {
       const metadata: GenerateImage.Metadata = { ...base, status: "unrequested", ms: Date.now() - startedAt }
       return {
         title: relative,
         output:
-          "이미지는 학생이 입력창의 '이미지 만들기'를 켜고 보낸 메시지에서만 만들 수 있습니다. 지금은 만들지 않았습니다. 다시 호출하지 말고, 이미지가 필요하면 학생에게 '이미지 만들기'를 켜고 원하는 그림을 설명해 달라고 짧게 안내하세요.",
+          "학생이 입력창의 '이미지 만들기'를 꺼 두어 이미지를 만들지 않았습니다. 다시 호출하지 말고 CSS·SVG·이모지로 대신 표현하세요. 그림이 꼭 필요하면 '이미지 만들기'를 켜면 만들 수 있다고 한 줄로 알려 주세요.",
         metadata,
       }
     }

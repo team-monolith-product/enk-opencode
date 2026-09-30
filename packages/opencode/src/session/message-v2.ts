@@ -29,7 +29,7 @@ interface FetchDecompressionError extends Error {
 
 export namespace MessageV2 {
   export const IMAGE_REQUEST_NOTE =
-    "<image_request>학생이 입력창의 '이미지 만들기'를 켜고 보낸 메시지입니다. generate_image 로 이 메시지가 요청한 이미지를 한 장 만드세요.</image_request>"
+    "<image_generation>이미지 만들기가 켜져 있습니다. 결과물에 그림이 필요하면 generate_image 로 만들 수 있습니다.</image_generation>"
 
   const log = Log.create({ service: "session.message-v2" })
 
