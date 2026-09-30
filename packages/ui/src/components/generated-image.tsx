@@ -31,7 +31,6 @@ export function GeneratedImage(props: ToolProps) {
   const notice = createMemo(() => {
     const status = props.metadata.status
     if (status === "blocked") return i18n.t("ui.tool.generateImage.blocked")
-    if (status === "unrequested") return i18n.t("ui.tool.generateImage.unrequested")
     if (status === "disabled") return i18n.t("ui.tool.generateImage.disabled")
     if (status === "unavailable") return i18n.t("ui.tool.generateImage.unavailable")
     if (status === "limited")

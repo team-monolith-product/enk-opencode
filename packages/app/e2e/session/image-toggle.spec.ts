@@ -22,7 +22,6 @@ const session: MockSession = {
   time: { created: 1_700_000_100_000, updated: 1_700_000_100_000 },
 }
 
-
 async function open(page: Page, quota = { limit: 10, used: 3, remaining: 7 }) {
   const mock = await mockOpenCodeServer(page, {
     directory,
@@ -88,21 +87,22 @@ test("남은 개수가 있으면 기본으로 켜져 있고 툴팁으로 팀 한
   await button.screenshot({ path: "e2e/test-results/image-toggle-on.png" })
 })
 
-test("켜져 있으면 보내는 메시지에 표시가 붙고 보낸 뒤에도 켜져 있다", async ({ page }) => {
+test("켜져 있으면 이미지 생성을 허용해 보내고 보낸 뒤에도 켜져 있다", async ({ page }) => {
   await open(page)
 
   const body = await send(page, "게임 주인공 고양이 캐릭터")
-  expect(body.parts[0].metadata).toEqual({ imageRequest: true })
+  expect(body.imageGeneration).toBe(true)
+  expect(body.parts[0].metadata).toBeUndefined()
   await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "true")
 })
 
-test("사용자가 끄면 표시 없이 보내고 새로고침해도 꺼진 채로 남는다", async ({ page }) => {
+test("사용자가 끄면 허용하지 않고 보내고 새로고침해도 꺼진 채로 남는다", async ({ page }) => {
   await open(page)
 
   await page.locator(toggle).click()
   await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "false")
   const body = await send(page, "버튼 색 바꿔줘")
-  expect(body.parts[0].metadata).toBeUndefined()
+  expect(body.imageGeneration).toBe(false)
   await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "false")
 
   await page.reload()

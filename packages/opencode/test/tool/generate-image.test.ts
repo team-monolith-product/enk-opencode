@@ -237,28 +237,8 @@ describe("tool.generate_image quota", () => {
   })
 })
 
-describe("tool.generate_image toggle and folder", () => {
+describe("tool.generate_image folder", () => {
   const image = () => new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] }))
-
-  test("does nothing when the student turned image generation off", async () => {
-    mockFetch(image)
-    const { result, saved } = await run(
-      { prompt: "cat", name: "cat" },
-      { ctx: context({ messages: [userMessage(false)] }) },
-    )
-    expect(result.metadata.status).toBe("unrequested")
-    expect(requests).toHaveLength(0)
-    expect(saved).toBeUndefined()
-  })
-
-  test("lets the AI make several images while the toggle is on", async () => {
-    mockFetch(image)
-    const messages = [userMessage(true)]
-    const first = await run({ prompt: "cat", name: "cat" }, { ctx: context({ messages }) })
-    const second = await run({ prompt: "dog", name: "dog" }, { ctx: context({ messages }) })
-    expect(first.result.metadata.status).toBe("generated")
-    expect(second.result.metadata.status).toBe("generated")
-  })
 
   test("saves under public/ai-images when the project serves public/", async () => {
     mockFetch(image)

@@ -30,7 +30,7 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
-import { ImageToggle, type ImageQuota } from "@/components/prompt-input/image-toggle"
+import { createImageGeneration } from "@/components/prompt-input/image-toggle"
 import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
@@ -165,8 +165,6 @@ const DOC_HEIGHT = 300
 const DOC_RATIO = 0.8
 // 자동 확대: 입력창 포커스 시 기존 '확대(전체 너비 expanded)'로 자동 진입할지 여부. localStorage 영속.
 const AUTO_EXPAND_KEY = "prompt.doc.autoExpand"
-// 이미지 생성 허용 토글. 사용자가 한 번 고르면 그 값을 계속 따르고, 고른 적이 없으면 남은 개수가 있을 때 켜 둔다.
-const IMAGE_GENERATION_KEY = "prompt.imageGeneration"
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
@@ -1676,53 +1674,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   })
 
-  // createResource 는 루트 Suspense 를 걸어 조회가 끝날 때까지 화면 전체를 가린다. 신호로만 둔다.
-  const [imageStatus, setImageStatus] = createSignal<{ enabled: boolean; quota?: ImageQuota }>()
-  const refetchImageStatus = () => {
-    const directory = sdk.directory
-    return sdk.client.imageRequest
-      .quota({ directory })
-      .then((x) => {
-        if (sdk.directory === directory) setImageStatus(x.data)
-      })
-      .catch(() => undefined)
-  }
-  createEffect(on(() => sdk.directory, () => void refetchImageStatus()))
-  const [imageChoice, setImageChoice] = createSignal<boolean | undefined>(
-    (() => {
-      try {
-        const value = localStorage.getItem(IMAGE_GENERATION_KEY)
-        return value === null ? undefined : value === "1"
-      } catch {
-        return undefined
-      }
-    })(),
-  )
-  const imageQuota = () => imageStatus()?.quota
-  const imageExhausted = () => (imageQuota()?.remaining ?? 1) <= 0
-
-  createEffect(
-    on(
-      () => working(),
-      (busy, was) => {
-        if (was && !busy) void refetchImageStatus()
-      },
-      { defer: true },
-    ),
-  )
-
-  const imageMode = () => !imageExhausted() && (imageChoice() ?? true)
-  const toggleImageMode = () => {
-    const next = !imageMode()
-    setImageChoice(next)
-    try {
-      localStorage.setItem(IMAGE_GENERATION_KEY, next ? "1" : "0")
-    } catch {}
-  }
+  const imageGeneration = createImageGeneration({ sdk, working })
 
   const { abort, handleSubmit } = createPromptSubmit({
     info,
-    imageRequest: () => !!imageStatus()?.enabled && imageMode(),
+    imageGeneration: imageGeneration.request,
     imageAttachments,
     commentCount,
     autoAccept: () => accepting(),
@@ -1782,6 +1738,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             model: input.model,
             variant: input.variant,
             locale: input.locale,
+            imageGeneration: input.imageGeneration,
             parts: input.parts,
           },
         })
@@ -2313,16 +2270,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }
           >
             <PromptDocShell
-              imageToggle={
-                imageStatus()?.enabled ? (
-                  <ImageToggle
-                    enabled={imageMode()}
-                    quota={imageQuota()}
-                    disabled={imageExhausted()}
-                    onToggle={toggleImageMode}
-                  />
-                ) : undefined
-              }
+              imageToggle={<imageGeneration.Toggle />}
               doc={doc}
               readonly={readonly}
               submitIcon={submitIcon()}
@@ -2418,14 +2366,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       <Icon name="plus" class="size-4.5" />
                     </Button>
                   </TooltipKeybind>
-                  <Show when={imageStatus()?.enabled}>
-                    <ImageToggle
-                      enabled={imageMode()}
-                      quota={imageQuota()}
-                      disabled={imageExhausted()}
-                      onToggle={toggleImageMode}
-                    />
-                  </Show>
+                  <imageGeneration.Toggle />
                   {modeButtons()}
                 </div>
               </Show>
