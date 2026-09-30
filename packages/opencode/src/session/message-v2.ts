@@ -28,6 +28,9 @@ interface FetchDecompressionError extends Error {
 }
 
 export namespace MessageV2 {
+  export const IMAGE_REQUEST_NOTE =
+    "<image_request>학생이 입력창의 '이미지 만들기'를 켜고 보낸 메시지입니다. generate_image 로 이 메시지가 요청한 이미지를 한 장 만드세요.</image_request>"
+
   const log = Log.create({ service: "session.message-v2" })
 
   export function isMedia(mime: string) {
@@ -718,6 +721,9 @@ export namespace MessageV2 {
                   ? stripTextPlaceholder(part.text.length)
                   : part.text,
             })
+          // 토글 표시는 metadata 라 모델에게 보이지 않는다. 모델이 알 수 있게 이 메시지에만 한 줄을 덧붙인다.
+          if (part.type === "text" && !part.ignored && part.metadata?.["imageRequest"] === true)
+            userMessage.parts.push({ type: "text", text: IMAGE_REQUEST_NOTE })
           // text/plain and directory files are converted into text parts, ignore them
           if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
             if (isMedia(part.mime) && (options?.stripMedia || !supportsMedia || deferMedia(part))) {
