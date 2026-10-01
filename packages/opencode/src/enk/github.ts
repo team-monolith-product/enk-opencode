@@ -16,7 +16,7 @@ export namespace GitHub {
   const limit = 100 * 1024 * 1024
   const bridge = "__preview-bridge.js"
   const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
-  const exclude = [
+  export const exclude = [
     ".env",
     ".env.*",
     "!.env.example",
