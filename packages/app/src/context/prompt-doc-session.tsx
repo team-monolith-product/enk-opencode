@@ -27,12 +27,14 @@ import {
   connectSubmit,
   respondSubmit,
   startClearSubmit,
+  startRollbackSubmit,
   startStopSubmit,
   type DocSubmitState,
 } from "@/components/prompt-input/doc-submit"
 import { DialogDocSubmit } from "@/components/doc-submit/dialog-doc-submit"
 import { startRtcKeepalive } from "@/utils/rtc-keepalive"
 import { SessionClearVote } from "@/utils/session-clear-vote"
+import { RollbackError, rollbackCode, SessionRollbackVote } from "@/utils/session-rollback-vote"
 
 export type PromptMode = "normal" | "shell" | "doc"
 
@@ -78,6 +80,9 @@ export type PromptDocSession = {
 }
 
 const PromptDocSessionContext = createContext<PromptDocSession>()
+
+const voteKind = (kind: DocSubmitState["targetKind"] | undefined) =>
+  kind === "stop" || kind === "clear" || kind === "rollback" ? kind : "doc"
 
 export function usePromptDocSession() {
   const value = useContext(PromptDocSessionContext)
@@ -331,6 +336,11 @@ export function createPromptDocSession(): PromptDocSession {
         if (dialogOpen(state.submitID)) closeApproval()
         return
       }
+      // 되돌리기가 합의되면 서버가 파일을 되돌리고 history.restored 로 모두에게 알린다. 컴포저는 그대로 둔다.
+      if (state.status === "sent" && state.targetKind === "rollback") {
+        if (dialogOpen(state.submitID)) closeApproval()
+        return
+      }
       if (state.status === "sent") {
         // Only a doc send reaches this — a 'stop' vote returned above, and question votes run on
         // their own socket (session-question-dock) — so the composer is safe to clear wholesale.
@@ -354,7 +364,7 @@ export function createPromptDocSession(): PromptDocSession {
           state={approval}
           actorID={actorID}
           spectator={readonly}
-          kind={approval()?.targetKind === "stop" || approval()?.targetKind === "clear" ? (approval()!.targetKind as "stop" | "clear") : "doc"}
+          kind={voteKind(approval()?.targetKind)}
           sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
           approve={() => {
             const current = approval()
@@ -547,6 +557,39 @@ export function createPromptDocSession(): PromptDocSession {
     }
     return true
   }
+
+  // 되돌리기 합의를 시작한다. 혼자면 서버가 바로 되돌린다. 막히면 RollbackError 를 던진다.
+  const requestRollback = async (sha: string) => {
+    const sessionID = params.id
+    const docID = doc.docID()
+    const actorID = doc.actorID()
+    if (!sessionID || !docID || !actorID) throw new RollbackError("unavailable")
+
+    const names: Record<string, string> = {}
+    for (const item of doc.actors()) {
+      const name = item.name?.trim()
+      if (name && name !== item.actorID) names[item.actorID] = name
+    }
+    const state = await startRollbackSubmit({
+      baseUrl: sdk.url,
+      directory: sdk.directory,
+      sessionID,
+      docID,
+      actorID,
+      names,
+      sha,
+    }).catch((err: unknown) => {
+      throw new RollbackError(rollbackCode(err instanceof Error ? err.message : ""))
+    })
+    setApprovalSession(sessionID)
+    showApproval(state)
+  }
+
+  createEffect(() => {
+    const id = params.id
+    if (!id) return
+    onCleanup(SessionRollbackVote.register(id, requestRollback))
+  })
 
   // 지우기 확인창은 앱 셸에 있어 이 컨텍스트에 닿지 않는다. 지금 열린 세션이 자기 요청 함수를 걸어
   // 두면, 확인창이 "지우기" 를 누른 순간 동의를 먼저 구할 수 있다.
