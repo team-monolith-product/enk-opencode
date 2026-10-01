@@ -158,3 +158,19 @@ export function createGitHubRepo(opts: GitHubOpts, input: { name: string }): Pro
     .post({ url: "/github/repo", body: input })
     .then((res) => res.data as GitHubStatus)
 }
+
+export type HistoryEntry = { sha: string; time: number; subject: string; revert?: string }
+export type HistoryChange = { status: "A" | "M" | "D"; file: string }
+export type HistoryStatus = { enabled: boolean; open: boolean; entries: HistoryEntry[] }
+
+export function getHistory(opts: EnvFileOpts): Promise<HistoryStatus> {
+  return devServerClient(opts)
+    .get({ url: "/history" })
+    .then((res) => res.data as HistoryStatus)
+}
+
+export function getHistoryChanges(opts: EnvFileOpts, sha: string): Promise<HistoryChange[]> {
+  return devServerClient(opts)
+    .get({ url: `/history/${sha}` })
+    .then((res) => res.data as HistoryChange[])
+}

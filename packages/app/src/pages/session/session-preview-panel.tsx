@@ -14,10 +14,12 @@ import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { useParams } from "@solidjs/router"
 import {
   getDevServerLogs,
   getDevServerStatus,
   getGitHubStatus,
+  getHistory,
   listEnvKeys,
   restartDevServer,
   type DevServerLogsResult,
@@ -104,6 +106,22 @@ export function createSessionPreview() {
   // 상태 폴링 핸들 — restart() 등 외부에서 수동 재확인을 트리거하기 위해 밖으로 끌어올린다.
   // 서버 연결이 없거나 언마운트되면 no-op 으로 되돌린다.
   let recheck: () => void = () => {}
+
+  // 되돌리기는 대화가 끝나지 않아도 파일을 바꾼다. session.idle 을 기다리지 않고 바로 다시 그리고, 함께 보던
+  // 모두에게 무엇으로 돌아갔는지 알린다.
+  onCleanup(
+    sdk.event.listen(({ name, details }) => {
+      if ((name as string) !== "history.restored") return
+      const event = details as unknown as { properties: { subject: string; deps: boolean } }
+      setDirty(false)
+      setReloadCount((n) => n + 1)
+      recheck()
+      showToast({
+        title: language.t("history.restored", { subject: event.properties.subject }),
+        description: event.properties.deps ? language.t("history.restored.deps") : undefined,
+      })
+    }),
+  )
 
   createEffect(() => {
     // dev override(VITE_PREVIEW_URL): 상태 판정 없이 항상 미리보기 표시.
@@ -653,6 +671,24 @@ export function SessionBrowserChrome(props: {
       .then((x) => dialog.show(() => <x.DialogGitHub />))
       .catch(() => showToast({ title: language.t("common.requestFailed") }))
   }
+
+  const params = useParams()
+  const [history, setHistory] = createSignal(false)
+  onMount(() => {
+    const conn = server.current
+    if (!conn) return
+    void getHistory({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
+      .then((status) => setHistory(status.enabled))
+      .catch(() => setHistory(false))
+  })
+
+  const openHistory = () => {
+    const sessionID = params.id
+    if (!sessionID) return
+    import("@/components/dialog-history")
+      .then((x) => dialog.show(() => <x.DialogHistory sessionID={sessionID} />))
+      .catch(() => showToast({ title: language.t("common.requestFailed") }))
+  }
   let copyTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => copyTimer && clearTimeout(copyTimer))
 
@@ -880,6 +916,21 @@ export function SessionBrowserChrome(props: {
             </span>
           </Show>
         </button>
+        <Show when={history() && params.id}>
+          <button
+            type="button"
+            class={
+              ghostBtn +
+              " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap @max-[380px]/chrome:hidden"
+            }
+            onClick={openHistory}
+            aria-label={language.t("command.history")}
+            title={language.t("command.history.description")}
+          >
+            <Icon name="clock" size="small" />
+            <span class="@max-[520px]/chrome:hidden">{language.t("command.history")}</span>
+          </button>
+        </Show>
         <Show when={github()}>
           <button
             type="button"
@@ -948,6 +999,11 @@ export function SessionBrowserChrome(props: {
                     <Show when={envCount() > 0}> ({envCount()})</Show>
                   </DropdownMenu.ItemLabel>
                 </DropdownMenu.Item>
+                <Show when={history() && params.id}>
+                  <DropdownMenu.Item onSelect={openHistory}>
+                    <DropdownMenu.ItemLabel>{language.t("command.history")}</DropdownMenu.ItemLabel>
+                  </DropdownMenu.Item>
+                </Show>
                 <Show when={github()}>
                   <DropdownMenu.Item onSelect={openGitHub}>
                     <DropdownMenu.ItemLabel>{language.t("command.github")}</DropdownMenu.ItemLabel>
