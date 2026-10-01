@@ -1,12 +1,9 @@
 import { Agent } from "@/agent/agent"
-import { Bus } from "@/bus"
 import { Provider } from "@/provider/provider"
-import { Instance } from "@/project/instance"
 import { Session } from "@/session"
 import { LLM } from "@/session/llm"
 import type { MessageV2 } from "@/session/message-v2"
 import type { SessionID } from "@/session/schema"
-import { SessionStatus } from "@/session/status"
 import { Log } from "@/util/log"
 import { GitHub } from "./github"
 import { Locale } from "./locale"
@@ -23,25 +20,21 @@ export namespace GitHubSync {
 
   export type Turn = { user: MessageV2.User; request: string; reply: string }
 
-  export function init() {
-    const dir = Instance.directory
-    Bus.subscribe(SessionStatus.Event.Idle, async (evt) => {
-      await sync(dir, evt.properties.sessionID).catch((err) => {
-        if (err instanceof GitHub.Failure) return log.info("skipped", { code: err.code })
-        log.warn("failed", { error: err instanceof Error ? err.message : String(err) })
-      })
-    })
-  }
-
-  async function sync(dir: string, sessionID: SessionID) {
-    const status = await GitHub.status(dir)
-    if (!status.login || !status.repo) return
+  export async function current(sessionID: SessionID) {
     const session = await Session.get(sessionID)
     if (session.parentID) return
-    const turn = latest(await Session.messages({ sessionID }))
-    if (!turn) return
-    const result = await GitHub.push(dir, { message: (changes) => describe(turn, changes) })
-    if (result.sha) log.info("pushed", { sessionID, sha: result.sha })
+    return latest(await Session.messages({ sessionID }))
+  }
+
+  export async function sync(dir: string, turn: Turn, message?: string) {
+    await publish(dir, message ?? ((changes) => describe(turn, changes)))
+  }
+
+  export async function publish(dir: string, message: string | GitHub.Describe) {
+    const status = await GitHub.status(dir)
+    if (!status.login || !status.repo) return
+    const result = await GitHub.push(dir, { message })
+    if (result.sha) log.info("pushed", { sha: result.sha })
   }
 
   export function latest(messages: MessageV2.WithParts[]): Turn | undefined {

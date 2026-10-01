@@ -374,6 +374,12 @@
   gap: 4px;
 }
 
+[data-component="doc-submit-overlay"] .ds-preview-meta {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--c-muted);
+}
+
 [data-component="doc-submit-overlay"] .ds-preview-a {
   display: inline-flex;
   align-items: center;

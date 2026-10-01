@@ -2055,7 +2055,7 @@ export type SessionPromptDoc = {
   sessionID: string
 }
 
-export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear"
+export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear" | "rollback"
 
 export type DocSubmitStatus = "pending" | "sent" | "cancelled" | "expired" | "left"
 
@@ -2072,6 +2072,11 @@ export type DocSubmit = {
   targetKind: DocSubmitTargetKind
   targetID: string
   questionAction?: "send" | "dismiss" | "back"
+  rollback?: {
+    sha: string
+    subject: string
+    time: number
+  }
   actorID: string
   status: DocSubmitStatus
   actors: Array<DocSubmitActor>

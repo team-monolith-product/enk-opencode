@@ -13,7 +13,7 @@ import { Instance } from "./instance"
 import { Log } from "@/util/log"
 import { ShareNext } from "@/share/share-next"
 import { ensureSession } from "../session/ensure"
-import { GitHubSync } from "../enk/github-sync"
+import { HistorySync } from "../enk/history-sync"
 import { ImageQuota } from "../enk/image-quota"
 
 export async function InstanceBootstrap() {
@@ -26,7 +26,7 @@ export async function InstanceBootstrap() {
   FileWatcher.init()
   Vcs.init()
   Snapshot.init()
-  GitHubSync.init()
+  HistorySync.init()
   ImageQuota.init()
   Doc.recover()
 

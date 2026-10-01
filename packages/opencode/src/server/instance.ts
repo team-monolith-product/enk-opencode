@@ -27,6 +27,7 @@ import { EnvRequestRoutes } from "./routes/env-request"
 import { ImageQuotaRoutes } from "./routes/image-quota"
 import { DevServerRoutes } from "./routes/dev-server"
 import { GitHubRoutes } from "./routes/github"
+import { HistoryRoutes } from "./routes/history"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProjectSummaryRoutes } from "./routes/project-summary"
 import { ProviderRoutes } from "./routes/provider"
@@ -56,6 +57,7 @@ export const InstanceRoutes = (app?: Hono) =>
     .route("/image-quota", ImageQuotaRoutes())
     .route("/dev-server", DevServerRoutes())
     .route("/github", GitHubRoutes())
+    .route("/history", HistoryRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/project-summary", ProjectSummaryRoutes())
     .route("/session", SessionRoutes().route("/", SessionDocRoutes()))

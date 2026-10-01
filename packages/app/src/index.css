@@ -1895,15 +1895,15 @@
   outline: none !important;
 }
 
-[data-component="dialog"]:has(.github-dialog) [data-slot="dialog-container"] {
+[data-component="dialog"]:has(:is(.github-dialog, .history-dialog)) [data-slot="dialog-container"] {
   width: min(520px, calc(100vw - 48px));
 }
 
-[data-component="dialog"] [data-slot="dialog-content"].github-dialog {
+[data-component="dialog"] [data-slot="dialog-content"]:is(.github-dialog, .history-dialog) {
   max-width: 520px;
 }
 
-.github-dialog .github-panel {
+:is(.github-dialog, .history-dialog) .github-panel {
   border: 1px solid var(--env-line);
   border-radius: 4px;
   background: var(--env-surface);
@@ -1941,7 +1941,7 @@
   color: var(--env-text-ink);
 }
 
-.github-dialog .github-hint {
+:is(.github-dialog, .history-dialog) .github-hint {
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--env-text-muted);
@@ -1958,6 +1958,103 @@
   min-width: 0;
   font-size: 13px;
   font-weight: 600;
+}
+
+/* 버전 기록 — 외부 연동 목록과 같은 눌린 면 위에 시점을 쌓는다. 고른 줄은 대기 줄과 같은 앰버 워시. */
+.history-dialog .history-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(360px, 45vh);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--env-line);
+  border-radius: 4px;
+  background: var(--env-surface);
+}
+
+.history-dialog .history-list > li + li {
+  border-top: 1px solid var(--env-line);
+}
+
+.history-dialog .history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  color: var(--env-text-ink);
+  transition: background-color 150ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.history-dialog .history-item:hover {
+  background: var(--env-hover);
+}
+
+.history-dialog .history-item[data-selected] {
+  background: var(--env-pending);
+}
+
+.history-dialog .history-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.history-dialog .history-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.history-dialog .history-badge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border: 1px solid var(--env-line);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--env-text-weak);
+}
+
+.history-dialog .history-badge[data-tone="now"] {
+  border-color: var(--env-hazard-ink);
+  background: var(--env-hazard-mark);
+  color: var(--env-hazard-ink);
+}
+
+.history-dialog .history-time {
+  font-size: 11.5px;
+  color: var(--env-text-muted);
+}
+
+.history-dialog .history-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--env-text-weak);
+}
+
+.history-dialog .history-file {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.history-dialog .history-file-status {
+  flex-shrink: 0;
+  min-width: 28px;
+  color: var(--env-accent);
 }
 
 /* 세션 지우기 확인 모달 — 외부 연동 관리와 같은 해저드 셸. 묻는 말 하나뿐이라 폭만 좁힌다. */
