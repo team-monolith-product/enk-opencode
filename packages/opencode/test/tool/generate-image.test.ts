@@ -115,7 +115,7 @@ describe("tool.generate_image", () => {
     expect(result.metadata).toMatchObject({
       status: "generated",
       path: path.join("ai-images", "cat.png"),
-      url: "ai-images/cat.png",
+      url: "/ai-images/cat.png",
       mime: "image/png",
       bytes: PNG.length,
     })
@@ -161,6 +161,44 @@ describe("tool.generate_image quota", () => {
   beforeEach(() => {
     process.env["ENK_HACKATHON_RAILS_URL"] = "http://rails/"
     process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
+    process.env["ENK_IMAGE_GENERATION_LIMIT"] = "10"
+  })
+
+  test("does nothing in a pod without an injected limit", async () => {
+    delete process.env["ENK_IMAGE_GENERATION_LIMIT"]
+    mockFetch(() => image())
+    const { result, saved } = await run({ prompt: "cat", name: "cat" })
+    expect(result.metadata.status).toBe("unavailable")
+    expect(requests).toHaveLength(0)
+    expect(saved).toBeUndefined()
+  })
+
+  test("confirms the slot once the image is saved", async () => {
+    mockFetch((url) => (url.startsWith(RAILS) ? quota(201, { limit: 10, used: 1, remaining: 9 }) : image()))
+    await run({ prompt: "cat", name: "cat" })
+    expect(calls("PATCH").map((r) => r.url)).toEqual([`${RAILS}/call_1`])
+    expect(calls("DELETE")).toHaveLength(0)
+  })
+
+  test("keeps the slot when OpenAI times out because it may already have billed", async () => {
+    mockFetch((url) => {
+      if (url.startsWith(RAILS)) return quota(201, { limit: 10, used: 1, remaining: 9 })
+      throw Object.assign(new Error("timed out"), { name: "TimeoutError" })
+    })
+    const { result, saved } = await run({ prompt: "cat", name: "cat" })
+    expect(result.metadata.status).toBe("timeout")
+    expect(calls("PATCH")).toHaveLength(1)
+    expect(calls("DELETE")).toHaveLength(0)
+    expect(saved).toBeUndefined()
+  })
+
+  test("finishes and saves the image even if the student stops the response", async () => {
+    mockFetch((url) => (url.startsWith(RAILS) ? quota(201, { limit: 10, used: 1, remaining: 9 }) : image()))
+    const controller = new AbortController()
+    controller.abort()
+    const { result, saved } = await run({ prompt: "cat", name: "cat" }, { ctx: context({ abort: controller.signal }) })
+    expect(result.metadata.status).toBe("generated")
+    expect(saved).toBeDefined()
   })
 
   test("reserves a slot with the call id before generating and reports what is left", async () => {
@@ -252,6 +290,35 @@ describe("tool.generate_image folder", () => {
     })
     expect(saved).toBeDefined()
     expect(result.output).toContain('"/ai-images/Hero-Cat.png"')
+  })
+
+  test("saves under static/ai-images for frameworks that serve static/", async () => {
+    mockFetch(image)
+    const { result } = await run(
+      { prompt: "cat", name: "cat" },
+      { setup: (dir) => mkdir(path.join(dir, "static"), { recursive: true }) },
+    )
+    expect(result.metadata).toMatchObject({
+      path: path.join("static", "ai-images", "cat.png"),
+      url: "/static/ai-images/cat.png",
+    })
+  })
+
+  test("saves into the public/ of a single nested app", async () => {
+    mockFetch(image)
+    const { result } = await run(
+      { prompt: "cat", name: "cat" },
+      {
+        setup: async (dir) => {
+          await mkdir(path.join(dir, "my-app", "public"), { recursive: true })
+          await Bun.write(path.join(dir, "my-app", "package.json"), "{}")
+        },
+      },
+    )
+    expect(result.metadata).toMatchObject({
+      path: path.join("my-app", "public", "ai-images", "cat.png"),
+      url: "/ai-images/cat.png",
+    })
   })
 
   test("never overwrites an earlier image", async () => {

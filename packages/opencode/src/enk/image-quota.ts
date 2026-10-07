@@ -74,6 +74,20 @@ export namespace ImageQuota {
     return { status: "reserved", quota }
   }
 
+  // 그림을 실제로 썼다고 rails 에 알린다. 확정되지 않은 예약은 rails 가 일정 시간 뒤 개수에서 뺀다
+  // (반납 실패·pod 재시작·응답 유실로 한도가 영구히 새지 않게).
+  async function confirm(callID: string) {
+    const rails = backend()
+    if (!rails) return
+    const res = await fetch(`${rails.url}/${encodeURIComponent(callID)}`, {
+      method: "PATCH",
+      headers: { Authorization: `token ${rails.token}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }).catch(() => undefined)
+    const quota = res?.ok ? await body(res) : undefined
+    if (quota) save(quota)
+  }
+
   async function release(callID: string) {
     const rails = backend()
     if (!rails) return
@@ -87,8 +101,8 @@ export namespace ImageQuota {
   }
 
   /**
-   * 한 장을 예약하고 run 을 실행한다. run 이 던지거나 kept 가 아닌 결과를 돌려주면 예약을 반납해
-   * 개수에서 빠지게 한다. 예약하지 못하면 run 을 부르지 않는다.
+   * 한 장을 예약하고 run 을 실행한다. kept 면 확정하고, run 이 던지거나 kept 가 아니면 반납해 개수에서 뺀다.
+   * 예약하지 못하면 run 을 부르지 않는다.
    */
   export async function withReservation<T>(
     callID: string,
@@ -100,7 +114,7 @@ export namespace ImageQuota {
       await release(callID)
       throw err
     })
-    if (!result.kept) await release(callID)
+    await (result.kept ? confirm(callID) : release(callID))
     return { status: "reserved", value: result.value }
   }
 

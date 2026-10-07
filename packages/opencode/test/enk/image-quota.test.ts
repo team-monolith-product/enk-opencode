@@ -69,7 +69,7 @@ describe("ImageQuota", () => {
     rails(() => json(201, { limit: 10, used: 4, remaining: 6 }))
     const result = await ImageQuota.withReservation("call_1", async (quota) => ({ kept: true, value: quota }))
     expect(result).toEqual({ status: "reserved", value: { limit: 10, used: 4, remaining: 6 } })
-    expect(calls).toEqual(["POST"])
+    expect(calls).toEqual(["POST", "PATCH"])
   })
 
   test("gives the slot back when the run does not keep it or throws", async () => {

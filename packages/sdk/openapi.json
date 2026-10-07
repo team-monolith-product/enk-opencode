@@ -4782,6 +4782,9 @@
                   "locale": {
                     "$ref": "#/components/schemas/PromptLocale"
                   },
+                  "imageGeneration": {
+                    "type": "boolean"
+                  },
                   "parts": {
                     "type": "array",
                     "items": {

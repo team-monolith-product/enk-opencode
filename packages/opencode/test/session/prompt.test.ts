@@ -189,7 +189,7 @@ describe("session.prompt missing file", () => {
 })
 
 describe("session.prompt image generation toggle", () => {
-  test("turns the toggle into this message's generate_image override", async () => {
+  test("allows generate_image only when the toggle is on, denying by default", async () => {
     await using tmp = await tmpdir({ git: true, config: { agent: { build: { model: "openai/gpt-5.2" } } } })
     await Instance.provide({
       directory: tmp.path,
@@ -211,7 +211,7 @@ describe("session.prompt image generation toggle", () => {
           throw new Error("expected user messages")
         expect(off.info.tools).toEqual({ generate_image: false })
         expect(on.info.tools).toEqual({ generate_image: true })
-        expect(unset.info.tools).toBeUndefined()
+        expect(unset.info.tools).toEqual({ generate_image: false })
 
         await Session.remove(session.id)
       },

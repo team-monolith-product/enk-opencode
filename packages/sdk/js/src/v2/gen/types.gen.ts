@@ -4483,6 +4483,7 @@ export type SessionCommandData = {
     command: string
     variant?: string
     locale?: PromptLocale
+    imageGeneration?: boolean
     parts?: Array<{
       id?: string
       type: "file"
