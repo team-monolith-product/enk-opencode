@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { ImageQuota } from "../../src/enk/image-quota"
 
-const ENV_KEYS = ["ENK_HACKATHON_RAILS_URL", "ENK_AI_USAGE_TOKEN", "ENK_IMAGE_GENERATION_LIMIT", "ENK_IMAGE_GENERATION_PHASE"]
+const ENV_KEYS = [
+  "ENK_HACKATHON_RAILS_URL",
+  "ENK_AI_USAGE_TOKEN",
+  "ENK_IMAGE_GENERATION_LIMIT",
+  "ENK_IMAGE_GENERATION_PHASE",
+]
 const originalEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]))
 const originalFetch = globalThis.fetch
 let calls: string[] = []
@@ -46,6 +51,11 @@ describe("ImageQuota", () => {
   test("answers from the injected limit before rails replies", () => {
     process.env["ENK_IMAGE_GENERATION_LIMIT"] = "10"
     expect(ImageQuota.state()).toEqual(known(10, 0))
+  })
+
+  test("is disabled when the injected limit is 0", () => {
+    process.env["ENK_IMAGE_GENERATION_LIMIT"] = "0"
+    expect(ImageQuota.state()).toEqual({ kind: "disabled" })
   })
 
   test("is unavailable when the hub injected no limit", () => {

@@ -15,6 +15,7 @@ export namespace ImageQuota {
   export type State =
     | { kind: "unlimited" } // rails 가 없는 로컬 개발
     | { kind: "unavailable" } // 한도가 주입되지 않은 pod(팀 작업 공간이 아님 등)
+    | { kind: "disabled" } // 한도 0: 이 해커톤에서는 이미지 생성을 쓰지 않는다
     | { kind: "known"; quota: Quota }
 
   export type Reservation =
@@ -52,6 +53,7 @@ export namespace ImageQuota {
     if (!backend()) return { kind: "unlimited" }
     const limit = Flag.ENK_IMAGE_GENERATION_LIMIT
     if (limit === undefined) return { kind: "unavailable" }
+    if (limit === 0) return { kind: "disabled" }
     const id = Flag.ENK_IMAGE_GENERATION_PHASE ?? ROW
     const row = Database.use((db) => db.select().from(ImageQuotaTable).where(eq(ImageQuotaTable.id, id)).get())
     const used = row?.used ?? 0
@@ -76,25 +78,13 @@ export namespace ImageQuota {
     return { status: "reserved", quota }
   }
 
-  // 그림을 실제로 썼다고 rails 에 알린다. 확정되지 않은 예약은 rails 가 일정 시간 뒤 개수에서 뺀다
+  // 그림을 썼으면 확정(PATCH)하고 아니면 반납(DELETE)한다. 확정되지 않은 예약은 rails 가 일정 시간 뒤 개수에서 뺀다
   // (반납 실패·pod 재시작·응답 유실로 한도가 영구히 새지 않게).
-  async function confirm(callID: string) {
+  async function settle(callID: string, method: "PATCH" | "DELETE") {
     const rails = backend()
     if (!rails) return
     const res = await fetch(`${rails.url}/${encodeURIComponent(callID)}`, {
-      method: "PATCH",
-      headers: { Authorization: `token ${rails.token}` },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    }).catch(() => undefined)
-    const quota = res?.ok ? await body(res) : undefined
-    if (quota) save(quota)
-  }
-
-  async function release(callID: string) {
-    const rails = backend()
-    if (!rails) return
-    const res = await fetch(`${rails.url}/${encodeURIComponent(callID)}`, {
-      method: "DELETE",
+      method,
       headers: { Authorization: `token ${rails.token}` },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     }).catch(() => undefined)
@@ -113,10 +103,10 @@ export namespace ImageQuota {
     const reservation = await reserve(callID)
     if (reservation.status !== "reserved") return reservation
     const result = await run(reservation.quota).catch(async (err) => {
-      await release(callID)
+      await settle(callID, "DELETE")
       throw err
     })
-    await (result.kept ? confirm(callID) : release(callID))
+    await settle(callID, result.kept ? "PATCH" : "DELETE")
     return { status: "reserved", value: result.value }
   }
 

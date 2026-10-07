@@ -23,9 +23,8 @@ export const ImageQuotaRoutes = lazy(() =>
     async (c) => {
       if (!GenerateImage.available()) return c.json({ enabled: false })
       const state = ImageQuota.state()
-      if (state.kind === "unavailable") return c.json({ enabled: false })
-      if (state.kind === "unlimited") return c.json({ enabled: true })
-      return c.json({ enabled: state.quota.limit > 0, quota: state.quota })
+      if (state.kind === "known") return c.json({ enabled: true, quota: state.quota })
+      return c.json({ enabled: state.kind === "unlimited" })
     },
   ),
 )
