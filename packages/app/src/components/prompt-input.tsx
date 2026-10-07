@@ -1,15 +1,6 @@
 import { useFilteredList } from "@opencode-ai/ui/hooks"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
-import {
-  createEffect,
-  on,
-  Component,
-  Show,
-  onCleanup,
-  onMount,
-  createMemo,
-  createSignal,
-} from "solid-js"
+import { createEffect, on, Component, Show, onCleanup, onMount, createMemo, createSignal } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { Binary } from "@opencode-ai/util/binary"
@@ -2172,7 +2163,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       >
         <PromptDragOverlay
           type={store.draggingType}
-          label={language.t(store.draggingType === "@mention" ? "prompt.dropzone.file.label" : "prompt.dropzone.label")}
+          label={language.t(
+            store.draggingType === "@mention" ? "prompt.dropzone.file.label" : "prompt.dropzone.label",
+          )}
         />
         <PromptContextItems
           items={contextItems()}
@@ -2279,7 +2272,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               maxLength={MAX_PROMPT_DOC_CHARS}
               shake={countShake()}
               submitDisabled={
-                readonly || (submitAction() === "send" && (!hasDraft() || doc.uploading() || doc.missing().length > 0))
+                readonly ||
+                (submitAction() === "send" && (!hasDraft() || doc.uploading() || doc.missing().length > 0))
               }
               tip={tip()}
               onExit={exitDoc}
@@ -2328,7 +2322,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     data-action="prompt-submit"
                     type="submit"
                     disabled={
-                      docMode() === "shell" || (docMode() === "normal" && !hasDraft() && submitAction() === "send")
+                      docMode() === "shell" ||
+                      (docMode() === "normal" && !hasDraft() && submitAction() === "send")
                     }
                     tabIndex={docMode() === "shell" ? -1 : undefined}
                     icon={submitIcon()}

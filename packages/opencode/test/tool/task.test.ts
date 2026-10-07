@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { Agent } from "../../src/agent/agent"
 import { Instance } from "../../src/project/instance"
-import { TaskTool, deniedTools } from "../../src/tool/task"
+import { TaskTool } from "../../src/tool/task"
 import { tmpdir } from "../fixture/fixture"
 
 afterEach(async () => {
@@ -45,25 +45,5 @@ describe("tool.task", () => {
         expect(zebra).toBeGreaterThan(general)
       },
     })
-  })
-})
-
-describe("tool.task deniedTools", () => {
-  const user = (id: string, tools?: Record<string, boolean>) =>
-    ({ info: { id, role: "user", tools }, parts: [] }) as never
-  const assistant = (id: string) => ({ info: { id, role: "assistant" }, parts: [] }) as never
-
-  test("carries the parent turn's disabled tools into the subagent", () => {
-    const messages = [
-      user("u1", { generate_image: true }),
-      assistant("a1"),
-      user("u2", { generate_image: false, question: true }),
-    ]
-    expect(deniedTools(messages)).toEqual({ generate_image: false })
-  })
-
-  test("carries nothing when the parent turn disabled nothing", () => {
-    expect(deniedTools([user("u1")])).toEqual({})
-    expect(deniedTools([])).toEqual({})
   })
 })

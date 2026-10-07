@@ -1,4 +1,4 @@
-import { Database, desc, eq } from "@/storage/db"
+import { Database, eq } from "@/storage/db"
 import { Flag } from "@/flag/flag"
 import { ImageQuotaTable } from "./image-quota.sql"
 
@@ -52,12 +52,8 @@ export namespace ImageQuota {
     if (!backend()) return { kind: "unlimited" }
     const limit = Flag.ENK_IMAGE_GENERATION_LIMIT
     if (limit === undefined) return { kind: "unavailable" }
-    const phase = Flag.ENK_IMAGE_GENERATION_PHASE
-    const row = Database.use((db) =>
-      phase
-        ? db.select().from(ImageQuotaTable).where(eq(ImageQuotaTable.id, phase)).get()
-        : db.select().from(ImageQuotaTable).orderBy(desc(ImageQuotaTable.time_updated)).get(),
-    )
+    const id = Flag.ENK_IMAGE_GENERATION_PHASE ?? ROW
+    const row = Database.use((db) => db.select().from(ImageQuotaTable).where(eq(ImageQuotaTable.id, id)).get())
     const used = row?.used ?? 0
     return { kind: "known", quota: { limit, used, remaining: Math.max(limit - used, 0) } }
   }
