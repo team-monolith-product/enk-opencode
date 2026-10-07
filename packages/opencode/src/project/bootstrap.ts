@@ -14,7 +14,6 @@ import { Log } from "@/util/log"
 import { ShareNext } from "@/share/share-next"
 import { ensureSession } from "../session/ensure"
 import { HistorySync } from "../enk/history-sync"
-import { ImageQuota } from "../enk/image-quota"
 
 export async function InstanceBootstrap() {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
@@ -27,7 +26,6 @@ export async function InstanceBootstrap() {
   Vcs.init()
   Snapshot.init()
   HistorySync.init()
-  ImageQuota.init()
   Doc.recover()
 
   Bus.subscribe(Command.Event.Executed, async (payload) => {

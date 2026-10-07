@@ -106,6 +106,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         model: `${input.draft.model.providerID}/${input.draft.model.modelID}`,
         variant: input.draft.variant,
         locale: input.draft.locale,
+        imageGeneration: input.draft.imageGeneration,
         parts: images.map((attachment) => ({
           id: Identifier.ascending("part"),
           type: "file" as const,
@@ -495,6 +496,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             model: `${model.providerID}/${model.modelID}`,
             variant,
             locale,
+            imageGeneration: input.imageGeneration?.(),
             parts: files.map((attachment) => ({
               id: Identifier.ascending("part"),
               type: "file" as const,

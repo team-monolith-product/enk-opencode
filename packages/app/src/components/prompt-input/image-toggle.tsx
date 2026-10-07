@@ -48,8 +48,8 @@ export function createImageGeneration(input: { sdk: ReturnType<typeof useSDK>; w
   }
 
   return {
-    /** 이번 메시지에 이미지 생성을 허용할지. 기능이 없는 곳이면 보내지 않는다. */
-    request: () => (status()?.enabled === false ? undefined : isOn()),
+    /** 이번 메시지에 이미지 생성을 허용할지. 쓸 수 없는 곳이면 꺼서 보내 모델에게 도구가 보이지 않게 한다. */
+    request: () => status()?.enabled !== false && isOn(),
     Toggle: () => (
       <Show when={status()?.enabled}>
         <ImageToggle enabled={isOn()} quota={status()?.quota} disabled={exhausted()} onToggle={toggle} />

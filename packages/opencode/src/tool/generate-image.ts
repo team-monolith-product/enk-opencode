@@ -1,6 +1,7 @@
 import z from "zod"
 import path from "path"
 import { randomUUID } from "node:crypto"
+import { readdir } from "node:fs/promises"
 import { Tool } from "./tool"
 import DESCRIPTION from "./generate-image.txt"
 import { Bus } from "../bus"
@@ -28,7 +29,7 @@ export namespace GenerateImage {
     input_tokens_details?: { text_tokens?: number; image_tokens?: number }
   }
 
-  export type Status = "generated" | "blocked" | "limited" | "disabled" | "unavailable"
+  export type Status = "generated" | "blocked" | "timeout" | "limited" | "disabled" | "unavailable"
 
   export type Metadata = {
     status: Status
@@ -65,17 +66,42 @@ export namespace GenerateImage {
     return endpoint() !== undefined
   }
 
-  // AI 가 만든 이미지는 한 폴더에 모은다. public/ 이 있는 프레임워크(Vite·Next 등)는 그 아래에 두어야
-  // 브라우저가 /ai-images/... 로 바로 불러온다.
+  // AI 가 만든 이미지는 한 폴더에 모은다. 결과물이 정적 파일을 서빙하는 폴더 아래에 두고, 브라우저가 어느 페이지에서든
+  // 불러올 수 있게 / 로 시작하는 경로를 돌려준다.
+  async function servedRoot() {
+    const dir = Instance.directory
+    if (await Filesystem.isDir(path.join(dir, "public")))
+      return { folder: path.join("public", FOLDER), url: `/${FOLDER}` }
+    if (await Filesystem.isDir(path.join(dir, "static")))
+      return { folder: path.join("static", FOLDER), url: `/static/${FOLDER}` }
+    const apps = (await readdir(dir, { withFileTypes: true }).catch(() => []))
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules")
+      .map((entry) => entry.name)
+    const nested = []
+    for (const app of apps)
+      if (
+        (await Filesystem.exists(path.join(dir, app, "package.json"))) &&
+        (await Filesystem.isDir(path.join(dir, app, "public")))
+      )
+        nested.push(app)
+    if (nested.length === 1) return { folder: path.join(nested[0]!, "public", FOLDER), url: `/${FOLDER}` }
+    return { folder: FOLDER, url: `/${FOLDER}` }
+  }
+
+  // 같은 이름으로 동시에 그려도 서로 덮어쓰지 않게, 저장이 끝날 때까지 고른 경로를 잡아 둔다.
+  const claimed = new Set<string>()
+
   export async function location(name: string, ext: Extension) {
-    const served = await Filesystem.isDir(path.join(Instance.directory, "public"))
-    const folder = served ? path.join("public", FOLDER) : FOLDER
+    const root = await servedRoot()
     const stem = slug(name)
     for (let n = 1; ; n++) {
       const file = `${n === 1 ? stem : `${stem}-${n}`}${ext}`
-      const relative = path.join(folder, file)
-      if (await Filesystem.exists(path.join(Instance.directory, relative))) continue
-      return { relative, url: served ? `/${FOLDER}/${file}` : `${FOLDER}/${file}` }
+      const relative = path.join(root.folder, file)
+      const absolute = path.join(Instance.directory, relative)
+      if (await Filesystem.exists(absolute)) continue
+      if (claimed.has(absolute)) continue
+      claimed.add(absolute)
+      return { relative, url: `${root.url}/${file}`, [Symbol.dispose]: () => claimed.delete(absolute) }
     }
   }
 
@@ -103,10 +129,16 @@ export namespace GenerateImage {
     format: (typeof FORMATS)[Extension]
   }
 
-  export type Outcome = { kind: "image"; bytes: Buffer; usage?: Usage } | { kind: "blocked"; reason?: string }
+  export type Outcome =
+    | { kind: "image"; bytes: Buffer; usage?: Usage }
+    | { kind: "blocked"; reason?: string }
+    | { kind: "timeout" }
 
-  /** OpenAI Images 호출. 안전 정책 거절만 결과로 돌려주고 나머지 실패는 던진다. */
-  export async function request(input: Request, signal: AbortSignal): Promise<Outcome> {
+  /**
+   * OpenAI Images 호출. 학생이 응답을 멈춰도 끊지 않는다 — 이미 청구된 그림을 버리지 않고 저장·과금·개수에 반영한다.
+   * 안전 정책 거절과 시간 초과만 결과로 돌려주고 나머지 실패는 던진다.
+   */
+  export async function request(input: Request): Promise<Outcome> {
     const api = endpoint()
     if (!api) throw new Error("이미지 생성이 설정되지 않은 환경입니다 (OPENAI_BASE_URL / OPENAI_API_KEY 없음).")
     const res = await fetch(api.url, {
@@ -121,8 +153,12 @@ export namespace GenerateImage {
         background: input.background,
         output_format: input.format,
       }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }).catch((err) => {
+      if (err instanceof Error && err.name === "TimeoutError") return undefined
+      throw err
     })
+    if (!res) return { kind: "timeout" }
     const body = (await res.json().catch(() => undefined)) as
       | { data?: { b64_json?: string }[]; usage?: Usage; error?: { code?: string; message?: string } }
       | undefined
@@ -145,6 +181,8 @@ export namespace GenerateImage {
       limited: `이 팀이 만들 수 있는 이미지 ${quota?.limit}장을 모두 사용했습니다. ${REFUSAL}`,
       blocked:
         "안전 정책에 걸려 이미지를 만들지 못했습니다(이번 시도는 개수에서 빠집니다). 학생에게 짧게 알리고, 실존 인물·상표·폭력적 표현을 뺀 오리지널 디자인으로 프롬프트를 바꿔 제안하세요.",
+      timeout:
+        "이미지 생성이 너무 오래 걸려 그림을 받지 못했습니다. 생성 비용이 이미 나갔을 수 있어 이번 시도는 개수에 남습니다. 같은 그림을 바로 다시 요청하지 말고 학생에게 짧게 알리세요.",
     }[status]
   }
 }
@@ -166,16 +204,9 @@ export const GenerateImageTool = Tool.define("generate_image", {
     if (params.background === "transparent" && format === "jpeg")
       throw new Error("투명 배경은 png 또는 webp 에서만 가능합니다. format 을 바꿔 다시 호출하세요.")
 
-    const { relative, url } = await GenerateImage.location(params.name, ext)
+    using spot = await GenerateImage.location(params.name, ext)
+    const { relative, url } = spot
     const filepath = path.join(Instance.directory, relative)
-    await assertExternalDirectory(ctx, filepath)
-    await ctx.ask({
-      permission: "edit",
-      patterns: [path.relative(Instance.worktree, filepath)],
-      always: ["*"],
-      metadata: { filepath },
-    })
-
     const base = {
       path: relative,
       url,
@@ -190,16 +221,23 @@ export const GenerateImageTool = Tool.define("generate_image", {
       metadata: { ...base, ...extra, status, ms: Date.now() - startedAt } satisfies GenerateImage.Metadata,
     })
 
+    if (ImageQuota.state().kind === "unavailable") return done("unavailable", GenerateImage.output("unavailable"))
+
+    await assertExternalDirectory(ctx, filepath)
+    await ctx.ask({
+      permission: "edit",
+      patterns: [path.relative(Instance.worktree, filepath)],
+      always: ["*"],
+      metadata: { filepath },
+    })
+
     const callID = ctx.callID || randomUUID()
     const result = await ImageQuota.withReservation(callID, async (quota) => {
       ctx.metadata({ title: relative, metadata: { ...base, status: "generating" } })
-      const outcome = await GenerateImage.request({ ...base, format }, ctx.abort)
-      if (outcome.kind === "blocked") {
-        return {
-          kept: false,
-          value: done("blocked", GenerateImage.output("blocked"), { reason: outcome.reason }),
-        }
-      }
+      const outcome = await GenerateImage.request({ ...base, format })
+      if (outcome.kind === "blocked")
+        return { kept: false, value: done("blocked", GenerateImage.output("blocked"), { reason: outcome.reason }) }
+      if (outcome.kind === "timeout") return { kept: true, value: done("timeout", GenerateImage.output("timeout")) }
 
       AiUsage.reportTool({
         cwd: Instance.directory,
@@ -219,7 +257,7 @@ export const GenerateImageTool = Tool.define("generate_image", {
         kept: true,
         value: done(
           "generated",
-          `이미지를 ${relative} 에 저장했습니다 (${params.size}, ${format}). 파일을 복사하거나 옮기지 말고, 웹 페이지 코드에서는 "${url}" 경로로 그대로 참조하세요. 이미지는 학생 채팅 화면에 이미 표시되었습니다.${left}`,
+          `이미지를 ${relative} 에 저장했습니다 (${params.size}, ${format}). 웹 페이지에서는 "${url}" 경로로 참조하세요. 파일은 복사하지 말고 이 한 장을 쓰되, 결과물이 이 폴더를 서빙하지 않으면 서빙되는 폴더로 옮기고 경로를 맞추세요. 이미지는 채팅 화면의 도구 카드에 표시됩니다.${left}`,
           { mime: GenerateImage.mime(format), bytes: outcome.bytes.length, quota },
         ),
       }

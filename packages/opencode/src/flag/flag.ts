@@ -72,6 +72,8 @@ export namespace Flag {
   export declare const ENK_AI_FALLBACK_RETRIES: number
   // Team image generation limit of the hackathon, injected by the hub at spawn.
   export declare const ENK_IMAGE_GENERATION_LIMIT: number | undefined
+  // Hackathon phase (tutorial | main_event) the hub spawned this pod in; the limit is counted per phase.
+  export declare const ENK_IMAGE_GENERATION_PHASE: string | undefined
   // Once a session has fallen back this many times it stops granting the primary model any
   // retries: the primary still gets one attempt per turn, so a recovered provider is picked
   // back up automatically, but a dead one costs a single failed round trip instead of N.
@@ -253,6 +255,14 @@ Object.defineProperty(Flag, "ENK_AI_FALLBACK_MODELS", {
 Object.defineProperty(Flag, "ENK_IMAGE_GENERATION_LIMIT", {
   get() {
     return Flag.nonNegativeNumber("ENK_IMAGE_GENERATION_LIMIT")
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_IMAGE_GENERATION_PHASE", {
+  get() {
+    return process.env["ENK_IMAGE_GENERATION_PHASE"] || undefined
   },
   enumerable: true,
   configurable: false,

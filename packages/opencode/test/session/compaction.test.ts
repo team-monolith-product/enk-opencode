@@ -751,6 +751,47 @@ describe("session.compaction.process", () => {
     })
   })
 
+  test("the continue prompt keeps the user's tool settings", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        spyOn(ProviderModule.Provider, "getModel").mockResolvedValue(createModel({ context: 100_000, output: 32_000 }))
+
+        const session = await Session.create({})
+        const msg = await Session.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          time: { created: Date.now() },
+          tools: { generate_image: false },
+        })
+        await Session.updatePart({
+          id: PartID.ascending(),
+          messageID: msg.id,
+          sessionID: session.id,
+          type: "text",
+          text: "hello",
+        })
+        const rt = runtime("continue")
+        try {
+          const msgs = await Session.messages({ sessionID: session.id })
+          await rt.runPromise(
+            SessionCompaction.Service.use((svc) =>
+              svc.process({ parentID: msg.id, messages: msgs, sessionID: session.id, auto: true }),
+            ),
+          )
+          const last = (await Session.messages({ sessionID: session.id })).at(-1)
+          expect(last?.info.role === "user" ? last.info.tools : undefined).toEqual({ generate_image: false })
+        } finally {
+          await rt.dispose()
+        }
+      },
+    })
+  })
+
   test("replays the prior user turn on overflow when earlier context exists", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

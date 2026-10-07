@@ -3517,6 +3517,7 @@ export class Session2 extends HeyApiClient {
       command?: string
       variant?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       parts?: Array<{
         id?: string
         type: "file"
@@ -3544,6 +3545,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
             { in: "body", key: "locale" },
+            { in: "body", key: "imageGeneration" },
             { in: "body", key: "parts" },
           ],
         },

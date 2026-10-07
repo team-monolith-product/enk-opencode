@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { ImageQuota } from "../../src/enk/image-quota"
 
-const ENV_KEYS = ["ENK_HACKATHON_RAILS_URL", "ENK_AI_USAGE_TOKEN", "ENK_IMAGE_GENERATION_LIMIT"]
+const ENV_KEYS = ["ENK_HACKATHON_RAILS_URL", "ENK_AI_USAGE_TOKEN", "ENK_IMAGE_GENERATION_LIMIT", "ENK_IMAGE_GENERATION_PHASE"]
 const originalEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]))
 const originalFetch = globalThis.fetch
 let calls: string[] = []
@@ -25,6 +25,7 @@ beforeEach(() => {
   process.env["ENK_HACKATHON_RAILS_URL"] = "http://rails/"
   process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
   delete process.env["ENK_IMAGE_GENERATION_LIMIT"]
+  delete process.env["ENK_IMAGE_GENERATION_PHASE"]
   ImageQuota.reset()
 })
 
@@ -47,40 +48,41 @@ describe("ImageQuota", () => {
     expect(ImageQuota.state()).toEqual(known(10, 0))
   })
 
-  test("is unknown until synced, then keeps what rails returns", async () => {
-    rails(() => json(200, { limit: 10, used: 7, remaining: 3 }))
-    expect(ImageQuota.state()).toEqual({ kind: "unknown" })
-    expect(await ImageQuota.sync()).toEqual(known(10, 7))
-    expect(ImageQuota.state()).toEqual(known(10, 7))
+  test("is unavailable when the hub injected no limit", () => {
+    expect(ImageQuota.state()).toEqual({ kind: "unavailable" })
   })
 
-  test("the injected limit wins over a stored one", async () => {
-    rails(() => json(200, { limit: 10, used: 4, remaining: 6 }))
-    await ImageQuota.sync()
-    process.env["ENK_IMAGE_GENERATION_LIMIT"] = "20"
-    expect(ImageQuota.state()).toEqual(known(20, 4))
+  test("never asks rails for the limit", () => {
+    process.env["ENK_IMAGE_GENERATION_LIMIT"] = "10"
+    rails(() => json(200, { limit: 99, used: 0, remaining: 99 }))
+    expect(ImageQuota.state()).toEqual(known(10, 0))
+    expect(calls).toEqual([])
   })
 
-  test("init syncs once in the background", async () => {
-    rails(() => json(200, { limit: 10, used: 1, remaining: 9 }))
-    ImageQuota.init()
-    ImageQuota.init()
-    await Bun.sleep(10)
-    expect(calls).toEqual(["GET"])
-    expect(ImageQuota.state()).toEqual(known(10, 1))
+  test("uses the injected limit with the used count from rails responses", async () => {
+    process.env["ENK_IMAGE_GENERATION_LIMIT"] = "10"
+    rails(() => json(201, { limit: 20, used: 4, remaining: 16 }))
+    await ImageQuota.withReservation("call_1", async () => ({ kept: true, value: undefined }))
+    expect(ImageQuota.state()).toEqual(known(10, 4))
   })
 
-  test("reports non-team workspaces as unavailable", async () => {
-    rails(() => json(403, {}))
-    expect(await ImageQuota.sync()).toEqual({ kind: "unavailable" })
+  test("counts the tutorial and the main event apart", async () => {
+    process.env["ENK_IMAGE_GENERATION_LIMIT"] = "10"
+    rails(() => json(201, { limit: 10, used: 10, remaining: 0, phase: "tutorial" }))
+    await ImageQuota.withReservation("call_1", async () => ({ kept: true, value: undefined }))
+
+    process.env["ENK_IMAGE_GENERATION_PHASE"] = "main_event"
+    expect(ImageQuota.state()).toEqual(known(10, 0))
+
+    process.env["ENK_IMAGE_GENERATION_PHASE"] = "tutorial"
+    expect(ImageQuota.state()).toEqual(known(10, 10))
   })
 
   test("keeps a reservation the run wants to keep", async () => {
     rails(() => json(201, { limit: 10, used: 4, remaining: 6 }))
     const result = await ImageQuota.withReservation("call_1", async (quota) => ({ kept: true, value: quota }))
     expect(result).toEqual({ status: "reserved", value: { limit: 10, used: 4, remaining: 6 } })
-    expect(calls).toEqual(["POST"])
-    expect(ImageQuota.state()).toEqual(known(10, 4))
+    expect(calls).toEqual(["POST", "PATCH"])
   })
 
   test("gives the slot back when the run does not keep it or throws", async () => {
@@ -96,7 +98,6 @@ describe("ImageQuota", () => {
       }),
     ).rejects.toThrow("boom")
     expect(calls).toEqual(["POST", "DELETE", "POST", "DELETE"])
-    expect(ImageQuota.state()).toEqual(known(10, 3))
   })
 
   test("does not run when the team used everything", async () => {
