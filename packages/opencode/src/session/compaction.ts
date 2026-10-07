@@ -140,6 +140,7 @@ export namespace SessionCompaction {
       model: { providerID: ProviderID; modelID: ModelID }
       auto: boolean
       overflow?: boolean
+      tools?: Record<string, boolean>
     }) => Effect.Effect<void>
   }
 
@@ -546,6 +547,7 @@ When constructing the summary, try to stick to this template:
         model: { providerID: ProviderID; modelID: ModelID }
         auto: boolean
         overflow?: boolean
+        tools?: Record<string, boolean>
       }) {
         const msg = yield* session.updateMessage({
           id: MessageID.ascending(),
@@ -554,6 +556,7 @@ When constructing the summary, try to stick to this template:
           sessionID: input.sessionID,
           agent: input.agent,
           time: { created: Date.now() },
+          tools: input.tools,
         })
         yield* session.updatePart({
           id: PartID.ascending(),
@@ -615,6 +618,7 @@ When constructing the summary, try to stick to this template:
       model: z.object({ providerID: ProviderID.zod, modelID: ModelID.zod }),
       auto: z.boolean(),
       overflow: z.boolean().optional(),
+      tools: z.record(z.string(), z.boolean()).optional(),
     }),
     (input) => runPromise((svc) => svc.create(input)),
   )

@@ -496,6 +496,36 @@ it.effect("loop answers a new user message whose id predates the last assistant"
   ),
 )
 
+it.effect("auto compaction keeps the student's image toggle for the continue turn", () =>
+  provideTmpdirInstance(
+    () =>
+      Effect.gen(function* () {
+        const { test, prompt, chat } = yield* boot()
+        const session = yield* Session.Service
+        const huge = usage(200_000, 1)
+        yield* test.reply(
+          start(),
+          textStart(),
+          textDelta("t", "working"),
+          textEnd(),
+          { ...finishToolCallsStep(), usage: huge } as LLM.Event,
+          { ...finishToolCalls(), totalUsage: huge } as LLM.Event,
+        )
+        yield* test.reply(...replyStop("summary"))
+        yield* test.reply(...replyStop("continued"))
+        const msg = yield* user(chat.id, "hello")
+        yield* session.updateMessage({ ...msg, tools: { generate_image: false } })
+
+        yield* prompt.loop({ sessionID: chat.id })
+
+        const inputs = yield* test.inputs
+        expect(inputs).toHaveLength(3)
+        expect(inputs[2].user.tools).toEqual({ generate_image: false })
+      }),
+    { git: true, config: cfg },
+  ),
+)
+
 it.effect("loop calls LLM and returns assistant message", () =>
   provideTmpdirInstance(
     (dir) =>
