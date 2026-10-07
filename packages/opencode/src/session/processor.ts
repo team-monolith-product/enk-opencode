@@ -314,7 +314,7 @@ export namespace SessionProcessor {
                   at: Date.now(),
                 })
               } catch {}
-              TokenQuota.consumeStep(usage.tokens)
+              TokenQuota.consume(AiUsage.totalTokens(usage.tokens))
               ctx.stepIndex++
               yield* session.updatePart({
                 id: PartID.ascending(),

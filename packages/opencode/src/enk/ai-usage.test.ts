@@ -152,3 +152,14 @@ describe("AiUsage.remember (bounded idempotency-key set)", () => {
     expect([...set]).toEqual(["d", "e", "f"])
   })
 })
+
+describe("AiUsage.totalTokens", () => {
+  test("sums every count the rails tokens column stores", () => {
+    expect(AiUsage.totalTokens({ input: 100, output: 200, reasoning: 10, cache: { read: 30, write: 5 } })).toBe(345)
+  })
+
+  test("treats missing counts as zero", () => {
+    expect(AiUsage.totalTokens({ input: 7 })).toBe(7)
+    expect(AiUsage.totalTokens({})).toBe(0)
+  })
+})

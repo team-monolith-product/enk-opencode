@@ -1,5 +1,6 @@
+import z from "zod"
 import { Log } from "@/util/log"
-import type { Locale } from "./locale"
+import { Locale } from "./locale"
 
 // 팀당 주·월 AI 토큰 한도는 rails 가 센다(hackathons.weekly_token_limit / monthly_token_limit). 모델을 부르기 전에
 // 남은 양을 묻고, 바닥나면 턴을 시작하지 않는다. rails 에 닿지 못하면 막지 않는다 — 한도는 비용 가드지만 채팅은
@@ -13,8 +14,20 @@ export namespace TokenQuota {
   const CACHE_TTL_MS = 30_000
   const TIME_ZONE = "Asia/Seoul"
 
-  export type Window = { limit: number; used: number; remaining: number; resets_at: string }
-  export type Quota = { active: boolean; exhausted: boolean; weekly: Window | null; monthly: Window | null }
+  export const Window = z.object({
+    limit: z.number(),
+    used: z.number(),
+    remaining: z.number(),
+    resets_at: z.string(),
+  })
+  export type Window = z.infer<typeof Window>
+  export const Quota = z.object({
+    active: z.boolean(),
+    exhausted: z.boolean(),
+    weekly: Window.nullable(),
+    monthly: Window.nullable(),
+  })
+  export type Quota = z.infer<typeof Quota>
   export type Verdict = { status: "allowed" } | { status: "blocked"; quota: Quota }
 
   const INACTIVE: Quota = { active: false, exhausted: false, weekly: null, monthly: null }
@@ -32,17 +45,8 @@ export namespace TokenQuota {
     cache = undefined
   }
 
-  export function windows(quota: Quota) {
-    return [quota.weekly, quota.monthly].filter((window): window is Window => window !== null)
-  }
-
-  export function exhausted(quota: Quota) {
-    return windows(quota).some((window) => window.remaining <= 0)
-  }
-
   export function verdict(quota: Quota): Verdict {
-    if (quota.active && exhausted(quota)) return { status: "blocked", quota }
-    return { status: "allowed" }
+    return quota.exhausted ? { status: "blocked", quota } : { status: "allowed" }
   }
 
   // 로컬이거나 팀 작업 공간이 아니면 제한 없음. 팀 토큰이 아니면 rails 가 403 을 주므로 같은 취급이다.
@@ -50,8 +54,7 @@ export namespace TokenQuota {
     const rails = backend()
     if (!rails) return { status: "allowed" }
     if (!cache || now - cache.at >= CACHE_TTL_MS) {
-      const fetched = await fetchQuota(rails)
-      cache = { quota: fetched ?? cache?.quota ?? INACTIVE, at: now }
+      cache = { quota: (await fetchQuota(rails)) ?? cache?.quota ?? INACTIVE, at: now }
     }
     return verdict(cache.quota)
   }
@@ -70,74 +73,78 @@ export namespace TokenQuota {
       log.warn("token quota request failed, allowing", { status: res.status })
       return
     }
-    const quota = (await res.json().catch(() => undefined)) as Quota | undefined
-    if (!quota || typeof quota.active !== "boolean") {
+    const parsed = Quota.safeParse(await res.json().catch(() => undefined))
+    if (!parsed.success) {
       log.warn("token quota malformed, allowing")
       return
     }
-    return quota
+    return parsed.data
   }
 
-  // 한 스텝의 토큰을 캐시에서 바로 깎는다. rails 적재는 큐를 타서 늦게 반영되므로 pod 안의 소비는 즉시 반영해야
+  // 한 스텝의 토큰을 깎은 새 quota. rails 적재는 큐를 타서 늦게 반영되므로 pod 안의 소비는 즉시 반영해야
   // 같은 턴 안에서도 한도를 지킨다. 다음 재조회 때 rails 값으로 덮인다.
+  export function spend(quota: Quota, tokens: number): Quota {
+    const spent = (window: Window | null) => {
+      if (!window) return null
+      const used = window.used + tokens
+      return { ...window, used, remaining: Math.max(window.limit - used, 0) }
+    }
+    const weekly = spent(quota.weekly)
+    const monthly = spent(quota.monthly)
+    const exhausted = quota.active && [weekly, monthly].some((window) => window !== null && window.remaining <= 0)
+    return { ...quota, weekly, monthly, exhausted }
+  }
+
   export function consume(tokens: number) {
     if (!cache || tokens <= 0) return
-    for (const window of windows(cache.quota)) {
-      window.used += tokens
-      window.remaining = Math.max(window.limit - window.used, 0)
-    }
-    cache.quota.exhausted = cache.quota.active && exhausted(cache.quota)
-  }
-
-  export function consumeStep(tokens: {
-    input?: number
-    output?: number
-    reasoning?: number
-    cache?: { read?: number; write?: number }
-  }) {
-    consume(
-      (tokens.input ?? 0) +
-        (tokens.output ?? 0) +
-        (tokens.reasoning ?? 0) +
-        (tokens.cache?.read ?? 0) +
-        (tokens.cache?.write ?? 0),
-    )
+    cache = { ...cache, quota: spend(cache.quota, tokens) }
   }
 
   // 바닥난 창 중 가장 늦게 열리는 창을 안내한다 — 주간이 먼저 풀려도 월간이 막혀 있으면 그때까지 못 쓴다.
   export function blocking(quota: Quota) {
-    const candidates = windows(quota).filter((window) => window.remaining <= 0)
-    return candidates.sort((a, b) => Date.parse(b.resets_at) - Date.parse(a.resets_at))[0]
+    return [quota.weekly, quota.monthly]
+      .filter((window): window is Window => window !== null && window.remaining <= 0)
+      .sort((a, b) => Date.parse(b.resets_at) - Date.parse(a.resets_at))[0]
   }
 
-  export function message(quota: Quota, locale?: Locale.Value) {
+  type Copy = {
+    tag: string
+    month: Intl.DateTimeFormatOptions["month"]
+    weekly: string
+    monthly: string
+    text: (label: string, limit: string, at: string) => string
+  }
+
+  const COPY: Record<Locale.Value, Copy> = {
+    ko: {
+      tag: "ko-KR",
+      month: "long",
+      weekly: "이번 주",
+      monthly: "이번 달",
+      text: (label, limit, at) => `${label} AI 토큰 한도(${limit})를 모두 사용했습니다. ${at}에 다시 사용할 수 있어요.`,
+    },
+    en: {
+      tag: "en-US",
+      month: "short",
+      weekly: "This week's",
+      monthly: "This month's",
+      text: (label, limit, at) => `${label} AI token limit (${limit}) has been used up. It resets at ${at} (KST).`,
+    },
+  }
+
+  export function message(quota: Quota, locale: Locale.Value = Locale.DEFAULT) {
     const window = blocking(quota)
     if (!window) return ""
-    const period = window === quota.weekly ? "weekly" : "monthly"
-    const limit = window.limit.toLocaleString("en-US")
-    if (locale === "en") {
-      const at = new Intl.DateTimeFormat("en-US", {
-        timeZone: TIME_ZONE,
-        month: "short",
-        day: "numeric",
-        weekday: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(new Date(window.resets_at))
-      const label = period === "weekly" ? "This week's" : "This month's"
-      return `${label} AI token limit (${limit}) has been used up. It resets at ${at} (KST).`
-    }
-    const at = new Intl.DateTimeFormat("ko-KR", {
+    const copy = COPY[locale]
+    const at = new Intl.DateTimeFormat(copy.tag, {
       timeZone: TIME_ZONE,
-      month: "long",
+      month: copy.month,
       day: "numeric",
       weekday: "short",
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
     }).format(new Date(window.resets_at))
-    const label = period === "weekly" ? "이번 주" : "이번 달"
-    return `${label} AI 토큰 한도(${limit})를 모두 사용했습니다. ${at}에 다시 사용할 수 있어요.`
+    return copy.text(window === quota.weekly ? copy.weekly : copy.monthly, window.limit.toLocaleString("en-US"), at)
   }
 }

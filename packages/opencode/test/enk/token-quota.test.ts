@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { AiUsage } from "../../src/enk/ai-usage"
 import { TokenQuota } from "../../src/enk/token-quota"
 import { Log } from "../../src/util/log"
 
@@ -121,9 +122,9 @@ describe("TokenQuota.consume", () => {
       Response.json(quota({ weekly: window(1000, 900, WEEK_RESET), monthly: window(5000, 900, MONTH_RESET) })),
     )
     expect((await TokenQuota.check(1_000)).status).toBe("allowed")
-    TokenQuota.consumeStep({ input: 50, output: 20, reasoning: 5, cache: { read: 10, write: 5 } })
+    TokenQuota.consume(AiUsage.totalTokens({ input: 50, output: 20, reasoning: 5, cache: { read: 10, write: 5 } }))
     expect((await TokenQuota.check(2_000)).status).toBe("allowed")
-    TokenQuota.consumeStep({ input: 10 })
+    TokenQuota.consume(AiUsage.totalTokens({ input: 10 }))
     const verdict = await TokenQuota.check(3_000)
     expect(verdict.status).toBe("blocked")
     if (verdict.status === "blocked") {
@@ -135,6 +136,23 @@ describe("TokenQuota.consume", () => {
 
   test("is a no-op before anything was fetched", () => {
     expect(() => TokenQuota.consume(100)).not.toThrow()
+  })
+})
+
+describe("TokenQuota.spend", () => {
+  test("returns a new quota and leaves the input untouched", () => {
+    const before = quota({ weekly: window(1000, 990, WEEK_RESET) })
+    const after = TokenQuota.spend(before, 20)
+    expect(after.weekly).toEqual(window(1000, 1010, WEEK_RESET))
+    expect(after.exhausted).toBe(true)
+    expect(before.weekly).toEqual(window(1000, 990, WEEK_RESET))
+    expect(before.exhausted).toBe(false)
+  })
+
+  test("never marks an inactive quota as exhausted", () => {
+    const after = TokenQuota.spend(quota({ active: false, weekly: window(10, 0, WEEK_RESET) }), 50)
+    expect(after.weekly?.remaining).toBe(0)
+    expect(after.exhausted).toBe(false)
   })
 })
 
