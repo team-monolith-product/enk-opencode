@@ -53,7 +53,7 @@ export function GeneratedImage(props: ToolProps) {
         if (!file) return
         void data.readFile!(file)
           .then((content) => {
-            if (path() === file) setSrc(dataUrlFromMediaValue(content as never, "image"))
+            if (path() === file) setSrc(dataUrlFromMediaValue(content, "image"))
           })
           .catch(() => undefined)
       },

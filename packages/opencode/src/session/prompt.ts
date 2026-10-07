@@ -1698,7 +1698,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               lastFinished.summary !== true &&
               (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
             ) {
-              yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+              yield* compaction.create({
+                sessionID,
+                agent: lastUser.agent,
+                model: lastUser.model,
+                auto: true,
+                tools: lastUser.tools,
+              })
               continue
             }
 
@@ -1820,6 +1826,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     model: lastUser.model,
                     auto: true,
                     overflow: !handle.message.finish,
+                    tools: lastUser.tools,
                   })
                 }
                 return "continue" as const

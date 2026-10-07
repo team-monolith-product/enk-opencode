@@ -1,4 +1,12 @@
-import type { Message, Session, Part, FileDiff, SessionStatus, ProviderListResponse } from "@opencode-ai/sdk/v2"
+import type {
+  Message,
+  Session,
+  Part,
+  FileContent,
+  FileDiff,
+  SessionStatus,
+  ProviderListResponse,
+} from "@opencode-ai/sdk/v2"
 import { createSimpleContext } from "./helper"
 import { PreloadMultiFileDiffResult } from "@pierre/diffs/ssr"
 import type { JSX } from "solid-js"
@@ -29,7 +37,7 @@ export type SessionHrefFn = (sessionID: string) => string
 
 export type AssetUrlFn = (url: string) => string
 
-export type ReadFileFn = (path: string) => Promise<unknown>
+export type ReadFileFn = (path: string) => Promise<FileContent | undefined>
 
 export const { use: useData, provider: DataProvider } = createSimpleContext({
   name: "Data",

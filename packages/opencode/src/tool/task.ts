@@ -25,13 +25,6 @@ const parameters = z.object({
   command: z.string().describe("The command that triggered this task").optional(),
 })
 
-// 부모 턴에서 꺼진 도구는 서브에이전트에서도 꺼 둔다.
-export function deniedTools(messages: MessageV2.WithParts[]) {
-  const user = messages.findLast((m) => m.info.role === "user")?.info
-  const tools = user?.role === "user" ? user.tools : undefined
-  return Object.fromEntries(Object.entries(tools ?? {}).filter(([, enabled]) => enabled === false))
-}
-
 export const TaskTool = Tool.define("task", async (ctx) => {
   const agents = await Agent.list().then((x) => x.filter((a) => a.mode !== "primary"))
 
@@ -143,9 +136,6 @@ export const TaskTool = Tool.define("task", async (ctx) => {
         },
         agent: agent.name,
         tools: {
-          ...deniedTools(ctx.messages),
-          // 서브에이전트가 만든 이미지는 학생 채팅에 보이지 않으므로 이미지는 메인 대화에서만 만든다.
-          generate_image: false,
           ...(hasTodoWritePermission ? {} : { todowrite: false }),
           ...(hasTaskPermission ? {} : { task: false }),
           ...Object.fromEntries((config.experimental?.primary_tools ?? []).map((t) => [t, false])),

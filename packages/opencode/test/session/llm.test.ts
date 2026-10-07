@@ -717,6 +717,93 @@ describe("session.llm.stream", () => {
     })
   })
 
+  test("gives generate_image only to turns that turned it on", async () => {
+    const server = state.server
+    if (!server) {
+      throw new Error("Server not initialized")
+    }
+
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const model = fixture.model
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: [providerID],
+            provider: {
+              [providerID]: {
+                options: {
+                  apiKey: "test-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await Provider.getModel(ProviderID.make(providerID), ModelID.make(model.id))
+        const sessionID = SessionID.make("session-test-image-tool")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [],
+        } satisfies Agent.Info
+        const noop = (description: string) =>
+          tool({ description, inputSchema: z.object({}), execute: async () => ({ output: "" }) })
+
+        const sent = async (tools: Record<string, boolean> | undefined) => {
+          const request = waitRequest(
+            "/chat/completions",
+            new Response(createChatStream("Hello"), {
+              status: 200,
+              headers: { "Content-Type": "text/event-stream" },
+            }),
+          )
+          const stream = await LLM.stream({
+            user: {
+              id: MessageID.make("user-image-tool"),
+              sessionID,
+              role: "user",
+              time: { created: Date.now() },
+              agent: agent.name,
+              model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
+              tools,
+            },
+            sessionID,
+            model: resolved,
+            agent,
+            system: ["You are a helpful assistant."],
+            abort: new AbortController().signal,
+            messages: [{ role: "user", content: "Hello" }],
+            tools: { generate_image: noop("Draw"), read: noop("Read") },
+          })
+          for await (const _ of stream.fullStream) {
+          }
+          const capture = await request
+          const names = (capture.body.tools as Array<{ function?: { name?: string } }> | undefined)?.map(
+            (item) => item.function?.name,
+          )
+          return names?.toSorted()
+        }
+
+        expect(await sent(undefined)).toEqual(["read"])
+        expect(await sent({ generate_image: false })).toEqual(["read"])
+        expect(await sent({ generate_image: true })).toEqual(["generate_image", "read"])
+      },
+    })
+  })
+
   test("sends responses API payload for OpenAI models", async () => {
     const server = state.server
     if (!server) {

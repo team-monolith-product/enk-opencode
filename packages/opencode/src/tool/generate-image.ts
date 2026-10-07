@@ -221,7 +221,8 @@ export const GenerateImageTool = Tool.define("generate_image", {
       metadata: { ...base, ...extra, status, ms: Date.now() - startedAt } satisfies GenerateImage.Metadata,
     })
 
-    if (ImageQuota.state().kind === "unavailable") return done("unavailable", GenerateImage.output("unavailable"))
+    const { kind } = ImageQuota.state()
+    if (kind === "unavailable" || kind === "disabled") return done(kind, GenerateImage.output(kind))
 
     await assertExternalDirectory(ctx, filepath)
     await ctx.ask({
@@ -265,7 +266,6 @@ export const GenerateImageTool = Tool.define("generate_image", {
 
     if (result.status === "reserved") return result.value
     if (result.status === "unavailable") return done("unavailable", GenerateImage.output("unavailable"))
-    const status = result.quota.limit === 0 ? "disabled" : "limited"
-    return done(status, GenerateImage.output(status, result.quota), { quota: result.quota })
+    return done("limited", GenerateImage.output("limited", result.quota), { quota: result.quota })
   },
 })

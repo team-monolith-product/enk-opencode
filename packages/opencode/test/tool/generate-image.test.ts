@@ -227,11 +227,12 @@ describe("tool.generate_image quota", () => {
     expect(result.output).toContain("10장")
   })
 
-  test("treats a limit of 0 as disabled", async () => {
-    mockFetch(() => quota(409, { limit: 0, used: 0, remaining: 0 }))
+  test("treats a limit of 0 as disabled without asking rails", async () => {
+    process.env["ENK_IMAGE_GENERATION_LIMIT"] = "0"
+    mockFetch(() => image())
     const { result } = await run({ prompt: "cat", name: "cat" })
 
-    expect(openai()).toHaveLength(0)
+    expect(requests).toHaveLength(0)
     expect(result.metadata.status).toBe("disabled")
   })
 

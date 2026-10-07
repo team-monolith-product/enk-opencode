@@ -1,9 +1,8 @@
 import { type Accessor, createEffect, createSignal, on, Show } from "solid-js"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useLanguage } from "@/context/language"
+import type { ImageQuota, ImageQuotaStatus } from "@opencode-ai/sdk/v2/client"
 import type { useSDK } from "@/context/sdk"
-
-export type ImageQuota = { limit: number; used: number; remaining: number }
 
 // 사용자가 한 번 고르면 그 값을 계속 따르고, 고른 적이 없으면 남은 개수가 있을 때 켜 둔다.
 const CHOICE_KEY = "prompt.imageGeneration"
@@ -22,7 +21,7 @@ function loadChoice() {
  * createResource 는 루트 Suspense 를 걸어 조회 동안 화면 전체를 가리므로 신호로만 둔다.
  */
 export function createImageGeneration(input: { sdk: ReturnType<typeof useSDK>; working: Accessor<boolean> }) {
-  const [status, setStatus] = createSignal<{ enabled: boolean; quota?: ImageQuota }>()
+  const [status, setStatus] = createSignal<ImageQuotaStatus>()
   const [choice, setChoice] = createSignal(loadChoice())
 
   const refresh = () => {

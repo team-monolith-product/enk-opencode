@@ -345,12 +345,17 @@ export namespace LLM {
     })
   }
 
+  const OPT_IN = new Set(["generate_image"])
+
   function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
     const disabled = Permission.disabled(
       Object.keys(input.tools),
       Permission.merge(input.agent.permission, input.permission ?? []),
     )
-    return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
+    return Record.filter(input.tools, (_, k) => {
+      const allowed = input.user.tools?.[k]
+      return (OPT_IN.has(k) ? allowed === true : allowed !== false) && !disabled.has(k)
+    })
   }
 
   // Check if messages contain any tool-call content
