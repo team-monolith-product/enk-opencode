@@ -335,6 +335,22 @@ describe("tool.generate_image folder", () => {
     expect(result.metadata.path).toBe(path.join("ai-images", "cat-2.png"))
   })
 
+  test("gives parallel calls with the same name different files", async () => {
+    mockFetch(image)
+    await using dir = await tmpdir()
+    const paths = await Instance.provide({
+      directory: dir.path,
+      fn: async () => {
+        const tool = await GenerateImageTool.init()
+        const call = (id: string) =>
+          tool.execute(tool.parameters.parse({ prompt: "cat", name: "cat" }), { ...context(), callID: id })
+        const results = await Promise.all([call("call_1"), call("call_2")])
+        return results.map((result) => result.metadata.path)
+      },
+    })
+    expect(paths.toSorted()).toEqual([path.join("ai-images", "cat-2.png"), path.join("ai-images", "cat.png")])
+  })
+
   test("keeps only the file name the model passes", () => {
     expect(GenerateImage.slug("../../etc/passwd")).toBe("passwd")
     expect(GenerateImage.slug("고양이 캐릭터.png")).toBe("고양이-캐릭터")

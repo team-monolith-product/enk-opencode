@@ -88,14 +88,20 @@ export namespace GenerateImage {
     return { folder: FOLDER, url: `/${FOLDER}` }
   }
 
+  // 같은 이름으로 동시에 그려도 서로 덮어쓰지 않게, 저장이 끝날 때까지 고른 경로를 잡아 둔다.
+  const claimed = new Set<string>()
+
   export async function location(name: string, ext: Extension) {
     const root = await servedRoot()
     const stem = slug(name)
     for (let n = 1; ; n++) {
       const file = `${n === 1 ? stem : `${stem}-${n}`}${ext}`
       const relative = path.join(root.folder, file)
-      if (await Filesystem.exists(path.join(Instance.directory, relative))) continue
-      return { relative, url: `${root.url}/${file}` }
+      const absolute = path.join(Instance.directory, relative)
+      if (await Filesystem.exists(absolute)) continue
+      if (claimed.has(absolute)) continue
+      claimed.add(absolute)
+      return { relative, url: `${root.url}/${file}`, [Symbol.dispose]: () => claimed.delete(absolute) }
     }
   }
 
@@ -198,7 +204,8 @@ export const GenerateImageTool = Tool.define("generate_image", {
     if (params.background === "transparent" && format === "jpeg")
       throw new Error("투명 배경은 png 또는 webp 에서만 가능합니다. format 을 바꿔 다시 호출하세요.")
 
-    const { relative, url } = await GenerateImage.location(params.name, ext)
+    using spot = await GenerateImage.location(params.name, ext)
+    const { relative, url } = spot
     const filepath = path.join(Instance.directory, relative)
     const base = {
       path: relative,

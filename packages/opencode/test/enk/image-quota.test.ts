@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { ImageQuota } from "../../src/enk/image-quota"
 
-const ENV_KEYS = ["ENK_HACKATHON_RAILS_URL", "ENK_AI_USAGE_TOKEN", "ENK_IMAGE_GENERATION_LIMIT"]
+const ENV_KEYS = ["ENK_HACKATHON_RAILS_URL", "ENK_AI_USAGE_TOKEN", "ENK_IMAGE_GENERATION_LIMIT", "ENK_IMAGE_GENERATION_PHASE"]
 const originalEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]))
 const originalFetch = globalThis.fetch
 let calls: string[] = []
@@ -25,6 +25,7 @@ beforeEach(() => {
   process.env["ENK_HACKATHON_RAILS_URL"] = "http://rails/"
   process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
   delete process.env["ENK_IMAGE_GENERATION_LIMIT"]
+  delete process.env["ENK_IMAGE_GENERATION_PHASE"]
   ImageQuota.reset()
 })
 
@@ -63,6 +64,18 @@ describe("ImageQuota", () => {
     rails(() => json(201, { limit: 20, used: 4, remaining: 16 }))
     await ImageQuota.withReservation("call_1", async () => ({ kept: true, value: undefined }))
     expect(ImageQuota.state()).toEqual(known(10, 4))
+  })
+
+  test("counts the tutorial and the main event apart", async () => {
+    process.env["ENK_IMAGE_GENERATION_LIMIT"] = "10"
+    rails(() => json(201, { limit: 10, used: 10, remaining: 0, phase: "tutorial" }))
+    await ImageQuota.withReservation("call_1", async () => ({ kept: true, value: undefined }))
+
+    process.env["ENK_IMAGE_GENERATION_PHASE"] = "main_event"
+    expect(ImageQuota.state()).toEqual(known(10, 0))
+
+    process.env["ENK_IMAGE_GENERATION_PHASE"] = "tutorial"
+    expect(ImageQuota.state()).toEqual(known(10, 10))
   })
 
   test("keeps a reservation the run wants to keep", async () => {

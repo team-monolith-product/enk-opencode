@@ -1,15 +1,16 @@
-import { Database, eq } from "@/storage/db"
+import { Database, desc, eq } from "@/storage/db"
 import { Flag } from "@/flag/flag"
 import { ImageQuotaTable } from "./image-quota.sql"
 
 // 팀당 이미지 생성 한도는 rails 가 센다. 비용이 한도를 넘지 않도록 rails 에 닿지 못하면 생성하지 않는다.
 // 한도는 hub 가 spawn 때 주입한 값만 쓰고 rails 에 묻지 않는다. 사용 개수는 예약·반납 응답으로 DB 에 남긴다.
+// 튜토리얼과 본행사는 따로 세므로 사용 개수도 rails 가 알려준 구간(phase)별 행에 남긴다.
 export namespace ImageQuota {
   const route = "/api/v1/opencode/image_generations"
   const TIMEOUT_MS = 15_000
   const ROW = "team"
 
-  export type Quota = { limit: number; used: number; remaining: number }
+  export type Quota = { limit: number; used: number; remaining: number; phase?: string }
 
   export type State =
     | { kind: "unlimited" } // rails 가 없는 로컬 개발
@@ -33,7 +34,7 @@ export namespace ImageQuota {
       Database.use((db) =>
         db
           .insert(ImageQuotaTable)
-          .values({ id: ROW, limit: quota.limit, used: quota.used, time_updated: Date.now() })
+          .values({ id: quota.phase ?? ROW, limit: quota.limit, used: quota.used, time_updated: Date.now() })
           .onConflictDoUpdate({
             target: ImageQuotaTable.id,
             set: { limit: quota.limit, used: quota.used, time_updated: Date.now() },
@@ -51,7 +52,12 @@ export namespace ImageQuota {
     if (!backend()) return { kind: "unlimited" }
     const limit = Flag.ENK_IMAGE_GENERATION_LIMIT
     if (limit === undefined) return { kind: "unavailable" }
-    const row = Database.use((db) => db.select().from(ImageQuotaTable).where(eq(ImageQuotaTable.id, ROW)).get())
+    const phase = Flag.ENK_IMAGE_GENERATION_PHASE
+    const row = Database.use((db) =>
+      phase
+        ? db.select().from(ImageQuotaTable).where(eq(ImageQuotaTable.id, phase)).get()
+        : db.select().from(ImageQuotaTable).orderBy(desc(ImageQuotaTable.time_updated)).get(),
+    )
     const used = row?.used ?? 0
     return { kind: "known", quota: { limit, used, remaining: Math.max(limit - used, 0) } }
   }
