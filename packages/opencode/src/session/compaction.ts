@@ -140,7 +140,7 @@ export namespace SessionCompaction {
       model: { providerID: ProviderID; modelID: ModelID }
       auto: boolean
       overflow?: boolean
-      tools?: Record<string, boolean>
+      imageGeneration?: boolean
     }) => Effect.Effect<void>
   }
 
@@ -482,6 +482,7 @@ When constructing the summary, try to stick to this template:
               model: original.model,
               format: original.format,
               tools: original.tools,
+              imageGeneration: original.imageGeneration,
               system: original.system,
               locale: original.locale,
               variant: original.variant,
@@ -513,7 +514,7 @@ When constructing the summary, try to stick to this template:
               time: { created: Date.now() },
               agent: userMessage.agent,
               model: userMessage.model,
-              tools: userMessage.tools,
+              imageGeneration: userMessage.imageGeneration,
             })
             const text =
               (input.overflow
@@ -547,7 +548,7 @@ When constructing the summary, try to stick to this template:
         model: { providerID: ProviderID; modelID: ModelID }
         auto: boolean
         overflow?: boolean
-        tools?: Record<string, boolean>
+        imageGeneration?: boolean
       }) {
         const msg = yield* session.updateMessage({
           id: MessageID.ascending(),
@@ -556,7 +557,7 @@ When constructing the summary, try to stick to this template:
           sessionID: input.sessionID,
           agent: input.agent,
           time: { created: Date.now() },
-          tools: input.tools,
+          imageGeneration: input.imageGeneration,
         })
         yield* session.updatePart({
           id: PartID.ascending(),
@@ -618,7 +619,7 @@ When constructing the summary, try to stick to this template:
       model: z.object({ providerID: ProviderID.zod, modelID: ModelID.zod }),
       auto: z.boolean(),
       overflow: z.boolean().optional(),
-      tools: z.record(z.string(), z.boolean()).optional(),
+      imageGeneration: z.boolean().optional(),
     }),
     (input) => runPromise((svc) => svc.create(input)),
   )

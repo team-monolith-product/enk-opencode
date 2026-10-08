@@ -514,13 +514,13 @@ it.effect("auto compaction keeps the student's image toggle for the continue tur
         yield* test.reply(...replyStop("summary"))
         yield* test.reply(...replyStop("continued"))
         const msg = yield* user(chat.id, "hello")
-        yield* session.updateMessage({ ...msg, tools: { generate_image: false } })
+        yield* session.updateMessage({ ...msg, imageGeneration: true })
 
         yield* prompt.loop({ sessionID: chat.id })
 
         const inputs = yield* test.inputs
         expect(inputs).toHaveLength(3)
-        expect(inputs[2].user.tools).toEqual({ generate_image: false })
+        expect(inputs[2].user.imageGeneration).toBe(true)
       }),
     { git: true, config: cfg },
   ),

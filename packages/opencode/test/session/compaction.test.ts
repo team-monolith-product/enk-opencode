@@ -751,7 +751,7 @@ describe("session.compaction.process", () => {
     })
   })
 
-  test("the continue prompt keeps the user's tool settings", async () => {
+  test("the continue prompt keeps the user's image toggle", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -766,7 +766,7 @@ describe("session.compaction.process", () => {
           agent: "build",
           model: ref,
           time: { created: Date.now() },
-          tools: { generate_image: false },
+          imageGeneration: true,
         })
         await Session.updatePart({
           id: PartID.ascending(),
@@ -784,7 +784,7 @@ describe("session.compaction.process", () => {
             ),
           )
           const last = (await Session.messages({ sessionID: session.id })).at(-1)
-          expect(last?.info.role === "user" ? last.info.tools : undefined).toEqual({ generate_image: false })
+          expect(last?.info.role === "user" ? last.info.imageGeneration : undefined).toBe(true)
         } finally {
           await rt.dispose()
         }

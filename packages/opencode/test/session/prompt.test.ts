@@ -189,7 +189,7 @@ describe("session.prompt missing file", () => {
 })
 
 describe("session.prompt image generation toggle", () => {
-  test("allows generate_image only when the toggle is on, denying by default", async () => {
+  test("records the image toggle on the user message without touching tools", async () => {
     await using tmp = await tmpdir({ git: true, config: { agent: { build: { model: "openai/gpt-5.2" } } } })
     await Instance.provide({
       directory: tmp.path,
@@ -209,9 +209,10 @@ describe("session.prompt image generation toggle", () => {
         const unset = await send()
         if (off.info.role !== "user" || on.info.role !== "user" || unset.info.role !== "user")
           throw new Error("expected user messages")
-        expect(off.info.tools).toEqual({ generate_image: false })
-        expect(on.info.tools).toEqual({ generate_image: true })
-        expect(unset.info.tools).toEqual({ generate_image: false })
+        expect(off.info.imageGeneration).toBe(false)
+        expect(on.info.imageGeneration).toBe(true)
+        expect(unset.info.imageGeneration).toBeUndefined()
+        expect([off.info.tools, on.info.tools, unset.info.tools]).toEqual([undefined, undefined, undefined])
 
         await Session.remove(session.id)
       },
@@ -734,16 +735,16 @@ describe("session.agent-resolution", () => {
           SessionPrompt.command({ sessionID: session.id, command: "init", arguments: "", imageGeneration }).catch(
             () => undefined,
           )
-        const tools = async () => {
+        const toggle = async () => {
           const messages = await Session.messages({ sessionID: session.id })
           const last = messages.findLast((m) => m.info.role === "user")
-          return last?.info.role === "user" ? last.info.tools : undefined
+          return last?.info.role === "user" ? last.info.imageGeneration : undefined
         }
 
         await send(true)
-        expect(await tools()).toEqual({ generate_image: true })
+        expect(await toggle()).toBe(true)
         await send()
-        expect(await tools()).toEqual({ generate_image: false })
+        expect(await toggle()).toBeUndefined()
 
         await Session.remove(session.id)
       },

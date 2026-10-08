@@ -286,14 +286,11 @@ export namespace LLM {
             toolName: lower,
           }
         }
-        const name = failed.toolCall.toolName
         return {
           ...failed.toolCall,
           input: JSON.stringify({
-            tool: name,
-            error: input.tools[name]
-              ? `${name} is turned off for this message only. Tools can be turned back on in a later message, so check the tool list you are given then instead of relying on this error.`
-              : failed.error.message,
+            tool: failed.toolCall.toolName,
+            error: failed.error.message,
           }),
           toolName: "invalid",
         }
@@ -348,17 +345,12 @@ export namespace LLM {
     })
   }
 
-  const OPT_IN = new Set(["generate_image"])
-
   function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
     const disabled = Permission.disabled(
       Object.keys(input.tools),
       Permission.merge(input.agent.permission, input.permission ?? []),
     )
-    return Record.filter(input.tools, (_, k) => {
-      const allowed = input.user.tools?.[k]
-      return (OPT_IN.has(k) ? allowed === true : allowed !== false) && !disabled.has(k)
-    })
+    return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
   }
 
   // Check if messages contain any tool-call content
