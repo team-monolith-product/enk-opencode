@@ -810,7 +810,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           time: { created: Date.now() },
           agent: lastUser.agent,
           model: lastUser.model,
-          tools: lastUser.tools,
+          imageGeneration: lastUser.imageGeneration,
         }
         yield* sessions.updateMessage(summaryUserMsg)
         yield* sessions.updatePart({
@@ -1130,7 +1130,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           role: "user",
           sessionID: input.sessionID,
           time: { created: Date.now() },
-          tools: { ...input.tools, generate_image: input.imageGeneration === true },
+          tools: input.tools,
+          imageGeneration: input.imageGeneration,
           agent: ag.name,
           model,
           system: input.system,
@@ -1703,7 +1704,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 agent: lastUser.agent,
                 model: lastUser.model,
                 auto: true,
-                tools: lastUser.tools,
+                imageGeneration: lastUser.imageGeneration,
               })
               continue
             }
@@ -1826,7 +1827,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     model: lastUser.model,
                     auto: true,
                     overflow: !handle.message.finish,
-                    tools: lastUser.tools,
+                    imageGeneration: lastUser.imageGeneration,
                   })
                 }
                 return "continue" as const
@@ -2054,7 +2055,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     format: MessageV2.Format.optional(),
     system: z.string().optional(),
     locale: Locale.Schema.optional(),
-    // 입력창의 '이미지 만들기' 토글. true 일 때만 이 메시지 턴에서 generate_image 를 모델에게 준다.
     imageGeneration: z.boolean().optional(),
     variant: z.string().optional(),
     parts: z.array(

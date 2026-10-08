@@ -11740,6 +11740,9 @@
               "type": "boolean"
             }
           },
+          "imageGeneration": {
+            "type": "boolean"
+          },
           "variant": {
             "type": "string"
           }

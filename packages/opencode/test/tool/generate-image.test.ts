@@ -8,11 +8,11 @@ import { ImageQuota } from "../../src/enk/image-quota"
 import { tmpdir } from "../fixture/fixture"
 
 let seq = 0
-function userMessage(imageRequest: boolean) {
+function userMessage(imageGeneration?: boolean) {
   const id = `msg_user_${++seq}`
   return {
-    info: { id, role: "user" },
-    parts: [{ type: "text", text: "그려 줘", metadata: imageRequest ? { imageRequest: true } : undefined }],
+    info: { id, role: "user", imageGeneration },
+    parts: [{ type: "text", text: "그려 줘" }],
   }
 }
 
@@ -162,6 +162,18 @@ describe("tool.generate_image quota", () => {
     process.env["ENK_HACKATHON_RAILS_URL"] = "http://rails/"
     process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
     process.env["ENK_IMAGE_GENERATION_LIMIT"] = "10"
+  })
+
+  test("draws nothing in a message where the student turned image generation off", async () => {
+    mockFetch(() => image())
+    for (const messages of [[userMessage(false)], [userMessage()], [userMessage(true), userMessage(false)]]) {
+      requests = []
+      const { result, saved } = await run({ prompt: "cat", name: "cat" }, { ctx: context({ messages }) })
+      expect(result.metadata.status).toBe("off")
+      expect(result.output).toContain("이미지 만들기")
+      expect(requests).toHaveLength(0)
+      expect(saved).toBeUndefined()
+    }
   })
 
   test("does nothing in a pod without an injected limit", async () => {

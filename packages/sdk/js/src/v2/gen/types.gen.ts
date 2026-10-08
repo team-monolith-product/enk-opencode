@@ -612,6 +612,7 @@ export type UserMessage = {
   tools?: {
     [key: string]: boolean
   }
+  imageGeneration?: boolean
   variant?: string
 }
 

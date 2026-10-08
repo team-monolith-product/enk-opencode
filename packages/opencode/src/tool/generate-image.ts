@@ -29,7 +29,7 @@ export namespace GenerateImage {
     input_tokens_details?: { text_tokens?: number; image_tokens?: number }
   }
 
-  export type Status = "generated" | "blocked" | "timeout" | "limited" | "disabled" | "unavailable"
+  export type Status = "generated" | "off" | "blocked" | "timeout" | "limited" | "disabled" | "unavailable"
 
   export type Metadata = {
     status: Status
@@ -176,6 +176,7 @@ export namespace GenerateImage {
 
   export function output(status: Exclude<Status, "generated">, quota?: ImageQuota.Quota) {
     return {
+      off: "학생이 이번 메시지에서 입력창의 '이미지 만들기'를 꺼 두어 그리지 않았습니다. 다시 호출하지 말고, 그림이 꼭 필요하면 '이미지 만들기'를 켜고 다시 요청해 달라고 짧게 안내하세요. 토글은 메시지마다 바뀌므로 켜진 메시지에서는 이 도구로 그릴 수 있습니다.",
       unavailable: `이 작업 공간에서는 이미지 생성을 쓸 수 없습니다. ${REFUSAL}`,
       disabled: `이 해커톤에서는 이미지 생성을 사용하지 않습니다. ${REFUSAL}`,
       limited: `이 팀이 만들 수 있는 이미지 ${quota?.limit}장을 모두 사용했습니다. ${REFUSAL}`,
@@ -220,6 +221,9 @@ export const GenerateImageTool = Tool.define("generate_image", {
       output,
       metadata: { ...base, ...extra, status, ms: Date.now() - startedAt } satisfies GenerateImage.Metadata,
     })
+
+    const user = ctx.messages.findLast((m) => m.info.role === "user")?.info
+    if (user?.role !== "user" || user.imageGeneration !== true) return done("off", GenerateImage.output("off"))
 
     const { kind } = ImageQuota.state()
     if (kind === "unavailable" || kind === "disabled") return done(kind, GenerateImage.output(kind))
