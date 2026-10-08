@@ -254,6 +254,8 @@ describe("tool.generate_image quota", () => {
     expect(saved).toBeUndefined()
     expect(result.metadata.status).toBe("limited")
     expect(result.output).toContain("10장")
+    expect(result.output).toContain("다시 호출해도 됩니다")
+    expect(result.output).not.toContain("다시 호출하지 말고")
   })
 
   test("treats a limit of 0 as disabled without asking rails", async () => {
