@@ -176,6 +176,23 @@ describe("tool.generate_image quota", () => {
     }
   })
 
+  test("says the images are used up instead of asking to turn the locked toggle on", async () => {
+    process.env["ENK_IMAGE_GENERATION_LIMIT"] = "2"
+    mockFetch(() => quota(201, { limit: 2, used: 2, remaining: 0 }))
+    await ImageQuota.withReservation("call_0", async () => ({ kept: true, value: undefined }))
+    requests = []
+
+    const { result, saved } = await run(
+      { prompt: "cat", name: "cat" },
+      { ctx: context({ messages: [userMessage(false)] }) },
+    )
+
+    expect(result.metadata.status).toBe("limited")
+    expect(result.output).toContain("2장")
+    expect(requests).toHaveLength(0)
+    expect(saved).toBeUndefined()
+  })
+
   test("does nothing in a pod without an injected limit", async () => {
     delete process.env["ENK_IMAGE_GENERATION_LIMIT"]
     mockFetch(() => image())

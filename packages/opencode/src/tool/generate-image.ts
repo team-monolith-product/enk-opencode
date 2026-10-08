@@ -222,11 +222,14 @@ export const GenerateImageTool = Tool.define("generate_image", {
       metadata: { ...base, ...extra, status, ms: Date.now() - startedAt } satisfies GenerateImage.Metadata,
     })
 
+    const state = ImageQuota.state()
+    if (state.kind === "unavailable" || state.kind === "disabled")
+      return done(state.kind, GenerateImage.output(state.kind))
+    if (state.kind === "known" && state.quota.remaining === 0)
+      return done("limited", GenerateImage.output("limited", state.quota), { quota: state.quota })
+
     const user = ctx.messages.findLast((m) => m.info.role === "user")?.info
     if (user?.role !== "user" || user.imageGeneration !== true) return done("off", GenerateImage.output("off"))
-
-    const { kind } = ImageQuota.state()
-    if (kind === "unavailable" || kind === "disabled") return done(kind, GenerateImage.output(kind))
 
     await assertExternalDirectory(ctx, filepath)
     await ctx.ask({
