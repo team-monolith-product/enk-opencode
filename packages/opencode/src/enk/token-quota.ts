@@ -28,7 +28,6 @@ export namespace TokenQuota {
     monthly: Window.nullable(),
   })
   export type Quota = z.infer<typeof Quota>
-  export type Verdict = { status: "allowed" } | { status: "blocked"; quota: Quota }
 
   const INACTIVE: Quota = { active: false, exhausted: false, weekly: null, monthly: null }
 
@@ -45,18 +44,15 @@ export namespace TokenQuota {
     cache = undefined
   }
 
-  export function verdict(quota: Quota): Verdict {
-    return quota.exhausted ? { status: "blocked", quota } : { status: "allowed" }
-  }
-
-  // 로컬이거나 팀 작업 공간이 아니면 제한 없음. 팀 토큰이 아니면 rails 가 403 을 주므로 같은 취급이다.
-  export async function check(now = Date.now()): Promise<Verdict> {
+  // 지금 적용되는 한도. rails 설정이 없는 로컬은 undefined(제한 없음). 팀 토큰이 아니면 rails 가 403 을 주므로
+  // 비활성 quota 로 본다. 막을지는 호출자가 `exhausted` 로 읽는다.
+  export async function check(now = Date.now()): Promise<Quota | undefined> {
     const rails = backend()
-    if (!rails) return { status: "allowed" }
+    if (!rails) return
     if (!cache || now - cache.at >= CACHE_TTL_MS) {
       cache = { quota: (await fetchQuota(rails)) ?? cache?.quota ?? INACTIVE, at: now }
     }
-    return verdict(cache.quota)
+    return cache.quota
   }
 
   async function fetchQuota(rails: { url: string; token: string }): Promise<Quota | undefined> {

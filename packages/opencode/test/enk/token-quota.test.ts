@@ -49,7 +49,7 @@ afterEach(() => {
 
 describe("TokenQuota.check", () => {
   test("allows everything when rails is not configured", async () => {
-    expect(await TokenQuota.check()).toEqual({ status: "allowed" })
+    expect(await TokenQuota.check()).toBeUndefined()
   })
 
   test("blocks when the hackathon enforces the limit and a window is exhausted", async () => {
@@ -59,21 +59,21 @@ describe("TokenQuota.check", () => {
       monthly: window(5000, 1200, MONTH_RESET),
     })
     await using rails = serve(() => Response.json(body))
-    const verdict = await TokenQuota.check()
-    expect(verdict.status).toBe("blocked")
-    if (verdict.status === "blocked") expect(verdict.quota.weekly?.remaining).toBe(0)
+    const current = await TokenQuota.check()
+    expect(current?.exhausted).toBe(true)
+    expect(current?.weekly?.remaining).toBe(0)
     expect(rails.requests).toBe(1)
   })
 
   test("allows while the windows still have room", async () => {
     await using rails = serve(() => Response.json(quota({ weekly: window(1000, 300, WEEK_RESET) })))
-    expect(await TokenQuota.check()).toEqual({ status: "allowed" })
+    expect((await TokenQuota.check())?.exhausted).toBe(false)
     expect(rails.requests).toBe(1)
   })
 
   test("never blocks while the limit is inactive, even with an exhausted window", async () => {
     await using rails = serve(() => Response.json(quota({ active: false, weekly: window(100, 500, WEEK_RESET) })))
-    expect(await TokenQuota.check()).toEqual({ status: "allowed" })
+    expect((await TokenQuota.check())?.exhausted).toBe(false)
     expect(rails.requests).toBe(1)
   })
 
@@ -88,30 +88,30 @@ describe("TokenQuota.check", () => {
 
   test("allows when rails answers 403 (not a team workspace)", async () => {
     await using rails = serve(() => new Response("", { status: 403 }))
-    expect(await TokenQuota.check()).toEqual({ status: "allowed" })
+    expect(await TokenQuota.check()).toEqual({ active: false, exhausted: false, weekly: null, monthly: null })
     expect(rails.requests).toBe(1)
   })
 
   test("fails open on a server error and waits the ttl before retrying", async () => {
     await using rails = serve(() => new Response("", { status: 500 }))
-    expect(await TokenQuota.check(1_000)).toEqual({ status: "allowed" })
-    expect(await TokenQuota.check(2_000)).toEqual({ status: "allowed" })
+    expect((await TokenQuota.check(1_000))?.exhausted).toBe(false)
+    expect((await TokenQuota.check(2_000))?.exhausted).toBe(false)
     expect(rails.requests).toBe(1)
   })
 
   test("fails open when rails is unreachable", async () => {
     process.env["ENK_HACKATHON_RAILS_URL"] = "http://127.0.0.1:9"
     process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
-    expect(await TokenQuota.check()).toEqual({ status: "allowed" })
+    expect((await TokenQuota.check())?.exhausted).toBe(false)
   })
 
   test("keeps the last known quota when a refresh fails", async () => {
     let status = 200
     const body = quota({ exhausted: true, weekly: window(1000, 1000, WEEK_RESET) })
     await using rails = serve(() => (status === 200 ? Response.json(body) : new Response("", { status })))
-    expect((await TokenQuota.check(1_000)).status).toBe("blocked")
+    expect((await TokenQuota.check(1_000))?.exhausted).toBe(true)
     status = 503
-    expect((await TokenQuota.check(40_000)).status).toBe("blocked")
+    expect((await TokenQuota.check(40_000))?.exhausted).toBe(true)
     expect(rails.requests).toBe(2)
   })
 })
@@ -121,16 +121,14 @@ describe("TokenQuota.consume", () => {
     await using rails = serve(() =>
       Response.json(quota({ weekly: window(1000, 900, WEEK_RESET), monthly: window(5000, 900, MONTH_RESET) })),
     )
-    expect((await TokenQuota.check(1_000)).status).toBe("allowed")
+    expect((await TokenQuota.check(1_000))?.exhausted).toBe(false)
     TokenQuota.consume(AiUsage.totalTokens({ input: 50, output: 20, reasoning: 5, cache: { read: 10, write: 5 } }))
-    expect((await TokenQuota.check(2_000)).status).toBe("allowed")
+    expect((await TokenQuota.check(2_000))?.exhausted).toBe(false)
     TokenQuota.consume(AiUsage.totalTokens({ input: 10 }))
-    const verdict = await TokenQuota.check(3_000)
-    expect(verdict.status).toBe("blocked")
-    if (verdict.status === "blocked") {
-      expect(verdict.quota.weekly).toEqual(window(1000, 1000, WEEK_RESET))
-      expect(verdict.quota.monthly).toEqual(window(5000, 1000, MONTH_RESET))
-    }
+    const current = await TokenQuota.check(3_000)
+    expect(current?.exhausted).toBe(true)
+    expect(current?.weekly).toEqual(window(1000, 1000, WEEK_RESET))
+    expect(current?.monthly).toEqual(window(5000, 1000, MONTH_RESET))
     expect(rails.requests).toBe(1)
   })
 

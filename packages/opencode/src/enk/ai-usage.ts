@@ -145,7 +145,6 @@ export namespace AiUsage {
     return markerAttributes(info, "final", info.time.completed!)
   }
 
-  /** Build a per-step record: that model call's authoritative token counts and fee. */
   /** Sum of one step's counts: the unit rails stores in its `tokens` column, and the unit the team token quota is measured in. */
   export function totalTokens(tokens: StepUsage["tokens"]) {
     return (
@@ -157,6 +156,7 @@ export namespace AiUsage {
     )
   }
 
+  /** Build a per-step record: that model call's authoritative token counts and fee. */
   export function buildStepAttributes(info: MessageV2.Assistant, step: StepUsage): Attributes {
     const input = step.tokens.input ?? 0
     const output = step.tokens.output ?? 0

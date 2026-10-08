@@ -1664,8 +1664,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // 팀의 주·월 토큰 한도(rails)가 바닥났으면 모델을 부르지 않는다. 제목 생성·압축보다 앞에 두어 한 번의
             // 모델 호출도 새지 않게 한다. 스텝마다 묻되 캐시로 받으므로 긴 에이전트 턴도 한도에 닿은 스텝에서 멈춘다.
             const quota = yield* Effect.promise(() => TokenQuota.check())
-            if (quota.status === "blocked") {
-              yield* refuseTurn({ sessionID, lastUser, message: TokenQuota.message(quota.quota, lastUser.locale) })
+            if (quota?.exhausted) {
+              yield* refuseTurn({ sessionID, lastUser, message: TokenQuota.message(quota, lastUser.locale) })
               break
             }
 
