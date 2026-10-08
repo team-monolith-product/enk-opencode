@@ -70,16 +70,15 @@ async function workspace(origin: string) {
   })
 }
 
-const exhausted: TokenQuota.Quota = {
-  active: true,
-  exhausted: true,
-  weekly: { limit: 1000, used: 1000, remaining: 0, resets_at: "2026-10-12T00:00:00+09:00" },
-  monthly: null,
-}
+const weekly = (remaining: number): TokenQuota.Window => ({
+  limit: 1000,
+  remaining,
+  resets_at: "2026-10-12T00:00:00+09:00",
+})
 
 describe("TokenQuota in the prompt loop", () => {
   test("closes the turn with the limit notice instead of calling the model", async () => {
-    await using rails = serve(exhausted)
+    await using rails = serve({ exhausted: true, weekly: weekly(0), monthly: null })
     await using tmp = await workspace(rails.server.url.origin)
 
     await Instance.provide({
@@ -106,11 +105,7 @@ describe("TokenQuota in the prompt loop", () => {
   })
 
   test("lets the turn through while the team still has tokens", async () => {
-    await using rails = serve({
-      ...exhausted,
-      exhausted: false,
-      weekly: { ...exhausted.weekly!, used: 10, remaining: 990 },
-    })
+    await using rails = serve({ exhausted: false, weekly: weekly(990), monthly: null })
     await using tmp = await workspace(rails.server.url.origin)
 
     await Instance.provide({

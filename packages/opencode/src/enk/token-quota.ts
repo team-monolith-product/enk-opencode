@@ -14,22 +14,13 @@ export namespace TokenQuota {
   const CACHE_TTL_MS = 30_000
   const TIME_ZONE = "Asia/Seoul"
 
-  export const Window = z.object({
-    limit: z.number(),
-    used: z.number(),
-    remaining: z.number(),
-    resets_at: z.string(),
-  })
+  // rails 응답 중 pod 가 읽는 부분. 창이 있다는 것 자체가 "지금 강제 중"이다.
+  export const Window = z.object({ limit: z.number(), remaining: z.number(), resets_at: z.string() })
   export type Window = z.infer<typeof Window>
-  export const Quota = z.object({
-    active: z.boolean(),
-    exhausted: z.boolean(),
-    weekly: Window.nullable(),
-    monthly: Window.nullable(),
-  })
+  export const Quota = z.object({ exhausted: z.boolean(), weekly: Window.nullable(), monthly: Window.nullable() })
   export type Quota = z.infer<typeof Quota>
 
-  const INACTIVE: Quota = { active: false, exhausted: false, weekly: null, monthly: null }
+  const NONE: Quota = { exhausted: false, weekly: null, monthly: null }
 
   let cache: { quota: Quota; at: number } | undefined
 
@@ -45,12 +36,12 @@ export namespace TokenQuota {
   }
 
   // 지금 적용되는 한도. rails 설정이 없는 로컬은 undefined(제한 없음). 팀 토큰이 아니면 rails 가 403 을 주므로
-  // 비활성 quota 로 본다. 막을지는 호출자가 `exhausted` 로 읽는다.
+  // 창 없는 quota 로 본다. 막을지는 호출자가 `exhausted` 로 읽는다.
   export async function check(now = Date.now()): Promise<Quota | undefined> {
     const rails = backend()
     if (!rails) return
     if (!cache || now - cache.at >= CACHE_TTL_MS) {
-      cache = { quota: (await fetchQuota(rails)) ?? cache?.quota ?? INACTIVE, at: now }
+      cache = { quota: (await fetchQuota(rails)) ?? cache?.quota ?? NONE, at: now }
     }
     return cache.quota
   }
@@ -64,7 +55,7 @@ export namespace TokenQuota {
       return undefined
     })
     if (!res) return
-    if (res.status === 403) return INACTIVE
+    if (res.status === 403) return NONE
     if (!res.ok) {
       log.warn("token quota request failed, allowing", { status: res.status })
       return
@@ -80,15 +71,10 @@ export namespace TokenQuota {
   // 한 스텝의 토큰을 깎은 새 quota. rails 적재는 큐를 타서 늦게 반영되므로 pod 안의 소비는 즉시 반영해야
   // 같은 턴 안에서도 한도를 지킨다. 다음 재조회 때 rails 값으로 덮인다.
   export function spend(quota: Quota, tokens: number): Quota {
-    const spent = (window: Window | null) => {
-      if (!window) return null
-      const used = window.used + tokens
-      return { ...window, used, remaining: Math.max(window.limit - used, 0) }
-    }
+    const spent = (window: Window | null) => window && { ...window, remaining: Math.max(window.remaining - tokens, 0) }
     const weekly = spent(quota.weekly)
     const monthly = spent(quota.monthly)
-    const exhausted = quota.active && [weekly, monthly].some((window) => window !== null && window.remaining <= 0)
-    return { ...quota, weekly, monthly, exhausted }
+    return { exhausted: [weekly, monthly].some((window) => window !== null && window.remaining <= 0), weekly, monthly }
   }
 
   export function consume(tokens: number) {
@@ -97,7 +83,7 @@ export namespace TokenQuota {
   }
 
   // 바닥난 창 중 가장 늦게 열리는 창을 안내한다 — 주간이 먼저 풀려도 월간이 막혀 있으면 그때까지 못 쓴다.
-  export function blocking(quota: Quota) {
+  function blocking(quota: Quota) {
     return [quota.weekly, quota.monthly]
       .filter((window): window is Window => window !== null && window.remaining <= 0)
       .sort((a, b) => Date.parse(b.resets_at) - Date.parse(a.resets_at))[0]
