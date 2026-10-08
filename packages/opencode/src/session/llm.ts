@@ -286,11 +286,14 @@ export namespace LLM {
             toolName: lower,
           }
         }
+        const name = failed.toolCall.toolName
         return {
           ...failed.toolCall,
           input: JSON.stringify({
-            tool: failed.toolCall.toolName,
-            error: failed.error.message,
+            tool: name,
+            error: input.tools[name]
+              ? `${name} is turned off for this message only. Tools can be turned back on in a later message, so check the tool list you are given then instead of relying on this error.`
+              : failed.error.message,
           }),
           toolName: "invalid",
         }
