@@ -28,7 +28,7 @@ import { ReadTool } from "../tool/read"
 import { FileTime } from "../file/time"
 import { Flag } from "../flag/flag"
 import { ModelPolicy } from "../enk/model-policy"
-import { TokenQuota } from "../enk/token-quota"
+import { CostQuota } from "../enk/cost-quota"
 import { ModelFallback } from "../enk/model-fallback"
 import { Locale } from "../enk/locale"
 import { SessionFallback } from "./fallback"
@@ -1661,11 +1661,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               break
             }
 
-            // 팀의 주·월 토큰 한도(rails)가 바닥났으면 모델을 부르지 않는다. 제목 생성·압축보다 앞에 두어 한 번의
+            // 팀의 주·월 비용 한도(rails)가 바닥났으면 모델을 부르지 않는다. 제목 생성·압축보다 앞에 두어 한 번의
             // 모델 호출도 새지 않게 한다. 스텝마다 묻되 캐시로 받으므로 긴 에이전트 턴도 한도에 닿은 스텝에서 멈춘다.
-            const quota = yield* Effect.promise(() => TokenQuota.check())
+            const quota = yield* Effect.promise(() => CostQuota.check())
             if (quota?.exhausted) {
-              yield* refuseTurn({ sessionID, lastUser, message: TokenQuota.message(quota, lastUser.locale) })
+              yield* refuseTurn({ sessionID, lastUser, message: CostQuota.message(quota, lastUser.locale) })
               break
             }
 

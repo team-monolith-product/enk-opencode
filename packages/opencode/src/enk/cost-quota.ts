@@ -2,19 +2,19 @@ import z from "zod"
 import { Log } from "@/util/log"
 import { Locale } from "./locale"
 
-// 팀당 주·월 AI 토큰 한도는 rails 가 센다(hackathons.weekly_token_limit / monthly_token_limit). 모델을 부르기 전에
+// 팀당 주·월 AI 비용 한도(달러)는 rails 가 센다(hackathons.weekly_cost_limit / monthly_cost_limit). 모델을 부르기 전에
 // 남은 양을 묻고, 바닥나면 턴을 시작하지 않는다. rails 에 닿지 못하면 막지 않는다 — 한도는 비용 가드지만 채팅은
 // 제품의 전부라, 잠깐의 장애로 해커톤 전체를 세우지 않는다.
-export namespace TokenQuota {
-  const log = Log.create({ service: "enk.token-quota" })
-  const route = "/api/v1/opencode/token_quota"
+export namespace CostQuota {
+  const log = Log.create({ service: "enk.cost-quota" })
+  const route = "/api/v1/opencode/cost_quota"
   const TIMEOUT_MS = 5_000
   // 매 스텝마다 rails 를 치지 않도록 응답을 잠시 들고 간다. 그 사이 pod 안의 소비는 consume() 이 로컬로 깎고,
   // 실패했을 때도 같은 시간만큼 기다렸다가 다시 묻는다(장애 중 스텝마다 타임아웃을 물지 않게).
   const CACHE_TTL_MS = 30_000
   const TIME_ZONE = "Asia/Seoul"
 
-  // rails 응답 중 pod 가 읽는 부분. 창이 있다는 것 자체가 "지금 강제 중"이다.
+  // rails 응답 중 pod 가 읽는 부분. 금액은 달러. 창이 있다는 것 자체가 "지금 강제 중"이다.
   export const Window = z.object({ limit: z.number(), remaining: z.number(), resets_at: z.string() })
   export type Window = z.infer<typeof Window>
   export const Quota = z.object({ exhausted: z.boolean(), weekly: Window.nullable(), monthly: Window.nullable() })
@@ -51,35 +51,37 @@ export namespace TokenQuota {
       headers: { Authorization: `token ${rails.token}` },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     }).catch((err) => {
-      log.warn("token quota unreachable, allowing", { err: String(err) })
+      log.warn("cost quota unreachable, allowing", { err: String(err) })
       return undefined
     })
     if (!res) return
     if (res.status === 403) return NONE
     if (!res.ok) {
-      log.warn("token quota request failed, allowing", { status: res.status })
+      log.warn("cost quota request failed, allowing", { status: res.status })
       return
     }
     const parsed = Quota.safeParse(await res.json().catch(() => undefined))
     if (!parsed.success) {
-      log.warn("token quota malformed, allowing")
+      log.warn("cost quota malformed, allowing")
       return
     }
     return parsed.data
   }
 
-  // 한 스텝의 토큰을 깎은 새 quota. rails 적재는 큐를 타서 늦게 반영되므로 pod 안의 소비는 즉시 반영해야
-  // 같은 턴 안에서도 한도를 지킨다. 다음 재조회 때 rails 값으로 덮인다.
-  export function spend(quota: Quota, tokens: number): Quota {
-    const spent = (window: Window | null) => window && { ...window, remaining: Math.max(window.remaining - tokens, 0) }
+  // 한 스텝의 비용(달러)을 깎은 새 quota. rails 적재는 큐를 타서 늦게 반영되므로 pod 안의 소비는 즉시 반영해야
+  // 같은 턴 안에서도 한도를 지킨다. 다음 재조회 때 rails 값으로 덮인다. 부동소수 잔여로 0 에 못 닿는 일이 없게
+  // rails cost 컬럼과 같은 소수 8자리로 반올림한다.
+  export function spend(quota: Quota, cost: number): Quota {
+    const spent = (window: Window | null) =>
+      window && { ...window, remaining: Math.max(Number((window.remaining - cost).toFixed(8)), 0) }
     const weekly = spent(quota.weekly)
     const monthly = spent(quota.monthly)
     return { exhausted: [weekly, monthly].some((window) => window !== null && window.remaining <= 0), weekly, monthly }
   }
 
-  export function consume(tokens: number) {
-    if (!cache || tokens <= 0) return
-    cache = { ...cache, quota: spend(cache.quota, tokens) }
+  export function consume(cost: number) {
+    if (!cache || cost <= 0) return
+    cache = { ...cache, quota: spend(cache.quota, cost) }
   }
 
   // 바닥난 창 중 가장 늦게 열리는 창을 안내한다 — 주간이 먼저 풀려도 월간이 막혀 있으면 그때까지 못 쓴다.
@@ -103,14 +105,14 @@ export namespace TokenQuota {
       month: "long",
       weekly: "이번 주",
       monthly: "이번 달",
-      text: (label, limit, at) => `${label} AI 토큰 한도(${limit})를 모두 사용했습니다. ${at}에 다시 사용할 수 있어요.`,
+      text: (label, limit, at) => `${label} AI 사용 한도(${limit})를 모두 사용했습니다. ${at}에 다시 사용할 수 있어요.`,
     },
     en: {
       tag: "en-US",
       month: "short",
       weekly: "This week's",
       monthly: "This month's",
-      text: (label, limit, at) => `${label} AI token limit (${limit}) has been used up. It resets at ${at} (KST).`,
+      text: (label, limit, at) => `${label} AI spending limit (${limit}) has been used up. It resets at ${at} (KST).`,
     },
   }
 
@@ -127,6 +129,7 @@ export namespace TokenQuota {
       minute: "2-digit",
       hour12: false,
     }).format(new Date(window.resets_at))
-    return copy.text(window === quota.weekly ? copy.weekly : copy.monthly, window.limit.toLocaleString("en-US"), at)
+    const limit = "$" + window.limit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return copy.text(window === quota.weekly ? copy.weekly : copy.monthly, limit, at)
   }
 }
