@@ -247,6 +247,38 @@ function createChatStream(text: string) {
   })
 }
 
+function createToolCallStream(name: string) {
+  const payload =
+    [
+      `data: ${JSON.stringify({
+        id: "chatcmpl-1",
+        object: "chat.completion.chunk",
+        choices: [
+          {
+            delta: {
+              role: "assistant",
+              tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name, arguments: "{}" } }],
+            },
+          },
+        ],
+      })}`,
+      `data: ${JSON.stringify({
+        id: "chatcmpl-1",
+        object: "chat.completion.chunk",
+        choices: [{ delta: {}, finish_reason: "tool_calls" }],
+      })}`,
+      "data: [DONE]",
+    ].join("\n\n") + "\n\n"
+
+  const encoder = new TextEncoder()
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(payload))
+      controller.close()
+    },
+  })
+}
+
 async function loadFixture(providerID: string, modelID: string) {
   const fixturePath = path.join(import.meta.dir, "../tool/fixtures/models-api.json")
   const data = await Filesystem.readJson<Record<string, ModelsDev.Provider>>(fixturePath)
@@ -800,6 +832,93 @@ describe("session.llm.stream", () => {
         expect(await sent(undefined)).toEqual(["read"])
         expect(await sent({ generate_image: false })).toEqual(["read"])
         expect(await sent({ generate_image: true })).toEqual(["generate_image", "read"])
+      },
+    })
+  })
+
+  test("tells the model a tool turned off for this message can come back later", async () => {
+    const server = state.server
+    if (!server) {
+      throw new Error("Server not initialized")
+    }
+
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const model = fixture.model
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: [providerID],
+            provider: {
+              [providerID]: {
+                options: {
+                  apiKey: "test-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await Provider.getModel(ProviderID.make(providerID), ModelID.make(model.id))
+        const sessionID = SessionID.make("session-test-disabled-tool")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [],
+        } satisfies Agent.Info
+        const noop = (description: string) =>
+          tool({ description, inputSchema: z.object({}).passthrough(), execute: async () => ({ output: "" }) })
+
+        const repaired = async (name: string) => {
+          waitRequest(
+            "/chat/completions",
+            new Response(createToolCallStream(name), {
+              status: 200,
+              headers: { "Content-Type": "text/event-stream" },
+            }),
+          )
+          const stream = await LLM.stream({
+            user: {
+              id: MessageID.make("user-disabled-tool"),
+              sessionID,
+              role: "user",
+              time: { created: Date.now() },
+              agent: agent.name,
+              model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
+              tools: { generate_image: false },
+            },
+            sessionID,
+            model: resolved,
+            agent,
+            system: ["You are a helpful assistant."],
+            abort: new AbortController().signal,
+            messages: [{ role: "user", content: "Hello" }],
+            tools: { generate_image: noop("Draw"), invalid: noop("Invalid"), read: noop("Read") },
+          })
+          for await (const part of stream.fullStream) {
+            if (part.type === "tool-call") return { tool: part.toolName, input: part.input as { error: string } }
+          }
+        }
+
+        const off = await repaired("generate_image")
+        expect(off?.tool).toBe("invalid")
+        expect(off?.input.error).toContain("turned off for this message only")
+
+        const unknown = await repaired("draw_picture")
+        expect(unknown?.tool).toBe("invalid")
+        expect(unknown?.input.error).not.toContain("turned off for this message only")
       },
     })
   })
