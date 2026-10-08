@@ -23,11 +23,17 @@ const session: MockSession = {
 }
 
 async function open(page: Page, quota = { limit: 10, used: 3, remaining: 7 }) {
+  const team = { on: true, toggles: [] as boolean[] }
   const mock = await mockOpenCodeServer(page, {
     directory,
     project,
     sessions: [session],
-    imageQuota: () => ({ enabled: true, quota }),
+    imageQuota: () => ({ enabled: true, on: team.on, quota }),
+    imageToggle: (on) => {
+      team.on = on
+      team.toggles.push(on)
+      return { enabled: true, on, quota }
+    },
     provider: {
       all: [
         {
@@ -56,7 +62,7 @@ async function open(page: Page, quota = { limit: 10, used: 3, remaining: 7 }) {
   })
   await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
   await expect(page.locator('[data-component="session-prompt-dock"]')).toBeVisible()
-  return { mock }
+  return { mock, team }
 }
 
 test.use({ viewport: { width: 1100, height: 800 }, locale: "ko-KR" })
@@ -96,10 +102,11 @@ test("켜져 있으면 이미지 생성을 허용해 보내고 보낸 뒤에도 
   await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "true")
 })
 
-test("사용자가 끄면 허용하지 않고 보내고 새로고침해도 꺼진 채로 남는다", async ({ page }) => {
-  await open(page)
+test("끄면 팀 값으로 저장하고, 허용하지 않고 보내고, 새로고침해도 꺼진 채로 남는다", async ({ page }) => {
+  const { team } = await open(page)
 
   await page.locator(toggle).click()
+  await expect.poll(() => team.toggles).toEqual([false])
   await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "false")
   const body = await send(page, "버튼 색 바꿔줘")
   expect(body.imageGeneration).toBe(false)
@@ -107,6 +114,20 @@ test("사용자가 끄면 허용하지 않고 보내고 새로고침해도 꺼�
 
   await page.reload()
   await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "false")
+})
+
+test("다른 팀원이 바꾸면 새로고침 없이 바로 따라간다", async ({ page }) => {
+  const { mock, team } = await open(page)
+  await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "true")
+
+  team.on = false
+  mock.emit({ type: "image.generation.updated", properties: { on: false } })
+  await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "false")
+
+  team.on = true
+  mock.emit({ type: "image.generation.updated", properties: { on: true } })
+  await expect(page.locator(toggle)).toHaveAttribute("aria-checked", "true")
+  expect(team.toggles).toEqual([])
 })
 
 test("한도를 다 쓰면 꺼진 채로 막힌다", async ({ page }) => {
@@ -122,7 +143,7 @@ test("느린 개수 조회가 대화 화면을 막지 않는다", async ({ page 
     directory,
     project,
     sessions: [session],
-    imageQuota: () => ({ enabled: true, quota: { limit: 10, used: 3, remaining: 7 } }),
+    imageQuota: () => ({ enabled: true, on: true, quota: { limit: 10, used: 3, remaining: 7 } }),
     imageQuotaDelay: 5_000,
   })
   await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)

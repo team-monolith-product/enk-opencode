@@ -1,28 +1,15 @@
-import { type Accessor, createEffect, createSignal, on, Show } from "solid-js"
+import { type Accessor, createEffect, createSignal, on, onCleanup, Show } from "solid-js"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useLanguage } from "@/context/language"
 import type { ImageQuota, ImageQuotaStatus } from "@opencode-ai/sdk/v2/client"
 import type { useSDK } from "@/context/sdk"
 
-// 사용자가 한 번 고르면 그 값을 계속 따르고, 고른 적이 없으면 남은 개수가 있을 때 켜 둔다.
-const CHOICE_KEY = "prompt.imageGeneration"
-
-function loadChoice() {
-  try {
-    const value = localStorage.getItem(CHOICE_KEY)
-    return value === null ? undefined : value === "1"
-  } catch {
-    return undefined
-  }
-}
-
 /**
- * 입력창의 '이미지 만들기' 상태. 서버의 개수 캐시를 읽어 토글을 그리고, 전송할 값(request)을 준다.
+ * 입력창의 '이미지 만들기' 상태. 토글은 팀 작업 공간에 값 하나라 서버에 두고, 누가 바꾸든 이벤트로 모든 화면이 따라간다.
  * createResource 는 루트 Suspense 를 걸어 조회 동안 화면 전체를 가리므로 신호로만 둔다.
  */
 export function createImageGeneration(input: { sdk: ReturnType<typeof useSDK>; working: Accessor<boolean> }) {
   const [status, setStatus] = createSignal<ImageQuotaStatus>()
-  const [choice, setChoice] = createSignal(loadChoice())
 
   const refresh = () => {
     const directory = input.sdk.directory
@@ -35,19 +22,25 @@ export function createImageGeneration(input: { sdk: ReturnType<typeof useSDK>; w
   }
   createEffect(on(() => input.sdk.directory, refresh))
   createEffect(on(input.working, (busy, was) => was && !busy && refresh(), { defer: true }))
+  onCleanup(
+    input.sdk.event.on("image.generation.updated", (event) => {
+      setStatus((current) => current && { ...current, on: event.properties.on })
+    }),
+  )
 
   const exhausted = () => (status()?.quota?.remaining ?? 1) <= 0
-  const isOn = () => !exhausted() && (choice() ?? true)
+  const isOn = () => !exhausted() && (status()?.on ?? true)
   const toggle = () => {
     const next = !isOn()
-    setChoice(next)
-    try {
-      localStorage.setItem(CHOICE_KEY, next ? "1" : "0")
-    } catch {}
+    setStatus((current) => current && { ...current, on: next })
+    void input.sdk.client.imageQuota
+      .toggle({ directory: input.sdk.directory, on: next })
+      .then((x) => setStatus(x.data))
+      .catch(refresh)
   }
 
   return {
-    /** 이번 메시지에 이미지 생성을 허용할지. 쓸 수 없는 곳이면 꺼서 보내 모델에게 도구가 보이지 않게 한다. */
+    /** 이번 메시지에 이미지 생성을 허용할지. 쓸 수 없는 곳이면 꺼서 보낸다. */
     request: () => status()?.enabled !== false && isOn(),
     Toggle: () => (
       <Show when={status()?.enabled}>
