@@ -556,6 +556,13 @@ export type EventPtyDeleted = {
   }
 }
 
+export type EventImageGenerationUpdated = {
+  type: "image.generation.updated"
+  properties: {
+    on: boolean
+  }
+}
+
 export type EventWorktreeReady = {
   type: "worktree.ready"
   properties: {
@@ -1065,6 +1072,7 @@ export type Event =
   | EventPtyUpdated
   | EventPtyExited
   | EventPtyDeleted
+  | EventImageGenerationUpdated
   | EventWorktreeReady
   | EventWorktreeFailed
   | EventMessageUpdated
@@ -1865,6 +1873,7 @@ export type ImageQuota = {
 
 export type ImageQuotaStatus = {
   enabled: boolean
+  on: boolean
   quota?: ImageQuota
 }
 
@@ -3211,6 +3220,36 @@ export type ImageQuotaGetResponses = {
 }
 
 export type ImageQuotaGetResponse = ImageQuotaGetResponses[keyof ImageQuotaGetResponses]
+
+export type ImageQuotaToggleData = {
+  body?: {
+    on: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/image-quota/toggle"
+}
+
+export type ImageQuotaToggleErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ImageQuotaToggleError = ImageQuotaToggleErrors[keyof ImageQuotaToggleErrors]
+
+export type ImageQuotaToggleResponses = {
+  /**
+   * Quota
+   */
+  200: ImageQuotaStatus
+}
+
+export type ImageQuotaToggleResponse = ImageQuotaToggleResponses[keyof ImageQuotaToggleResponses]
 
 export type DevServerStatusData = {
   body?: never

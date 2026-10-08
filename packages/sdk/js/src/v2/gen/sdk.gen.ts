@@ -89,6 +89,8 @@ import type {
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   ImageQuotaGetResponses,
+  ImageQuotaToggleErrors,
+  ImageQuotaToggleResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -1362,7 +1364,7 @@ export class ImageQuota extends HeyApiClient {
   /**
    * Image generation quota
    *
-   * Whether image generation is available here and how many images the team has left.
+   * Whether image generation is available here, whether the team's toggle is on, and how many images the team has left.
    */
   public get<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -1386,6 +1388,43 @@ export class ImageQuota extends HeyApiClient {
       url: "/image-quota",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Set image generation toggle
+   *
+   * Turn the team's image generation toggle on or off. Every open screen of the workspace follows it.
+   */
+  public toggle<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      on?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "on" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<ImageQuotaToggleResponses, ImageQuotaToggleErrors, ThrowOnError>({
+      url: "/image-quota/toggle",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }

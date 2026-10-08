@@ -1803,7 +1803,7 @@
           }
         ],
         "summary": "Image generation quota",
-        "description": "Whether image generation is available here and how many images the team has left.",
+        "description": "Whether image generation is available here, whether the team's toggle is on, and how many images the team has left.",
         "responses": {
           "200": {
             "description": "Quota",
@@ -1820,6 +1820,72 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageQuota.get({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/image-quota/toggle": {
+      "put": {
+        "operationId": "imageQuota.toggle",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Set image generation toggle",
+        "description": "Turn the team's image generation toggle on or off. Every open screen of the workspace follows it.",
+        "responses": {
+          "200": {
+            "description": "Quota",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageQuotaStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "on": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["on"]
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.imageQuota.toggle({\n  ...\n})"
           }
         ]
       }
@@ -11574,6 +11640,25 @@
         },
         "required": ["type", "properties"]
       },
+      "Event.image.generation.updated": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "image.generation.updated"
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "on": {
+                "type": "boolean"
+              }
+            },
+            "required": ["on"]
+          }
+        },
+        "required": ["type", "properties"]
+      },
       "Event.worktree.ready": {
         "type": "object",
         "properties": {
@@ -13111,6 +13196,9 @@
           },
           {
             "$ref": "#/components/schemas/Event.pty.deleted"
+          },
+          {
+            "$ref": "#/components/schemas/Event.image.generation.updated"
           },
           {
             "$ref": "#/components/schemas/Event.worktree.ready"
@@ -15082,11 +15170,14 @@
           "enabled": {
             "type": "boolean"
           },
+          "on": {
+            "type": "boolean"
+          },
           "quota": {
             "$ref": "#/components/schemas/ImageQuota"
           }
         },
-        "required": ["enabled"]
+        "required": ["enabled", "on"]
       },
       "DevServerStatus": {
         "type": "object",
