@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
-import { TokenQuota } from "../../src/enk/token-quota"
+import { CostQuota } from "../../src/enk/cost-quota"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { SessionPrompt } from "../../src/session/prompt"
@@ -11,7 +11,7 @@ Log.init({ print: false })
 
 afterEach(async () => {
   await Instance.disposeAll()
-  TokenQuota.reset()
+  CostQuota.reset()
   delete process.env["ENK_HACKATHON_RAILS_URL"]
   delete process.env["ENK_AI_USAGE_TOKEN"]
 })
@@ -27,8 +27,8 @@ function chat(text: string) {
   return new Response(payload, { status: 200, headers: { "Content-Type": "text/event-stream" } })
 }
 
-/** 모델(/chat/completions)과 hackathon-rails(/token_quota) 역할을 한 서버가 맡는다. */
-function serve(quota: TokenQuota.Quota) {
+/** 모델(/chat/completions)과 hackathon-rails(/cost_quota) 역할을 한 서버가 맡는다. */
+function serve(quota: CostQuota.Quota) {
   let modelCalls = 0
   const server = Bun.serve({
     port: 0,
@@ -38,7 +38,7 @@ function serve(quota: TokenQuota.Quota) {
         modelCalls++
         return chat("hello from the model")
       }
-      if (url.pathname.endsWith("/api/v1/opencode/token_quota")) return Response.json(quota)
+      if (url.pathname.endsWith("/api/v1/opencode/cost_quota")) return Response.json(quota)
       return new Response("not found", { status: 404 })
     },
   })
@@ -70,13 +70,13 @@ async function workspace(origin: string) {
   })
 }
 
-const weekly = (remaining: number): TokenQuota.Window => ({
-  limit: 1000,
+const weekly = (remaining: number): CostQuota.Window => ({
+  limit: 10,
   remaining,
   resets_at: "2026-10-12T00:00:00+09:00",
 })
 
-describe("TokenQuota in the prompt loop", () => {
+describe("CostQuota in the prompt loop", () => {
   test("closes the turn with the limit notice instead of calling the model", async () => {
     await using rails = serve({ exhausted: true, weekly: weekly(0), monthly: null })
     await using tmp = await workspace(rails.server.url.origin)
@@ -94,7 +94,7 @@ describe("TokenQuota in the prompt loop", () => {
         expect(result.info.role).toBe("assistant")
         if (result.info.role !== "assistant") return
         expect(result.info.error?.name).toBe("UnknownError")
-        expect(result.info.error?.data.message).toContain("이번 주 AI 토큰 한도(1,000)")
+        expect(result.info.error?.data.message).toContain("이번 주 AI 사용 한도($10.00)")
         expect(result.info.finish).toBe("stop")
 
         const msgs = await Session.messages({ sessionID: session.id })
@@ -105,7 +105,7 @@ describe("TokenQuota in the prompt loop", () => {
   })
 
   test("lets the turn through while the team still has tokens", async () => {
-    await using rails = serve({ exhausted: false, weekly: weekly(990), monthly: null })
+    await using rails = serve({ exhausted: false, weekly: weekly(9.5), monthly: null })
     await using tmp = await workspace(rails.server.url.origin)
 
     await Instance.provide({

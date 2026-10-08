@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { AiUsage } from "../../src/enk/ai-usage"
-import { TokenQuota } from "../../src/enk/token-quota"
+import { CostQuota } from "../../src/enk/cost-quota"
 import { Log } from "../../src/util/log"
 
 Log.init({ print: false })
@@ -8,13 +7,13 @@ Log.init({ print: false })
 const WEEK_RESET = "2026-10-12T00:00:00+09:00"
 const MONTH_RESET = "2026-11-01T00:00:00+09:00"
 
-const window = (limit: number, remaining: number, resets_at: string): TokenQuota.Window => ({
+const window = (limit: number, remaining: number, resets_at: string): CostQuota.Window => ({
   limit,
   remaining,
   resets_at,
 })
 
-function quota(overrides: Partial<TokenQuota.Quota> = {}): TokenQuota.Quota {
+function quota(overrides: Partial<CostQuota.Quota> = {}): CostQuota.Quota {
   return { exhausted: false, weekly: null, monthly: null, ...overrides }
 }
 
@@ -39,151 +38,138 @@ function serve(respond: () => Response) {
   }
 }
 
-beforeEach(() => TokenQuota.reset())
+beforeEach(() => CostQuota.reset())
 
 afterEach(() => {
   delete process.env["ENK_HACKATHON_RAILS_URL"]
   delete process.env["ENK_AI_USAGE_TOKEN"]
 })
 
-describe("TokenQuota.check", () => {
+describe("CostQuota.check", () => {
   test("has no quota when rails is not configured", async () => {
-    expect(await TokenQuota.check()).toBeUndefined()
+    expect(await CostQuota.check()).toBeUndefined()
   })
 
   test("reports exhausted when rails says a window ran out", async () => {
-    const body = quota({
-      exhausted: true,
-      weekly: window(1000, 0, WEEK_RESET),
-      monthly: window(5000, 3800, MONTH_RESET),
-    })
+    const body = quota({ exhausted: true, weekly: window(10, 0, WEEK_RESET), monthly: window(50, 38, MONTH_RESET) })
     await using rails = serve(() => Response.json(body))
-    const current = await TokenQuota.check()
+    const current = await CostQuota.check()
     expect(current?.exhausted).toBe(true)
     expect(current?.weekly?.remaining).toBe(0)
     expect(rails.requests).toBe(1)
   })
 
   test("reads only the fields it needs, so extra rails fields are fine", async () => {
-    const body = {
-      active: true,
-      exhausted: false,
-      weekly: { ...window(1000, 700, WEEK_RESET), used: 300 },
-      monthly: null,
-    }
+    const body = { active: true, exhausted: false, weekly: { ...window(10, 7, WEEK_RESET), used: 3 }, monthly: null }
     await using rails = serve(() => Response.json(body))
-    expect(await TokenQuota.check()).toEqual(quota({ weekly: window(1000, 700, WEEK_RESET) }))
+    expect(await CostQuota.check()).toEqual(quota({ weekly: window(10, 7, WEEK_RESET) }))
     expect(rails.requests).toBe(1)
   })
 
   test("reuses the cached answer within the ttl and asks again after it", async () => {
-    await using rails = serve(() => Response.json(quota({ weekly: window(1000, 700, WEEK_RESET) })))
-    await TokenQuota.check(1_000)
-    await TokenQuota.check(10_000)
+    await using rails = serve(() => Response.json(quota({ weekly: window(10, 7, WEEK_RESET) })))
+    await CostQuota.check(1_000)
+    await CostQuota.check(10_000)
     expect(rails.requests).toBe(1)
-    await TokenQuota.check(31_000)
+    await CostQuota.check(31_000)
     expect(rails.requests).toBe(2)
   })
 
   test("treats 403 (not a team workspace) as no quota", async () => {
     await using rails = serve(() => new Response("", { status: 403 }))
-    expect(await TokenQuota.check()).toEqual(quota())
+    expect(await CostQuota.check()).toEqual(quota())
     expect(rails.requests).toBe(1)
   })
 
   test("fails open on a server error and waits the ttl before retrying", async () => {
     await using rails = serve(() => new Response("", { status: 500 }))
-    expect((await TokenQuota.check(1_000))?.exhausted).toBe(false)
-    expect((await TokenQuota.check(2_000))?.exhausted).toBe(false)
+    expect((await CostQuota.check(1_000))?.exhausted).toBe(false)
+    expect((await CostQuota.check(2_000))?.exhausted).toBe(false)
     expect(rails.requests).toBe(1)
   })
 
   test("fails open on a malformed body", async () => {
     await using rails = serve(() => Response.json({ weekly: "nope" }))
-    expect((await TokenQuota.check())?.exhausted).toBe(false)
+    expect((await CostQuota.check())?.exhausted).toBe(false)
     expect(rails.requests).toBe(1)
   })
 
   test("fails open when rails is unreachable", async () => {
     process.env["ENK_HACKATHON_RAILS_URL"] = "http://127.0.0.1:9"
     process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
-    expect((await TokenQuota.check())?.exhausted).toBe(false)
+    expect((await CostQuota.check())?.exhausted).toBe(false)
   })
 
   test("keeps the last known quota when a refresh fails", async () => {
     let status = 200
-    const body = quota({ exhausted: true, weekly: window(1000, 0, WEEK_RESET) })
+    const body = quota({ exhausted: true, weekly: window(10, 0, WEEK_RESET) })
     await using rails = serve(() => (status === 200 ? Response.json(body) : new Response("", { status })))
-    expect((await TokenQuota.check(1_000))?.exhausted).toBe(true)
+    expect((await CostQuota.check(1_000))?.exhausted).toBe(true)
     status = 503
-    expect((await TokenQuota.check(40_000))?.exhausted).toBe(true)
+    expect((await CostQuota.check(40_000))?.exhausted).toBe(true)
     expect(rails.requests).toBe(2)
   })
 })
 
-describe("TokenQuota.consume", () => {
+describe("CostQuota.consume", () => {
   test("spends the cached windows locally so a long turn stops at the limit without another request", async () => {
     await using rails = serve(() =>
-      Response.json(quota({ weekly: window(1000, 100, WEEK_RESET), monthly: window(5000, 4100, MONTH_RESET) })),
+      Response.json(quota({ weekly: window(10, 0.1, WEEK_RESET), monthly: window(50, 41, MONTH_RESET) })),
     )
-    expect((await TokenQuota.check(1_000))?.exhausted).toBe(false)
-    TokenQuota.consume(AiUsage.totalTokens({ input: 50, output: 20, reasoning: 5, cache: { read: 10, write: 5 } }))
-    expect((await TokenQuota.check(2_000))?.exhausted).toBe(false)
-    TokenQuota.consume(AiUsage.totalTokens({ input: 10 }))
-    const current = await TokenQuota.check(3_000)
+    expect((await CostQuota.check(1_000))?.exhausted).toBe(false)
+    CostQuota.consume(0.09)
+    expect((await CostQuota.check(2_000))?.exhausted).toBe(false)
+    CostQuota.consume(0.01)
+    const current = await CostQuota.check(3_000)
     expect(current?.exhausted).toBe(true)
-    expect(current?.weekly).toEqual(window(1000, 0, WEEK_RESET))
-    expect(current?.monthly).toEqual(window(5000, 4000, MONTH_RESET))
+    expect(current?.weekly?.remaining).toBe(0)
+    expect(current?.monthly?.remaining).toBeCloseTo(40.9, 6)
     expect(rails.requests).toBe(1)
   })
 
   test("is a no-op before anything was fetched", () => {
-    expect(() => TokenQuota.consume(100)).not.toThrow()
+    expect(() => CostQuota.consume(1)).not.toThrow()
   })
 })
 
-describe("TokenQuota.spend", () => {
+describe("CostQuota.spend", () => {
   test("returns a new quota and leaves the input untouched", () => {
-    const before = quota({ weekly: window(1000, 10, WEEK_RESET) })
-    const after = TokenQuota.spend(before, 20)
-    expect(after).toEqual(quota({ exhausted: true, weekly: window(1000, 0, WEEK_RESET) }))
-    expect(before).toEqual(quota({ weekly: window(1000, 10, WEEK_RESET) }))
+    const before = quota({ weekly: window(10, 0.1, WEEK_RESET) })
+    const after = CostQuota.spend(before, 0.2)
+    expect(after).toEqual(quota({ exhausted: true, weekly: window(10, 0, WEEK_RESET) }))
+    expect(before).toEqual(quota({ weekly: window(10, 0.1, WEEK_RESET) }))
   })
 
   test("spends every window and stays open while all have room", () => {
-    const after = TokenQuota.spend(
-      quota({ weekly: window(1000, 50, WEEK_RESET), monthly: window(5000, 60, MONTH_RESET) }),
-      30,
-    )
-    expect(after).toEqual(quota({ weekly: window(1000, 20, WEEK_RESET), monthly: window(5000, 30, MONTH_RESET) }))
+    const after = CostQuota.spend(quota({ weekly: window(10, 5, WEEK_RESET), monthly: window(50, 6, MONTH_RESET) }), 3)
+    expect(after).toEqual(quota({ weekly: window(10, 2, WEEK_RESET), monthly: window(50, 3, MONTH_RESET) }))
   })
 })
 
-describe("TokenQuota.message", () => {
-  test("names the weekly window with its KST reset time", () => {
-    const text = TokenQuota.message(quota({ weekly: window(1_000_000, 0, WEEK_RESET) }))
+describe("CostQuota.message", () => {
+  test("names the weekly window with its dollar limit and KST reset time", () => {
+    const text = CostQuota.message(quota({ weekly: window(1000, 0, WEEK_RESET) }))
     expect(text).toContain("이번 주")
-    expect(text).toContain("1,000,000")
+    expect(text).toContain("$1,000.00")
     expect(text).toContain("10월 12일")
     expect(text).toContain("00:00")
   })
 
   test("prefers the window that resets later when both are exhausted", () => {
-    const text = TokenQuota.message(
-      quota({ weekly: window(1000, 0, WEEK_RESET), monthly: window(5000, 0, MONTH_RESET) }),
-    )
+    const text = CostQuota.message(quota({ weekly: window(10, 0, WEEK_RESET), monthly: window(50, 0, MONTH_RESET) }))
     expect(text).toContain("이번 달")
+    expect(text).toContain("$50.00")
     expect(text).toContain("11월 1일")
   })
 
   test("speaks english for an english session", () => {
-    const text = TokenQuota.message(quota({ monthly: window(5000, 0, MONTH_RESET) }), "en")
+    const text = CostQuota.message(quota({ monthly: window(12.5, 0, MONTH_RESET) }), "en")
     expect(text).toContain("This month's")
-    expect(text).toContain("5,000")
+    expect(text).toContain("$12.50")
     expect(text).toContain("Nov 1")
   })
 
   test("is empty when nothing is exhausted", () => {
-    expect(TokenQuota.message(quota({ weekly: window(1000, 10, WEEK_RESET) }))).toBe("")
+    expect(CostQuota.message(quota({ weekly: window(10, 1, WEEK_RESET) }))).toBe("")
   })
 })
