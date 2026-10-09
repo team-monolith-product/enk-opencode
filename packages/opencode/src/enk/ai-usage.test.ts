@@ -152,3 +152,32 @@ describe("AiUsage.remember (bounded idempotency-key set)", () => {
     expect([...set]).toEqual(["d", "e", "f"])
   })
 })
+
+describe("AiUsage.buildToolAttributes", () => {
+  const usage: AiUsage.ToolUsage = {
+    cwd: "/fsx/teams/45/project-directory",
+    messageID: "msg_1",
+    callID: "call_1",
+    modelID: "gpt-image-1-mini",
+    tokens: { input: 50, output: 1056 },
+    cost: 0.0085,
+    at: 1_000,
+  }
+
+  test("bills under the tool's own model_id, apart from model steps", () => {
+    const attrs = AiUsage.buildToolAttributes(usage)
+    expect(attrs.model_id).toBe("gpt-image-1-mini")
+    expect(attrs.step_index).toBe(-2)
+    expect(attrs.phase).toBe("step")
+    expect(attrs.mount_path).toBe("/fsx/teams/45/project-directory")
+  })
+
+  test("carries tokens and cost", () => {
+    const attrs = AiUsage.buildToolAttributes(usage)
+    expect(attrs.tokens).toBe(1106)
+    expect(attrs.input).toBe(50)
+    expect(attrs.output).toBe(1056)
+    expect(attrs.cost).toBe(0.0085)
+    expect(attrs.used_at).toBe(new Date(1_000).toISOString())
+  })
+})

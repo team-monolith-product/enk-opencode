@@ -35,6 +35,7 @@ export type FollowupDraft = {
   model: { providerID: string; modelID: string }
   variant?: string
   locale?: PromptLocale
+  imageGeneration?: boolean
 }
 
 type FollowupSendInput = {
@@ -58,6 +59,7 @@ export type PromptApprovalInput = {
   model: { providerID: string; modelID: string }
   variant?: string
   locale?: PromptLocale
+  imageGeneration?: boolean
   parts: RequestParts
 }
 
@@ -104,6 +106,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
         model: `${input.draft.model.providerID}/${input.draft.model.modelID}`,
         variant: input.draft.variant,
         locale: input.draft.locale,
+        imageGeneration: input.draft.imageGeneration,
         parts: images.map((attachment) => ({
           id: Identifier.ascending("part"),
           type: "file" as const,
@@ -173,6 +176,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       parts: requestParts,
       variant: input.draft.variant,
       locale: input.draft.locale,
+      imageGeneration: input.draft.imageGeneration,
     })
     return true
   } catch (err) {
@@ -203,6 +207,7 @@ type PromptSubmitInput = {
   onQueued?: (input: { sessionID: string; mode: "normal" | "shell" | "doc" }) => void | Promise<void>
   onAbort?: () => void
   onSubmit?: () => void
+  imageGeneration?: Accessor<boolean>
   approve?: (input: PromptApprovalInput) => Promise<boolean> | boolean
 }
 
@@ -422,6 +427,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       model,
       variant,
       locale,
+      imageGeneration: input.imageGeneration?.(),
     }
 
     const clearInput = () => {
@@ -487,6 +493,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             model: `${model.providerID}/${model.modelID}`,
             variant,
             locale,
+            imageGeneration: input.imageGeneration?.(),
             parts: files.map((attachment) => ({
               id: Identifier.ascending("part"),
               type: "file" as const,
@@ -528,6 +535,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         model,
         variant,
         locale,
+        imageGeneration: draft.imageGeneration,
         parts: requestParts,
       })
     ) {

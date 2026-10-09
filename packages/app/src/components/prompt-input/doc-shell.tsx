@@ -45,6 +45,7 @@ type ShellProps = {
     enabled: boolean
     onToggle: () => void
   }
+  imageToggle?: JSX.Element
 }
 
 export const PromptDocShell: Component<ShellProps> = (props) => {
@@ -332,6 +333,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               />
             </Tooltip>
           </Show>
+          {props.imageToggle}
           <Show when={props.autoExpand}>
             <span class="mx-1 h-4 w-px shrink-0 bg-border-weaker-base" />
             <Tooltip placement="top" value={language.t("prompt.action.docAutoExpandHint")}>

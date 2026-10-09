@@ -792,6 +792,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           time: { created: Date.now() },
           agent: lastUser.agent,
           model: lastUser.model,
+          imageGeneration: lastUser.imageGeneration,
         }
         yield* sessions.updateMessage(summaryUserMsg)
         yield* sessions.updatePart({
@@ -1112,6 +1113,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           sessionID: input.sessionID,
           time: { created: Date.now() },
           tools: input.tools,
+          imageGeneration: input.imageGeneration,
           agent: ag.name,
           model,
           system: input.system,
@@ -1715,7 +1717,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               lastFinished.summary !== true &&
               (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
             ) {
-              yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+              yield* compaction.create({
+                sessionID,
+                agent: lastUser.agent,
+                model: lastUser.model,
+                auto: true,
+                imageGeneration: lastUser.imageGeneration,
+              })
               continue
             }
 
@@ -1837,6 +1845,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     model: lastUser.model,
                     auto: true,
                     overflow: !handle.message.finish,
+                    imageGeneration: lastUser.imageGeneration,
                   })
                 }
                 return "continue" as const
@@ -1990,6 +1999,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           parts,
           variant: input.variant,
           locale: input.locale,
+          imageGeneration: input.imageGeneration,
         })
         yield* bus.publish(Command.Event.Executed, {
           name: input.command,
@@ -2063,6 +2073,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     format: MessageV2.Format.optional(),
     system: z.string().optional(),
     locale: Locale.Schema.optional(),
+    imageGeneration: z.boolean().optional(),
     variant: z.string().optional(),
     parts: z.array(
       z.discriminatedUnion("type", [
@@ -2157,6 +2168,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     command: z.string(),
     variant: z.string().optional(),
     locale: Locale.Schema.optional(),
+    imageGeneration: z.boolean().optional(),
     parts: z
       .array(
         z.discriminatedUnion("type", [

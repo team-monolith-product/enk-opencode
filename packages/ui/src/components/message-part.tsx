@@ -49,6 +49,7 @@ import { Checkbox } from "./checkbox"
 import { DiffChanges } from "./diff-changes"
 import { Markdown } from "./markdown"
 import { ImagePreview } from "./image-preview"
+import { GeneratedImage } from "./generated-image"
 import { getDirectory as _getDirectory, getFilename } from "@opencode-ai/util/path"
 import { checksum } from "@opencode-ai/util/encode"
 import { Tooltip } from "./tooltip"
@@ -1791,6 +1792,11 @@ ToolRegistry.register({
       />
     )
   },
+})
+
+ToolRegistry.register({
+  name: "generate_image",
+  render: GeneratedImage,
 })
 
 ToolRegistry.register({

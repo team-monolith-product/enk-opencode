@@ -14,6 +14,7 @@ import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import { EnsureDevServerTool } from "./ensure-dev-server"
 import { EnvRequestTool } from "./env-request"
+import { GenerateImage, GenerateImageTool } from "./generate-image"
 import type { Agent } from "../agent/agent"
 import { Tool } from "./tool"
 import { Config } from "../config/config"
@@ -136,6 +137,7 @@ export namespace ToolRegistry {
           SkillTool,
           ApplyPatchTool,
           EnsureDevServerTool,
+          ...(GenerateImage.available() ? [GenerateImageTool] : []),
           ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
           ...(cfg.experimental?.batch_tool === true ? [BatchTool] : []),
           ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
