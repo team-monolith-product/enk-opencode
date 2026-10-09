@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { rm, stat } from "fs/promises"
 import path from "path"
 import { BootEnv } from "../../src/boot/env"
+import { ChildEnv } from "../../src/util/child-env"
 
 const SCRIPT = path.resolve(import.meta.dir, "../../../../docker/entrypoint.sh")
 const files: string[] = []
@@ -18,7 +19,8 @@ afterEach(async () => {
  * 단언을 흔드는 일이 없다.
  */
 async function run(env: Record<string, string>) {
-  const dump = 'printenv | sort; echo "===BOOT==="; cat "$OPENCODE_BOOT_ENV"; echo "===PATH==="; printf %s "$OPENCODE_BOOT_ENV"'
+  const dump =
+    'printenv | sort; echo "===BOOT==="; cat "$OPENCODE_BOOT_ENV"; echo "===PATH==="; printf %s "$OPENCODE_BOOT_ENV"'
   const proc = Bun.spawn(["sh", SCRIPT, "sh", "-c", dump], {
     env: { PATH: process.env.PATH!, ...env },
     stdout: "pipe",
@@ -51,6 +53,16 @@ describe("docker/entrypoint.sh", () => {
       ENK_AI_USAGE_TOKEN: "rails-secret",
       OPENCODE_SERVER_PASSWORD: "server-secret",
     })
+  })
+
+  test("covers the same keywords as the ChildEnv deny list", async () => {
+    // 한쪽만 아는 이름은 "자식 환경에서는 걸러지는데 exec environ 에는 남는" 틈이 된다.
+    const names = ["MY_AUTH_HEADER", "SSH_AUTH_SOCK", "MY_APIKEY", "MY_CREDENTIALS", "MY_PRIVATE_PEM"]
+    const { child } = await run(Object.fromEntries(names.map((name, i) => [name, `deny-secret-${i}`])))
+    for (const name of names) {
+      expect(ChildEnv.allowed(name)).toBe(false)
+      expect(child).not.toContain(name + "=")
+    }
   })
 
   test("OPENCODE_SCRUB_ENV adds names the pattern does not catch", async () => {
