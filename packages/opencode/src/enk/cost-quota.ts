@@ -117,19 +117,27 @@ export namespace CostQuota {
     },
   }
 
+  // 날짜와 시각을 따로 포맷해 잇는다. 한 포맷터에 맡기면 ICU 버전마다 "at"·쉼표 연결이 달라 문장이 흔들린다.
   export function message(quota: Quota, locale: Locale.Value = Locale.DEFAULT) {
     const window = blocking(quota)
     if (!window) return ""
     const copy = COPY[locale]
-    const at = new Intl.DateTimeFormat(copy.tag, {
+    const resetsAt = new Date(window.resets_at)
+    const date = new Intl.DateTimeFormat(copy.tag, {
       timeZone: TIME_ZONE,
       month: copy.month,
       day: "numeric",
       weekday: "short",
+    })
+    const time = new Intl.DateTimeFormat(copy.tag, {
+      timeZone: TIME_ZONE,
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
-    }).format(new Date(window.resets_at))
-    return copy.text(window === quota.weekly ? copy.weekly : copy.monthly, at)
+    })
+    return copy.text(
+      window === quota.weekly ? copy.weekly : copy.monthly,
+      `${date.format(resetsAt)} ${time.format(resetsAt)}`,
+    )
   }
 }

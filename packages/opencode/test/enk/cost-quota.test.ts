@@ -162,7 +162,7 @@ describe("CostQuota.message", () => {
 
   test("speaks english for an english session", () => {
     const text = CostQuota.message(quota({ monthly: window(0, MONTH_RESET) }), "en")
-    expect(text).toBe("This month's AI usage limit has been used up. It resets on Sun, Nov 1 at 00:00 (KST).")
+    expect(text).toBe("This month's AI usage limit has been used up. It resets on Sun, Nov 1 00:00 (KST).")
   })
 
   test("is empty when nothing is exhausted", () => {
