@@ -28,6 +28,7 @@ import { ReadTool } from "../tool/read"
 import { FileTime } from "../file/time"
 import { Flag } from "../flag/flag"
 import { ModelPolicy } from "../enk/model-policy"
+import { CostQuota } from "../enk/cost-quota"
 import { ModelFallback } from "../enk/model-fallback"
 import { Locale } from "../enk/locale"
 import { SessionFallback } from "./fallback"
@@ -1588,6 +1589,34 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           throw new Error("Impossible")
         })
 
+      // 모델을 부르지 않고 턴을 닫는다. 안내는 모델 오류와 같은 자리(assistant 메시지의 error)에 보인다.
+      const refuseTurn = Effect.fn("SessionPrompt.refuseTurn")(function* (input: {
+        sessionID: SessionID
+        lastUser: MessageV2.User
+        message: string
+      }) {
+        const { sessionID, lastUser } = input
+        const error = new NamedError.Unknown({ message: input.message })
+        yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          parentID: lastUser.id,
+          role: "assistant",
+          mode: lastUser.agent,
+          agent: lastUser.agent,
+          variant: lastUser.variant,
+          path: { cwd: Instance.directory, root: Instance.worktree },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: lastUser.model.modelID,
+          providerID: lastUser.model.providerID,
+          time: { created: Date.now(), completed: Date.now() },
+          sessionID,
+          finish: "stop",
+          error: error.toObject(),
+        })
+        yield* bus.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+      })
+
       const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
         function* (sessionID: SessionID) {
           let structured: unknown | undefined
@@ -1629,6 +1658,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               lastAssistant.parentID === lastUser.id
             ) {
               log.info("exiting loop", { sessionID })
+              break
+            }
+
+            // 팀의 주·월 비용 한도(rails)가 바닥났으면 모델을 부르지 않는다. 제목 생성·압축보다 앞에 두어 한 번의
+            // 모델 호출도 새지 않게 한다. 스텝마다 묻되 캐시로 받으므로 긴 에이전트 턴도 한도에 닿은 스텝에서 멈춘다.
+            const quota = yield* Effect.promise(() => CostQuota.check())
+            if (quota?.exhausted) {
+              yield* refuseTurn({ sessionID, lastUser, message: CostQuota.message(quota, lastUser.locale) })
               break
             }
 
