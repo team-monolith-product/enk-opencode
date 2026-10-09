@@ -15,11 +15,13 @@ export type DocSubmitState = {
   sessionID: string
   // 'doc' → targetID is the prompt doc id; 'question' → the question request id; 'stop' → the prompt
   // doc id whose in-flight AI response a consensus would cancel; 'clear' → the prompt doc id of the
-  // session a consensus would delete (archive).
-  targetKind: "doc" | "question" | "stop" | "clear"
+  // session a consensus would delete (archive); 'rollback' → the prompt doc id of the session whose
+  // project files a consensus would roll back to `rollback`.
+  targetKind: "doc" | "question" | "stop" | "clear" | "rollback"
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
+  rollback?: { sha: string; subject: string; time: number }
   actorID: string
   status: "pending" | "sent" | "cancelled" | "expired" | "left"
   actors: DocSubmitActor[]
@@ -265,6 +267,18 @@ export async function startClearSubmit(input: StopInput) {
     docID: input.docID,
     actorID: input.actorID,
     names: input.names,
+    timeoutMs: input.timeoutMs,
+  })
+}
+
+// Start a consent vote to roll the project files back to a saved version. With nobody else connected
+// the server rolls back right away and answers with a 'sent' state.
+export async function startRollbackSubmit(input: StopInput & { sha: string }) {
+  return json(path(input, `/session/${input.sessionID}/prompt-doc/rollback`), {
+    docID: input.docID,
+    actorID: input.actorID,
+    names: input.names,
+    sha: input.sha,
     timeoutMs: input.timeoutMs,
   })
 }
