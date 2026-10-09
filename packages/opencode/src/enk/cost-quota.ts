@@ -14,8 +14,9 @@ export namespace CostQuota {
   const CACHE_TTL_MS = 30_000
   const TIME_ZONE = "Asia/Seoul"
 
-  // rails 응답 중 pod 가 읽는 부분. 금액은 달러. 창이 있다는 것 자체가 "지금 강제 중"이다.
-  export const Window = z.object({ limit: z.number(), remaining: z.number(), resets_at: z.string() })
+  // rails 응답 중 pod 가 읽는 부분. 창이 있다는 것 자체가 "지금 강제 중"이다. 한도 금액은 참가자에게 보이면
+  // 안 되므로 읽지 않는다 — 남은 양(달러)은 로컬 차감에만 쓰고 안내문에는 창과 초기화 시각만 적는다.
+  export const Window = z.object({ remaining: z.number(), resets_at: z.string() })
   export type Window = z.infer<typeof Window>
   export const Quota = z.object({ exhausted: z.boolean(), weekly: Window.nullable(), monthly: Window.nullable() })
   export type Quota = z.infer<typeof Quota>
@@ -96,7 +97,7 @@ export namespace CostQuota {
     month: Intl.DateTimeFormatOptions["month"]
     weekly: string
     monthly: string
-    text: (label: string, limit: string, at: string) => string
+    text: (label: string, at: string) => string
   }
 
   const COPY: Record<Locale.Value, Copy> = {
@@ -105,14 +106,14 @@ export namespace CostQuota {
       month: "long",
       weekly: "이번 주",
       monthly: "이번 달",
-      text: (label, limit, at) => `${label} AI 사용 한도(${limit})를 모두 사용했습니다. ${at}에 다시 사용할 수 있어요.`,
+      text: (label, at) => `${label} AI 사용 한도를 모두 사용했습니다. ${at}에 다시 사용할 수 있어요.`,
     },
     en: {
       tag: "en-US",
       month: "short",
       weekly: "This week's",
       monthly: "This month's",
-      text: (label, limit, at) => `${label} AI spending limit (${limit}) has been used up. It resets at ${at} (KST).`,
+      text: (label, at) => `${label} AI usage limit has been used up. It resets on ${at} (KST).`,
     },
   }
 
@@ -129,7 +130,6 @@ export namespace CostQuota {
       minute: "2-digit",
       hour12: false,
     }).format(new Date(window.resets_at))
-    const limit = "$" + window.limit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    return copy.text(window === quota.weekly ? copy.weekly : copy.monthly, limit, at)
+    return copy.text(window === quota.weekly ? copy.weekly : copy.monthly, at)
   }
 }
