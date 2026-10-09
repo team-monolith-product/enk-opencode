@@ -7,11 +7,7 @@ Log.init({ print: false })
 const WEEK_RESET = "2026-10-12T00:00:00+09:00"
 const MONTH_RESET = "2026-11-01T00:00:00+09:00"
 
-const window = (limit: number, remaining: number, resets_at: string): CostQuota.Window => ({
-  limit,
-  remaining,
-  resets_at,
-})
+const window = (remaining: number, resets_at: string): CostQuota.Window => ({ remaining, resets_at })
 
 function quota(overrides: Partial<CostQuota.Quota> = {}): CostQuota.Quota {
   return { exhausted: false, weekly: null, monthly: null, ...overrides }
@@ -51,7 +47,7 @@ describe("CostQuota.check", () => {
   })
 
   test("reports exhausted when rails says a window ran out", async () => {
-    const body = quota({ exhausted: true, weekly: window(10, 0, WEEK_RESET), monthly: window(50, 38, MONTH_RESET) })
+    const body = quota({ exhausted: true, weekly: window(0, WEEK_RESET), monthly: window(38, MONTH_RESET) })
     await using rails = serve(() => Response.json(body))
     const current = await CostQuota.check()
     expect(current?.exhausted).toBe(true)
@@ -60,14 +56,19 @@ describe("CostQuota.check", () => {
   })
 
   test("reads only the fields it needs, so extra rails fields are fine", async () => {
-    const body = { active: true, exhausted: false, weekly: { ...window(10, 7, WEEK_RESET), used: 3 }, monthly: null }
+    const body = {
+      active: true,
+      exhausted: false,
+      weekly: { ...window(7, WEEK_RESET), limit: 10, used: 3 },
+      monthly: null,
+    }
     await using rails = serve(() => Response.json(body))
-    expect(await CostQuota.check()).toEqual(quota({ weekly: window(10, 7, WEEK_RESET) }))
+    expect(await CostQuota.check()).toEqual(quota({ weekly: window(7, WEEK_RESET) }))
     expect(rails.requests).toBe(1)
   })
 
   test("reuses the cached answer within the ttl and asks again after it", async () => {
-    await using rails = serve(() => Response.json(quota({ weekly: window(10, 7, WEEK_RESET) })))
+    await using rails = serve(() => Response.json(quota({ weekly: window(7, WEEK_RESET) })))
     await CostQuota.check(1_000)
     await CostQuota.check(10_000)
     expect(rails.requests).toBe(1)
@@ -102,7 +103,7 @@ describe("CostQuota.check", () => {
 
   test("keeps the last known quota when a refresh fails", async () => {
     let status = 200
-    const body = quota({ exhausted: true, weekly: window(10, 0, WEEK_RESET) })
+    const body = quota({ exhausted: true, weekly: window(0, WEEK_RESET) })
     await using rails = serve(() => (status === 200 ? Response.json(body) : new Response("", { status })))
     expect((await CostQuota.check(1_000))?.exhausted).toBe(true)
     status = 503
@@ -114,7 +115,7 @@ describe("CostQuota.check", () => {
 describe("CostQuota.consume", () => {
   test("spends the cached windows locally so a long turn stops at the limit without another request", async () => {
     await using rails = serve(() =>
-      Response.json(quota({ weekly: window(10, 0.1, WEEK_RESET), monthly: window(50, 41, MONTH_RESET) })),
+      Response.json(quota({ weekly: window(0.1, WEEK_RESET), monthly: window(41, MONTH_RESET) })),
     )
     expect((await CostQuota.check(1_000))?.exhausted).toBe(false)
     CostQuota.consume(0.09)
@@ -134,42 +135,37 @@ describe("CostQuota.consume", () => {
 
 describe("CostQuota.spend", () => {
   test("returns a new quota and leaves the input untouched", () => {
-    const before = quota({ weekly: window(10, 0.1, WEEK_RESET) })
+    const before = quota({ weekly: window(0.1, WEEK_RESET) })
     const after = CostQuota.spend(before, 0.2)
-    expect(after).toEqual(quota({ exhausted: true, weekly: window(10, 0, WEEK_RESET) }))
-    expect(before).toEqual(quota({ weekly: window(10, 0.1, WEEK_RESET) }))
+    expect(after).toEqual(quota({ exhausted: true, weekly: window(0, WEEK_RESET) }))
+    expect(before).toEqual(quota({ weekly: window(0.1, WEEK_RESET) }))
   })
 
   test("spends every window and stays open while all have room", () => {
-    const after = CostQuota.spend(quota({ weekly: window(10, 5, WEEK_RESET), monthly: window(50, 6, MONTH_RESET) }), 3)
-    expect(after).toEqual(quota({ weekly: window(10, 2, WEEK_RESET), monthly: window(50, 3, MONTH_RESET) }))
+    const after = CostQuota.spend(quota({ weekly: window(5, WEEK_RESET), monthly: window(6, MONTH_RESET) }), 3)
+    expect(after).toEqual(quota({ weekly: window(2, WEEK_RESET), monthly: window(3, MONTH_RESET) }))
   })
 })
 
 describe("CostQuota.message", () => {
-  test("names the weekly window with its dollar limit and KST reset time", () => {
-    const text = CostQuota.message(quota({ weekly: window(1000, 0, WEEK_RESET) }))
-    expect(text).toContain("이번 주")
-    expect(text).toContain("$1,000.00")
-    expect(text).toContain("10월 12일")
-    expect(text).toContain("00:00")
+  test("names the weekly window with its KST reset time and never the amount", () => {
+    const text = CostQuota.message(quota({ weekly: window(0, WEEK_RESET) }))
+    expect(text).toBe("이번 주 AI 사용 한도를 모두 사용했습니다. 10월 12일 (월) 00:00에 다시 사용할 수 있어요.")
   })
 
   test("prefers the window that resets later when both are exhausted", () => {
-    const text = CostQuota.message(quota({ weekly: window(10, 0, WEEK_RESET), monthly: window(50, 0, MONTH_RESET) }))
+    const text = CostQuota.message(quota({ weekly: window(0, WEEK_RESET), monthly: window(0, MONTH_RESET) }))
     expect(text).toContain("이번 달")
-    expect(text).toContain("$50.00")
     expect(text).toContain("11월 1일")
+    expect(text).not.toContain("$")
   })
 
   test("speaks english for an english session", () => {
-    const text = CostQuota.message(quota({ monthly: window(12.5, 0, MONTH_RESET) }), "en")
-    expect(text).toContain("This month's")
-    expect(text).toContain("$12.50")
-    expect(text).toContain("Nov 1")
+    const text = CostQuota.message(quota({ monthly: window(0, MONTH_RESET) }), "en")
+    expect(text).toBe("This month's AI usage limit has been used up. It resets on Sun, Nov 1 at 00:00 (KST).")
   })
 
   test("is empty when nothing is exhausted", () => {
-    expect(CostQuota.message(quota({ weekly: window(10, 1, WEEK_RESET) }))).toBe("")
+    expect(CostQuota.message(quota({ weekly: window(1, WEEK_RESET) }))).toBe("")
   })
 })

@@ -70,11 +70,7 @@ async function workspace(origin: string) {
   })
 }
 
-const weekly = (remaining: number): CostQuota.Window => ({
-  limit: 10,
-  remaining,
-  resets_at: "2026-10-12T00:00:00+09:00",
-})
+const weekly = (remaining: number): CostQuota.Window => ({ remaining, resets_at: "2026-10-12T00:00:00+09:00" })
 
 describe("CostQuota in the prompt loop", () => {
   test("closes the turn with the limit notice instead of calling the model", async () => {
@@ -94,7 +90,9 @@ describe("CostQuota in the prompt loop", () => {
         expect(result.info.role).toBe("assistant")
         if (result.info.role !== "assistant") return
         expect(result.info.error?.name).toBe("UnknownError")
-        expect(result.info.error?.data.message).toContain("이번 주 AI 사용 한도($10.00)")
+        expect(result.info.error?.data.message).toBe(
+          "이번 주 AI 사용 한도를 모두 사용했습니다. 10월 12일 (월) 00:00에 다시 사용할 수 있어요.",
+        )
         expect(result.info.finish).toBe("stop")
 
         const msgs = await Session.messages({ sessionID: session.id })
