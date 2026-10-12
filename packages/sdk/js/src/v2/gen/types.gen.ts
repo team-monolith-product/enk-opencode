@@ -502,7 +502,7 @@ export type EventHistoryFailed = {
   type: "history.failed"
   properties: {
     sessionID: string
-    code: "closed" | "missing" | "busy" | "failed"
+    code: "missing" | "busy" | "failed"
   }
 }
 
@@ -1931,7 +1931,6 @@ export type HistoryEntry = {
 
 export type HistoryStatus = {
   enabled: boolean
-  open: boolean
   entries: Array<HistoryEntry>
 }
 
@@ -5022,10 +5021,6 @@ export type SessionPromptDocRollbackErrors = {
    * Bad request
    */
   400: BadRequestError
-  /**
-   * Expected failure
-   */
-  403: EnkFailure
   /**
    * Expected failure
    */

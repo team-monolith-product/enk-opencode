@@ -16,7 +16,7 @@ import "./dialog-history.css"
 
 const MAX_FILES = 30
 // 서버가 되돌리기를 거절하는 사유(history.failed 와 같은 이름). 서버 쪽 목록이 바뀌면 여기서 타입 오류가 난다.
-const REFUSALS = ["closed", "busy", "missing"] as const satisfies readonly EventHistoryFailed["properties"]["code"][]
+const REFUSALS = ["busy", "missing"] as const satisfies readonly EventHistoryFailed["properties"]["code"][]
 
 /** 서버가 되돌리기 투표를 거절한 이유. */
 function refusal(err: unknown) {
@@ -63,7 +63,7 @@ export function DialogHistory(props: { sessionID: string }) {
     return "list"
   })
   const ready = createMemo(
-    () => !spectator && state.status?.open === true && !!state.selected && state.selected !== current(),
+    () => !spectator && !!state.selected && state.selected !== current(),
   )
 
   const restore = async () => {
@@ -166,11 +166,7 @@ export function DialogHistory(props: { sessionID: string }) {
 
           <Show when={view() === "list"}>
             <span class="history-hint">
-              {spectator
-                ? language.t("history.readonly")
-                : state.status?.open
-                  ? language.t("history.note")
-                  : language.t("history.closed")}
+              {spectator ? language.t("history.readonly") : language.t("history.note")}
             </span>
           </Show>
         </div>

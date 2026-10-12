@@ -1,6 +1,5 @@
 import { Log } from "../util/log"
 import { EnkFailure } from "./failure"
-import { Rails } from "./rails"
 import { ServeTargets } from "./serve-targets"
 import { WorkspaceRepo } from "./workspace-repo"
 
@@ -23,35 +22,19 @@ export namespace History {
   export type Saved = { sha: string; message: string; changes: Change[]; skipped: string[] }
   export type Restored = { sha: string; target: Entry; changes: Change[] }
   export type Revert = { subject: string; after?: string }
-  export type Code = "disabled" | "closed" | "missing"
+  export type Code = "disabled" | "missing" | "revert"
 
   export class Failure extends EnkFailure<Code> {}
-
-  /** 되돌리기는 본행사가 진행 중일 때만 연다. 마감 뒤 결과물은 갤러리에 공개된 그대로 둔다. */
-  export async function open() {
-    const rails = Rails.endpoint("/api/v1/opencode/hackathon")
-    if (!rails) return true
-    const res = await fetch(rails.url, { headers: rails.headers, signal: AbortSignal.timeout(15_000) }).catch(
-      () => undefined,
-    )
-    if (!res?.ok) return false
-    const body = (await res.json().catch(() => undefined)) as { status?: string } | undefined
-    return body?.status === "hackathon_running"
-  }
 
   function trailers(values: Record<string, string | undefined>) {
     const lines = Object.entries(values).flatMap(([key, value]) => (value ? [`${key}: ${value}`] : []))
     return lines.length ? `\n\n${lines.join("\n")}` : ""
   }
 
-  async function commitTree(repo: WorkspaceRepo.Repo, tree: string, parent: string | undefined, message: string) {
-    const sha = (
-      await repo.must(["commit-tree", "--no-gpg-sign", tree, ...(parent ? ["-p", parent] : []), "-m", message], {
-        env: who,
-      })
-    ).trim()
-    await repo.must(["update-ref", WorkspaceRepo.HEAD, sha, parent ?? ""])
-    return sha
+  /** 인덱스에 올라 있는 그대로 커밋한다. */
+  async function commitIndex(repo: WorkspaceRepo.Repo, message: string) {
+    await repo.must(["commit", "--quiet", "--no-verify", "--no-gpg-sign", "-m", message], { env: who })
+    return (await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD))!
   }
 
   async function save(
@@ -64,7 +47,7 @@ export namespace History {
     if (parent && staged.tree === (await WorkspaceRepo.rev(repo, `${parent}^{tree}`))) return
     const changes = await WorkspaceRepo.diff(repo, parent ? `${parent}^{tree}` : undefined, staged.tree)
     const message = typeof input.message === "string" ? input.message : await input.message(changes)
-    const sha = await commitTree(repo, staged.tree, parent, message + trailers({ [Trailer.message]: input.turn }))
+    const sha = await commitIndex(repo, message + trailers({ [Trailer.message]: input.turn }))
     return { sha, message, changes, skipped: staged.skipped }
   }
 
@@ -148,9 +131,10 @@ export namespace History {
   }
 
   /**
-   * 작업 폴더를 `sha` 시점으로 맞춘다. 마지막 기록 뒤에 바뀐 파일(업로드·직접 편집)이 있으면 먼저 기록해 두고,
-   * 기록에서 빠진 파일(.env·node_modules·큰 파일)은 건드리지 않는다. `after` 는 되돌린 시점의 마지막 메시지로,
-   * 그 뒤 첫 답변에만 되돌렸다는 안내를 붙이는 기준이 된다.
+   * 작업 폴더를 `sha` 시점으로 되돌린다. `sha` 뒤에 쌓인 커밋을 `git revert` 로 최신 것부터 거꾸로 적용해 커밋
+   * 하나로 남기므로, 결과 트리는 `sha` 와 같고 기록은 앞으로만 쌓인다. 마지막 기록 뒤에 바뀐 파일(업로드·직접
+   * 편집)이 있으면 먼저 기록해 두고, 기록에서 빠진 파일(.env·node_modules·큰 파일)은 건드리지 않는다. `after` 는
+   * 되돌린 시점의 마지막 메시지로, 그 뒤 첫 답변에만 되돌렸다는 안내를 붙이는 기준이 된다.
    */
   export async function restore(
     dir: string,
@@ -167,12 +151,14 @@ export namespace History {
       const [found] = await read(repo, ["-1", input.sha])
       const target: Entry = { sha: input.sha, time: found!.time, subject: found!.subject }
       if (changes.length === 0) return { sha: parent, target, changes }
-      await repo.must(["read-tree", "--reset", "-u", goal])
+      const reverted = await repo.run(["revert", "--no-commit", "--no-edit", `${input.sha}..${parent}`], { env: who })
+      if (reverted.exitCode !== 0) {
+        await repo.run(["revert", "--abort"])
+        throw new Failure("revert", 500, reverted.stderr.toString().trim())
+      }
       const message = input.message(target)
-      const sha = await commitTree(
+      const sha = await commitIndex(
         repo,
-        goal,
-        parent,
         message + trailers({ [Trailer.revert]: input.sha, [Trailer.after]: input.after }),
       )
       reverts.set(repo.root, { subject: message, after: input.after })

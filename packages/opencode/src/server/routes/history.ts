@@ -13,7 +13,7 @@ const Entry = z
   .meta({ ref: "HistoryEntry" })
 const Change = z.object({ status: z.enum(["A", "M", "D"]), file: z.string() }).meta({ ref: "HistoryChange" })
 const Status = z
-  .object({ enabled: z.boolean(), open: z.boolean(), entries: Entry.array() })
+  .object({ enabled: z.boolean(), entries: Entry.array() })
   .meta({ ref: "HistoryStatus" })
 
 export const HistoryRoutes = lazy(() =>
@@ -23,15 +23,14 @@ export const HistoryRoutes = lazy(() =>
       describeRoute({
         summary: "Version history",
         description:
-          "Saved versions of the project folder, newest first. A version is saved every time an AI turn ends. `open` says whether rolling back is allowed right now.",
+          "Saved versions of the project folder, newest first. A version is saved every time an AI turn ends.",
         operationId: "history.list",
         responses: { ...ok("Version history", Status), ...failures(500) },
       }),
       async (c) => {
         const dir = Instance.directory
-        if (!ServeTargets.isProject(dir)) return c.json({ enabled: false, open: false, entries: [] })
-        const [open, entries] = await Promise.all([History.open(), History.list(dir)])
-        return c.json({ enabled: true, open, entries })
+        if (!ServeTargets.isProject(dir)) return c.json({ enabled: false, entries: [] })
+        return c.json({ enabled: true, entries: await History.list(dir) })
       },
     )
     .get(

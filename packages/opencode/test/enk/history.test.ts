@@ -12,8 +12,6 @@ import { tmpdir } from "../fixture/fixture"
 Log.init({ print: false })
 
 afterEach(() => {
-  delete process.env["ENK_HACKATHON_RAILS_URL"]
-  delete process.env["ENK_AI_USAGE_TOKEN"]
   delete process.env["ENK_PROJECT_DIRECTORY"]
 })
 
@@ -191,28 +189,6 @@ describe("History.restore", () => {
 
     expect(restore(work, "0".repeat(40))).rejects.toMatchObject({ code: "missing" })
     expect(restore(work, "HEAD")).rejects.toMatchObject({ code: "missing" })
-  })
-})
-
-describe("History.open", () => {
-  test("is open only while the main event is running", async () => {
-    let status = "hackathon_running"
-    await using server = Object.assign(Bun.serve({ port: 0, fetch: () => Response.json({ status }) }), {
-      [Symbol.asyncDispose]: () => server.stop(true),
-    })
-    process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
-    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
-
-    expect(await History.open()).toBe(true)
-    status = "hackathon_ended"
-    expect(await History.open()).toBe(false)
-  })
-
-  test("is closed when rails cannot be reached", async () => {
-    process.env["ENK_HACKATHON_RAILS_URL"] = "http://127.0.0.1:9"
-    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
-
-    expect(await History.open()).toBe(false)
   })
 })
 

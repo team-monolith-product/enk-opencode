@@ -37,7 +37,7 @@ export namespace HistorySync {
   ])
 
   // 되돌리기를 막는 사유. 버전 기록 창의 거절 안내와 같은 이름이고, 그 밖의 실패는 "failed" 로 묶는다.
-  const REFUSALS = ["closed", "missing", "busy"] as const
+  const REFUSALS = ["missing", "busy"] as const
 
   function reason(err: unknown) {
     if (err instanceof Session.BusyError) return "busy"
@@ -82,11 +82,10 @@ export namespace HistorySync {
     log.warn("github failed", { error: err instanceof Error ? err.message : String(err) })
   }
 
-  /** 투표를 열기 전과 되돌리기 직전에 같은 조건을 본다. 투표가 도는 사이 마감되거나 기록이 바뀔 수 있다. */
+  /** 투표를 열기 전과 되돌리기 직전에 같은 조건을 본다. 기록에 있는 버전인지는 git 저장소만 보고 판단한다. */
   async function verify(input: { sessionID: SessionID; sha: string }) {
     const session = await Session.get(input.sessionID)
     if (!ServeTargets.isProject(session.directory)) throw new History.Failure("disabled", 404)
-    if (!(await History.open())) throw new History.Failure("closed", 403)
     const target = await History.entry(session.directory, input.sha)
     if (!target) throw new History.Failure("missing", 404)
     return { session, target }

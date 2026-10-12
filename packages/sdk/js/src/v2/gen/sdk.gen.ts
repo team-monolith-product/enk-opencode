@@ -1535,7 +1535,7 @@ export class History extends HeyApiClient {
   /**
    * Version history
    *
-   * Saved versions of the project folder, newest first. A version is saved every time an AI turn ends. `open` says whether rolling back is allowed right now.
+   * Saved versions of the project folder, newest first. A version is saved every time an AI turn ends.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {

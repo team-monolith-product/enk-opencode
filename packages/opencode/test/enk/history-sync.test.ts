@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
+import { rm } from "fs/promises"
 import { Bus } from "../../src/bus"
 import { Doc } from "../../src/doc"
 import { History } from "../../src/enk/history"
 import { HistorySync } from "../../src/enk/history-sync"
+import { WorkspaceRepo } from "../../src/enk/workspace-repo"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Instance } from "../../src/project/instance"
 import { Project } from "../../src/project/project"
@@ -16,8 +18,6 @@ Log.init({ print: false })
 
 afterEach(async () => {
   await Instance.disposeAll()
-  delete process.env["ENK_HACKATHON_RAILS_URL"]
-  delete process.env["ENK_AI_USAGE_TOKEN"]
 })
 
 const read = (dir: string) => Bun.file(path.join(dir, "index.html")).text()
@@ -182,12 +182,6 @@ describe("rollback consent vote", () => {
 
   test("tells everyone when the agreed rollback can no longer run", async () => {
     await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
-    let status = "hackathon_running"
-    await using server = Object.assign(Bun.serve({ port: 0, fetch: () => Response.json({ status }) }), {
-      [Symbol.asyncDispose]: () => server.stop(true),
-    })
-    process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
-    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
     await Instance.provide({
       directory: tmp.path,
       init: InstanceBootstrap,
@@ -210,11 +204,11 @@ describe("rollback consent vote", () => {
           sha: first.sha,
           target: { subject: "처음", time: 0 },
         })
-        status = "hackathon_ended"
+        await rm(WorkspaceRepo.open(tmp.path).root, { recursive: true, force: true })
         Doc.submitRespond({ sessionID: session.id, submitID: state.submitID, actorID: bob.actorID, action: "approve" })
 
         await until(async () => failed.length > 0)
-        expect(failed).toEqual([{ sessionID: session.id, code: "closed" }])
+        expect(failed).toEqual([{ sessionID: session.id, code: "missing" }])
         expect(await read(tmp.path)).toBe("v2")
         unsub()
         close()
@@ -224,27 +218,6 @@ describe("rollback consent vote", () => {
 })
 
 describe("HistorySync.check", () => {
-  test("refuses after the main event has ended", async () => {
-    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
-    await using server = Object.assign(
-      Bun.serve({ port: 0, fetch: () => Response.json({ status: "hackathon_ended" }) }),
-      { [Symbol.asyncDispose]: () => server.stop(true) },
-    )
-    process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
-    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
-    await Instance.provide({
-      directory: tmp.path,
-      init: InstanceBootstrap,
-      fn: async () => {
-        const { session, first } = await team(tmp.path)
-
-        await expect(HistorySync.check({ sessionID: session.id, sha: first.sha })).rejects.toMatchObject({
-          code: "closed",
-        })
-      },
-    })
-  })
-
   test("refuses a version that is not in the history", async () => {
     await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
     await Instance.provide({
