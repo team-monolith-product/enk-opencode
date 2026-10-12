@@ -1,5 +1,6 @@
-import { Hono, type Context } from "hono"
-import { describeRoute, resolver, validator } from "hono-openapi"
+import { Hono } from "hono"
+import { describeRoute, validator } from "hono-openapi"
+import { failures, ok } from "../enk-responses"
 import z from "zod"
 import { GitHub } from "../../enk/github"
 import { Instance } from "../../project/instance"
@@ -21,37 +22,12 @@ const Status = z
     push: z.object({ sha: z.string(), time: z.number(), by: z.string().optional() }).optional(),
   })
   .meta({ ref: "GitHubStatus" })
-const Failure = z.object({ code: z.string(), message: z.string() }).meta({ ref: "GitHubError" })
 const RepoName = z
   .string()
   .min(1)
   .max(100)
   .regex(/^[A-Za-z0-9._-]+$/)
   .refine((name) => name !== "." && name !== "..")
-
-const failures = (...codes: number[]) =>
-  Object.fromEntries(
-    codes.map((code) => [
-      code,
-      { description: "GitHub error", content: { "application/json": { schema: resolver(Failure) } } },
-    ]),
-  )
-
-const ok = (description: string, schema: z.ZodType) => ({
-  200: { description, content: { "application/json": { schema: resolver(schema) } } },
-})
-
-async function handle<T>(c: Context, fn: () => Promise<T> | T) {
-  return Promise.resolve()
-    .then(fn)
-    .then(
-      (data) => c.json(data as object),
-      (err) => {
-        if (!(err instanceof GitHub.Failure)) throw err
-        return c.json({ code: err.code, message: err.message }, err.status)
-      },
-    )
-}
 
 export const GitHubRoutes = lazy(() =>
   new Hono()
@@ -64,7 +40,7 @@ export const GitHubRoutes = lazy(() =>
         operationId: "github.status",
         responses: ok("Link status", Status),
       }),
-      (c) => handle(c, () => GitHub.status(Instance.directory)),
+      async (c) => c.json(await GitHub.status(Instance.directory)),
     )
     .post(
       "/repo",
@@ -75,6 +51,6 @@ export const GitHubRoutes = lazy(() =>
         responses: { ...ok("Link status", Status), ...failures(409, 422, 502) },
       }),
       validator("json", z.object({ name: RepoName })),
-      (c) => handle(c, () => GitHub.create(Instance.directory, c.req.valid("json"))),
+      async (c) => c.json(await GitHub.create(Instance.directory, c.req.valid("json"))),
     ),
 )

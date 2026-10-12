@@ -1,3 +1,4 @@
+import type { DocRollbackTarget } from "@opencode-ai/sdk/v2/client"
 import { apiUrl } from "@/utils/api-url"
 import type { PromptApprovalInput } from "./submit"
 
@@ -21,7 +22,7 @@ export type DocSubmitState = {
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
-  rollback?: { sha: string; subject: string; time: number }
+  rollback?: DocRollbackTarget
   actorID: string
   status: "pending" | "sent" | "cancelled" | "expired" | "left"
   actors: DocSubmitActor[]
@@ -219,13 +220,24 @@ export function liveSocket(input: {
   }
 }
 
+/** 투표 요청을 서버가 거절했을 때. `body` 는 서버 오류 본문 그대로다(enk 실패는 `code`, 이름 있는 오류는 `name`). */
+export class SubmitRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: { code?: string; name?: string } | undefined,
+  ) {
+    super(`Submit request failed (${status})`)
+    this.name = "SubmitRequestError"
+  }
+}
+
 const json = async (url: URL, body: unknown) => {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) throw new SubmitRequestError(res.status, await res.json().catch(() => undefined))
   return (await res.json()) as DocSubmitState
 }
 

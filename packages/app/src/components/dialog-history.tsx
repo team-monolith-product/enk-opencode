@@ -5,30 +5,31 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { showToast } from "@opencode-ai/ui/toast"
 import { createMemo, For, Match, onMount, Show, Switch as Branch } from "solid-js"
 import { createStore } from "solid-js/store"
+import type { EventHistoryFailed, HistoryChange, HistoryStatus } from "@opencode-ai/sdk/v2/client"
+import { SubmitRequestError } from "@/components/prompt-input/doc-submit"
 import { useLanguage } from "@/context/language"
 import { readonlyViewer } from "@/context/parent-params"
-import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
-import { useServer } from "@/context/server"
 import { getRelativeTime } from "@/utils/time"
-import { getHistory, getHistoryChanges, type HistoryChange, type HistoryStatus } from "@/utils/server"
-import { RollbackError, SessionRollbackVote } from "@/utils/session-rollback-vote"
+import { SessionVote } from "@/utils/session-vote"
+import "./dialog-history.css"
 
 const MAX_FILES = 30
+// 서버가 되돌리기를 거절하는 사유(history.failed 와 같은 이름). 서버 쪽 목록이 바뀌면 여기서 타입 오류가 난다.
+const REFUSALS = ["busy", "missing"] as const satisfies readonly EventHistoryFailed["properties"]["code"][]
+
+/** 서버가 되돌리기 투표를 거절한 이유. */
+function refusal(err: unknown) {
+  if (!(err instanceof SubmitRequestError)) return "failed"
+  if (err.body?.name === "DocVoteConflictError") return "conflict"
+  return REFUSALS.find((code) => code === err.body?.code) ?? "failed"
+}
 
 export function DialogHistory(props: { sessionID: string }) {
   const dialog = useDialog()
   const language = useLanguage()
-  const server = useServer()
   const sdk = useSDK()
-  const platform = usePlatform()
   const spectator = readonlyViewer()
-
-  const opts = () => {
-    const conn = server.current
-    if (!conn) return
-    return { server: conn.http, directory: sdk.directory, fetch: platform.fetch }
-  }
 
   const [state, setState] = createStore<{
     status?: HistoryStatus
@@ -37,23 +38,19 @@ export function DialogHistory(props: { sessionID: string }) {
     changes: Record<string, HistoryChange[] | "loading" | "failed">
   }>({ failed: false, changes: {} })
 
-  const refetch = async () => {
-    const o = opts()
-    if (!o) return
-    await getHistory(o).then(
-      (status) => setState({ status, failed: false }),
+  const refetch = () =>
+    sdk.client.history.list().then(
+      (res) => setState({ status: res.data, failed: false }),
       () => setState("failed", true),
     )
-  }
   onMount(() => void refetch())
 
   const select = (sha: string) => {
     setState("selected", sha)
-    const o = opts()
-    if (!o || state.changes[sha]) return
+    if (state.changes[sha] && state.changes[sha] !== "failed") return
     setState("changes", sha, "loading")
-    void getHistoryChanges(o, sha).then(
-      (list) => setState("changes", sha, list),
+    void sdk.client.history.changes({ sha }).then(
+      (res) => setState("changes", sha, res.data ?? []),
       () => setState("changes", sha, "failed"),
     )
   }
@@ -66,17 +63,19 @@ export function DialogHistory(props: { sessionID: string }) {
     return "list"
   })
   const ready = createMemo(
-    () => !spectator && state.status?.open === true && !!state.selected && state.selected !== current(),
+    () => !spectator && !!state.selected && state.selected !== current(),
   )
 
   const restore = async () => {
     const sha = state.selected
     if (!sha || !ready()) return
+    const vote = SessionVote.get(props.sessionID)
     dialog.close()
-    await SessionRollbackVote.request(props.sessionID, sha).catch((err: unknown) => {
-      const code = err instanceof RollbackError ? err.code : "failed"
-      showToast({ title: language.t(`history.error.${code}`) })
-    })
+    try {
+      if (!(await vote?.rollback(sha))) showToast({ title: language.t("history.error.unavailable") })
+    } catch (err) {
+      showToast({ title: language.t(`history.error.${refusal(err)}`) })
+    }
   }
 
   const label = (status: HistoryChange["status"]) => language.t(`history.change.${status}`)
@@ -106,11 +105,11 @@ export function DialogHistory(props: { sessionID: string }) {
             </Match>
 
             <Match when={view() === "loading"}>
-              <div class="github-panel text-12-regular text-text-weak">{language.t("common.loading")}</div>
+              <div class="history-panel text-12-regular text-text-weak">{language.t("common.loading")}</div>
             </Match>
 
             <Match when={view() === "empty"}>
-              <div class="github-panel text-12-regular text-text-weak">{language.t("history.empty")}</div>
+              <div class="history-panel text-12-regular text-text-weak">{language.t("history.empty")}</div>
             </Match>
 
             <Match when={view() === "list"}>
@@ -145,6 +144,9 @@ export function DialogHistory(props: { sessionID: string }) {
                             <Match when={state.changes[entry.sha] === "loading"}>
                               <span class="history-time">{language.t("common.loading")}</span>
                             </Match>
+                            <Match when={state.changes[entry.sha] === "failed"}>
+                              <span class="history-time">{language.t("history.error.changes")}</span>
+                            </Match>
                             <Match when={Array.isArray(state.changes[entry.sha])}>
                               <HistoryFiles
                                 list={state.changes[entry.sha] as HistoryChange[]}
@@ -163,12 +165,8 @@ export function DialogHistory(props: { sessionID: string }) {
           </Branch>
 
           <Show when={view() === "list"}>
-            <span class="github-hint">
-              {spectator
-                ? language.t("history.readonly")
-                : state.status?.open
-                  ? language.t("history.note")
-                  : language.t("history.closed")}
+            <span class="history-hint">
+              {spectator ? language.t("history.readonly") : language.t("history.note")}
             </span>
           </Show>
         </div>

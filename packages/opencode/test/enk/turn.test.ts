@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { GitHubSync } from "../../src/enk/github-sync"
+import { TurnSummary } from "../../src/enk/turn"
 import type { MessageV2 } from "../../src/session/message-v2"
 
 const user = (id: string, text: string, synthetic = false) =>
@@ -14,9 +14,9 @@ const assistant = (id: string, text: string) =>
     parts: [{ type: "text", text }],
   }) as unknown as MessageV2.WithParts
 
-describe("GitHubSync.compose", () => {
+describe("TurnSummary.compose", () => {
   test("lists what changed under the summary", () => {
-    const message = GitHubSync.compose(
+    const message = TurnSummary.compose(
       "로그인 화면 추가",
       [
         { status: "A", file: "login.html" },
@@ -32,7 +32,7 @@ describe("GitHubSync.compose", () => {
   test("keeps the subject short and the file list bounded", () => {
     const changes = Array.from({ length: 32 }, (_, i) => ({ status: "M" as const, file: `f${i}.txt` }))
 
-    const lines = GitHubSync.compose("x".repeat(100), changes, "en").split("\n")
+    const lines = TurnSummary.compose("x".repeat(100), changes, "en").split("\n")
 
     expect(lines[0]).toHaveLength(72)
     expect(lines).toHaveLength(2 + 30 + 1)
@@ -40,9 +40,9 @@ describe("GitHubSync.compose", () => {
   })
 })
 
-describe("GitHubSync.latest", () => {
+describe("TurnSummary.latest", () => {
   test("reads the last request and the final reply of the turn", () => {
-    const turn = GitHubSync.latest([
+    const turn = TurnSummary.latest([
       user("msg_1", "첫 요청"),
       assistant("msg_2", "첫 답변"),
       user("msg_3", "로그인 화면 만들어줘"),
@@ -57,6 +57,6 @@ describe("GitHubSync.latest", () => {
   })
 
   test("returns nothing before the first request", () => {
-    expect(GitHubSync.latest([])).toBeUndefined()
+    expect(TurnSummary.latest([])).toBeUndefined()
   })
 })

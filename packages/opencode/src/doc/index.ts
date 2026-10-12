@@ -524,6 +524,11 @@ export namespace Doc {
     .meta({ ref: "DocSubmitTargetKind" })
   export type SubmitTargetKind = z.infer<typeof SubmitTargetKind>
 
+  /** 되돌리기 합의가 가리키는 저장된 버전. 제목·시각은 참가자 모두에게 무엇에 동의하는지 보여 주려고 함께 둔다. */
+  export const RollbackTarget = z
+    .object({ sha: z.string().regex(/^[0-9a-f]{40}$/), subject: z.string(), time: z.number() })
+    .meta({ ref: "DocRollbackTarget" })
+
   /** 지우기 합의와 다른 합의가 겹칠 때. 참가자가 서로 다른 것에 동의하는 상황을 막는다. */
   export const VoteConflictError = NamedError.create(
     "DocVoteConflictError",
@@ -543,7 +548,7 @@ export namespace Doc {
       // participant (not just the requester) see the right dialog copy.
       questionAction: z.enum(["send", "dismiss", "back"]).optional(),
       // For 'rollback' votes: the saved version everyone is agreeing to go back to.
-      rollback: z.object({ sha: z.string(), subject: z.string(), time: z.number() }).optional(),
+      rollback: RollbackTarget.optional(),
       actorID: ActorID.zod,
       status: SubmitStatus,
       actors: SubmitActorInfo.array(),
@@ -711,7 +716,7 @@ export namespace Doc {
       if (payload?.step !== undefined) return "back"
       return payload?.reject ? "dismiss" : "send"
     })()
-    const rollback = row.target_kind === "rollback" ? RollbackPayload.safeParse(JSON.parse(row.prompt)).data : undefined
+    const rollback = row.target_kind === "rollback" ? RollbackTarget.safeParse(JSON.parse(row.prompt)).data : undefined
     return {
       submitID: row.id,
       sessionID: row.session_id,
@@ -762,8 +767,9 @@ export namespace Doc {
 
   function send(row: SubmitRow) {
     if (row.target_kind === "rollback") {
-      const { sha } = RollbackPayload.parse(JSON.parse(row.prompt))
-      HistorySync.rollback({ sessionID: row.session_id, sha }).catch((err) => fail(row, err))
+      // 되돌리기는 실패를 history.failed 로 직접 알리므로 여기서 다시 오류를 띄우지 않는다.
+      const { sha } = RollbackTarget.parse(JSON.parse(row.prompt))
+      void HistorySync.rollback({ sessionID: row.session_id, sha })
       return
     }
     if (row.target_kind === "clear") {
@@ -1109,15 +1115,13 @@ export namespace Doc {
     })
   })
 
-  // 되돌리기 합의. 지우기와 같이 프롬프트 docID 를 대상으로 삼고, 합의가 서면 send() 가 되돌린다.
-  export const RollbackPayload = z.object({
-    sha: z.string().regex(/^[0-9a-f]{40}$/),
-    subject: z.string(),
-    time: z.number(),
-  })
-  export const RollbackSubmitCreateInput = StopSubmitCreateInput.extend({ sha: RollbackPayload.shape.sha })
+  // 되돌리기 합의. 지우기와 같이 프롬프트 docID 를 대상으로 삼고, 합의가 서면 send() 가 되돌린다. 요청은 sha 만
+  // 보내고, 제목·시각은 서버가 기록에서 찾아 붙여 doc_submit.prompt 에 남긴다.
+  export const RollbackRequest = StopSubmitCreateInput.extend({ sha: RollbackTarget.shape.sha })
 
-  export const rollbackSubmitCreate = fn(StopSubmitCreateInput.extend(RollbackPayload.shape), (input) => {
+  const RollbackSubmitCreateInput = RollbackRequest.extend({ target: RollbackTarget.omit({ sha: true }) })
+
+  export const rollbackSubmitCreate = fn(RollbackSubmitCreateInput, (input) => {
     Session.get(input.sessionID)
     get(input.docID)
     return create({
@@ -1127,7 +1131,7 @@ export namespace Doc {
       docID: input.docID,
       actorID: input.actorID,
       names: input.names,
-      promptBlob: JSON.stringify({ sha: input.sha, subject: input.subject, time: input.time }),
+      promptBlob: JSON.stringify({ sha: input.sha, ...input.target }),
       timeoutMs: input.timeoutMs,
     })
   })

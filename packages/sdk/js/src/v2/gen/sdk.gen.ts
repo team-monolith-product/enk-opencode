@@ -88,6 +88,10 @@ import type {
   GlobalSyncEventSubscribeResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
+  HistoryChangesErrors,
+  HistoryChangesResponses,
+  HistoryListErrors,
+  HistoryListResponses,
   ImageQuotaGetResponses,
   ImageQuotaToggleErrors,
   ImageQuotaToggleResponses,
@@ -192,6 +196,8 @@ import type {
   SessionPromptDocReadyErrors,
   SessionPromptDocReadyResponses,
   SessionPromptDocResponses,
+  SessionPromptDocRollbackErrors,
+  SessionPromptDocRollbackResponses,
   SessionPromptDocStopErrors,
   SessionPromptDocStopResponses,
   SessionPromptDocSubmitConnectErrors,
@@ -1597,6 +1603,70 @@ export class Github extends HeyApiClient {
   }
 }
 
+export class History extends HeyApiClient {
+  /**
+   * Version history
+   *
+   * Saved versions of the project folder, newest first. A version is saved every time an AI turn ends.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<HistoryListResponses, HistoryListErrors, ThrowOnError>({
+      url: "/history",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Version changes
+   *
+   * Files that changed in this version compared with the one before it.
+   */
+  public changes<ThrowOnError extends boolean = false>(
+    parameters: {
+      sha: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sha" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<HistoryChangesResponses, HistoryChangesErrors, ThrowOnError>({
+      url: "/history/{sha}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Tool extends HeyApiClient {
   /**
    * List tool IDs
@@ -2414,6 +2484,61 @@ export class PromptDoc extends HeyApiClient {
       ThrowOnError
     >({
       url: "/session/{sessionID}/prompt-doc/clear",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Create rollback approval
+   *
+   * Create a collaborative consent vote to roll the project files back to a saved version. With nobody else connected the rollback runs right away.
+   */
+  public rollback<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      docID?: string
+      actorID?: string
+      actorIDs?: Array<string>
+      names?: {
+        [key: string]: string
+      }
+      timeoutMs?: number
+      sha?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "docID" },
+            { in: "body", key: "actorID" },
+            { in: "body", key: "actorIDs" },
+            { in: "body", key: "names" },
+            { in: "body", key: "timeoutMs" },
+            { in: "body", key: "sha" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionPromptDocRollbackResponses,
+      SessionPromptDocRollbackErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/prompt-doc/rollback",
       ...options,
       ...params,
       headers: {
@@ -5833,6 +5958,11 @@ export class OpencodeClient extends HeyApiClient {
   private _github?: Github
   get github(): Github {
     return (this._github ??= new Github({ client: this.client }))
+  }
+
+  private _history?: History
+  get history(): History {
+    return (this._history ??= new History({ client: this.client }))
   }
 
   private _tool?: Tool
