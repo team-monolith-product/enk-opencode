@@ -22,7 +22,7 @@ export namespace History {
   export type Saved = { sha: string; message: string; changes: Change[]; skipped: string[] }
   export type Restored = { sha: string; target: Entry; changes: Change[] }
   export type Revert = { subject: string; after?: string }
-  export type Code = "disabled" | "missing" | "revert"
+  export type Code = "disabled" | "missing"
 
   export class Failure extends EnkFailure<Code> {}
 
@@ -131,8 +131,8 @@ export namespace History {
   }
 
   /**
-   * 작업 폴더를 `sha` 시점으로 되돌린다. `sha` 뒤에 쌓인 커밋을 `git revert` 로 최신 것부터 거꾸로 적용해 커밋
-   * 하나로 남기므로, 결과 트리는 `sha` 와 같고 기록은 앞으로만 쌓인다. 마지막 기록 뒤에 바뀐 파일(업로드·직접
+   * 작업 폴더를 `sha` 시점으로 되돌린다. `git restore --source` 로 그 시점의 파일로 한 번에 맞추고(없는 파일은
+   * 지운다) `git commit` 하나로 남기므로, 몇 턴 전이든 걸리는 시간이 같고 기록은 앞으로만 쌓인다. 마지막 기록 뒤에 바뀐 파일(업로드·직접
    * 편집)이 있으면 먼저 기록해 두고, 기록에서 빠진 파일(.env·node_modules·큰 파일)은 건드리지 않는다. `after` 는
    * 되돌린 시점의 마지막 메시지로, 그 뒤 첫 답변에만 되돌렸다는 안내를 붙이는 기준이 된다.
    */
@@ -151,11 +151,7 @@ export namespace History {
       const [found] = await read(repo, ["-1", input.sha])
       const target: Entry = { sha: input.sha, time: found!.time, subject: found!.subject }
       if (changes.length === 0) return { sha: parent, target, changes }
-      const reverted = await repo.run(["revert", "--no-commit", "--no-edit", `${input.sha}..${parent}`], { env: who })
-      if (reverted.exitCode !== 0) {
-        await repo.run(["revert", "--abort"])
-        throw new Failure("revert", 500, reverted.stderr.toString().trim())
-      }
+      await repo.must(["restore", `--source=${input.sha}`, "--staged", "--worktree", "--", "."])
       const message = input.message(target)
       const sha = await commitIndex(
         repo,

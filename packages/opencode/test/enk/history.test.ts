@@ -181,6 +181,26 @@ describe("History.restore", () => {
     expect(await exists(path.join(work, "app/.git/HEAD"))).toBe(true)
   })
 
+  test("jumps straight back to a version many turns ago in one commit", async () => {
+    await using tmp = await tmpdir()
+    const work = await workspace(tmp.path)
+    await put(work, { "index.html": "v0" })
+    const first = await History.commit(work, { message: "처음" })
+    for (let i = 1; i <= 30; i++) {
+      await put(work, { "index.html": `v${i}`, [`page${i}.html`]: String(i) })
+      await History.commit(work, { message: `턴 ${i}` })
+    }
+
+    const restored = await restore(work, first!.sha)
+
+    expect(await readFile(path.join(work, "index.html"), "utf8")).toBe("v0")
+    expect(await exists(path.join(work, "page30.html"))).toBe(false)
+    expect(restored.changes).toHaveLength(31)
+    const list = await History.list(work)
+    expect(list).toHaveLength(32)
+    expect(list[0]).toMatchObject({ subject: "되돌리기: 처음", revert: first!.sha })
+  })
+
   test("rejects a commit that is not in the history", async () => {
     await using tmp = await tmpdir()
     const work = await workspace(tmp.path)
