@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { $ } from "bun"
 import path from "path"
-import { mkdir, readFile, rm, writeFile } from "fs/promises"
+import { mkdir, readFile, rm, truncate, writeFile } from "fs/promises"
 import { History } from "../../src/enk/history"
+import { HistoryNote } from "../../src/enk/history-note"
+import { WorkspaceRepo } from "../../src/enk/workspace-repo"
+import type { MessageV2 } from "../../src/session/message-v2"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 
@@ -31,13 +34,18 @@ async function put(root: string, files: Record<string, string>) {
 const exists = (file: string) => Bun.file(file).exists()
 
 const files = (dir: string, sha: string) =>
-  $`git --git-dir=${History.gitdir(dir)} ls-tree -r --name-only ${sha}`
+  $`git --git-dir=${WorkspaceRepo.open(dir).root} ls-tree -r --name-only ${sha}`
     .quiet()
     .text()
     .then((text) => text.split("\n").filter(Boolean).sort())
 
-const restore = (dir: string, sha: string) =>
-  History.restore(dir, { sha, message: (target) => `되돌리기: ${target.subject}`, backup: "되돌리기 전 자동 저장" })
+const restore = (dir: string, sha: string, after?: string) =>
+  History.restore(dir, {
+    sha,
+    message: (target) => `되돌리기: ${target.subject}`,
+    backup: "되돌리기 전 자동 저장",
+    after,
+  })
 
 describe("History.commit", () => {
   test("records uploads but leaves out secrets, dependencies and the opencode marker", async () => {
@@ -51,10 +59,31 @@ describe("History.commit", () => {
       "node_modules/pkg/index.js": "module.exports = 1",
     })
 
-    const saved = await History.commit(work, { message: "첫 화면", trailers: { [History.Trailer.message]: "msg_1" } })
+    const saved = await History.commit(work, { message: "첫 화면", turn: "msg_1" })
 
     expect(saved?.message).toBe("첫 화면")
     expect(await files(work, saved!.sha)).toEqual([".env.example", "__assets__/photo.png", "index.html"])
+  })
+
+  test("leaves out files over 100MB and reports them", async () => {
+    await using tmp = await tmpdir()
+    const work = await workspace(tmp.path)
+    await put(work, { "index.html": "a", "media/intro.mp4": "" })
+    await truncate(path.join(work, "media/intro.mp4"), 101 * 1024 * 1024)
+
+    const saved = await History.commit(work, { message: "영상" })
+
+    expect(saved?.skipped).toEqual(["media/intro.mp4"])
+    expect(await files(work, saved!.sha)).toEqual(["index.html"])
+  })
+
+  test("does not save a first version with nothing in it", async () => {
+    await using tmp = await tmpdir()
+    const work = await workspace(tmp.path)
+    await put(work, { ".env": "API_KEY=secret" })
+
+    expect(await History.commit(work, { message: "비밀만" })).toBeUndefined()
+    expect(await History.list(work)).toEqual([])
   })
 
   test("skips when nothing changed and lists newest first", async () => {
@@ -104,7 +133,7 @@ describe("History.restore", () => {
     await rm(path.join(work, "style.css"))
     await History.commit(work, { message: "게임 추가" })
 
-    const restored = await restore(work, first!.sha)
+    await restore(work, first!.sha)
 
     expect(await readFile(path.join(work, "index.html"), "utf8")).toBe("v1")
     expect(await readFile(path.join(work, "style.css"), "utf8")).toBe("a")
@@ -115,7 +144,6 @@ describe("History.restore", () => {
     const list = await History.list(work)
     expect(list.map((entry) => entry.subject)).toEqual(["되돌리기: 처음", "게임 추가", "처음"])
     expect(list[0]!.revert).toBe(first!.sha)
-    expect(restored.deps).toBe(false)
   })
 
   test("saves changes made after the last turn before rolling back, so they can be restored", async () => {
@@ -146,10 +174,13 @@ describe("History.restore", () => {
 
     const restored = await restore(work, first!.sha)
 
+    expect(restored.changes).toEqual([
+      { status: "M", file: "app/package.json" },
+      { status: "D", file: "app/src/new.js" },
+    ])
     expect(await readFile(path.join(work, "app/package.json"), "utf8")).toBe('{"v":1}')
     expect(await exists(path.join(work, "app/src/new.js"))).toBe(false)
     expect(await exists(path.join(work, "app/.git/HEAD"))).toBe(true)
-    expect(restored.deps).toBe(true)
   })
 
   test("rejects a commit that is not in the history", async () => {
@@ -185,20 +216,24 @@ describe("History.open", () => {
   })
 })
 
-describe("History.reminder", () => {
-  test("tells the AI about a rollback made after its last reply", async () => {
+const message = (id: string, role: "user" | "assistant") =>
+  ({ info: { id, role }, parts: [] }) as unknown as MessageV2.WithParts
+
+describe("HistoryNote.text", () => {
+  test("tells the AI about a rollback only on the first reply after it", async () => {
     await using tmp = await tmpdir()
     const work = await workspace(tmp.path)
     await put(work, { "index.html": "v1" })
     const first = await History.commit(work, { message: "처음" })
     await put(work, { "index.html": "v2" })
     await History.commit(work, { message: "두번째" })
-    const before = Date.now()
+    const before = [message("msg_1", "user"), message("msg_2", "assistant")]
 
-    expect(await History.reminder(work, before)).toBeUndefined()
-    await restore(work, first!.sha)
+    expect(await HistoryNote.text(work, before, "msg_3")).toBeUndefined()
+    await restore(work, first!.sha, "msg_2")
 
-    expect(await History.reminder(work, before)).toContain('"되돌리기: 처음"')
-    expect(await History.reminder(work, before + 2000)).toBeUndefined()
+    expect(await HistoryNote.text(work, before, "msg_3")).toContain('"되돌리기: 처음"')
+    const after = [...before, message("msg_3", "user"), message("msg_4", "assistant")]
+    expect(await HistoryNote.text(work, after, "msg_5")).toBeUndefined()
   })
 })

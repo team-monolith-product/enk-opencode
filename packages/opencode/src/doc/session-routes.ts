@@ -6,9 +6,7 @@ import { Doc } from "./index"
 import { ActorID, DocID, SubmitID } from "./schema"
 import { SessionID } from "@/session/schema"
 import { errors } from "../server/error"
-import { History } from "@/enk/history"
 import { HistorySync } from "@/enk/history-sync"
-import { Session } from "@/session"
 
 // Client reply to a server heartbeat ping (see Doc heartbeat). Cheap string check avoids JSON.parse
 // on the hot path; the only inbound control message on these channels is the pong.
@@ -200,17 +198,11 @@ export const SessionDocRoutes = () =>
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod })),
-      validator("json", Doc.RollbackSubmitCreateInput.omit({ sessionID: true })),
+      validator("json", Doc.RollbackRequest.omit({ sessionID: true })),
       async (c) => {
         const input = { ...c.req.valid("json"), sessionID: c.req.valid("param").sessionID }
-        return HistorySync.check(input).then(
-          ({ target }) => c.json(Doc.rollbackSubmitCreate({ ...input, subject: target.subject, time: target.time })),
-          (err) => {
-            if (err instanceof History.Failure) return c.json({ code: err.code, message: err.message }, err.status)
-            if (err instanceof Session.BusyError) return c.json({ code: "busy", message: err.message }, 409)
-            throw err
-          },
-        )
+        const { target } = await HistorySync.check(input)
+        return c.json(Doc.rollbackSubmitCreate({ ...input, target: { subject: target.subject, time: target.time } }))
       },
     )
     .post(

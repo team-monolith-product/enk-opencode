@@ -1,7 +1,8 @@
-import { Hono, type Context } from "hono"
+import { Hono } from "hono"
 import { describeRoute, resolver, validator } from "hono-openapi"
 import z from "zod"
 import { History } from "../../enk/history"
+import { ServeTargets } from "../../enk/serve-targets"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
 
@@ -27,18 +28,6 @@ const ok = (description: string, schema: z.ZodType) => ({
   200: { description, content: { "application/json": { schema: resolver(schema) } } },
 })
 
-async function handle<T>(c: Context, fn: () => Promise<T> | T) {
-  return Promise.resolve()
-    .then(fn)
-    .then(
-      (data) => c.json(data as object),
-      (err) => {
-        if (err instanceof History.Failure) return c.json({ code: err.code, message: err.message }, err.status)
-        throw err
-      },
-    )
-}
-
 export const HistoryRoutes = lazy(() =>
   new Hono()
     .get(
@@ -50,13 +39,12 @@ export const HistoryRoutes = lazy(() =>
         operationId: "history.list",
         responses: ok("Version history", Status),
       }),
-      (c) =>
-        handle(c, async () => {
-          const dir = Instance.directory
-          if (!History.enabled(dir)) return { enabled: false, open: false, entries: [] }
-          const [open, entries] = await Promise.all([History.open(), History.list(dir)])
-          return { enabled: true, open, entries }
-        }),
+      async (c) => {
+        const dir = Instance.directory
+        if (!ServeTargets.isProject(dir)) return c.json({ enabled: false, open: false, entries: [] })
+        const [open, entries] = await Promise.all([History.open(), History.list(dir)])
+        return c.json({ enabled: true, open, entries })
+      },
     )
     .get(
       "/:sha",
@@ -67,6 +55,6 @@ export const HistoryRoutes = lazy(() =>
         responses: { ...ok("Changed files", Change.array()), ...failures(404) },
       }),
       validator("param", z.object({ sha: Sha })),
-      (c) => handle(c, () => History.changes(Instance.directory, c.req.valid("param").sha)),
+      async (c) => c.json(await History.changes(Instance.directory, c.req.valid("param").sha)),
     ),
 )

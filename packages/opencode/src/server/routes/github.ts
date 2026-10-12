@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono"
+import { Hono } from "hono"
 import { describeRoute, resolver, validator } from "hono-openapi"
 import z from "zod"
 import { GitHub } from "../../enk/github"
@@ -41,18 +41,6 @@ const ok = (description: string, schema: z.ZodType) => ({
   200: { description, content: { "application/json": { schema: resolver(schema) } } },
 })
 
-async function handle<T>(c: Context, fn: () => Promise<T> | T) {
-  return Promise.resolve()
-    .then(fn)
-    .then(
-      (data) => c.json(data as object),
-      (err) => {
-        if (!(err instanceof GitHub.Failure)) throw err
-        return c.json({ code: err.code, message: err.message }, err.status)
-      },
-    )
-}
-
 export const GitHubRoutes = lazy(() =>
   new Hono()
     .get(
@@ -64,7 +52,7 @@ export const GitHubRoutes = lazy(() =>
         operationId: "github.status",
         responses: ok("Link status", Status),
       }),
-      (c) => handle(c, () => GitHub.status(Instance.directory)),
+      async (c) => c.json(await GitHub.status(Instance.directory)),
     )
     .post(
       "/repo",
@@ -75,6 +63,6 @@ export const GitHubRoutes = lazy(() =>
         responses: { ...ok("Link status", Status), ...failures(409, 422, 502) },
       }),
       validator("json", z.object({ name: RepoName })),
-      (c) => handle(c, () => GitHub.create(Instance.directory, c.req.valid("json"))),
+      async (c) => c.json(await GitHub.create(Instance.directory, c.req.valid("json"))),
     ),
 )

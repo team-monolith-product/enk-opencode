@@ -57,14 +57,19 @@ describe("rollback consent vote", () => {
           docID,
           actorID: alice.actorID,
           sha: first.sha,
-          subject: "처음",
-          time: 0,
+          target: { subject: "처음", time: 0 },
         })
 
         expect(state.status).toBe("sent")
         await until(async () => (await read(tmp.path)) === "v1")
         await until(async () => events.length > 0)
-        expect(events[0]).toMatchObject({ sessionID: session.id, target: first.sha, subject: "처음", files: 1 })
+        expect(events[0]).toMatchObject({
+          sessionID: session.id,
+          target: first.sha,
+          subject: "처음",
+          files: 1,
+          deps: false,
+        })
         expect((await History.list(tmp.path))[0]).toMatchObject({ subject: "되돌리기: 처음", revert: first.sha })
         unsub()
       },
@@ -91,8 +96,7 @@ describe("rollback consent vote", () => {
           docID,
           actorID: alice.actorID,
           sha: first.sha,
-          subject: "처음",
-          time: 0,
+          target: { subject: "처음", time: 0 },
         })
         expect(state.status).toBe("pending")
         expect(state.rollback).toEqual({ sha: first.sha, subject: "처음", time: 0 })
@@ -128,8 +132,7 @@ describe("rollback consent vote", () => {
             docID,
             actorID: alice.actorID,
             sha: first.sha,
-            subject: "처음",
-            time: 0,
+            target: { subject: "처음", time: 0 },
           }),
         ).toThrow()
         Doc.submitRespond({ sessionID: session.id, submitID: stop.submitID, actorID: bob.actorID, action: "cancel" })
@@ -139,8 +142,7 @@ describe("rollback consent vote", () => {
           docID,
           actorID: alice.actorID,
           sha: first.sha,
-          subject: "처음",
-          time: 0,
+          target: { subject: "처음", time: 0 },
         })
         expect(rollback.status).toBe("pending")
         expect(() => Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: alice.actorID })).toThrow()

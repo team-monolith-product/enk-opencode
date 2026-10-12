@@ -31,7 +31,7 @@ import { ModelPolicy } from "../enk/model-policy"
 import { CostQuota } from "../enk/cost-quota"
 import { ModelFallback } from "../enk/model-fallback"
 import { Locale } from "../enk/locale"
-import { History } from "../enk/history"
+import { HistoryNote } from "../enk/history-note"
 import { SessionFallback } from "./fallback"
 import { ulid } from "ulid"
 import { spawn } from "child_process"
@@ -319,22 +319,18 @@ export namespace SessionPrompt {
         const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
         if (!userMessage) return input.messages
 
-        const reply = input.messages.findLast(
-          (msg) => msg.info.role === "assistant" && msg.info.id < userMessage.info.id,
+        const reverted = yield* Effect.promise(() =>
+          HistoryNote.text(input.session.directory, input.messages, userMessage.info.id),
         )
-        if (reply?.info.role === "assistant") {
-          const since = reply.info.time.completed ?? reply.info.time.created
-          const note = yield* Effect.promise(() => History.reminder(input.session.directory, since))
-          if (note) {
-            userMessage.parts.push({
-              id: PartID.ascending(),
-              messageID: userMessage.info.id,
-              sessionID: userMessage.info.sessionID,
-              type: "text",
-              text: note,
-              synthetic: true,
-            })
-          }
+        if (reverted) {
+          userMessage.parts.push({
+            id: PartID.ascending(),
+            messageID: userMessage.info.id,
+            sessionID: userMessage.info.sessionID,
+            type: "text",
+            text: reverted,
+            synthetic: true,
+          })
         }
 
         if (!Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) {

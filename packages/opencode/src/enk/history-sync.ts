@@ -1,3 +1,4 @@
+import path from "path"
 import z from "zod"
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
@@ -8,10 +9,12 @@ import { SessionID } from "@/session/schema"
 import { SessionStatus } from "@/session/status"
 import { Log } from "@/util/log"
 import { GitHub } from "./github"
-import { GitHubSync } from "./github-sync"
 import { History } from "./history"
 import { Locale } from "./locale"
+import { ServeTargets } from "./serve-targets"
+import { TurnSummary } from "./turn"
 
+/** 대화가 끝날 때마다 버전을 남기고 GitHub 에 올리며, 합의된 되돌리기를 실행한다. */
 export namespace HistorySync {
   const log = Log.create({ service: "history-sync" })
 
@@ -19,6 +22,18 @@ export namespace HistorySync {
     ko: { revert: (subject) => `되돌리기: ${subject}`, backup: "되돌리기 전 자동 저장" },
     en: { revert: (subject) => `Roll back to: ${subject}`, backup: "Saved before rolling back" },
   }
+
+  const MANIFESTS = new Set([
+    "package.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+    "requirements.txt",
+    "pyproject.toml",
+    "uv.lock",
+  ])
 
   export const Event = {
     Restored: BusEvent.define(
@@ -37,16 +52,14 @@ export namespace HistorySync {
   export function init() {
     const dir = Instance.directory
     Bus.subscribe(SessionStatus.Event.Idle, async (evt) => {
-      const turn = await GitHubSync.current(evt.properties.sessionID).catch(() => undefined)
+      const turn = await TurnSummary.current(evt.properties.sessionID).catch(() => undefined)
       if (!turn) return
-      const saved = await History.commit(dir, {
-        message: (changes) => GitHubSync.describe(turn, changes),
-        trailers: { [History.Trailer.message]: turn.user.id },
-      }).catch((err) => {
+      const describe = (changes: History.Change[]) => TurnSummary.describe(turn, changes)
+      const saved = await History.commit(dir, { message: describe, turn: turn.user.id }).catch((err) => {
         log.warn("save failed", { error: err instanceof Error ? err.message : String(err) })
         return undefined
       })
-      await GitHubSync.sync(dir, turn, saved?.message).catch(skip)
+      await GitHub.sync(dir, saved?.message ?? describe).catch(skip)
     })
   }
 
@@ -58,23 +71,27 @@ export namespace HistorySync {
   /** 투표를 열기 전과 되돌리기 직전에 같은 조건을 본다. 투표가 도는 사이 마감될 수 있다. */
   export async function check(input: { sessionID: SessionID; sha: string }) {
     const session = await Session.get(input.sessionID)
-    if (!History.enabled(session.directory)) throw new History.Failure("disabled", 404)
+    if (!ServeTargets.isProject(session.directory)) throw new History.Failure("disabled", 404)
     if (!(await History.open())) throw new History.Failure("closed", 403)
     const target = await History.entry(session.directory, input.sha)
     if (!target) throw new History.Failure("missing", 404)
-    await SessionPrompt.assertNotBusy(input.sessionID)
+    await SessionPrompt.assertNotBusy(input.sessionID).catch((err) => {
+      if (err instanceof Session.BusyError) throw new History.Failure("busy", 409, err.message)
+      throw err
+    })
     return { session, target }
   }
 
   export async function rollback(input: { sessionID: SessionID; sha: string }) {
     const { session } = await check(input)
-    const turn = GitHubSync.latest(await Session.messages({ sessionID: input.sessionID }))
-    const locale = turn?.user.locale ?? Locale.DEFAULT
+    const messages = await Session.messages({ sessionID: input.sessionID })
+    const locale = TurnSummary.latest(messages)?.user.locale ?? Locale.DEFAULT
     const label = LABEL[locale]
     const result = await History.restore(session.directory, {
       sha: input.sha,
       message: (target) => label.revert(target.subject),
       backup: label.backup,
+      after: messages.at(-1)?.info.id,
     })
     await Bus.publish(Event.Restored, {
       sessionID: input.sessionID,
@@ -82,12 +99,12 @@ export namespace HistorySync {
       target: result.target.sha,
       subject: result.target.subject,
       files: result.changes.length,
-      deps: result.deps,
+      deps: result.changes.some((change) => MANIFESTS.has(path.posix.basename(change.file))),
     })
     if (result.changes.length > 0) {
-      void GitHubSync.publish(
+      void GitHub.sync(
         session.directory,
-        GitHubSync.compose(label.revert(result.target.subject), result.changes, locale),
+        TurnSummary.compose(label.revert(result.target.subject), result.changes, locale),
       ).catch(skip)
     }
     return result

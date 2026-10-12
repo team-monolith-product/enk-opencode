@@ -3,6 +3,8 @@ import { $ } from "bun"
 import path from "path"
 import { mkdir, rm, truncate, writeFile } from "fs/promises"
 import { GitHub } from "../../src/enk/github"
+import { History } from "../../src/enk/history"
+import { WorkspaceRepo } from "../../src/enk/workspace-repo"
 import { GitHubRoutes } from "../../src/server/routes/github"
 import { Instance } from "../../src/project/instance"
 import { Log } from "../../src/util/log"
@@ -37,14 +39,16 @@ function serve(link: Record<string, unknown>) {
 async function workspace(root: string) {
   const work = path.join(root, "project-directory")
   const remote = path.join(root, "remote.git")
-  const gitdir = path.join(root, "gitdir")
   await mkdir(path.join(work, ".git"), { recursive: true })
   await writeFile(path.join(work, ".git", "opencode"), "team-1-project")
   await $`git init --quiet --bare --initial-branch=main ${remote}`.quiet()
   return {
     work,
     remote,
-    publish: (message: string) => GitHub.publish({ gitdir, worktree: work, remote, branch: "main", message, author }),
+    publish: async (message: string | GitHub.Describe) => {
+      await History.commit(work, { message: "local" })
+      return GitHub.publish({ repo: WorkspaceRepo.open(work), remote, branch: "main", message, author })
+    },
     files: () =>
       $`git --git-dir=${remote} ls-tree -r --name-only main`
         .quiet()
@@ -82,7 +86,6 @@ describe("GitHub.publish", () => {
     const result = await ws.publish("first")
 
     expect(result.sha).toBeDefined()
-    expect(result.skipped).toEqual([])
     expect(await ws.files()).toEqual([".env.example", ".gitignore", "index.html", "src/app.js"])
     expect((await $`git --git-dir=${ws.remote} log -1 --format=%an/%ae main`.quiet().text()).trim()).toBe(
       `${author.name}/${author.email}`,
@@ -162,15 +165,14 @@ describe("GitHub.publish", () => {
     ])
   })
 
-  test("files over 100MB are skipped and reported", async () => {
+  test("files over 100MB are left out", async () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)
     await put(ws.work, { "index.html": "a", "media/intro.mp4": "" })
     await truncate(path.join(ws.work, "media/intro.mp4"), 101 * 1024 * 1024)
 
-    const result = await ws.publish("first")
+    await ws.publish("first")
 
-    expect(result.skipped).toEqual(["media/intro.mp4"])
     expect(await ws.files()).toEqual(["index.html"])
   })
 
@@ -206,18 +208,11 @@ describe("GitHub.publish", () => {
     await repo.publish("first")
     await put(repo.work, { "index.html": "<h1>hello</h1>", "new.txt": "hi" })
     await rm(path.join(repo.work, "old.txt"))
-    const seen: GitHub.Change[][] = []
+    const seen: WorkspaceRepo.Change[][] = []
     const publish = () =>
-      GitHub.publish({
-        gitdir: path.join(tmp.path, "gitdir"),
-        worktree: repo.work,
-        remote: repo.remote,
-        branch: "main",
-        author,
-        message: async (changes) => {
-          seen.push(changes)
-          return "second"
-        },
+      repo.publish(async (changes) => {
+        seen.push(changes)
+        return "second"
       })
 
     await publish()
