@@ -5,6 +5,7 @@ import { Instance } from "../../src/project/instance"
 import { GenerateImage, GenerateImageTool } from "../../src/tool/generate-image"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { ImageQuota } from "../../src/enk/image-quota"
+import { Session } from "../../src/session"
 import { tmpdir } from "../fixture/fixture"
 
 let seq = 0
@@ -162,6 +163,32 @@ describe("tool.generate_image quota", () => {
     process.env["ENK_HACKATHON_RAILS_URL"] = "http://rails/"
     process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
     process.env["ENK_IMAGE_GENERATION_LIMIT"] = "10"
+  })
+
+  test("does not draw inside a subagent, whose cards the student never sees", async () => {
+    mockFetch(() => image())
+    await using dir = await tmpdir()
+    const { result, saved } = await Instance.provide({
+      directory: dir.path,
+      fn: async () => {
+        const parent = await Session.create({})
+        const child = await Session.create({ parentID: parent.id })
+        const tool = await GenerateImageTool.init()
+        const result = await tool.execute(tool.parameters.parse({ prompt: "cat", name: "cat" }), {
+          ...context(),
+          sessionID: child.id,
+        })
+        const saved = await Bun.file(path.join(dir.path, String(result.metadata.path)))
+          .bytes()
+          .catch(() => undefined)
+        return { result, saved }
+      },
+    })
+    expect(result.metadata.status).toBe("subagent")
+    expect(result.output).toContain("메인 대화")
+    expect(result.output).not.toContain("꺼 두어")
+    expect(requests).toHaveLength(0)
+    expect(saved).toBeUndefined()
   })
 
   test("draws nothing in a message where the student turned image generation off", async () => {
