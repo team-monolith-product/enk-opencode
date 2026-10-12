@@ -7,6 +7,7 @@ import { ActorID, DocID, SubmitID } from "./schema"
 import { SessionID } from "@/session/schema"
 import { errors } from "../server/error"
 import { HistorySync } from "@/enk/history-sync"
+import { failures, ok } from "../server/enk-responses"
 
 // Client reply to a server heartbeat ping (see Doc heartbeat). Cheap string check avoids JSON.parse
 // on the hot path; the only inbound control message on these channels is the pong.
@@ -189,13 +190,7 @@ export const SessionDocRoutes = () =>
         description:
           "Create a collaborative consent vote to roll the project files back to a saved version. With nobody else connected the rollback runs right away.",
         operationId: "session.promptDoc.rollback",
-        responses: {
-          200: {
-            description: "Submit approval state",
-            content: { "application/json": { schema: resolver(Doc.SubmitState) } },
-          },
-          ...errors(400, 404),
-        },
+        responses: { ...ok("Submit approval state", Doc.SubmitState), ...errors(400), ...failures(403, 404, 409, 500) },
       }),
       validator("param", z.object({ sessionID: SessionID.zod })),
       validator("json", Doc.RollbackRequest.omit({ sessionID: true })),

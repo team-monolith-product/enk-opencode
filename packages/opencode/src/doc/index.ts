@@ -767,8 +767,9 @@ export namespace Doc {
 
   function send(row: SubmitRow) {
     if (row.target_kind === "rollback") {
+      // 되돌리기는 실패를 history.failed 로 직접 알리므로 여기서 다시 오류를 띄우지 않는다.
       const { sha } = RollbackTarget.parse(JSON.parse(row.prompt))
-      HistorySync.rollback({ sessionID: row.session_id, sha }).catch((err) => fail(row, err))
+      void HistorySync.rollback({ sessionID: row.session_id, sha })
       return
     }
     if (row.target_kind === "clear") {
@@ -1118,9 +1119,9 @@ export namespace Doc {
   // 보내고, 제목·시각은 서버가 기록에서 찾아 붙여 doc_submit.prompt 에 남긴다.
   export const RollbackRequest = StopSubmitCreateInput.extend({ sha: RollbackTarget.shape.sha })
 
-  export const rollbackSubmitCreate = fn(
-    RollbackRequest.extend({ target: RollbackTarget.omit({ sha: true }) }),
-    (input) => {
+  const RollbackSubmitCreateInput = RollbackRequest.extend({ target: RollbackTarget.omit({ sha: true }) })
+
+  export const rollbackSubmitCreate = fn(RollbackSubmitCreateInput, (input) => {
     Session.get(input.sessionID)
     get(input.docID)
     return create({
@@ -1133,8 +1134,7 @@ export namespace Doc {
       promptBlob: JSON.stringify({ sha: input.sha, ...input.target }),
       timeoutMs: input.timeoutMs,
     })
-  },
-  )
+  })
 
   export const stopSubmitCreate = fn(StopSubmitCreateInput, (input) => {
     Session.get(input.sessionID)

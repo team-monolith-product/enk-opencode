@@ -90,6 +90,7 @@ import type {
   GlobalUpgradeResponses,
   HistoryChangesErrors,
   HistoryChangesResponses,
+  HistoryListErrors,
   HistoryListResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
@@ -1554,7 +1555,7 @@ export class History extends HeyApiClient {
         },
       ],
     )
-    return (options?.client ?? this.client).get<HistoryListResponses, unknown, ThrowOnError>({
+    return (options?.client ?? this.client).get<HistoryListResponses, HistoryListErrors, ThrowOnError>({
       url: "/history",
       ...options,
       ...params,

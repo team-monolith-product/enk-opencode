@@ -1,5 +1,6 @@
 import { Hono } from "hono"
-import { describeRoute, resolver, validator } from "hono-openapi"
+import { describeRoute, validator } from "hono-openapi"
+import { failures, ok } from "../enk-responses"
 import z from "zod"
 import { History } from "../../enk/history"
 import { ServeTargets } from "../../enk/serve-targets"
@@ -14,19 +15,6 @@ const Change = z.object({ status: z.enum(["A", "M", "D"]), file: z.string() }).m
 const Status = z
   .object({ enabled: z.boolean(), open: z.boolean(), entries: Entry.array() })
   .meta({ ref: "HistoryStatus" })
-const Failure = z.object({ code: z.string(), message: z.string() }).meta({ ref: "HistoryError" })
-
-const failures = (...codes: number[]) =>
-  Object.fromEntries(
-    codes.map((code) => [
-      code,
-      { description: "History error", content: { "application/json": { schema: resolver(Failure) } } },
-    ]),
-  )
-
-const ok = (description: string, schema: z.ZodType) => ({
-  200: { description, content: { "application/json": { schema: resolver(schema) } } },
-})
 
 export const HistoryRoutes = lazy(() =>
   new Hono()
@@ -37,7 +25,7 @@ export const HistoryRoutes = lazy(() =>
         description:
           "Saved versions of the project folder, newest first. A version is saved every time an AI turn ends. `open` says whether rolling back is allowed right now.",
         operationId: "history.list",
-        responses: ok("Version history", Status),
+        responses: { ...ok("Version history", Status), ...failures(500) },
       }),
       async (c) => {
         const dir = Instance.directory
@@ -52,7 +40,7 @@ export const HistoryRoutes = lazy(() =>
         summary: "Version changes",
         description: "Files that changed in this version compared with the one before it.",
         operationId: "history.changes",
-        responses: { ...ok("Changed files", Change.array()), ...failures(404) },
+        responses: { ...ok("Changed files", Change.array()), ...failures(404, 500) },
       }),
       validator("param", z.object({ sha: Sha })),
       async (c) => c.json(await History.changes(Instance.directory, c.req.valid("param").sha)),

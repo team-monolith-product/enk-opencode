@@ -498,6 +498,14 @@ export type EventHistoryRestored = {
   }
 }
 
+export type EventHistoryFailed = {
+  type: "history.failed"
+  properties: {
+    sessionID: string
+    code: "closed" | "missing" | "busy" | "failed"
+  }
+}
+
 export type EventDocPromptRotated = {
   type: "doc.prompt.rotated"
   properties: {
@@ -1069,6 +1077,7 @@ export type Event =
   | EventSessionDiff
   | EventSessionError
   | EventHistoryRestored
+  | EventHistoryFailed
   | EventDocPromptRotated
   | EventVcsBranchUpdated
   | EventWorkspaceReady
@@ -1908,7 +1917,7 @@ export type GitHubStatus = {
   }
 }
 
-export type GitHubError = {
+export type EnkFailure = {
   code: string
   message: string
 }
@@ -1929,11 +1938,6 @@ export type HistoryStatus = {
 export type HistoryChange = {
   status: "A" | "M" | "D"
   file: string
-}
-
-export type HistoryError = {
-  code: string
-  message: string
 }
 
 export type ToolIds = Array<string>
@@ -3314,17 +3318,17 @@ export type GithubRepoCreateData = {
 
 export type GithubRepoCreateErrors = {
   /**
-   * GitHub error
+   * Expected failure
    */
-  409: GitHubError
+  409: EnkFailure
   /**
-   * GitHub error
+   * Expected failure
    */
-  422: GitHubError
+  422: EnkFailure
   /**
-   * GitHub error
+   * Expected failure
    */
-  502: GitHubError
+  502: EnkFailure
 }
 
 export type GithubRepoCreateError = GithubRepoCreateErrors[keyof GithubRepoCreateErrors]
@@ -3347,6 +3351,15 @@ export type HistoryListData = {
   }
   url: "/history"
 }
+
+export type HistoryListErrors = {
+  /**
+   * Expected failure
+   */
+  500: EnkFailure
+}
+
+export type HistoryListError = HistoryListErrors[keyof HistoryListErrors]
 
 export type HistoryListResponses = {
   /**
@@ -3371,9 +3384,13 @@ export type HistoryChangesData = {
 
 export type HistoryChangesErrors = {
   /**
-   * History error
+   * Expected failure
    */
-  404: HistoryError
+  404: EnkFailure | NotFoundError
+  /**
+   * Expected failure
+   */
+  500: EnkFailure
 }
 
 export type HistoryChangesError = HistoryChangesErrors[keyof HistoryChangesErrors]
@@ -5006,9 +5023,21 @@ export type SessionPromptDocRollbackErrors = {
    */
   400: BadRequestError
   /**
-   * Not found
+   * Expected failure
    */
-  404: NotFoundError
+  403: EnkFailure
+  /**
+   * Expected failure
+   */
+  404: EnkFailure | NotFoundError
+  /**
+   * Expected failure
+   */
+  409: EnkFailure
+  /**
+   * Expected failure
+   */
+  500: EnkFailure
 }
 
 export type SessionPromptDocRollbackError = SessionPromptDocRollbackErrors[keyof SessionPromptDocRollbackErrors]

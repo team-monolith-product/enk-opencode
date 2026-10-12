@@ -43,6 +43,7 @@ export namespace WorkspaceRepo {
   }
 
   export function open(dir: string) {
+    // 경로 이름은 버전 기록 저장소로 처음 만들 때 그대로 둔다. 이미 쌓인 기록을 잇는다.
     const root = path.join(Global.Path.data, "history", Hash.fast(path.resolve(dir)))
     const run = (args: string[], opts?: Options) =>
       git(

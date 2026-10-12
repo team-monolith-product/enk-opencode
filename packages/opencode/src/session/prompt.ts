@@ -98,6 +98,7 @@ export namespace SessionPrompt {
     readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
     readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
     readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
+    readonly exclusive: (sessionID: SessionID, work: () => Promise<void>) => Effect.Effect<void>
     readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
     readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
   }
@@ -1898,6 +1899,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         },
       )
 
+      // 모델을 부르지 않는 작업(되돌리기 등)을 셸 명령과 같은 자리에서 돌린다. 도는 동안 세션은 바쁨으로 보이고, 그
+      // 사이 들어온 프롬프트는 끝난 뒤 이어서 돈다. 이미 답이 도는 중이면 BusyError. 셸 결과 자리는 러너도 호출자도
+      // 읽지 않아 빈 값을 둔다.
+      const exclusive = Effect.fn("SessionPrompt.exclusive")(function* (sessionID: SessionID, work: () => Promise<void>) {
+        const s = yield* InstanceState.get(cache)
+        const runner = getRunner(s.runners, sessionID)
+        yield* runner.startShell(() => Effect.promise(work).pipe(Effect.as(undefined as never)))
+      })
+
       const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
         log.info("command", input)
         const cmd = yield* commands.get(input.command)
@@ -2022,6 +2032,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         prompt,
         loop,
         shell,
+        exclusive,
         command,
         resolvePromptParts,
       })
@@ -2161,6 +2172,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
   export async function shell(input: ShellInput) {
     return runPromise((svc) => svc.shell(ShellInput.parse(input)))
+  }
+
+  export async function exclusive(sessionID: SessionID, work: () => Promise<void>) {
+    return runPromise((svc) => svc.exclusive(sessionID, work))
   }
 
   export const CommandInput = z.object({

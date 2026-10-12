@@ -23,7 +23,7 @@ export namespace History {
   export type Saved = { sha: string; message: string; changes: Change[]; skipped: string[] }
   export type Restored = { sha: string; target: Entry; changes: Change[] }
   export type Revert = { subject: string; after?: string }
-  export type Code = "disabled" | "closed" | "missing" | "busy"
+  export type Code = "disabled" | "closed" | "missing"
 
   export class Failure extends EnkFailure<Code> {}
 

@@ -8,6 +8,7 @@ import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Instance } from "../../src/project/instance"
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session"
+import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 
@@ -146,6 +147,76 @@ describe("rollback consent vote", () => {
         })
         expect(rollback.status).toBe("pending")
         expect(() => Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: alice.actorID })).toThrow()
+        close()
+      },
+    })
+  })
+
+  test("holds the session busy while rolling back, like a shell command", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session, docID, alice, first } = await team(tmp.path)
+        const seen: string[] = []
+        const unsub = Bus.subscribe(SessionStatus.Event.Status, (event) => {
+          if (event.properties.sessionID === session.id) seen.push(event.properties.status.type)
+        })
+
+        Doc.rollbackSubmitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          sha: first.sha,
+          target: { subject: "처음", time: 0 },
+        })
+
+        await until(async () => seen.includes("idle"))
+        expect(seen).toEqual(["busy", "idle"])
+        expect(await read(tmp.path)).toBe("v1")
+        unsub()
+      },
+    })
+  })
+
+  test("tells everyone when the agreed rollback can no longer run", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    let status = "hackathon_running"
+    await using server = Object.assign(Bun.serve({ port: 0, fetch: () => Response.json({ status }) }), {
+      [Symbol.asyncDispose]: () => server.stop(true),
+    })
+    process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
+    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session, docID, alice, first } = await team(tmp.path)
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const close = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => {} },
+        })
+        const failed: unknown[] = []
+        const unsub = Bus.subscribe(HistorySync.Event.Failed, (event) => void failed.push(event.properties))
+
+        const state = Doc.rollbackSubmitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          sha: first.sha,
+          target: { subject: "처음", time: 0 },
+        })
+        status = "hackathon_ended"
+        Doc.submitRespond({ sessionID: session.id, submitID: state.submitID, actorID: bob.actorID, action: "approve" })
+
+        await until(async () => failed.length > 0)
+        expect(failed).toEqual([{ sessionID: session.id, code: "closed" }])
+        expect(await read(tmp.path)).toBe("v2")
+        unsub()
         close()
       },
     })
