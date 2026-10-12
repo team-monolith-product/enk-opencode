@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onMount, type JSX } from "solid-js"
+import { Index, Show, createSignal, onMount, type JSX } from "solid-js"
 import { useParams } from "@solidjs/router"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Icon, type IconProps } from "@opencode-ai/ui/icon"
@@ -9,6 +9,7 @@ import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { getGitHubStatus, listEnvKeys } from "@/utils/server"
+import { isTutorialDirectory } from "@/utils/workspace"
 
 type ChromeAction = {
   icon: IconProps["name"]
@@ -53,7 +54,6 @@ export function createChromeActions() {
   }
 
   const [github, setGithub] = createSignal(false)
-  const [history, setHistory] = createSignal(false)
   onMount(() => {
     refreshEnvCount()
     const o = opts()
@@ -61,11 +61,9 @@ export function createChromeActions() {
     void getGitHubStatus(o)
       .then((status) => setGithub(status.enabled))
       .catch(() => setGithub(false))
-    void sdk.client.history
-      .list()
-      .then((res) => setHistory(res.data?.enabled === true))
-      .catch(() => setHistory(false))
   })
+  // 버전 기록은 본행사 폴더에만 있다. 목록·마감 여부는 창을 열 때 묻고, 버튼은 폴더 규약만으로 띄운다.
+  const history = () => !isTutorialDirectory(sdk.directory)
 
   return (): ChromeAction[] => [
     {
@@ -118,13 +116,19 @@ export function createChromeActions() {
 
 export function ChromeActionButtons(props: { actions: ChromeAction[]; class: string }) {
   return (
-    <For each={props.actions}>
+    <Index each={props.actions}>
       {(action) => (
-        <button type="button" class={props.class} onClick={action.open} aria-label={action.label} title={action.title}>
-          <Icon name={action.icon} size="small" />
+        <button
+          type="button"
+          class={props.class}
+          onClick={() => action().open()}
+          aria-label={action().label}
+          title={action().title}
+        >
+          <Icon name={action().icon} size="small" />
           {/* 라벨은 가장 넓은 요소 — 520px 미만에서 아이콘+배지만 남긴다(aria-label 로 이름은 유지). */}
-          <span class="@max-[520px]/chrome:hidden">{action.label}</span>
-          <Show when={action.badge}>
+          <span class="@max-[520px]/chrome:hidden">{action().label}</span>
+          <Show when={action().badge}>
             {(badge) => (
               <span
                 class="inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full bg-surface-success-strong text-white font-mono text-[9.5px] font-bold leading-none"
@@ -136,21 +140,21 @@ export function ChromeActionButtons(props: { actions: ChromeAction[]; class: str
           </Show>
         </button>
       )}
-    </For>
+    </Index>
   )
 }
 
 export function ChromeActionItems(props: { actions: ChromeAction[] }) {
   return (
-    <For each={props.actions}>
+    <Index each={props.actions}>
       {(action) => (
-        <DropdownMenu.Item onSelect={action.open}>
+        <DropdownMenu.Item onSelect={() => action().open()}>
           <DropdownMenu.ItemLabel>
-            {action.label}
-            <Show when={action.badge}>{(badge) => <> ({badge().count})</>}</Show>
+            {action().label}
+            <Show when={action().badge}>{(badge) => <> ({badge().count})</>}</Show>
           </DropdownMenu.ItemLabel>
         </DropdownMenu.Item>
       )}
-    </For>
+    </Index>
   )
 }

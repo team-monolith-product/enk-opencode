@@ -12,6 +12,7 @@ import { readonlyViewer } from "@/context/parent-params"
 import { useSDK } from "@/context/sdk"
 import { getRelativeTime } from "@/utils/time"
 import { SessionVote } from "@/utils/session-vote"
+import "./dialog-history.css"
 
 const MAX_FILES = 30
 const REFUSALS = ["closed", "busy", "missing"] as const
@@ -103,11 +104,11 @@ export function DialogHistory(props: { sessionID: string }) {
             </Match>
 
             <Match when={view() === "loading"}>
-              <div class="github-panel text-12-regular text-text-weak">{language.t("common.loading")}</div>
+              <div class="history-panel text-12-regular text-text-weak">{language.t("common.loading")}</div>
             </Match>
 
             <Match when={view() === "empty"}>
-              <div class="github-panel text-12-regular text-text-weak">{language.t("history.empty")}</div>
+              <div class="history-panel text-12-regular text-text-weak">{language.t("history.empty")}</div>
             </Match>
 
             <Match when={view() === "list"}>
@@ -163,7 +164,7 @@ export function DialogHistory(props: { sessionID: string }) {
           </Branch>
 
           <Show when={view() === "list"}>
-            <span class="github-hint">
+            <span class="history-hint">
               {spectator
                 ? language.t("history.readonly")
                 : state.status?.open

@@ -20,6 +20,8 @@ import {
   type DevServerLogsResult,
   type DevServerStatusResult,
 } from "@/utils/server"
+import { isTutorialDirectory } from "@/utils/workspace"
+import { createHistoryNotices } from "./history-notices"
 import { ChromeActionButtons, ChromeActionItems, createChromeActions } from "./session-chrome-actions"
 import { SessionPreviewFallback } from "./session-preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
@@ -86,7 +88,7 @@ export function createSessionPreview() {
     if (!domain || !user) return undefined
     // 튜토리얼 디렉토리 세션은 전용 서브도메인을 쓴다 — CHP 가 {user}-tutorial 을 :3001 로,
     // 그 외를 :3000 으로 라우팅한다. 디렉토리 이름 규약은 서버의 ServeTargets 와 같다.
-    const suffix = sdk.directory.split("/").includes("tutorial-directory") ? "-tutorial" : ""
+    const suffix = isTutorialDirectory(sdk.directory) ? "-tutorial" : ""
     return `https://${user}${suffix}.${domain}`
   })
 
@@ -103,19 +105,11 @@ export function createSessionPreview() {
   // 서버 연결이 없거나 언마운트되면 no-op 으로 되돌린다.
   let recheck: () => void = () => {}
 
-  // 되돌리기는 대화가 끝나지 않아도 파일을 바꾼다. session.idle 을 기다리지 않고 바로 다시 그리고, 함께 보던
-  // 모두에게 무엇으로 돌아갔는지 알린다.
-  onCleanup(
-    sdk.event.on("history.restored", (event) => {
-      setDirty(false)
-      setReloadCount((n) => n + 1)
-      recheck()
-      showToast({
-        title: language.t("history.restored", { subject: event.properties.subject }),
-        description: event.properties.deps ? language.t("history.restored.deps") : undefined,
-      })
-    }),
-  )
+  createHistoryNotices(() => {
+    setDirty(false)
+    setReloadCount((n) => n + 1)
+    recheck()
+  })
 
   createEffect(() => {
     // dev override(VITE_PREVIEW_URL): 상태 판정 없이 항상 미리보기 표시.
