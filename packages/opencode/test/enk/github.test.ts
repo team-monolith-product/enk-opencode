@@ -45,9 +45,9 @@ async function workspace(root: string) {
   return {
     work,
     remote,
-    publish: async (message: string | GitHub.Describe) => {
-      await History.commit(work, { message: "local" })
-      return GitHub.publish({ repo: WorkspaceRepo.open(work), remote, branch: "main", message, author })
+    publish: async (message: string) => {
+      await History.commit(work, { message })
+      return GitHub.publish({ repo: WorkspaceRepo.open(work), remote, branch: "main", locale: "en", author })
     },
     files: () =>
       $`git --git-dir=${remote} ls-tree -r --name-only main`
@@ -201,31 +201,41 @@ describe("GitHub.publish", () => {
     expect((await ws.publish("again")).sha).toBeUndefined()
   })
 
-  test("a generated message sees what changed since the last push", async () => {
+  test("the message is the saved version's title with what changed since the last push", async () => {
     await using tmp = await tmpdir()
     const repo = await workspace(tmp.path)
     await put(repo.work, { "index.html": "<h1>hi</h1>", "old.txt": "bye" })
     await repo.publish("first")
     await put(repo.work, { "index.html": "<h1>hello</h1>", "new.txt": "hi" })
     await rm(path.join(repo.work, "old.txt"))
-    const seen: WorkspaceRepo.Change[][] = []
-    const publish = () =>
-      repo.publish(async (changes) => {
-        seen.push(changes)
-        return "second"
-      })
 
-    await publish()
-    await publish()
+    await repo.publish("second")
+    expect((await repo.publish("again")).sha).toBeUndefined()
 
-    expect(seen).toEqual([
-      [
-        { status: "M", file: "index.html" },
-        { status: "A", file: "new.txt" },
-        { status: "D", file: "old.txt" },
-      ],
-    ])
     expect(await repo.log()).toEqual(["second", "first"])
+    expect((await $`git --git-dir=${repo.remote} log -1 --format=%B main`.quiet().text()).trim()).toBe(
+      "second\n\n- Update: index.html\n- Add: new.txt\n- Delete: old.txt",
+    )
+  })
+
+  test("a rollback goes up as a new commit titled with the rollback", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "v1" })
+    await ws.publish("first")
+    const first = (await History.list(ws.work)).at(-1)!
+    await put(ws.work, { "index.html": "v2" })
+    await ws.publish("second")
+    await History.restore(ws.work, {
+      sha: first.sha,
+      message: (target) => `Roll back to: ${target.subject}`,
+      backup: "backup",
+    })
+
+    await ws.publish("unused")
+
+    expect(await ws.log()).toEqual(["Roll back to: first", "second", "first"])
+    expect(await $`git --git-dir=${ws.remote} show main:index.html`.quiet().text()).toBe("v1")
   })
 
   test("a workspace with nothing but secrets is refused", async () => {
@@ -323,14 +333,14 @@ describe("GitHub.push", () => {
   test("pushing without a link is refused", async () => {
     await using tmp = await tmpdir()
 
-    await expect(GitHub.push(tmp.path, { message: "x" })).rejects.toMatchObject({ code: "unlinked" })
+    await expect(GitHub.push(tmp.path, {})).rejects.toMatchObject({ code: "unlinked" })
   })
 
   test("pushing without a repository is refused", async () => {
     await using tmp = await tmpdir()
     await using rails = serve({ enabled: true, connected: true, login: "octocat", token: "gho_1" })
 
-    await expect(GitHub.push(tmp.path, { message: "x" })).rejects.toMatchObject({ code: "norepo" })
+    await expect(GitHub.push(tmp.path, {})).rejects.toMatchObject({ code: "norepo" })
   })
 })
 

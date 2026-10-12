@@ -69,12 +69,11 @@ export namespace HistorySync {
     Bus.subscribe(SessionStatus.Event.Idle, async (evt) => {
       const turn = await TurnSummary.current(evt.properties.sessionID).catch(() => undefined)
       if (!turn) return
-      const describe = (changes: History.Change[]) => TurnSummary.describe(turn, changes)
-      const saved = await History.commit(dir, { message: describe, turn: turn.user.id }).catch((err) => {
-        log.warn("save failed", { error: err instanceof Error ? err.message : String(err) })
-        return undefined
-      })
-      await GitHub.sync(dir, saved?.message ?? describe).catch(skip)
+      await History.commit(dir, {
+        message: (changes) => TurnSummary.describe(turn, changes),
+        turn: turn.user.id,
+      }).catch((err) => log.warn("save failed", { error: err instanceof Error ? err.message : String(err) }))
+      await GitHub.sync(dir, turn.user.locale).catch(skip)
     })
   }
 
@@ -136,11 +135,6 @@ export namespace HistorySync {
       files: result.changes.length,
       deps: result.changes.some((change) => MANIFESTS.has(path.posix.basename(change.file))),
     })
-    if (result.changes.length > 0) {
-      void GitHub.sync(
-        session.directory,
-        TurnSummary.compose(label.revert(result.target.subject), result.changes, locale),
-      ).catch(skip)
-    }
+    if (result.changes.length > 0) void GitHub.sync(session.directory, locale).catch(skip)
   }
 }

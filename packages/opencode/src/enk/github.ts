@@ -4,6 +4,8 @@ import { Log } from "../util/log"
 import { EnkFailure } from "./failure"
 import { Rails } from "./rails"
 import { ServeTargets } from "./serve-targets"
+import type { Locale } from "./locale"
+import { TurnSummary } from "./turn"
 import { WorkspaceRepo } from "./workspace-repo"
 
 export namespace GitHub {
@@ -26,7 +28,6 @@ export namespace GitHub {
     push?: Push
   }
   export type Result = { sha?: string }
-  export type Describe = (changes: WorkspaceRepo.Change[]) => Promise<string>
   export type Code =
     | "disabled"
     | "unlinked"
@@ -160,13 +161,13 @@ export namespace GitHub {
   }
 
   /** 연결한 팀이면 버전 기록의 최신 커밋을 저장소에 올린다. 연결하지 않은 팀에는 아무것도 하지 않는다. */
-  export async function sync(dir: string, message: string | Describe) {
+  export async function sync(dir: string, locale?: Locale.Value) {
     const current = await status(dir)
     if (!current.login || !current.repo) return
-    await push(dir, { message })
+    await push(dir, { locale })
   }
 
-  export async function push(dir: string, input: { message: string | Describe }) {
+  export async function push(dir: string, input: { locale?: Locale.Value }) {
     const hit = await linked()
     if (!hit.repo) throw new Failure("norepo", 409)
     const remote = await request<Remote>(
@@ -179,7 +180,7 @@ export namespace GitHub {
       repo: WorkspaceRepo.open(dir),
       remote: `${web}/${hit.repo.owner}/${hit.repo.name}.git`,
       branch: remote.default_branch || "main",
-      message: input.message,
+      locale: input.locale,
       author: {
         name: hit.login || "Jitda",
         email: `${hit.github_user_id ? `${hit.github_user_id}+` : ""}${hit.login}@users.noreply.github.com`,
@@ -225,12 +226,13 @@ export namespace GitHub {
   /**
    * 버전 기록의 최신 커밋을 원격 브랜치 위에 새 커밋으로 올린다. 원격에서 따로 쌓인 커밋(GitHub 웹 편집 등)이
    * 있으면 그 위에 얹으므로 force-push 하지 않는다. 작업 폴더와 인덱스를 건드리지 않아 기록과 다른 줄에서 돈다.
+   * 메시지는 기록 커밋의 제목에 원격과 달라진 파일 목록을 붙인다. 누가 먼저 올리든 같은 메시지가 된다.
    */
   export async function publish(input: {
     repo: WorkspaceRepo.Repo
     remote: string
     branch: string
-    message: string | Describe
+    locale?: Locale.Value
     author: { name: string; email: string }
     env?: Record<string, string>
   }): Promise<Result> {
@@ -248,7 +250,7 @@ export namespace GitHub {
       const head = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
       if (!head) throw new Failure("empty", 422)
       const tree = await publishable(repo, `${head}^{tree}`)
-      let message: string | undefined
+      const subject = (await repo.must(["log", "-1", "--format=%s", head])).trim()
       const attempt = async (retry: boolean): Promise<Result> => {
         const heads = await repo.must(["ls-remote", input.remote, ref], { env: input.env })
         const found = heads.split("\n").some((line) => line.endsWith(`\t${ref}`))
@@ -259,10 +261,8 @@ export namespace GitHub {
         }
         const parent = found ? await WorkspaceRepo.rev(repo, track) : undefined
         if (parent && tree === (await WorkspaceRepo.rev(repo, `${parent}^{tree}`))) return {}
-        message ??=
-          typeof input.message === "string"
-            ? input.message
-            : await input.message(await WorkspaceRepo.diff(repo, parent && `${parent}^{tree}`, tree))
+        const changes = await WorkspaceRepo.diff(repo, parent && `${parent}^{tree}`, tree)
+        const message = TurnSummary.compose(subject, changes, input.locale)
         const sha = (
           await repo.must(["commit-tree", "--no-gpg-sign", tree, ...(parent ? ["-p", parent] : []), "-m", message], {
             env: who,
