@@ -1,3 +1,4 @@
+import type { DocRollbackTarget } from "@opencode-ai/sdk/v2/client"
 import { apiUrl } from "@/utils/api-url"
 import type { PromptApprovalInput } from "./submit"
 
@@ -15,11 +16,13 @@ export type DocSubmitState = {
   sessionID: string
   // 'doc' → targetID is the prompt doc id; 'question' → the question request id; 'stop' → the prompt
   // doc id whose in-flight AI response a consensus would cancel; 'clear' → the prompt doc id of the
-  // session a consensus would delete (archive).
-  targetKind: "doc" | "question" | "stop" | "clear"
+  // session a consensus would delete (archive); 'rollback' → the prompt doc id of the session whose
+  // project files a consensus would roll back to `rollback`.
+  targetKind: "doc" | "question" | "stop" | "clear" | "rollback"
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
+  rollback?: DocRollbackTarget
   actorID: string
   status: "pending" | "sent" | "cancelled" | "expired" | "left"
   actors: DocSubmitActor[]
@@ -217,13 +220,24 @@ export function liveSocket(input: {
   }
 }
 
+/** 투표 요청을 서버가 거절했을 때. `body` 는 서버 오류 본문 그대로다(enk 실패는 `code`, 이름 있는 오류는 `name`). */
+export class SubmitRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: { code?: string; name?: string } | undefined,
+  ) {
+    super(`Submit request failed (${status})`)
+    this.name = "SubmitRequestError"
+  }
+}
+
 const json = async (url: URL, body: unknown) => {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) throw new SubmitRequestError(res.status, await res.json().catch(() => undefined))
   return (await res.json()) as DocSubmitState
 }
 
@@ -265,6 +279,18 @@ export async function startClearSubmit(input: StopInput) {
     docID: input.docID,
     actorID: input.actorID,
     names: input.names,
+    timeoutMs: input.timeoutMs,
+  })
+}
+
+// Start a consent vote to roll the project files back to a saved version. With nobody else connected
+// the server rolls back right away and answers with a 'sent' state.
+export async function startRollbackSubmit(input: StopInput & { sha: string }) {
+  return json(path(input, `/session/${input.sessionID}/prompt-doc/rollback`), {
+    docID: input.docID,
+    actorID: input.actorID,
+    names: input.names,
+    sha: input.sha,
     timeoutMs: input.timeoutMs,
   })
 }

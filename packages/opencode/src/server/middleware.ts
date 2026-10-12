@@ -7,9 +7,12 @@ import type { ErrorHandler } from "hono"
 import { HTTPException } from "hono/http-exception"
 import type { Log } from "../util/log"
 import { SentryReporter } from "../util/sentry"
+import { EnkFailure } from "../enk/failure"
 
 export function errorHandler(log: Log.Logger): ErrorHandler {
   return (err, c) => {
+    // 예상된 사용자 실패라 에러 로그·Sentry 로 보내지 않는다.
+    if (err instanceof EnkFailure) return c.json({ code: err.code, message: err.message }, { status: err.status })
     log.error("failed", {
       error: err,
     })

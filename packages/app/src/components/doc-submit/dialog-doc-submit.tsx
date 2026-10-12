@@ -6,12 +6,20 @@ import { createPage } from "@/components/blocksuite/blocksuite-doc"
 import { useColorScheme } from "@/utils/color-scheme"
 import { SessionPreviewMascot } from "@/pages/session/session-preview-mascot"
 import type { DocSubmitActor, DocSubmitState } from "../prompt-input/doc-submit"
+import { getRelativeTime } from "@/utils/time"
 import { avatarLabel } from "./avatar-label"
 import { useCountdown } from "./use-countdown"
 import "./doc-submit.css"
 
 // What the vote will do once approved — drives the dialog copy.
-export type DocSubmitKind = "doc" | "question-send" | "question-dismiss" | "question-back" | "stop" | "clear"
+export type DocSubmitKind =
+  | "doc"
+  | "question-send"
+  | "question-dismiss"
+  | "question-back"
+  | "stop"
+  | "clear"
+  | "rollback"
 
 // For question votes: the question(s) and the answer(s) being agreed on, shown so everyone sees
 // exactly what is about to be sent (or which question is being dismissed).
@@ -59,6 +67,7 @@ const headline = copyKey(
     "question-back": "docSubmit.headline.questionBack",
     stop: "docSubmit.headline.stop",
     clear: "docSubmit.headline.clear",
+    rollback: "docSubmit.headline.rollback",
   } as const,
   "doc",
 )
@@ -70,6 +79,7 @@ const requestVerb = copyKey(
     "question-back": "docSubmit.requestVerb.questionBack",
     stop: "docSubmit.requestVerb.stop",
     clear: "docSubmit.requestVerb.clear",
+    rollback: "docSubmit.requestVerb.rollback",
   } as const,
   "doc",
 )
@@ -81,6 +91,7 @@ const approveLabel = copyKey(
     "question-back": "docSubmit.approve.questionBack",
     stop: "docSubmit.approve.stop",
     clear: "docSubmit.approve.clear",
+    rollback: "docSubmit.approve.rollback",
   } as const,
   "doc",
 )
@@ -92,6 +103,7 @@ const excludeLabel = copyKey(
     "question-back": "docSubmit.exclude.questionBack",
     stop: "docSubmit.exclude.stop",
     clear: "docSubmit.exclude.clear",
+    rollback: "docSubmit.exclude.rollback",
   } as const,
   "doc",
 )
@@ -104,6 +116,7 @@ const proceedVerb = copyKey(
     "question-back": "docSubmit.proceed.questionBack",
     stop: "docSubmit.proceed.stop",
     clear: "docSubmit.proceed.clear",
+    rollback: "docSubmit.proceed.rollback",
   } as const,
   "doc",
 )
@@ -115,6 +128,7 @@ const warnText = copyKey(
     "question-back": "docSubmit.warn.questionBack",
     stop: "docSubmit.warn.stop",
     clear: "docSubmit.warn.clear",
+    rollback: "docSubmit.warn.rollback",
   } as const,
   "doc",
 )
@@ -126,6 +140,7 @@ const hintText = copyKey(
     "question-back": "docSubmit.hint.questionBack",
     stop: "docSubmit.hint.stop",
     clear: "docSubmit.hint.clear",
+    rollback: "docSubmit.hint.rollback",
   } as const,
   "doc",
 )
@@ -329,11 +344,36 @@ function PreviewCard(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boo
   )
 }
 
-// The snapshot region: doc viewer for prompt sends, question preview for question votes, nothing
-// for a bare "stop" vote.
+function RollbackCard(props: { target: NonNullable<DocSubmitState["rollback"]> }) {
+  const language = useLanguage()
+  return (
+    <div class="ds-preview">
+      <div class="ds-preview-item">
+        <div class="ds-preview-body">
+          <div class="ds-preview-q">{props.target.subject}</div>
+          <div class="ds-preview-meta">{getRelativeTime(new Date(props.target.time).toISOString(), language.t)}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The snapshot region: doc viewer for prompt sends, question preview for question votes, the target
+// version for a rollback vote, nothing for a bare "stop" vote.
 function SnapshotArea(props: { kind?: DocSubmitKind; state: DocSubmitState; preview?: () => DocSubmitPreviewItem[]; sdk?: DocSubmitSdk }) {
   return (
-    <Show when={props.kind !== "stop" && props.kind !== "clear"}>
+    <Show
+      when={props.kind !== "stop" && props.kind !== "clear" && props.kind !== "rollback"}
+      fallback={
+        <Show when={props.kind === "rollback" && props.state.rollback}>
+          {(target) => (
+            <div class="jt-snap-scroll ds-snap">
+              <RollbackCard target={target()} />
+            </div>
+          )}
+        </Show>
+      }
+    >
       <div class="jt-snap-scroll ds-snap">
         <Show
           when={props.kind === "doc" && props.sdk}
@@ -587,6 +627,10 @@ type Translate = ReturnType<typeof useLanguage>["t"]
 
 function failInfo(state: DocSubmitState, t: Translate): { title: string; sub: string; icon: JSX.Element } {
   const timeoutSec = Math.round(state.timeoutMs / 1000)
+  if (state.targetKind === "rollback") {
+    const icon = state.status === "left" ? ICON.user(22) : state.status === "expired" ? ICON.clock(22) : ICON.x(22)
+    return { title: t("docSubmit.failed.rollback.title"), sub: t("docSubmit.failed.rollback.sub"), icon }
+  }
   if (state.status === "left") {
     return { title: t("docSubmit.failed.left.title"), sub: t("docSubmit.failed.left.sub"), icon: ICON.user(22) }
   }

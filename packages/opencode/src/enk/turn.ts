@@ -1,47 +1,30 @@
 import { Agent } from "@/agent/agent"
-import { Bus } from "@/bus"
 import { Provider } from "@/provider/provider"
-import { Instance } from "@/project/instance"
 import { Session } from "@/session"
 import { LLM } from "@/session/llm"
 import type { MessageV2 } from "@/session/message-v2"
 import type { SessionID } from "@/session/schema"
-import { SessionStatus } from "@/session/status"
 import { Log } from "@/util/log"
-import { GitHub } from "./github"
 import { Locale } from "./locale"
+import type { WorkspaceRepo } from "./workspace-repo"
 
-export namespace GitHubSync {
-  const log = Log.create({ service: "github-sync" })
+/** 대화 한 턴(마지막 요청과 그 답)을 읽어, 그 턴에 바뀐 파일을 설명하는 커밋 메시지를 짓는다. */
+export namespace TurnSummary {
+  const log = Log.create({ service: "turn-summary" })
   const MAX_FILES = 30
   const MAX_SUBJECT = 72
 
-  const LABEL: Record<Locale.Value, Record<GitHub.Change["status"], string> & { fallback: string }> = {
+  const LABEL: Record<Locale.Value, Record<WorkspaceRepo.Change["status"], string> & { fallback: string }> = {
     ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용" },
     en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda" },
   }
 
   export type Turn = { user: MessageV2.User; request: string; reply: string }
 
-  export function init() {
-    const dir = Instance.directory
-    Bus.subscribe(SessionStatus.Event.Idle, async (evt) => {
-      await sync(dir, evt.properties.sessionID).catch((err) => {
-        if (err instanceof GitHub.Failure) return log.info("skipped", { code: err.code })
-        log.warn("failed", { error: err instanceof Error ? err.message : String(err) })
-      })
-    })
-  }
-
-  async function sync(dir: string, sessionID: SessionID) {
-    const status = await GitHub.status(dir)
-    if (!status.login || !status.repo) return
+  export async function current(sessionID: SessionID) {
     const session = await Session.get(sessionID)
     if (session.parentID) return
-    const turn = latest(await Session.messages({ sessionID }))
-    if (!turn) return
-    const result = await GitHub.push(dir, { message: (changes) => describe(turn, changes) })
-    if (result.sha) log.info("pushed", { sessionID, sha: result.sha })
+    return latest(await Session.messages({ sessionID }))
   }
 
   export function latest(messages: MessageV2.WithParts[]): Turn | undefined {
@@ -63,7 +46,7 @@ export namespace GitHubSync {
     return { user: found.info, request: text(found), reply }
   }
 
-  export async function describe(turn: Turn, changes: GitHub.Change[]) {
+  export async function describe(turn: Turn, changes: WorkspaceRepo.Change[]) {
     const title = await summarize(turn).catch((err) => {
       log.warn("summary failed", { error: err instanceof Error ? err.message : String(err) })
       return undefined
@@ -71,7 +54,7 @@ export namespace GitHubSync {
     return compose(title || fallback(turn), changes, turn.user.locale)
   }
 
-  export function compose(subject: string, changes: GitHub.Change[], locale?: Locale.Value) {
+  export function compose(subject: string, changes: WorkspaceRepo.Change[], locale?: Locale.Value) {
     const label = LABEL[locale ?? Locale.DEFAULT]
     const lines = changes.slice(0, MAX_FILES).map((change) => `- ${label[change.status]}: ${change.file}`)
     if (changes.length > MAX_FILES) lines.push(`- … +${changes.length - MAX_FILES}`)
