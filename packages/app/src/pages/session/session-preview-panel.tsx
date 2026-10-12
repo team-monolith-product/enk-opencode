@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import type { ErrorEntry } from "@/lib/preview-bridge-protocol"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
@@ -13,18 +13,14 @@ import { usePlatform } from "@/context/platform"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { useParams } from "@solidjs/router"
 import {
   getDevServerLogs,
   getDevServerStatus,
-  getGitHubStatus,
-  getHistory,
-  listEnvKeys,
   restartDevServer,
   type DevServerLogsResult,
   type DevServerStatusResult,
 } from "@/utils/server"
+import { ChromeActionButtons, ChromeActionItems, createChromeActions } from "./session-chrome-actions"
 import { SessionPreviewFallback } from "./session-preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
 import { formatBaseHost, formatEditablePath, resolveNavigatePath } from "./session-preview-address"
@@ -110,9 +106,7 @@ export function createSessionPreview() {
   // 되돌리기는 대화가 끝나지 않아도 파일을 바꾼다. session.idle 을 기다리지 않고 바로 다시 그리고, 함께 보던
   // 모두에게 무엇으로 돌아갔는지 알린다.
   onCleanup(
-    sdk.event.listen(({ name, details }) => {
-      if ((name as string) !== "history.restored") return
-      const event = details as unknown as { properties: { subject: string; deps: boolean } }
+    sdk.event.on("history.restored", (event) => {
       setDirty(false)
       setReloadCount((n) => n + 1)
       recheck()
@@ -632,63 +626,10 @@ export function SessionBrowserChrome(props: {
   const layout = useLayout()
   const language = useLanguage()
   const command = useCommand()
-  const dialog = useDialog()
-  const server = useServer()
-  const sdk = useSDK()
-  const platform = usePlatform()
   const [copied, setCopied] = createSignal(false)
 
-  // 시안: 저장된 연결 수 > 0 일 때만 배지. 값 필요 줄은 세지 않는다.
-  const [envCount, setEnvCount] = createSignal(0)
-  const refreshEnvCount = () => {
-    const conn = server.current
-    if (!conn) return
-    void listEnvKeys({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
-      .then((keys) => setEnvCount(keys.length))
-      .catch(() => setEnvCount(0))
-  }
-  onMount(() => refreshEnvCount())
+  const actions = createChromeActions()
 
-  const openEnvKeys = () => {
-    refreshEnvCount()
-    // 배포 직후 구버전 페이지에서 새 청크 로드가 실패할 수 있다 — 조용히 죽지 말고 토스트로 알린다.
-    import("@/components/dialog-env-keys")
-      .then((x) => dialog.show(() => <x.DialogEnvKeys />, refreshEnvCount))
-      .catch(() => showToast({ title: language.t("common.requestFailed") }))
-  }
-
-  const [github, setGithub] = createSignal(false)
-  onMount(() => {
-    const conn = server.current
-    if (!conn) return
-    void getGitHubStatus({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
-      .then((status) => setGithub(status.enabled))
-      .catch(() => setGithub(false))
-  })
-
-  const openGitHub = () => {
-    import("@/components/dialog-github")
-      .then((x) => dialog.show(() => <x.DialogGitHub />))
-      .catch(() => showToast({ title: language.t("common.requestFailed") }))
-  }
-
-  const params = useParams()
-  const [history, setHistory] = createSignal(false)
-  onMount(() => {
-    const conn = server.current
-    if (!conn) return
-    void getHistory({ server: conn.http, directory: sdk.directory, fetch: platform.fetch })
-      .then((status) => setHistory(status.enabled))
-      .catch(() => setHistory(false))
-  })
-
-  const openHistory = () => {
-    const sessionID = params.id
-    if (!sessionID) return
-    import("@/components/dialog-history")
-      .then((x) => dialog.show(() => <x.DialogHistory sessionID={sessionID} />))
-      .catch(() => showToast({ title: language.t("common.requestFailed") }))
-  }
   let copyTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => copyTimer && clearTimeout(copyTimer))
 
@@ -894,58 +835,13 @@ export function SessionBrowserChrome(props: {
       {/* 우 그룹 — 시안 SafariChrome: 외부 연동 + (에러 시)오류 + 새 탭 + 주소 복사.
           380px 미만에서는 오류 버튼만 남기고 나머지를 ⋯ 메뉴로 접는다(오류는 중요도상 항상 밖에). */}
       <div class="flex shrink-0 items-center justify-end gap-1">
-        <button
-          type="button"
+        <ChromeActionButtons
+          actions={actions()}
           class={
             ghostBtn +
             " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap @max-[380px]/chrome:hidden"
           }
-          onClick={openEnvKeys}
-          aria-label={language.t("command.env.keys")}
-          title={language.t("command.env.keys.description")}
-        >
-          <Icon name="plug" size="small" />
-          {/* 라벨은 가장 넓은 요소 — 520px 미만에서 아이콘+배지만 남긴다(aria-label 로 이름은 유지). */}
-          <span class="@max-[520px]/chrome:hidden">{language.t("command.env.keys")}</span>
-          <Show when={envCount() > 0}>
-            <span
-              class="inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full bg-surface-success-strong text-white font-mono text-[9.5px] font-bold leading-none"
-              aria-label={language.t("command.env.keys.badge", { count: envCount() })}
-            >
-              {envCount()}
-            </span>
-          </Show>
-        </button>
-        <Show when={history() && params.id}>
-          <button
-            type="button"
-            class={
-              ghostBtn +
-              " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap @max-[380px]/chrome:hidden"
-            }
-            onClick={openHistory}
-            aria-label={language.t("command.history")}
-            title={language.t("command.history.description")}
-          >
-            <Icon name="clock" size="small" />
-            <span class="@max-[520px]/chrome:hidden">{language.t("command.history")}</span>
-          </button>
-        </Show>
-        <Show when={github()}>
-          <button
-            type="button"
-            class={
-              ghostBtn +
-              " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap @max-[380px]/chrome:hidden"
-            }
-            onClick={openGitHub}
-            aria-label={language.t("command.github")}
-            title={language.t("command.github.description")}
-          >
-            <Icon name="github" size="small" />
-            <span class="@max-[520px]/chrome:hidden">{language.t("command.github")}</span>
-          </button>
-        </Show>
+        />
         <Show when={props.showErrorButton}>
           <button
             type="button"
@@ -993,22 +889,7 @@ export function SessionBrowserChrome(props: {
             />
             <DropdownMenu.Portal>
               <DropdownMenu.Content>
-                <DropdownMenu.Item onSelect={openEnvKeys}>
-                  <DropdownMenu.ItemLabel>
-                    {language.t("command.env.keys")}
-                    <Show when={envCount() > 0}> ({envCount()})</Show>
-                  </DropdownMenu.ItemLabel>
-                </DropdownMenu.Item>
-                <Show when={history() && params.id}>
-                  <DropdownMenu.Item onSelect={openHistory}>
-                    <DropdownMenu.ItemLabel>{language.t("command.history")}</DropdownMenu.ItemLabel>
-                  </DropdownMenu.Item>
-                </Show>
-                <Show when={github()}>
-                  <DropdownMenu.Item onSelect={openGitHub}>
-                    <DropdownMenu.ItemLabel>{language.t("command.github")}</DropdownMenu.ItemLabel>
-                  </DropdownMenu.Item>
-                </Show>
+                <ChromeActionItems actions={actions()} />
                 <DropdownMenu.Item disabled={previewBlocked() || !props.url} onSelect={openInNewTab}>
                   <DropdownMenu.ItemLabel>{language.t("common.openInNewTab")}</DropdownMenu.ItemLabel>
                 </DropdownMenu.Item>

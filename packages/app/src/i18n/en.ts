@@ -158,6 +158,7 @@ export const dict = {
   "history.closed": "The hackathon has ended, so you can no longer roll back.",
   "history.readonly": "You can't roll back while spectating.",
   "history.error.load": "Could not load the version history",
+  "history.error.changes": "Could not load the changed files. Tap again to retry",
   "history.error.closed": "The hackathon has ended, so you can't roll back",
   "history.error.busy": "You can't roll back while the AI is answering. Try again when it's done",
   "history.error.missing": "This version could not be found",

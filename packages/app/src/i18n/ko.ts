@@ -154,6 +154,7 @@ export const dict = {
   "history.closed": "해커톤이 끝나서 더 이상 되돌릴 수 없어요.",
   "history.readonly": "관전 중에는 되돌릴 수 없어요.",
   "history.error.load": "버전 기록을 불러오지 못했어요",
+  "history.error.changes": "바뀐 파일을 불러오지 못했어요. 다시 눌러 주세요",
   "history.error.closed": "해커톤이 끝나서 되돌릴 수 없어요",
   "history.error.busy": "AI가 답하는 중에는 되돌릴 수 없어요. 답이 끝난 뒤 다시 해 주세요",
   "history.error.missing": "이 버전을 찾을 수 없어요",

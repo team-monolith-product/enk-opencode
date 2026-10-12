@@ -5,30 +5,29 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { showToast } from "@opencode-ai/ui/toast"
 import { createMemo, For, Match, onMount, Show, Switch as Branch } from "solid-js"
 import { createStore } from "solid-js/store"
+import type { HistoryChange, HistoryStatus } from "@opencode-ai/sdk/v2/client"
+import { SubmitRequestError } from "@/components/prompt-input/doc-submit"
 import { useLanguage } from "@/context/language"
 import { readonlyViewer } from "@/context/parent-params"
-import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
-import { useServer } from "@/context/server"
 import { getRelativeTime } from "@/utils/time"
-import { getHistory, getHistoryChanges, type HistoryChange, type HistoryStatus } from "@/utils/server"
-import { RollbackError, SessionRollbackVote } from "@/utils/session-rollback-vote"
+import { SessionVote } from "@/utils/session-vote"
 
 const MAX_FILES = 30
+const REFUSALS = ["closed", "busy", "missing"] as const
+
+/** 서버가 되돌리기 투표를 거절한 이유. */
+function refusal(err: unknown) {
+  if (!(err instanceof SubmitRequestError)) return "failed"
+  if (err.body?.name === "DocVoteConflictError") return "conflict"
+  return REFUSALS.find((code) => code === err.body?.code) ?? "failed"
+}
 
 export function DialogHistory(props: { sessionID: string }) {
   const dialog = useDialog()
   const language = useLanguage()
-  const server = useServer()
   const sdk = useSDK()
-  const platform = usePlatform()
   const spectator = readonlyViewer()
-
-  const opts = () => {
-    const conn = server.current
-    if (!conn) return
-    return { server: conn.http, directory: sdk.directory, fetch: platform.fetch }
-  }
 
   const [state, setState] = createStore<{
     status?: HistoryStatus
@@ -37,23 +36,19 @@ export function DialogHistory(props: { sessionID: string }) {
     changes: Record<string, HistoryChange[] | "loading" | "failed">
   }>({ failed: false, changes: {} })
 
-  const refetch = async () => {
-    const o = opts()
-    if (!o) return
-    await getHistory(o).then(
-      (status) => setState({ status, failed: false }),
+  const refetch = () =>
+    sdk.client.history.list().then(
+      (res) => setState({ status: res.data, failed: false }),
       () => setState("failed", true),
     )
-  }
   onMount(() => void refetch())
 
   const select = (sha: string) => {
     setState("selected", sha)
-    const o = opts()
-    if (!o || state.changes[sha]) return
+    if (state.changes[sha] && state.changes[sha] !== "failed") return
     setState("changes", sha, "loading")
-    void getHistoryChanges(o, sha).then(
-      (list) => setState("changes", sha, list),
+    void sdk.client.history.changes({ sha }).then(
+      (res) => setState("changes", sha, res.data ?? []),
       () => setState("changes", sha, "failed"),
     )
   }
@@ -72,11 +67,13 @@ export function DialogHistory(props: { sessionID: string }) {
   const restore = async () => {
     const sha = state.selected
     if (!sha || !ready()) return
+    const vote = SessionVote.get(props.sessionID)
     dialog.close()
-    await SessionRollbackVote.request(props.sessionID, sha).catch((err: unknown) => {
-      const code = err instanceof RollbackError ? err.code : "failed"
-      showToast({ title: language.t(`history.error.${code}`) })
-    })
+    try {
+      if (!(await vote?.rollback(sha))) showToast({ title: language.t("history.error.unavailable") })
+    } catch (err) {
+      showToast({ title: language.t(`history.error.${refusal(err)}`) })
+    }
   }
 
   const label = (status: HistoryChange["status"]) => language.t(`history.change.${status}`)
@@ -144,6 +141,9 @@ export function DialogHistory(props: { sessionID: string }) {
                           <Branch>
                             <Match when={state.changes[entry.sha] === "loading"}>
                               <span class="history-time">{language.t("common.loading")}</span>
+                            </Match>
+                            <Match when={state.changes[entry.sha] === "failed"}>
+                              <span class="history-time">{language.t("history.error.changes")}</span>
                             </Match>
                             <Match when={Array.isArray(state.changes[entry.sha])}>
                               <HistoryFiles
