@@ -8,6 +8,7 @@ import { Plugin } from "@/plugin"
 import { Snapshot } from "@/snapshot"
 import { Log } from "@/util/log"
 import { AiUsage } from "@/enk/ai-usage"
+import { CostQuota } from "@/enk/cost-quota"
 import { Session } from "."
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
@@ -313,6 +314,7 @@ export namespace SessionProcessor {
                   at: Date.now(),
                 })
               } catch {}
+              CostQuota.consume(usage.cost)
               ctx.stepIndex++
               yield* session.updatePart({
                 id: PartID.ascending(),
