@@ -5,7 +5,7 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { showToast } from "@opencode-ai/ui/toast"
 import { createMemo, For, Match, onMount, Show, Switch as Branch } from "solid-js"
 import { createStore } from "solid-js/store"
-import type { HistoryChange, HistoryStatus } from "@opencode-ai/sdk/v2/client"
+import type { EventHistoryFailed, HistoryChange, HistoryStatus } from "@opencode-ai/sdk/v2/client"
 import { SubmitRequestError } from "@/components/prompt-input/doc-submit"
 import { useLanguage } from "@/context/language"
 import { readonlyViewer } from "@/context/parent-params"
@@ -15,7 +15,8 @@ import { SessionVote } from "@/utils/session-vote"
 import "./dialog-history.css"
 
 const MAX_FILES = 30
-const REFUSALS = ["closed", "busy", "missing"] as const
+// 서버가 되돌리기를 거절하는 사유(history.failed 와 같은 이름). 서버 쪽 목록이 바뀌면 여기서 타입 오류가 난다.
+const REFUSALS = ["closed", "busy", "missing"] as const satisfies readonly EventHistoryFailed["properties"]["code"][]
 
 /** 서버가 되돌리기 투표를 거절한 이유. */
 function refusal(err: unknown) {
