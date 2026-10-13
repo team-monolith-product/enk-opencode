@@ -21,6 +21,7 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
+import { createImageGeneration } from "@/components/prompt-input/image-toggle"
 import { useGlobalSync } from "@/context/global-sync"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
@@ -1664,8 +1665,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   })
 
+  const imageGeneration = createImageGeneration({ sdk, working })
+
   const { abort, handleSubmit } = createPromptSubmit({
     info,
+    imageGeneration: imageGeneration.request,
     imageAttachments,
     commentCount,
     autoAccept: () => accepting(),
@@ -1725,6 +1729,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             model: input.model,
             variant: input.variant,
             locale: input.locale,
+            imageGeneration: input.imageGeneration,
             parts: input.parts,
           },
         })
@@ -2196,7 +2201,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             if (!(target instanceof HTMLElement)) return
             if (
               target.closest(
-                '[data-action="prompt-attach"], [data-action="prompt-submit"], [data-action="prompt-normal"], [data-action="prompt-doc"], [data-action="prompt-doc-exit"], [data-action="prompt-permissions"]',
+                '[data-action="prompt-attach"], [data-action="prompt-image-toggle"], [data-action="prompt-submit"], [data-action="prompt-normal"], [data-action="prompt-doc"], [data-action="prompt-doc-exit"], [data-action="prompt-permissions"]',
               )
             ) {
               return
@@ -2258,6 +2263,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }
           >
             <PromptDocShell
+              imageToggle={<imageGeneration.Toggle />}
               doc={doc}
               readonly={readonly}
               submitIcon={submitIcon()}
@@ -2355,6 +2361,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       <Icon name="plus" class="size-4.5" />
                     </Button>
                   </TooltipKeybind>
+                  <imageGeneration.Toggle />
                   {modeButtons()}
                 </div>
               </Show>
