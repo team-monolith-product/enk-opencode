@@ -79,6 +79,8 @@
         "generate_image": "deny",
         "ensure_dev_server": "deny",
         "env_request": "deny",
+        // 미리보기 앱을 직접 조작하는 브라우저 도구도 막는다.
+        "playwright_*": "deny",
       },
     },
   },

@@ -57,10 +57,20 @@ describe("plan agent in the pod config", () => {
           "ensure_dev_server",
           "env_request",
           "task",
+          "playwright_browser_click",
+          "playwright_browser_navigate",
           "read",
         ]
         const disabled = Permission.disabled(tools, plan.permission)
-        for (const tool of ["bash", "generate_image", "ensure_dev_server", "env_request", "task"])
+        for (const tool of [
+          "bash",
+          "generate_image",
+          "ensure_dev_server",
+          "env_request",
+          "task",
+          "playwright_browser_click",
+          "playwright_browser_navigate",
+        ])
           expect(disabled.has(tool)).toBe(true)
         expect(disabled.has("read")).toBe(false)
       },
