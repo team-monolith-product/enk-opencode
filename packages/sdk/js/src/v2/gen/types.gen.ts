@@ -2011,6 +2011,14 @@ export type McpResource = {
   client: string
 }
 
+export type InitialPlanDelivery = {
+  state: "delivered" | "already_delivered" | "not_finalized"
+}
+
+export type InitialPlanDeliveryError = {
+  error: string
+}
+
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -3716,6 +3724,38 @@ export type ProjectSummaryGenerateResponses = {
 }
 
 export type ProjectSummaryGenerateResponse = ProjectSummaryGenerateResponses[keyof ProjectSummaryGenerateResponses]
+
+export type EnkInitialPlanDeliverData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/enk/initial-plan/deliver"
+}
+
+export type EnkInitialPlanDeliverErrors = {
+  /**
+   * Delivery failed
+   */
+  502: InitialPlanDeliveryError
+  /**
+   * Rails is not configured
+   */
+  503: InitialPlanDeliveryError
+}
+
+export type EnkInitialPlanDeliverError = EnkInitialPlanDeliverErrors[keyof EnkInitialPlanDeliverErrors]
+
+export type EnkInitialPlanDeliverResponses = {
+  /**
+   * Delivery state
+   */
+  200: InitialPlanDelivery
+}
+
+export type EnkInitialPlanDeliverResponse = EnkInitialPlanDeliverResponses[keyof EnkInitialPlanDeliverResponses]
 
 export type SessionListData = {
   body?: never
