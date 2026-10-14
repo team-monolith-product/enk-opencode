@@ -43,10 +43,12 @@ function serve() {
       }
       if (url.pathname === "/api/v1/opencode/initial_plan") return Response.json({ status: "claimed", planning_id: 7 })
       if (url.pathname === "/api/v1/opencode/initial_plan/claim")
-        return Response.json({ claimed: true, planning_id: 7, prompt: PLAN })
+        return Response.json({ claimed: true, planning_id: 7, claim_token: "tok-1", prompt: PLAN })
       if (url.pathname === "/api/v1/opencode/initial_plan/result") {
-        results.push(await req.json())
-        return Response.json({ ok: true })
+        const body = await req.json()
+        if (!body.claim_token) return Response.json({ errors: [{ title: "InvalidResult" }] }, { status: 422 })
+        results.push(body)
+        return Response.json({ status: body.status, applied: true })
       }
       return new Response("not found", { status: 404 })
     },
@@ -130,11 +132,11 @@ describe("initial plan in the main session", () => {
       init: InstanceBootstrap,
       fn: async () => {
         const main = await Session.create({ title: "Main" })
-        await InitialPlan.send(PLAN, "7")
+        await InitialPlan.send(PLAN, "7", "tok-1")
         await settle(main.id)
 
         expect(await InitialPlan.deliver()).toBe("already_delivered")
-        expect(rails.results).toEqual([{ status: "delivered", session_id: main.id }])
+        expect(rails.results).toEqual([{ status: "delivered", session_id: main.id, claim_token: "tok-1" }])
         expect((await count(main.id)).handoffs).toBe(1)
       },
     })
@@ -156,7 +158,7 @@ describe("initial plan in the main session", () => {
         })
 
         rails.state.model = "fail"
-        await InitialPlan.send(PLAN, "7")
+        await InitialPlan.send(PLAN, "7", "tok-1")
         const failed = await settle(main.id)
         expect(failed).toMatchObject({ planningID: "7", buildStarted: false, lastPlanStatus: "error" })
 
@@ -187,7 +189,7 @@ describe("initial plan build vote", () => {
         const { docID } = Doc.prompt(main.id)
         const alice = Doc.actorUpsert({ sessionID: main.id, name: "Alice" })
 
-        await InitialPlan.send(PLAN, "7")
+        await InitialPlan.send(PLAN, "7", "tok-1")
         await settle(main.id)
 
         const state = await Doc.buildSubmitCreate({ sessionID: main.id, docID, actorID: alice.actorID, text: START })
@@ -230,7 +232,7 @@ describe("initial plan build vote", () => {
           Doc.buildSubmitCreate({ sessionID: main.id, docID, actorID: alice.actorID, text: START }),
         ).rejects.toMatchObject({ data: { message: "no initial plan in this session" } })
 
-        await InitialPlan.send(PLAN, "7")
+        await InitialPlan.send(PLAN, "7", "tok-1")
         await settle(main.id)
 
         const pending = await Doc.buildSubmitCreate({ sessionID: main.id, docID, actorID: alice.actorID, text: START })

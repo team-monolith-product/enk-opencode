@@ -31,12 +31,21 @@ export namespace InitialPlan {
   export type Status = z.infer<typeof Status>
 
   const Claim = z.union([
-    z.object({ claimed: z.literal(true), planning_id: z.union([z.number(), z.string()]), prompt: z.string().min(1) }),
+    z.object({
+      claimed: z.literal(true),
+      planning_id: z.union([z.number(), z.string()]),
+      claim_token: z.string().min(1),
+      prompt: z.string().min(1),
+    }),
     z.object({ claimed: z.literal(false), status: z.string() }),
   ])
   type Claim = z.infer<typeof Claim>
 
-  type Marker = { planningID: string; sessionID: string }
+  type Marker = { planningID: string; sessionID: string; claimToken?: string }
+
+  const Result = z.object({ status: z.string(), applied: z.boolean() })
+
+  export type Sent = { sessionID: string; claimToken?: string }
 
   export const SessionState = z
     .object({
@@ -53,8 +62,8 @@ export namespace InitialPlan {
   export class Unavailable extends Error {}
 
   export type Deps = {
-    send: (prompt: string, planningID: string) => Promise<string>
-    find: (planningID: string) => Promise<string | undefined>
+    send: (prompt: string, planningID: string, claimToken: string) => Promise<string>
+    find: (planningID: string) => Promise<Sent | undefined>
   }
 
   function backend() {
@@ -88,13 +97,28 @@ export namespace InitialPlan {
     return Claim.parse(await call("/claim", { method: "POST" }))
   }
 
-  async function report(result: { status: "delivered"; session_id: string } | { status: "failed"; error: string }) {
-    await call("/result", { method: "POST", body: result })
+  // 성공 보고는 어느 점유 토큰으로든 받아 주고, 실패 보고는 지금 점유의 토큰일 때만 반영된다.
+  async function delivered(sessionID: string, claimToken: string) {
+    const result = Result.parse(
+      await call("/result", {
+        method: "POST",
+        body: { status: "delivered", session_id: sessionID, claim_token: claimToken },
+      }),
+    )
+    if (result.status !== "delivered") throw new Error(`rails kept the initial plan ${result.status}`)
   }
 
-  async function stored(planningID: string) {
+  async function failed(error: string, claimToken: string) {
+    const result = Result.parse(
+      await call("/result", { method: "POST", body: { status: "failed", error, claim_token: claimToken } }),
+    )
+    if (!result.applied) log.warn("initial plan failure not applied", { status: result.status })
+  }
+
+  async function stored(planningID: string): Promise<Sent | undefined> {
     const marker = await Storage.read<Marker>(KEY).catch(() => undefined)
-    return marker?.planningID === planningID ? marker.sessionID : undefined
+    if (marker?.planningID !== planningID) return
+    return { sessionID: marker.sessionID, claimToken: marker.claimToken }
   }
 
   function handoffOf(msg: MessageV2.WithParts) {
@@ -102,18 +126,18 @@ export namespace InitialPlan {
     for (const part of msg.parts) {
       if (part.type !== "text" || part.metadata?.[MARKER] !== true) continue
       const id = part.metadata["planningID"]
-      return { planningID: id == null ? null : String(id) }
+      const token = part.metadata["claimToken"]
+      return { planningID: id == null ? null : String(id), claimToken: typeof token === "string" ? token : undefined }
     }
-  }
-
-  async function handoffIn(sessionID: SessionID, planningID: string) {
-    const msgs = await Session.messages({ sessionID })
-    return msgs.some((msg) => handoffOf(msg)?.planningID === planningID)
   }
 
   export const find: Deps["find"] = async (planningID) => {
     for (const session of Session.list({ directory: Instance.directory, roots: true })) {
-      if (await handoffIn(session.id, planningID)) return session.id
+      const msgs = await Session.messages({ sessionID: session.id })
+      for (const msg of msgs) {
+        const handoff = handoffOf(msg)
+        if (handoff?.planningID === planningID) return { sessionID: session.id, claimToken: handoff.claimToken }
+      }
     }
   }
 
@@ -128,20 +152,21 @@ export namespace InitialPlan {
   }
 
   // 메인 세션에 Plan 요청을 남기고 곧바로 돌아온다. 답변 생성은 기다리지 않는다.
-  export const send: Deps["send"] = async (prompt, planningID) => {
+  export const send: Deps["send"] = async (prompt, planningID, claimToken) => {
     const session = await getOrCreateMain()
     await SessionPrompt.prompt({
       sessionID: session.id,
       agent: "plan",
       noReply: true,
-      parts: [{ type: "text", text: prompt, metadata: { [MARKER]: true, planningID } }],
+      parts: [{ type: "text", text: prompt, metadata: { [MARKER]: true, planningID, claimToken } }],
     })
     loopInBackground(session.id)
     return session.id
   }
 
-  async function confirm(sessionID: string) {
-    return report({ status: "delivered", session_id: sessionID }).then(
+  async function confirm(sent: Sent) {
+    if (!sent.claimToken) return false
+    return delivered(sent.sessionID, sent.claimToken).then(
       () => true,
       (err) => {
         log.warn("initial plan re-report failed", { err: String(err) })
@@ -159,6 +184,8 @@ export namespace InitialPlan {
     const earlier = known && ((await deps.find(known)) ?? (await stored(known)))
     if (earlier && (await confirm(earlier))) return "already_delivered"
 
+    // 표식은 있는데 토큰을 모르면 점유부터 받아 그 토큰으로 성공을 알린다.
+
     const claimed = await claim()
     if (!claimed.claimed) {
       if (claimed.status === "delivered") return "already_delivered"
@@ -168,21 +195,22 @@ export namespace InitialPlan {
     }
 
     const planningID = String(claimed.planning_id)
+    const claimToken = claimed.claim_token
     const previous = (await deps.find(planningID)) ?? (await stored(planningID))
     if (previous) {
-      await report({ status: "delivered", session_id: previous })
+      await delivered(previous.sessionID, claimToken)
       return "already_delivered"
     }
 
-    const sessionID = await deps.send(claimed.prompt, planningID).catch(async (err) => {
+    const sessionID = await deps.send(claimed.prompt, planningID, claimToken).catch(async (err) => {
       const error = err instanceof Error ? err.message : String(err)
-      await report({ status: "failed", error }).catch((reportErr) =>
+      await failed(error, claimToken).catch((reportErr) =>
         log.warn("initial plan failure report failed", { err: String(reportErr) }),
       )
       throw err
     })
-    await Storage.write(KEY, { planningID, sessionID } satisfies Marker)
-    await report({ status: "delivered", session_id: sessionID })
+    await Storage.write(KEY, { planningID, sessionID, claimToken } satisfies Marker)
+    await delivered(sessionID, claimToken)
     return "delivered"
   }
 

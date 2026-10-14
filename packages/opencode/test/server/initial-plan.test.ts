@@ -44,10 +44,12 @@ function serve(status: string) {
       if (url.pathname.endsWith("/chat/completions")) return chat("계획")
       if (url.pathname === "/api/v1/opencode/initial_plan") return Response.json({ status, planning_id: 3 })
       if (url.pathname === "/api/v1/opencode/initial_plan/claim")
-        return Response.json({ claimed: true, planning_id: 3, prompt: "# 최초 기획" })
+        return Response.json({ claimed: true, planning_id: 3, claim_token: "tok-1", prompt: "# 최초 기획" })
       if (url.pathname === "/api/v1/opencode/initial_plan/result") {
-        results.push(await req.json())
-        return Response.json({ ok: true })
+        const body = await req.json()
+        if (!body.claim_token) return Response.json({ errors: [{ title: "InvalidResult" }] }, { status: 422 })
+        results.push(body)
+        return Response.json({ status: body.status, applied: true })
       }
       return new Response("not found", { status: 404 })
     },

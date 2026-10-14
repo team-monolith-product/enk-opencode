@@ -15,11 +15,34 @@ type Call = { method: string; path: string; body?: unknown }
 type Rails = {
   status: () => object
   claim: () => object
+  result?: () => object
 }
 
-/** 팀 pod 가 부르는 hackathon-rails 역할. 받은 요청을 순서대로 남긴다. */
+/**
+ * 팀 pod 가 부르는 hackathon-rails 역할. 받은 요청을 순서대로 남긴다. 결과 보고는 rails Handoff 처럼
+ * claim_token 이 없으면 422, 성공은 어느 토큰이든 받고 실패는 지금 점유의 토큰일 때만 반영한다.
+ */
 function serve(rails: Rails) {
   const calls: Call[] = []
+  const handoff = { status: "pending", token: undefined as string | undefined, issued: 0 }
+  const claim = () => {
+    const answer = rails.claim() as { claimed: boolean }
+    if (!answer.claimed) return answer
+    handoff.issued++
+    handoff.status = "claimed"
+    handoff.token = `tok-${handoff.issued}`
+    return { ...answer, claim_token: handoff.token }
+  }
+  const result = (body: { status?: string; claim_token?: string }) => {
+    if (!body.claim_token || !["delivered", "failed"].includes(body.status ?? ""))
+      return Response.json({ errors: [{ title: "InvalidResult" }] }, { status: 422 })
+    if (rails.result) return Response.json(rails.result())
+    const applied =
+      handoff.status !== "delivered" &&
+      (body.status === "delivered" || (handoff.status === "claimed" && handoff.token === body.claim_token))
+    if (applied) handoff.status = body.status!
+    return Response.json({ status: handoff.status, applied })
+  }
   const server = Bun.serve({
     port: 0,
     async fetch(req) {
@@ -29,8 +52,8 @@ function serve(rails: Rails) {
       if (req.headers.get("authorization") !== "token team-token") return new Response("forbidden", { status: 403 })
       if (url.pathname.endsWith("/chat/completions")) return chat("계획을 정리했어요")
       if (url.pathname === "/api/v1/opencode/initial_plan") return Response.json(rails.status())
-      if (url.pathname === "/api/v1/opencode/initial_plan/claim") return Response.json(rails.claim())
-      if (url.pathname === "/api/v1/opencode/initial_plan/result") return Response.json({ ok: true })
+      if (url.pathname === "/api/v1/opencode/initial_plan/claim") return Response.json(claim())
+      if (url.pathname === "/api/v1/opencode/initial_plan/result") return result(body as never)
       return new Response("not found", { status: 404 })
     },
   })
@@ -87,7 +110,7 @@ describe("InitialPlan.deliver", () => {
 
     expect(state).toBe("delivered")
     expect(sent).toEqual(["7:# 최초 기획\n\n관찰한 장면 ..."])
-    expect(rails.results()).toEqual([{ status: "delivered", session_id: "ses_main" }])
+    expect(rails.results()).toEqual([{ status: "delivered", session_id: "ses_main", claim_token: "tok-1" }])
   })
 
   test("does nothing before the team finalizes", async () => {
@@ -134,7 +157,7 @@ describe("InitialPlan.deliver", () => {
       }),
     )
     await expect(failed).rejects.toThrow("model unavailable")
-    expect(rails.results()).toEqual([{ status: "failed", error: "model unavailable" }])
+    expect(rails.results()).toEqual([{ status: "failed", error: "model unavailable", claim_token: "tok-1" }])
 
     const retried = await InitialPlan.deliver(deps(async () => "ses_main"))
     expect(retried).toBe("delivered")
@@ -153,8 +176,8 @@ describe("InitialPlan.deliver", () => {
 
     expect(sends).toBe(1)
     expect(rails.results()).toEqual([
-      { status: "delivered", session_id: "ses_main" },
-      { status: "delivered", session_id: "ses_main" },
+      { status: "delivered", session_id: "ses_main", claim_token: "tok-1" },
+      { status: "delivered", session_id: "ses_main", claim_token: "tok-1" },
     ])
   })
 
@@ -196,13 +219,37 @@ describe("InitialPlan.deliver", () => {
         async () => {
           throw new Error("must not send")
         },
-        async (planningID) => (planningID === "7" ? "ses_marked" : undefined),
+        async (planningID) => (planningID === "7" ? { sessionID: "ses_marked", claimToken: "tok-old" } : undefined),
       ),
     )
 
     expect(state).toBe("already_delivered")
     expect(rails.claims()).toBe(0)
-    expect(rails.results()).toEqual([{ status: "delivered", session_id: "ses_marked" }])
+    expect(rails.results()).toEqual([{ status: "delivered", session_id: "ses_marked", claim_token: "tok-old" }])
+  })
+
+  test("claims for a token when the session marker has none, then reports without sending again", async () => {
+    await using rails = serve(claimable)
+    const state = await InitialPlan.deliver(
+      deps(
+        async () => {
+          throw new Error("must not send")
+        },
+        async () => ({ sessionID: "ses_marked" }),
+      ),
+    )
+
+    expect(state).toBe("already_delivered")
+    expect(rails.claims()).toBe(1)
+    expect(rails.results()).toEqual([{ status: "delivered", session_id: "ses_marked", claim_token: "tok-1" }])
+  })
+
+  test("fails the delivery when rails keeps the plan undelivered", async () => {
+    await using rails = serve({ ...claimable, result: () => ({ status: "failed", applied: false }) })
+    await expect(InitialPlan.deliver(deps(async () => "ses_main"))).rejects.toThrow(
+      "rails kept the initial plan failed",
+    )
+    expect(rails.claims()).toBe(1)
   })
 
   test("refuses when rails is not configured", async () => {
@@ -234,7 +281,7 @@ describe("InitialPlan.send", () => {
       fn: async () => {
         const main = await Session.create({ title: "Main" })
         expect(await InitialPlan.deliver()).toBe("delivered")
-        expect(rails.results()).toEqual([{ status: "delivered", session_id: main.id }])
+        expect(rails.results()).toEqual([{ status: "delivered", session_id: main.id, claim_token: "tok-1" }])
 
         const deadline = Date.now() + 10_000
         while (Date.now() < deadline) {
@@ -248,7 +295,11 @@ describe("InitialPlan.send", () => {
         const user = msgs.find((msg) => msg.info.role === "user")
         expect(user?.info.role === "user" && user.info.agent).toBe("plan")
         const part = user?.parts.find((p) => p.type === "text")
-        expect(part?.type === "text" && part.metadata).toEqual({ [InitialPlan.MARKER]: true, planningID: "7" })
+        expect(part?.type === "text" && part.metadata).toEqual({
+          [InitialPlan.MARKER]: true,
+          planningID: "7",
+          claimToken: "tok-1",
+        })
         const reply = msgs.find((msg) => msg.info.role === "assistant")
         expect(reply?.info.role === "assistant" && reply.info.agent).toBe("plan")
       },
