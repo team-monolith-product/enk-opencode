@@ -825,10 +825,10 @@ export namespace Doc {
     const body = SubmitPrompt.parse(JSON.parse(row.prompt))
     const planningID = InitialPlan.buildPlanningID(body.parts)
     if (!planningID) return fail(row, new Error("build request has no initial plan"))
-    InitialPlan.claimBuild(planningID, row.session_id)
-      .then(async (claimed) => {
-        if (!claimed) throw new Error("build already started")
-        const message = await SessionPrompt.prompt({ ...body, noReply: true, sessionID: row.session_id })
+    InitialPlan.startBuild(planningID, row.session_id, () =>
+      SessionPrompt.prompt({ ...body, noReply: true, sessionID: row.session_id }),
+    )
+      .then((message) => {
         if (message?.info?.id)
           Database.use((db) =>
             db

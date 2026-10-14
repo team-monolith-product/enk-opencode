@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import { upgradeWebSocket } from "hono/bun"
 import z from "zod"
+import { InitialPlan } from "../enk/initial-plan"
 import { Doc } from "./index"
 import { ActorID, DocID, SubmitID } from "./schema"
 import { SessionID } from "@/session/schema"
@@ -194,6 +195,10 @@ export const SessionDocRoutes = () =>
             content: { "application/json": { schema: resolver(Doc.SubmitState) } },
           },
           ...errors(400, 404),
+          409: {
+            description: "Build already started or the plan is not ready",
+            content: { "application/json": { schema: resolver(InitialPlan.UnavailableError.Schema) } },
+          },
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod })),

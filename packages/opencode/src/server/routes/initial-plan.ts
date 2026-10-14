@@ -13,8 +13,15 @@ import { errors } from "../error"
 const log = Log.create({ service: "server.initial-plan" })
 
 const Delivered = z
-  .object({ state: z.enum(["delivered", "already_delivered", "not_finalized", "pending_elsewhere"]) })
+  .object({ state: z.enum(["delivered", "already_delivered", "not_finalized", "pending_elsewhere", "failed"]) })
   .meta({ ref: "InitialPlanDelivery" })
+
+const conflict = {
+  409: {
+    description: "Not available in the current initial plan state",
+    content: { "application/json": { schema: resolver(InitialPlan.UnavailableError.Schema) } },
+  },
+}
 
 const Failed = z.object({ error: z.string() }).meta({ ref: "InitialPlanDeliveryError" })
 
@@ -83,6 +90,7 @@ export const InitialPlanRoutes = lazy(() =>
             content: { "application/json": { schema: resolver(InitialPlan.SessionState) } },
           },
           ...errors(400, 404),
+          ...conflict,
         },
       }),
       validator("json", z.object({ sessionID: SessionID.zod })),

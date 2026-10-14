@@ -2012,7 +2012,7 @@ export type McpResource = {
 }
 
 export type InitialPlanDelivery = {
-  state: "delivered" | "already_delivered" | "not_finalized" | "pending_elsewhere"
+  state: "delivered" | "already_delivered" | "not_finalized" | "pending_elsewhere" | "failed"
 }
 
 export type InitialPlanDeliveryError = {
@@ -2024,6 +2024,13 @@ export type InitialPlanSessionState = {
   planningID: string | null
   buildStarted: boolean
   lastPlanStatus: "running" | "done" | "error" | null
+}
+
+export type InitialPlanUnavailableError = {
+  name: "InitialPlanUnavailableError"
+  data: {
+    message: string
+  }
 }
 
 export type TextPartInput = {
@@ -3823,6 +3830,10 @@ export type EnkInitialPlanRetryErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Not available in the current initial plan state
+   */
+  409: InitialPlanUnavailableError
 }
 
 export type EnkInitialPlanRetryError = EnkInitialPlanRetryErrors[keyof EnkInitialPlanRetryErrors]
@@ -5110,6 +5121,10 @@ export type SessionPromptDocBuildErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Build already started or the plan is not ready
+   */
+  409: InitialPlanUnavailableError
 }
 
 export type SessionPromptDocBuildError = SessionPromptDocBuildErrors[keyof SessionPromptDocBuildErrors]

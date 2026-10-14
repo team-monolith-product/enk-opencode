@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import path from "path"
 import { Doc } from "../../src/doc"
 import { CostQuota } from "../../src/enk/cost-quota"
@@ -6,6 +6,7 @@ import { InitialPlan } from "../../src/enk/initial-plan"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
+import { SessionPrompt } from "../../src/session/prompt"
 import { SessionStatus } from "../../src/session/status"
 import type { SessionID } from "../../src/session/schema"
 import { Storage } from "../../src/storage/storage"
@@ -132,8 +133,18 @@ describe("initial plan in the main session", () => {
       init: InstanceBootstrap,
       fn: async () => {
         const main = await Session.create({ title: "Main" })
-        await InitialPlan.send(PLAN, "7", "tok-1")
-        await settle(main.id)
+        // 앞선 프로세스가 전달 메시지만 남기고 죽은 상태: 이 프로세스의 기억에는 아무것도 없다.
+        await SessionPrompt.prompt({
+          sessionID: main.id,
+          agent: "plan",
+          parts: [
+            {
+              type: "text",
+              text: PLAN,
+              metadata: { [InitialPlan.MARKER]: true, planningID: "7", claimToken: "tok-1" },
+            },
+          ],
+        })
 
         expect(await InitialPlan.deliver()).toBe("already_delivered")
         expect(rails.results).toEqual([{ status: "delivered", session_id: main.id, claim_token: "tok-1" }])
@@ -164,6 +175,7 @@ describe("initial plan in the main session", () => {
 
         rails.state.model = "ok"
         await InitialPlan.retry(main.id)
+        expect((await InitialPlan.sessionState(main.id)).lastPlanStatus).toBe("running")
         const done = await settle(main.id)
         expect(done).toMatchObject({ handoffMessageID: failed.handoffMessageID, lastPlanStatus: "done" })
 
@@ -252,6 +264,56 @@ describe("initial plan build vote", () => {
         expect(msgs.filter((msg) => msg.info.role === "user" && msg.info.agent === "build")).toHaveLength(1)
         expect(Doc.prompt(main.id).docID).toBe(docID)
         stop()
+      },
+    })
+  })
+})
+
+describe("initial plan guards", () => {
+  test("a build whose message never got created can be started again", async () => {
+    await using rails = serve()
+    await using tmp = await workspace(rails.server.url.origin)
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const main = await Session.create({ title: "Main" })
+        const { docID } = Doc.prompt(main.id)
+        const alice = Doc.actorUpsert({ sessionID: main.id, name: "Alice" })
+        await InitialPlan.send(PLAN, "7", "tok-1")
+        await settle(main.id)
+
+        const prompt = spyOn(SessionPrompt, "prompt").mockRejectedValueOnce(new Error("disk full"))
+        await Doc.buildSubmitCreate({ sessionID: main.id, docID, actorID: alice.actorID, text: START })
+        await Bun.sleep(50)
+        prompt.mockRestore()
+        expect((await InitialPlan.sessionState(main.id)).buildStarted).toBe(false)
+
+        const again = await Doc.buildSubmitCreate({ sessionID: main.id, docID, actorID: alice.actorID, text: START })
+        expect(again.status).toBe("sent")
+        await built(main.id)
+        expect((await InitialPlan.sessionState(main.id)).buildStarted).toBe(true)
+      },
+    })
+  })
+
+  test("ignores a handoff marker whose planning id is not a number", async () => {
+    await using rails = serve()
+    await using tmp = await workspace(rails.server.url.origin)
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const main = await Session.create({ title: "Main" })
+        await InitialPlan.send(PLAN, "../7", "tok-1")
+        await settle(main.id)
+        const state = await InitialPlan.sessionState(main.id)
+        expect(state.planningID).toBeNull()
+        const { docID } = Doc.prompt(main.id)
+        const alice = Doc.actorUpsert({ sessionID: main.id, name: "Alice" })
+        await expect(
+          Doc.buildSubmitCreate({ sessionID: main.id, docID, actorID: alice.actorID, text: START }),
+        ).rejects.toMatchObject({ data: { message: "no initial plan in this session" } })
       },
     })
   })

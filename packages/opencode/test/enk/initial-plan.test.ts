@@ -13,30 +13,43 @@ Log.init({ print: false })
 type Call = { method: string; path: string; body?: unknown }
 
 type Rails = {
-  status: () => object
-  claim: () => object
+  status?: () => object
+  claim?: () => object
   result?: () => object
 }
 
+const PROMPT = "# 최초 기획\n\n관찰한 장면 ..."
+
 /**
- * 팀 pod 가 부르는 hackathon-rails 역할. 받은 요청을 순서대로 남긴다. 결과 보고는 rails Handoff 처럼
+ * 팀 pod 가 부르는 hackathon-rails 역할. 받은 요청을 순서대로 남긴다. rails Handoff 처럼 pending 이거나 5분 넘게
+ * 결과 없는 claimed 만 다시 점유되고(failed 는 운영 화면의 재시도로 pending 이 돼야 한다), 결과 보고는
  * claim_token 이 없으면 422, 성공은 어느 토큰이든 받고 실패는 지금 점유의 토큰일 때만 반영한다.
  */
 function serve(rails: Rails) {
   const calls: Call[] = []
-  const handoff = { status: "pending", token: undefined as string | undefined, issued: 0 }
+  const handoff = { status: "pending", token: undefined as string | undefined, issued: 0, stale: false, drop: 0 }
+  const status = () => rails.status?.() ?? { status: handoff.status, planning_id: 7 }
   const claim = () => {
-    const answer = rails.claim() as { claimed: boolean }
+    const claimable = handoff.status === "pending" || (handoff.status === "claimed" && handoff.stale)
+    const answer = (rails.claim?.() ??
+      (claimable ? { claimed: true, planning_id: 7, prompt: PROMPT } : { claimed: false, status: handoff.status })) as {
+      claimed: boolean
+    }
     if (!answer.claimed) return answer
     handoff.issued++
     handoff.status = "claimed"
     handoff.token = `tok-${handoff.issued}`
+    handoff.stale = false
     return { ...answer, claim_token: handoff.token }
   }
   const result = (body: { status?: string; claim_token?: string }) => {
     if (!body.claim_token || !["delivered", "failed"].includes(body.status ?? ""))
       return Response.json({ errors: [{ title: "InvalidResult" }] }, { status: 422 })
     if (rails.result) return Response.json(rails.result())
+    if (handoff.drop > 0) {
+      handoff.drop--
+      return new Response("bad gateway", { status: 502 })
+    }
     const applied =
       handoff.status !== "delivered" &&
       (body.status === "delivered" || (handoff.status === "claimed" && handoff.token === body.claim_token))
@@ -51,7 +64,7 @@ function serve(rails: Rails) {
       calls.push({ method: req.method, path: url.pathname, body })
       if (req.headers.get("authorization") !== "token team-token") return new Response("forbidden", { status: 403 })
       if (url.pathname.endsWith("/chat/completions")) return chat("계획을 정리했어요")
-      if (url.pathname === "/api/v1/opencode/initial_plan") return Response.json(rails.status())
+      if (url.pathname === "/api/v1/opencode/initial_plan") return Response.json(status())
       if (url.pathname === "/api/v1/opencode/initial_plan/claim") return Response.json(claim())
       if (url.pathname === "/api/v1/opencode/initial_plan/result") return result(body as never)
       return new Response("not found", { status: 404 })
@@ -64,6 +77,12 @@ function serve(rails: Rails) {
     calls,
     results: () => calls.filter((call) => call.path.endsWith("/result")).map((call) => call.body),
     claims: () => calls.filter((call) => call.path.endsWith("/claim")).length,
+    retryInRails: () => {
+      handoff.status = "pending"
+    },
+    dropNextResult: () => {
+      handoff.drop++
+    },
     [Symbol.asyncDispose]: () => server.stop(true),
   }
 }
@@ -84,10 +103,7 @@ const deps = (send: InitialPlan.Deps["send"], find: InitialPlan.Deps["find"] = a
   find,
 })
 
-const claimable: Rails = {
-  status: () => ({ status: "pending", planning_id: 7 }),
-  claim: () => ({ claimed: true, planning_id: 7, prompt: "# 최초 기획\n\n관찰한 장면 ..." }),
-}
+const claimable: Rails = {}
 
 afterEach(async () => {
   CostQuota.reset()
@@ -149,7 +165,7 @@ describe("InitialPlan.deliver", () => {
     expect(rails.results()).toEqual([])
   })
 
-  test("reports the failure to rails and lets the next call retry", async () => {
+  test("reports the failure and stays failed until rails is asked to retry", async () => {
     await using rails = serve(claimable)
     const failed = InitialPlan.deliver(
       deps(async () => {
@@ -159,9 +175,11 @@ describe("InitialPlan.deliver", () => {
     await expect(failed).rejects.toThrow("model unavailable")
     expect(rails.results()).toEqual([{ status: "failed", error: "model unavailable", claim_token: "tok-1" }])
 
-    const retried = await InitialPlan.deliver(deps(async () => "ses_main"))
-    expect(retried).toBe("delivered")
-    expect(rails.claims()).toBe(2)
+    expect(await InitialPlan.deliver(deps(async () => "ses_main"))).toBe("failed")
+
+    rails.retryInRails()
+    expect(await InitialPlan.deliver(deps(async () => "ses_main"))).toBe("delivered")
+    expect(rails.claims()).toBe(3)
   })
 
   test("re-reports a send whose result never reached rails instead of sending twice", async () => {
@@ -171,7 +189,8 @@ describe("InitialPlan.deliver", () => {
       sends++
       return "ses_main"
     }
-    expect(await InitialPlan.deliver(deps(send))).toBe("delivered")
+    rails.dropNextResult()
+    await expect(InitialPlan.deliver(deps(send))).rejects.toThrow("responded 502")
     expect(await InitialPlan.deliver(deps(send))).toBe("already_delivered")
 
     expect(sends).toBe(1)

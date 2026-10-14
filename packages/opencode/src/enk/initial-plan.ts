@@ -4,7 +4,7 @@ import { NamedError } from "@opencode-ai/util/error"
 import { Instance } from "@/project/instance"
 import { Session } from "@/session"
 import { getOrCreateMain } from "@/session/ensure"
-import type { MessageV2 } from "@/session/message-v2"
+import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import type { SessionID } from "@/session/schema"
 import { SessionStatus } from "@/session/status"
@@ -22,7 +22,13 @@ export namespace InitialPlan {
   export const MARKER = "enkInitialPlan"
   export const BUILD_MARKER = "enkInitialPlanBuild"
 
-  export type State = "delivered" | "already_delivered" | "not_finalized" | "pending_elsewhere"
+  export type State = "delivered" | "already_delivered" | "not_finalized" | "pending_elsewhere" | "failed"
+
+  const PLANNING_ID = /^\d+$/
+  const planningOf = (value: unknown) => {
+    const id = typeof value === "number" ? String(value) : value
+    return typeof id === "string" && PLANNING_ID.test(id) ? id : undefined
+  }
 
   export const Status = z.object({
     status: z.enum(["none", "pending", "claimed", "delivered", "failed"]),
@@ -125,30 +131,50 @@ export namespace InitialPlan {
     if (msg.info.role !== "user") return
     for (const part of msg.parts) {
       if (part.type !== "text" || part.metadata?.[MARKER] !== true) continue
-      const id = part.metadata["planningID"]
       const token = part.metadata["claimToken"]
-      return { planningID: id == null ? null : String(id), claimToken: typeof token === "string" ? token : undefined }
-    }
-  }
-
-  export const find: Deps["find"] = async (planningID) => {
-    for (const session of Session.list({ directory: Instance.directory, roots: true })) {
-      const msgs = await Session.messages({ sessionID: session.id })
-      for (const msg of msgs) {
-        const handoff = handoffOf(msg)
-        if (handoff?.planningID === planningID) return { sessionID: session.id, claimToken: handoff.claimToken }
+      return {
+        planningID: planningOf(part.metadata["planningID"]) ?? null,
+        claimToken: typeof token === "string" ? token : undefined,
       }
     }
   }
 
+  // 전달 표식은 기획당 한 번만 찾는다. rails 가 pending·failed 로 머무는 동안 매 요청마다 세션 전체를 훑지 않게.
+  const found = new Map<string, Sent | null>()
+  const foundKey = (planningID: string) => `${Instance.directory}\0${planningID}`
+
+  export const find: Deps["find"] = async (planningID) => {
+    const key = foundKey(planningID)
+    const cached = found.get(key)
+    if (cached !== undefined) return cached ?? undefined
+    let result: Sent | null = null
+    for (const session of Session.list({ directory: Instance.directory, roots: true })) {
+      for await (const msg of MessageV2.stream(session.id)) {
+        const handoff = handoffOf(msg)
+        if (handoff?.planningID !== planningID) continue
+        result = { sessionID: session.id, claimToken: handoff.claimToken }
+        break
+      }
+      if (result) break
+    }
+    found.set(key, result)
+    return result ?? undefined
+  }
+
+  // 루프가 바쁨 상태를 세우기 전 틈에도 "진행 중" 으로 보이게, 루프가 끝날 때까지 들고 있는다.
+  const starting = new Set<string>()
+
   function loopInBackground(sessionID: SessionID) {
-    SessionPrompt.loop({ sessionID }).catch((err) => {
-      log.error("initial plan loop failed", { sessionID, error: err })
-      Bus.publish(Session.Event.Error, {
-        sessionID,
-        error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
+    starting.add(sessionID)
+    SessionPrompt.loop({ sessionID })
+      .catch((err) => {
+        log.error("initial plan loop failed", { sessionID, error: err })
+        Bus.publish(Session.Event.Error, {
+          sessionID,
+          error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
+        })
       })
-    })
+      .finally(() => starting.delete(sessionID))
   }
 
   // 메인 세션에 Plan 요청을 남기고 곧바로 돌아온다. 답변 생성은 기다리지 않는다.
@@ -160,6 +186,7 @@ export namespace InitialPlan {
       noReply: true,
       parts: [{ type: "text", text: prompt, metadata: { [MARKER]: true, planningID, claimToken } }],
     })
+    found.set(foundKey(planningID), { sessionID: session.id, claimToken })
     loopInBackground(session.id)
     return session.id
   }
@@ -180,7 +207,7 @@ export namespace InitialPlan {
     if (current.status === "none") return "not_finalized"
     if (current.status === "delivered") return "already_delivered"
 
-    const known = current.planning_id == null ? undefined : String(current.planning_id)
+    const known = planningOf(current.planning_id)
     const earlier = known && ((await deps.find(known)) ?? (await stored(known)))
     if (earlier && (await confirm(earlier))) return "already_delivered"
 
@@ -191,10 +218,12 @@ export namespace InitialPlan {
       if (claimed.status === "delivered") return "already_delivered"
       if (claimed.status === "none") return "not_finalized"
       if (claimed.status === "claimed") return "pending_elsewhere"
+      if (claimed.status === "failed") return "failed"
       throw new Error(`initial plan is ${claimed.status}`)
     }
 
-    const planningID = String(claimed.planning_id)
+    const planningID = planningOf(claimed.planning_id)
+    if (!planningID) throw new Error("rails answered an invalid planning id")
     const claimToken = claimed.claim_token
     const previous = (await deps.find(planningID)) ?? (await stored(planningID))
     if (previous) {
@@ -239,19 +268,34 @@ export namespace InitialPlan {
     return !!msg.info.time.completed && !msg.info.error && !!msg.info.finish && msg.info.finish !== "tool-calls"
   }
 
-  // 메인 세션 전체를 서버에서 훑는다. 앱의 메시지 창(최근 일부)에 기대면 오래된 전달 표식을 놓친다.
+  // 한 번 찾은 전달 표식과 한 번 시작된 Build 는 바뀌지 않으므로 세션별로 기억한다.
+  const memos = new Map<string, { handoffMessageID: string; planningID: string | null; buildStarted: boolean }>()
+
+  // 최신 메시지부터 페이지 단위로 거슬러 올라가 전달 표식에서 멈춘다. 앱의 메시지 창(최근 일부)에 기대지 않는다.
   export async function sessionState(sessionID: SessionID): Promise<SessionState> {
-    const msgs = await Session.messages({ sessionID })
-    const start = msgs.findLastIndex((msg) => !!handoffOf(msg))
-    if (start < 0) return NONE
-    const planningID = handoffOf(msgs[start])?.planningID ?? null
-    const after = msgs.slice(start + 1)
+    const memo = memos.get(sessionID)
+    if (memo?.buildStarted) return { ...memo, lastPlanStatus: null }
+
+    const after: MessageV2.WithParts[] = []
+    let handoff: { id: string; planningID: string | null } | undefined
+    for await (const msg of MessageV2.stream(sessionID)) {
+      if (memo ? msg.info.id === memo.handoffMessageID : handoffOf(msg)) {
+        handoff = { id: msg.info.id, planningID: memo ? memo.planningID : (handoffOf(msg)?.planningID ?? null) }
+        break
+      }
+      after.push(msg)
+    }
+    if (!handoff) return NONE
+    const planningID = handoff.planningID
     const buildStarted =
       after.some((msg) => msg.info.role === "user" && msg.info.agent !== "plan") ||
       (planningID !== null && (await buildMarked(planningID)))
+    memos.set(sessionID, { handoffMessageID: handoff.id, planningID, buildStarted })
+    if (buildStarted) return { handoffMessageID: handoff.id, planningID, buildStarted, lastPlanStatus: null }
     const busy = (await SessionStatus.get(sessionID)).type !== "idle"
-    const lastPlanStatus = busy || retrying.has(sessionID) ? "running" : settled(msgs.at(-1)) ? "done" : "error"
-    return { handoffMessageID: msgs[start].info.id, planningID, buildStarted, lastPlanStatus }
+    const lastPlanStatus =
+      busy || retrying.has(sessionID) || starting.has(sessionID) ? "running" : settled(after[0]) ? "done" : "error"
+    return { handoffMessageID: handoff.id, planningID, buildStarted, lastPlanStatus }
   }
 
   const retrying = new Set<string>()
@@ -287,14 +331,15 @@ export namespace InitialPlan {
 
   const building = new Set<string>()
 
-  // 첫 Build 는 기획당 한 번만 나간다. 표식을 먼저 남기고, 이미 있으면 false.
-  export async function claimBuild(planningID: string, sessionID: string) {
-    if (building.has(planningID)) return false
+  // 첫 Build 는 기획당 한 번만 나간다. 보내는 동안은 메모리로 막고, 표식은 메시지가 실제로 생긴 뒤에만 남긴다.
+  export async function startBuild<T>(planningID: string, sessionID: string, run: () => Promise<T>) {
+    if (building.has(planningID)) throw new UnavailableError({ message: "build already started" })
     building.add(planningID)
     try {
-      if (await buildMarked(planningID)) return false
+      if (await buildMarked(planningID)) throw new UnavailableError({ message: "build already started" })
+      const result = await run()
       await Storage.write([...BUILD_KEY, planningID], { sessionID })
-      return true
+      return result
     } finally {
       building.delete(planningID)
     }
@@ -309,8 +354,8 @@ export namespace InitialPlan {
 
   export function buildPlanningID(parts: { type: string; metadata?: Record<string, unknown> }[]) {
     for (const part of parts) {
-      const id = part.type === "text" ? part.metadata?.[BUILD_MARKER] : undefined
-      if (typeof id === "string") return id
+      const id = part.type === "text" ? planningOf(part.metadata?.[BUILD_MARKER]) : undefined
+      if (id) return id
     }
   }
 }
