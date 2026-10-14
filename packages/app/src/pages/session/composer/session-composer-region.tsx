@@ -11,6 +11,7 @@ import { SessionEnvRequestDock } from "@/pages/session/composer/session-env-requ
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
+import { SessionInitialPlanDock } from "@/pages/session/composer/session-initial-plan-dock"
 import type { SessionComposerState } from "@/pages/session/composer/session-composer-state"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import { SessionComposerShell } from "@/pages/session/composer/session-composer-shell"
@@ -76,6 +77,7 @@ export function SessionComposerRegion(props: {
     onEdit: (id: string) => void
     onEditLoaded: () => void
   }
+  initialPlan?: { starting: boolean; onStart: () => void }
   revert?: {
     items: { id: string; text: string }[]
     restoring?: string
@@ -481,6 +483,9 @@ export function SessionComposerRegion(props: {
                         }
                   }
                 >
+                  <Show when={props.initialPlan}>
+                    {(cta) => <SessionInitialPlanDock starting={cta().starting} onStart={cta().onStart} />}
+                  </Show>
                   <Show when={props.followup?.items.length}>
                     <SessionFollowupDock
                       items={props.followup!.items}

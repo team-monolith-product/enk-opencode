@@ -48,6 +48,8 @@ import { sessionBusy } from "@/components/prompt-input/composer-state"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
 import { createPromptDocSession, PromptDocSessionProvider } from "@/context/prompt-doc-session"
+import { readonlyViewer } from "@/context/parent-params"
+import { showInitialPlanCta } from "@/pages/session/composer/initial-plan-cta"
 import {
   createOpenDiffTab,
   createOpenReviewFile,
@@ -368,6 +370,24 @@ export default function Page() {
   // session page lives — the composer that renders them unmounts whenever a question or permission
   // dock takes the dock, and this state must outlive that.
   const promptDocSession = createPromptDocSession()
+
+  const [initialPlanStarting, setInitialPlanStarting] = createSignal(false)
+  const initialPlanCta = createMemo(() => {
+    const id = params.id
+    if (!id || readonlyViewer() || promptDocSession.votePending()) return false
+    return showInitialPlanCta({
+      messages: sync.data.message[id],
+      parts: (messageID) => sync.data.part[messageID],
+      busy: promptDocSession.working(),
+    })
+  })
+  const startInitialPlanBuild = async () => {
+    if (initialPlanStarting()) return
+    setInitialPlanStarting(true)
+    await promptDocSession
+      .startBuild(language.t("session.initialPlan.prompt"))
+      .finally(() => setInitialPlanStarting(false))
+  }
 
   // Session trimming is unaware of the active route, so keep the viewed session's caches alive.
   createEffect(() => {
@@ -1865,6 +1885,9 @@ export default function Page() {
                 onRestore: restore,
               }
             : undefined
+        }
+        initialPlan={
+          initialPlanCta() ? { starting: initialPlanStarting(), onStart: () => void startInitialPlanBuild() } : undefined
         }
         setPromptDockRef={(el) => {
           promptDock = el

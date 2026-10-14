@@ -74,7 +74,15 @@ export type PromptDocSession = {
    * The composer registers what it alone can do: build+send a prompt (the doc editor's submit key
    * routes here) and run the local abort side effects (queued followups, todos).
    */
-  setHandlers: (handlers: { submit?: () => void; abort?: () => void | Promise<void> }) => void
+  setHandlers: (handlers: Handlers) => void
+  /** Send a build request through the composer's own submit path (consent vote included). */
+  startBuild: (text: string) => Promise<void>
+}
+
+type Handlers = {
+  submit?: () => void
+  abort?: () => void | Promise<void>
+  startBuild?: (text: string) => Promise<void>
 }
 
 const PromptDocSessionContext = createContext<PromptDocSession>()
@@ -103,7 +111,7 @@ export function createPromptDocSession(): PromptDocSession {
   const stopConfig = () => settings.keybinds.get("prompt.stop") ?? "escape"
 
   const [mode, setMode] = createSignal<PromptMode>("doc")
-  const handlers: { submit?: () => void; abort?: () => void | Promise<void> } = {}
+  const handlers: Handlers = {}
 
   const status = createMemo(() => sync.data.session_status[params.id ?? ""] ?? { type: "idle" as const })
   const working = createMemo(() => {
@@ -570,6 +578,10 @@ export function createPromptDocSession(): PromptDocSession {
     setHandlers: (next) => {
       handlers.submit = next.submit
       handlers.abort = next.abort
+      handlers.startBuild = next.startBuild
+    },
+    startBuild: async (text) => {
+      await handlers.startBuild?.(text)
     },
   }
 }
