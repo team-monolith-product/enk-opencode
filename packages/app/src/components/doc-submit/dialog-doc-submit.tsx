@@ -336,8 +336,6 @@ function PreviewCard(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boo
   )
 }
 
-// The snapshot region: doc viewer for prompt sends, question preview for question votes, nothing
-// for a bare "stop" vote.
 export function BuildPreview(props: { text: string }) {
   const language = useLanguage()
   return (
@@ -354,6 +352,8 @@ export function BuildPreview(props: { text: string }) {
   )
 }
 
+// The snapshot region: doc viewer for prompt sends, question preview for question votes, the exact
+// request and agent for a build vote, nothing for "stop" and "clear" votes.
 function SnapshotArea(props: { kind?: DocSubmitKind; state: DocSubmitState; preview?: () => DocSubmitPreviewItem[]; sdk?: DocSubmitSdk }) {
   return (
     <Show when={props.kind !== "stop" && props.kind !== "clear"}>

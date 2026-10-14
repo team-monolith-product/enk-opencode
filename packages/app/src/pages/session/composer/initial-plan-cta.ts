@@ -1,7 +1,5 @@
 import { apiUrl } from "@/utils/api-url"
 
-export const INITIAL_PLAN_MARKER = "enkInitialPlan"
-
 export type InitialPlanSessionState = {
   handoffMessageID: string | null
   planningID: string | null
@@ -9,11 +7,14 @@ export type InitialPlanSessionState = {
   lastPlanStatus: "running" | "done" | "error" | null
 }
 
-export type InitialPlanMode = "running" | "ready" | "failed"
-
-export function isInitialPlanHandoff(part: { type: string; metadata?: Record<string, unknown> }) {
-  return part.type === "text" && part.metadata?.[INITIAL_PLAN_MARKER] === true
+export const INITIAL_PLAN_NONE: InitialPlanSessionState = {
+  handoffMessageID: null,
+  planningID: null,
+  buildStarted: false,
+  lastPlanStatus: null,
 }
+
+export type InitialPlanMode = "running" | "ready" | "failed"
 
 // 최초 기획을 받은 뒤 아직 Build 가 시작되지 않았을 때만 의미가 있다. 그동안 팀의 피드백은 Plan 으로 간다.
 export function initialPlanActive(state: InitialPlanSessionState | undefined) {
@@ -29,6 +30,16 @@ export function initialPlanMode(
   if (state!.lastPlanStatus === "error") return "failed"
   if (state!.lastPlanStatus === "done") return "ready"
   return undefined
+}
+
+// 다시 물어야 할 때만 바뀌는 키. Build 가 시작됐으면 더 묻지 않고, 전달이 없는 세션은 새 사용자 메시지가 올 때만 묻는다.
+export function initialPlanRefreshKey(
+  state: InitialPlanSessionState | undefined,
+  signals: { status?: string; count?: number; lastID?: string; lastCompleted?: number; lastUserID?: string },
+) {
+  if (state?.buildStarted) return "settled"
+  if (state && !state.handoffMessageID) return `idle:${signals.lastUserID ?? ""}`
+  return [signals.status, signals.count, signals.lastID, signals.lastCompleted].join(":")
 }
 
 type Target = { baseUrl: string; directory: string; sessionID: string }

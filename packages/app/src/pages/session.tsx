@@ -53,6 +53,8 @@ import {
   fetchInitialPlanState,
   initialPlanActive,
   initialPlanMode,
+  initialPlanRefreshKey,
+  INITIAL_PLAN_NONE,
   retryInitialPlan,
   type InitialPlanSessionState,
 } from "@/pages/session/composer/initial-plan-cta"
@@ -384,15 +386,20 @@ export default function Page() {
     const sessionID = params.id
     return sessionID ? { baseUrl: sdk.url, directory: sdk.directory, sessionID } : undefined
   }
+  const initialPlanCache = new Map<string, InitialPlanSessionState>()
   const refreshInitialPlan = () => {
     const target = initialPlanTarget()
     if (!target) return setInitialPlan(undefined)
     fetchInitialPlanState(target)
       .then((state) => {
+        initialPlanCache.set(target.sessionID, state)
         if (params.id === target.sessionID) setInitialPlan(state)
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (params.id === target.sessionID && !initialPlan()) setInitialPlan(INITIAL_PLAN_NONE)
+      })
   }
+  createEffect(on(() => params.id, (id) => setInitialPlan(id ? initialPlanCache.get(id) : undefined)))
   createEffect(
     on(
       () => {
@@ -400,21 +407,25 @@ export default function Page() {
         const last = sync.data.message[id]?.at(-1)
         return [
           id,
-          sync.data.session_status[id]?.type,
-          sync.data.message[id]?.length,
-          last?.id,
-          last?.role === "assistant" ? last.time.completed : undefined,
+          initialPlanRefreshKey(initialPlan(), {
+            status: sync.data.session_status[id]?.type,
+            count: sync.data.message[id]?.length,
+            lastID: last?.id,
+            lastCompleted: last?.role === "assistant" ? last.time.completed : undefined,
+            lastUserID: sync.data.message[id]?.findLast((msg) => msg.role === "user")?.id,
+          }),
         ]
       },
       () => refreshInitialPlan(),
     ),
   )
-  createEffect(on(() => params.id, () => setInitialPlan(undefined)))
   createEffect(
     on(
-      () => initialPlanActive(initialPlan()),
-      (active) => {
-        if (active && local.agent.current()?.name !== "plan") local.agent.set("plan")
+      () => [params.id, initialPlan()] as const,
+      ([id, state]) => {
+        if (!id || !state) return
+        if (initialPlanActive(state)) local.agent.override(id, "plan")
+        else local.agent.release(id, "build")
       },
     ),
   )
@@ -610,10 +621,12 @@ export default function Page() {
 
   createEffect(
     on(
-      () => lastUserMessage()?.id,
+      () => [lastUserMessage()?.id, initialPlan() !== undefined] as const,
       () => {
         const msg = lastUserMessage()
         if (!msg) return
+        // 최초 기획 뒤 Plan 단계의 메시지는 세션 에이전트로 저장하지 않는다. Build 가 시작되면 그 메시지로 복원된다.
+        if (msg.agent === "plan" && (!initialPlan() || initialPlanActive(initialPlan()))) return
         syncSessionModel(local, msg)
       },
     ),

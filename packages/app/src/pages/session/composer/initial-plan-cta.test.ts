@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
-  INITIAL_PLAN_MARKER,
   initialPlanActive,
   initialPlanMode,
-  isInitialPlanHandoff,
+  initialPlanRefreshKey,
   type InitialPlanSessionState,
 } from "./initial-plan-cta"
 
@@ -44,12 +43,28 @@ describe("initialPlanActive", () => {
   })
 })
 
-describe("isInitialPlanHandoff", () => {
-  test("recognizes only the marked handoff text", () => {
-    expect(isInitialPlanHandoff({ type: "text", metadata: { [INITIAL_PLAN_MARKER]: true, planningID: "7" } })).toBe(
-      true,
+describe("initialPlanRefreshKey", () => {
+  const signals = { status: "busy", count: 4, lastID: "msg_4", lastCompleted: undefined, lastUserID: "msg_3" }
+
+  test("follows every change while the plan is in play", () => {
+    expect(initialPlanRefreshKey(state(), signals)).not.toBe(initialPlanRefreshKey(state(), { ...signals, count: 5 }))
+    expect(initialPlanRefreshKey(undefined, signals)).not.toBe(
+      initialPlanRefreshKey(undefined, { ...signals, status: "idle" }),
     )
-    expect(isInitialPlanHandoff({ type: "text", metadata: {} })).toBe(false)
-    expect(isInitialPlanHandoff({ type: "file", metadata: { [INITIAL_PLAN_MARKER]: true } })).toBe(false)
+  })
+
+  test("stops asking once build started", () => {
+    const started = state({ buildStarted: true })
+    expect(initialPlanRefreshKey(started, signals)).toBe(initialPlanRefreshKey(started, { ...signals, count: 9 }))
+  })
+
+  test("asks a session without a handoff again only for a new user message", () => {
+    const none = state({ handoffMessageID: null })
+    expect(initialPlanRefreshKey(none, signals)).toBe(
+      initialPlanRefreshKey(none, { ...signals, count: 9, status: "idle" }),
+    )
+    expect(initialPlanRefreshKey(none, signals)).not.toBe(
+      initialPlanRefreshKey(none, { ...signals, lastUserID: "msg_9" }),
+    )
   })
 })

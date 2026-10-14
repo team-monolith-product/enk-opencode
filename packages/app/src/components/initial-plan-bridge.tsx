@@ -1,12 +1,12 @@
 import { PostMessageManagerImpl } from "@team-monolith/post-message-manager"
 import { onCleanup, onMount } from "solid-js"
 
-type State = "delivered" | "already_delivered" | "not_finalized" | "pending_elsewhere"
+type State = "delivered" | "already_delivered" | "not_finalized" | "pending_elsewhere" | "failed"
 
 export type Result = { status: "ok"; payload: { state: State } } | { status: "failed"; error: string }
 
 const MESSAGE = "initial.plan.submit"
-const STATES: State[] = ["delivered", "already_delivered", "not_finalized", "pending_elsewhere"]
+const STATES: State[] = ["delivered", "already_delivered", "not_finalized", "pending_elsewhere", "failed"]
 
 export function bridgeResult(status: number, body: unknown): Result {
   const value = (body ?? {}) as { state?: unknown; error?: unknown }

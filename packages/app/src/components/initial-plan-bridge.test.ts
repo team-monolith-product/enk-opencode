@@ -3,7 +3,7 @@ import { bridgeResult } from "./initial-plan-bridge"
 
 describe("bridgeResult", () => {
   test("passes every delivery state through", () => {
-    for (const state of ["delivered", "already_delivered", "not_finalized", "pending_elsewhere"])
+    for (const state of ["delivered", "already_delivered", "not_finalized", "pending_elsewhere", "failed"])
       expect(bridgeResult(200, { state })).toEqual({ status: "ok", payload: { state } } as never)
   })
 
