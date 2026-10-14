@@ -1,69 +1,55 @@
 import { describe, expect, test } from "bun:test"
-import type { AssistantMessage, Message, Part, UserMessage } from "@opencode-ai/sdk/v2"
-import { INITIAL_PLAN_MARKER, showInitialPlanCta } from "./initial-plan-cta"
+import {
+  INITIAL_PLAN_MARKER,
+  initialPlanActive,
+  initialPlanMode,
+  isInitialPlanHandoff,
+  type InitialPlanSessionState,
+} from "./initial-plan-cta"
 
-const user = (id: string, agent: string) =>
-  ({
-    id,
-    sessionID: "ses",
-    role: "user",
-    time: { created: 1 },
-    agent,
-    model: { providerID: "p", modelID: "m" },
-  }) as UserMessage
+const state = (input: Partial<InitialPlanSessionState> = {}): InitialPlanSessionState => ({
+  handoffMessageID: "msg_handoff",
+  planningID: "7",
+  buildStarted: false,
+  lastPlanStatus: "done",
+  ...input,
+})
 
-const reply = (id: string, agent: string, extra?: Partial<AssistantMessage>) =>
-  ({
-    id,
-    sessionID: "ses",
-    role: "assistant",
-    time: { created: 2, completed: 3 },
-    agent,
-    mode: agent,
-    parentID: "x",
-    modelID: "m",
-    providerID: "p",
-    path: { cwd: "/", root: "/" },
-    cost: 0,
-    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    ...extra,
-  }) as AssistantMessage
-
-const text = (messageID: string, metadata?: Record<string, unknown>) =>
-  ({ id: `${messageID}-p`, sessionID: "ses", messageID, type: "text", text: "...", metadata }) as Part
-
-function check(messages: Message[], busy = false) {
-  const parts: Record<string, Part[]> = { handoff: [text("handoff", { [INITIAL_PLAN_MARKER]: true })] }
-  for (const msg of messages) parts[msg.id] ??= [text(msg.id)]
-  return showInitialPlanCta({ messages, parts: (id) => parts[id], busy })
-}
-
-describe("showInitialPlanCta", () => {
-  test("shows once plan has answered the initial plan", () => {
-    expect(check([user("handoff", "plan"), reply("a1", "plan")])).toBe(true)
+describe("initialPlanMode", () => {
+  test("offers the build CTA once plan has answered", () => {
+    expect(initialPlanMode(state(), false)).toBe("ready")
   })
 
-  test("stays while the team keeps talking to plan", () => {
-    expect(check([user("handoff", "plan"), reply("a1", "plan"), user("u2", "plan"), reply("a2", "plan")])).toBe(true)
+  test("shows the planning status while plan is still answering", () => {
+    expect(initialPlanMode(state({ lastPlanStatus: "running" }), false)).toBe("running")
+    expect(initialPlanMode(state(), true)).toBe("running")
   })
 
-  test("hides while plan is still answering", () => {
-    expect(check([user("handoff", "plan"), reply("a1", "plan")], true)).toBe(false)
-    expect(check([user("handoff", "plan"), reply("a1", "plan", { time: { created: 2 } })])).toBe(false)
+  test("offers a retry when the plan run failed", () => {
+    expect(initialPlanMode(state({ lastPlanStatus: "error" }), false)).toBe("failed")
   })
 
-  test("hides when plan failed", () => {
-    const error = { name: "UnknownError", data: { message: "boom" } } as AssistantMessage["error"]
-    expect(check([user("handoff", "plan"), reply("a1", "plan", { error })])).toBe(false)
+  test("disappears once build started or without a handoff", () => {
+    expect(initialPlanMode(state({ buildStarted: true }), false)).toBeUndefined()
+    expect(initialPlanMode(state({ handoffMessageID: null }), false)).toBeUndefined()
+    expect(initialPlanMode(undefined, false)).toBeUndefined()
   })
+})
 
-  test("hides once build was requested", () => {
-    expect(check([user("handoff", "plan"), reply("a1", "plan"), user("u2", "build"), reply("a2", "build")])).toBe(false)
-    expect(check([user("handoff", "plan"), reply("a1", "plan"), user("u2", "build")])).toBe(false)
+describe("initialPlanActive", () => {
+  test("keeps plan as the default agent until build starts", () => {
+    expect(initialPlanActive(state())).toBe(true)
+    expect(initialPlanActive(state({ lastPlanStatus: "error" }))).toBe(true)
+    expect(initialPlanActive(state({ buildStarted: true }))).toBe(false)
   })
+})
 
-  test("never shows without the initial plan handoff", () => {
-    expect(check([user("u1", "plan"), reply("a1", "plan")])).toBe(false)
-    expect(check([])).toBe(false)
+describe("isInitialPlanHandoff", () => {
+  test("recognizes only the marked handoff text", () => {
+    expect(isInitialPlanHandoff({ type: "text", metadata: { [INITIAL_PLAN_MARKER]: true, planningID: "7" } })).toBe(
+      true,
+    )
+    expect(isInitialPlanHandoff({ type: "text", metadata: {} })).toBe(false)
+    expect(isInitialPlanHandoff({ type: "file", metadata: { [INITIAL_PLAN_MARKER]: true } })).toBe(false)
   })
 })

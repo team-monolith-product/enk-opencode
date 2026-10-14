@@ -49,7 +49,14 @@ import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
 import { createPromptDocSession, PromptDocSessionProvider } from "@/context/prompt-doc-session"
 import { readonlyViewer } from "@/context/parent-params"
-import { showInitialPlanCta } from "@/pages/session/composer/initial-plan-cta"
+import {
+  fetchInitialPlanState,
+  initialPlanActive,
+  initialPlanMode,
+  retryInitialPlan,
+  type InitialPlanSessionState,
+} from "@/pages/session/composer/initial-plan-cta"
+import { DialogInitialPlanBuild } from "@/pages/session/composer/dialog-initial-plan-build"
 import {
   createOpenDiffTab,
   createOpenReviewFile,
@@ -371,22 +378,84 @@ export default function Page() {
   // dock takes the dock, and this state must outlive that.
   const promptDocSession = createPromptDocSession()
 
-  const [initialPlanStarting, setInitialPlanStarting] = createSignal(false)
-  const initialPlanCta = createMemo(() => {
-    const id = params.id
-    if (!id || readonlyViewer() || promptDocSession.votePending()) return false
-    return showInitialPlanCta({
-      messages: sync.data.message[id],
-      parts: (messageID) => sync.data.part[messageID],
-      busy: promptDocSession.working(),
-    })
+  const [initialPlan, setInitialPlan] = createSignal<InitialPlanSessionState>()
+  const [initialPlanPending, setInitialPlanPending] = createSignal(false)
+  const initialPlanTarget = () => {
+    const sessionID = params.id
+    return sessionID ? { baseUrl: sdk.url, directory: sdk.directory, sessionID } : undefined
+  }
+  const refreshInitialPlan = () => {
+    const target = initialPlanTarget()
+    if (!target) return setInitialPlan(undefined)
+    fetchInitialPlanState(target)
+      .then((state) => {
+        if (params.id === target.sessionID) setInitialPlan(state)
+      })
+      .catch(() => undefined)
+  }
+  createEffect(
+    on(
+      () => {
+        const id = params.id ?? ""
+        const last = sync.data.message[id]?.at(-1)
+        return [
+          id,
+          sync.data.session_status[id]?.type,
+          sync.data.message[id]?.length,
+          last?.id,
+          last?.role === "assistant" ? last.time.completed : undefined,
+        ]
+      },
+      () => refreshInitialPlan(),
+    ),
+  )
+  createEffect(on(() => params.id, () => setInitialPlan(undefined)))
+  createEffect(
+    on(
+      () => initialPlanActive(initialPlan()),
+      (active) => {
+        if (active && local.agent.current()?.name !== "plan") local.agent.set("plan")
+      },
+    ),
+  )
+  const initialPlanDock = createMemo(() => {
+    if (readonlyViewer()) return undefined
+    const mode = initialPlanMode(initialPlan(), promptDocSession.working())
+    if (mode === "ready" && promptDocSession.votePending()) return undefined
+    return mode
   })
-  const startInitialPlanBuild = async () => {
-    if (initialPlanStarting()) return
-    setInitialPlanStarting(true)
-    await promptDocSession
-      .startBuild(language.t("session.initialPlan.prompt"))
-      .finally(() => setInitialPlanStarting(false))
+  const startInitialPlanBuild = () => {
+    const text = language.t("session.initialPlan.prompt")
+    const alone = promptDocSession.alone()
+    dialog.show(() => (
+      <DialogInitialPlanBuild
+        text={text}
+        alone={alone}
+        onClose={() => dialog.close()}
+        onConfirm={() => {
+          dialog.close()
+          setInitialPlanPending(true)
+          void promptDocSession.startInitialPlanBuild(text).finally(() => {
+            setInitialPlanPending(false)
+            refreshInitialPlan()
+          })
+        }}
+      />
+    ))
+  }
+  const retryInitialPlanRun = () => {
+    const target = initialPlanTarget()
+    if (!target || initialPlanPending()) return
+    setInitialPlanPending(true)
+    retryInitialPlan(target)
+      .then((state) => setInitialPlan(state))
+      .catch(() =>
+        showToast({
+          title: language.t("session.initialPlan.toast.retryFailed"),
+          description: language.t("common.requestFailed"),
+        }),
+      )
+      .finally(() => setInitialPlanPending(false))
   }
 
   // Session trimming is unaware of the active route, so keep the viewed session's caches alive.
@@ -1887,7 +1956,14 @@ export default function Page() {
             : undefined
         }
         initialPlan={
-          initialPlanCta() ? { starting: initialPlanStarting(), onStart: () => void startInitialPlanBuild() } : undefined
+          initialPlanDock()
+            ? {
+                mode: initialPlanDock()!,
+                pending: initialPlanPending(),
+                onStart: startInitialPlanBuild,
+                onRetry: retryInitialPlanRun,
+              }
+            : undefined
         }
         setPromptDockRef={(el) => {
           promptDock = el

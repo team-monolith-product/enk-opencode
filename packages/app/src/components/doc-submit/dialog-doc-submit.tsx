@@ -11,7 +11,7 @@ import { useCountdown } from "./use-countdown"
 import "./doc-submit.css"
 
 // What the vote will do once approved — drives the dialog copy.
-export type DocSubmitKind = "doc" | "question-send" | "question-dismiss" | "question-back" | "stop" | "clear"
+export type DocSubmitKind = "doc" | "question-send" | "question-dismiss" | "question-back" | "stop" | "clear" | "build"
 
 // For question votes: the question(s) and the answer(s) being agreed on, shown so everyone sees
 // exactly what is about to be sent (or which question is being dismissed).
@@ -59,6 +59,7 @@ const headline = copyKey(
     "question-back": "docSubmit.headline.questionBack",
     stop: "docSubmit.headline.stop",
     clear: "docSubmit.headline.clear",
+    build: "docSubmit.headline.build",
   } as const,
   "doc",
 )
@@ -70,6 +71,7 @@ const requestVerb = copyKey(
     "question-back": "docSubmit.requestVerb.questionBack",
     stop: "docSubmit.requestVerb.stop",
     clear: "docSubmit.requestVerb.clear",
+    build: "docSubmit.requestVerb.build",
   } as const,
   "doc",
 )
@@ -81,6 +83,7 @@ const approveLabel = copyKey(
     "question-back": "docSubmit.approve.questionBack",
     stop: "docSubmit.approve.stop",
     clear: "docSubmit.approve.clear",
+    build: "docSubmit.approve.build",
   } as const,
   "doc",
 )
@@ -92,6 +95,7 @@ const excludeLabel = copyKey(
     "question-back": "docSubmit.exclude.questionBack",
     stop: "docSubmit.exclude.stop",
     clear: "docSubmit.exclude.clear",
+    build: "docSubmit.exclude.build",
   } as const,
   "doc",
 )
@@ -104,6 +108,7 @@ const proceedVerb = copyKey(
     "question-back": "docSubmit.proceed.questionBack",
     stop: "docSubmit.proceed.stop",
     clear: "docSubmit.proceed.clear",
+    build: "docSubmit.proceed.build",
   } as const,
   "doc",
 )
@@ -115,6 +120,7 @@ const warnText = copyKey(
     "question-back": "docSubmit.warn.questionBack",
     stop: "docSubmit.warn.stop",
     clear: "docSubmit.warn.clear",
+    build: "docSubmit.warn.build",
   } as const,
   "doc",
 )
@@ -126,6 +132,7 @@ const hintText = copyKey(
     "question-back": "docSubmit.hint.questionBack",
     stop: "docSubmit.hint.stop",
     clear: "docSubmit.hint.clear",
+    build: "docSubmit.hint.build",
   } as const,
   "doc",
 )
@@ -331,10 +338,29 @@ function PreviewCard(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boo
 
 // The snapshot region: doc viewer for prompt sends, question preview for question votes, nothing
 // for a bare "stop" vote.
+export function BuildPreview(props: { text: string }) {
+  const language = useLanguage()
+  return (
+    <div class="ds-preview" data-component="build-preview">
+      <div class="ds-preview-item">
+        <div class="ds-preview-body">
+          <div class="ds-preview-q">{props.text}</div>
+          <div class="ds-preview-answers">
+            <span class="ds-preview-a">{language.t("docSubmit.preview.buildAgent")}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function SnapshotArea(props: { kind?: DocSubmitKind; state: DocSubmitState; preview?: () => DocSubmitPreviewItem[]; sdk?: DocSubmitSdk }) {
   return (
     <Show when={props.kind !== "stop" && props.kind !== "clear"}>
       <div class="jt-snap-scroll ds-snap">
+        <Show when={props.kind === "build"}>
+          <BuildPreview text={props.state.preview?.text ?? ""} />
+        </Show>
         <Show
           when={props.kind === "doc" && props.sdk}
           fallback={
