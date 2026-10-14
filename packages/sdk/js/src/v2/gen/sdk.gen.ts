@@ -37,6 +37,10 @@ import type {
   DocSyncPushResponses,
   EnkInitialPlanDeliverErrors,
   EnkInitialPlanDeliverResponses,
+  EnkInitialPlanRetryErrors,
+  EnkInitialPlanRetryResponses,
+  EnkInitialPlanSessionStateErrors,
+  EnkInitialPlanSessionStateResponses,
   EnvFileListResponses,
   EnvFileRemoveErrors,
   EnvFileRemoveResponses,
@@ -188,6 +192,8 @@ import type {
   SessionPromptAsyncResponses,
   SessionPromptDocAdvanceErrors,
   SessionPromptDocAdvanceResponses,
+  SessionPromptDocBuildErrors,
+  SessionPromptDocBuildResponses,
   SessionPromptDocClearErrors,
   SessionPromptDocClearResponses,
   SessionPromptDocErrors,
@@ -2097,6 +2103,81 @@ export class InitialPlan extends HeyApiClient {
       ...params,
     })
   }
+
+  /**
+   * Initial plan state of a session
+   *
+   * Scan the whole session for the initial plan handoff and report whether build started and how the plan run ended.
+   */
+  public sessionState<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      EnkInitialPlanSessionStateResponses,
+      EnkInitialPlanSessionStateErrors,
+      ThrowOnError
+    >({
+      url: "/enk/initial-plan/session-state",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Retry the plan run
+   *
+   * Re-run the plan agent on the same initial plan handoff after it failed. No new handoff is sent.
+   */
+  public retry<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      sessionID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<EnkInitialPlanRetryResponses, EnkInitialPlanRetryErrors, ThrowOnError>(
+      {
+        url: "/enk/initial-plan/retry",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
 }
 
 export class Enk extends HeyApiClient {
@@ -2459,6 +2540,61 @@ export class PromptDoc extends HeyApiClient {
       ThrowOnError
     >({
       url: "/session/{sessionID}/prompt-doc/clear",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Create initial plan build approval
+   *
+   * Create a consent vote to start the first build after the initial plan. The server fixes the build agent and allows it once per plan.
+   */
+  public build<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      docID?: string
+      actorID?: string
+      actorIDs?: Array<string>
+      names?: {
+        [key: string]: string
+      }
+      timeoutMs?: number
+      text?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "docID" },
+            { in: "body", key: "actorID" },
+            { in: "body", key: "actorIDs" },
+            { in: "body", key: "names" },
+            { in: "body", key: "timeoutMs" },
+            { in: "body", key: "text" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionPromptDocBuildResponses,
+      SessionPromptDocBuildErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/prompt-doc/build",
       ...options,
       ...params,
       headers: {

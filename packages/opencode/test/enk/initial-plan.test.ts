@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
+import { CostQuota } from "../../src/enk/cost-quota"
 import { InitialPlan } from "../../src/enk/initial-plan"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
@@ -55,12 +56,18 @@ function chat(text: string) {
   return new Response(payload, { status: 200, headers: { "Content-Type": "text/event-stream" } })
 }
 
+const deps = (send: InitialPlan.Deps["send"], find: InitialPlan.Deps["find"] = async () => undefined) => ({
+  send,
+  find,
+})
+
 const claimable: Rails = {
   status: () => ({ status: "pending", planning_id: 7 }),
   claim: () => ({ claimed: true, planning_id: 7, prompt: "# 최초 기획\n\n관찰한 장면 ..." }),
 }
 
 afterEach(async () => {
+  CostQuota.reset()
   await Storage.remove(["enk", "initial-plan"]).catch(() => undefined)
   await Instance.disposeAll()
   delete process.env["ENK_HACKATHON_RAILS_URL"]
@@ -71,21 +78,25 @@ describe("InitialPlan.deliver", () => {
   test("claims, hands the rails prompt to the plan agent and reports the session", async () => {
     await using rails = serve(claimable)
     const sent: string[] = []
-    const state = await InitialPlan.deliver(async (prompt) => {
-      sent.push(prompt)
-      return "ses_main"
-    })
+    const state = await InitialPlan.deliver(
+      deps(async (prompt, planningID) => {
+        sent.push(`${planningID}:${prompt}`)
+        return "ses_main"
+      }),
+    )
 
     expect(state).toBe("delivered")
-    expect(sent).toEqual(["# 최초 기획\n\n관찰한 장면 ..."])
+    expect(sent).toEqual(["7:# 최초 기획\n\n관찰한 장면 ..."])
     expect(rails.results()).toEqual([{ status: "delivered", session_id: "ses_main" }])
   })
 
   test("does nothing before the team finalizes", async () => {
     await using rails = serve({ ...claimable, status: () => ({ status: "none", planning_id: null }) })
-    const state = await InitialPlan.deliver(async () => {
-      throw new Error("must not send")
-    })
+    const state = await InitialPlan.deliver(
+      deps(async () => {
+        throw new Error("must not send")
+      }),
+    )
 
     expect(state).toBe("not_finalized")
     expect(rails.claims()).toBe(0)
@@ -93,9 +104,11 @@ describe("InitialPlan.deliver", () => {
 
   test("does not send again once rails has it delivered", async () => {
     await using rails = serve({ ...claimable, status: () => ({ status: "delivered", planning_id: 7 }) })
-    const state = await InitialPlan.deliver(async () => {
-      throw new Error("must not send")
-    })
+    const state = await InitialPlan.deliver(
+      deps(async () => {
+        throw new Error("must not send")
+      }),
+    )
 
     expect(state).toBe("already_delivered")
     expect(rails.claims()).toBe(0)
@@ -103,9 +116,11 @@ describe("InitialPlan.deliver", () => {
 
   test("treats a lost claim race to a delivered plan as already delivered", async () => {
     await using rails = serve({ ...claimable, claim: () => ({ claimed: false, status: "delivered" }) })
-    const state = await InitialPlan.deliver(async () => {
-      throw new Error("must not send")
-    })
+    const state = await InitialPlan.deliver(
+      deps(async () => {
+        throw new Error("must not send")
+      }),
+    )
 
     expect(state).toBe("already_delivered")
     expect(rails.results()).toEqual([])
@@ -113,13 +128,15 @@ describe("InitialPlan.deliver", () => {
 
   test("reports the failure to rails and lets the next call retry", async () => {
     await using rails = serve(claimable)
-    const failed = InitialPlan.deliver(async () => {
-      throw new Error("model unavailable")
-    })
+    const failed = InitialPlan.deliver(
+      deps(async () => {
+        throw new Error("model unavailable")
+      }),
+    )
     await expect(failed).rejects.toThrow("model unavailable")
     expect(rails.results()).toEqual([{ status: "failed", error: "model unavailable" }])
 
-    const retried = await InitialPlan.deliver(async () => "ses_main")
+    const retried = await InitialPlan.deliver(deps(async () => "ses_main"))
     expect(retried).toBe("delivered")
     expect(rails.claims()).toBe(2)
   })
@@ -131,8 +148,8 @@ describe("InitialPlan.deliver", () => {
       sends++
       return "ses_main"
     }
-    expect(await InitialPlan.deliver(send)).toBe("delivered")
-    expect(await InitialPlan.deliver(send)).toBe("already_delivered")
+    expect(await InitialPlan.deliver(deps(send))).toBe("delivered")
+    expect(await InitialPlan.deliver(deps(send))).toBe("already_delivered")
 
     expect(sends).toBe(1)
     expect(rails.results()).toEqual([
@@ -149,15 +166,47 @@ describe("InitialPlan.deliver", () => {
       await Bun.sleep(20)
       return "ses_main"
     }
-    const states = await Promise.all([InitialPlan.deliver(send), InitialPlan.deliver(send), InitialPlan.deliver(send)])
+    const states = await Promise.all([
+      InitialPlan.deliver(deps(send)),
+      InitialPlan.deliver(deps(send)),
+      InitialPlan.deliver(deps(send)),
+    ])
 
     expect(states).toEqual(["delivered", "delivered", "delivered"])
     expect(sends).toBe(1)
     expect(rails.claims()).toBe(1)
   })
 
+  test("tells the app another delivery holds the claim", async () => {
+    await using rails = serve({ ...claimable, claim: () => ({ claimed: false, status: "claimed" }) })
+    const state = await InitialPlan.deliver(
+      deps(async () => {
+        throw new Error("must not send")
+      }),
+    )
+
+    expect(state).toBe("pending_elsewhere")
+    expect(rails.results()).toEqual([])
+  })
+
+  test("trusts the session marker over a lost local record", async () => {
+    await using rails = serve(claimable)
+    const state = await InitialPlan.deliver(
+      deps(
+        async () => {
+          throw new Error("must not send")
+        },
+        async (planningID) => (planningID === "7" ? "ses_marked" : undefined),
+      ),
+    )
+
+    expect(state).toBe("already_delivered")
+    expect(rails.claims()).toBe(0)
+    expect(rails.results()).toEqual([{ status: "delivered", session_id: "ses_marked" }])
+  })
+
   test("refuses when rails is not configured", async () => {
-    await expect(InitialPlan.deliver(async () => "ses_main")).rejects.toBeInstanceOf(InitialPlan.Unavailable)
+    await expect(InitialPlan.deliver(deps(async () => "ses_main"))).rejects.toBeInstanceOf(InitialPlan.Unavailable)
   })
 })
 
@@ -199,7 +248,7 @@ describe("InitialPlan.send", () => {
         const user = msgs.find((msg) => msg.info.role === "user")
         expect(user?.info.role === "user" && user.info.agent).toBe("plan")
         const part = user?.parts.find((p) => p.type === "text")
-        expect(part?.type === "text" && part.metadata?.[InitialPlan.MARKER]).toBe(true)
+        expect(part?.type === "text" && part.metadata).toEqual({ [InitialPlan.MARKER]: true, planningID: "7" })
         const reply = msgs.find((msg) => msg.info.role === "assistant")
         expect(reply?.info.role === "assistant" && reply.info.agent).toBe("plan")
       },

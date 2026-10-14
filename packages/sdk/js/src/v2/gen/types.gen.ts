@@ -2012,11 +2012,18 @@ export type McpResource = {
 }
 
 export type InitialPlanDelivery = {
-  state: "delivered" | "already_delivered" | "not_finalized"
+  state: "delivered" | "already_delivered" | "not_finalized" | "pending_elsewhere"
 }
 
 export type InitialPlanDeliveryError = {
   error: string
+}
+
+export type InitialPlanSessionState = {
+  handoffMessageID: string | null
+  planningID: string | null
+  buildStarted: boolean
+  lastPlanStatus: "running" | "done" | "error" | null
 }
 
 export type TextPartInput = {
@@ -2073,7 +2080,7 @@ export type SessionPromptDoc = {
   sessionID: string
 }
 
-export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear"
+export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear" | "build"
 
 export type DocSubmitStatus = "pending" | "sent" | "cancelled" | "expired" | "left"
 
@@ -2090,6 +2097,10 @@ export type DocSubmit = {
   targetKind: DocSubmitTargetKind
   targetID: string
   questionAction?: "send" | "dismiss" | "back"
+  preview?: {
+    text: string
+    agent: string
+  }
   actorID: string
   status: DocSubmitStatus
   actors: Array<DocSubmitActor>
@@ -3757,6 +3768,74 @@ export type EnkInitialPlanDeliverResponses = {
 
 export type EnkInitialPlanDeliverResponse = EnkInitialPlanDeliverResponses[keyof EnkInitialPlanDeliverResponses]
 
+export type EnkInitialPlanSessionStateData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    sessionID: string
+  }
+  url: "/enk/initial-plan/session-state"
+}
+
+export type EnkInitialPlanSessionStateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type EnkInitialPlanSessionStateError = EnkInitialPlanSessionStateErrors[keyof EnkInitialPlanSessionStateErrors]
+
+export type EnkInitialPlanSessionStateResponses = {
+  /**
+   * Session state
+   */
+  200: InitialPlanSessionState
+}
+
+export type EnkInitialPlanSessionStateResponse =
+  EnkInitialPlanSessionStateResponses[keyof EnkInitialPlanSessionStateResponses]
+
+export type EnkInitialPlanRetryData = {
+  body?: {
+    sessionID: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/enk/initial-plan/retry"
+}
+
+export type EnkInitialPlanRetryErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type EnkInitialPlanRetryError = EnkInitialPlanRetryErrors[keyof EnkInitialPlanRetryErrors]
+
+export type EnkInitialPlanRetryResponses = {
+  /**
+   * Session state
+   */
+  200: InitialPlanSessionState
+}
+
+export type EnkInitialPlanRetryResponse = EnkInitialPlanRetryResponses[keyof EnkInitialPlanRetryResponses]
+
 export type SessionListData = {
   body?: never
   path?: never
@@ -5000,6 +5079,49 @@ export type SessionPromptDocClearResponses = {
 }
 
 export type SessionPromptDocClearResponse = SessionPromptDocClearResponses[keyof SessionPromptDocClearResponses]
+
+export type SessionPromptDocBuildData = {
+  body?: {
+    docID: string
+    actorID: string
+    actorIDs?: Array<string>
+    names?: {
+      [key: string]: string
+    }
+    timeoutMs?: number
+    text: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/prompt-doc/build"
+}
+
+export type SessionPromptDocBuildErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Not found
+   */
+  404: NotFoundError
+}
+
+export type SessionPromptDocBuildError = SessionPromptDocBuildErrors[keyof SessionPromptDocBuildErrors]
+
+export type SessionPromptDocBuildResponses = {
+  /**
+   * Submit approval state
+   */
+  200: DocSubmit
+}
+
+export type SessionPromptDocBuildResponse = SessionPromptDocBuildResponses[keyof SessionPromptDocBuildResponses]
 
 export type SessionPromptDocSubmitRespondData = {
   body?: {

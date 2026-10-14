@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
+import { CostQuota } from "../../src/enk/cost-quota"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { Session } from "../../src/session"
@@ -13,6 +14,7 @@ Log.init({ print: false })
 const ORIGINAL_ENV = process.env["ENK_PROJECT_DIRECTORY"]
 
 afterEach(async () => {
+  CostQuota.reset()
   if (ORIGINAL_ENV === undefined) delete process.env["ENK_PROJECT_DIRECTORY"]
   else process.env["ENK_PROJECT_DIRECTORY"] = ORIGINAL_ENV
   delete process.env["ENK_HACKATHON_RAILS_URL"]

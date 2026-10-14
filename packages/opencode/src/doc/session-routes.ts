@@ -182,6 +182,32 @@ export const SessionDocRoutes = () =>
       },
     )
     .post(
+      "/:sessionID/prompt-doc/build",
+      describeRoute({
+        summary: "Create initial plan build approval",
+        description:
+          "Create a consent vote to start the first build after the initial plan. The server fixes the build agent and allows it once per plan.",
+        operationId: "session.promptDoc.build",
+        responses: {
+          200: {
+            description: "Submit approval state",
+            content: { "application/json": { schema: resolver(Doc.SubmitState) } },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator("param", z.object({ sessionID: SessionID.zod })),
+      validator("json", Doc.BuildSubmitCreateInput.omit({ sessionID: true })),
+      async (c) => {
+        return c.json(
+          await Doc.buildSubmitCreate({
+            ...c.req.valid("json"),
+            sessionID: c.req.valid("param").sessionID,
+          }),
+        )
+      },
+    )
+    .post(
       "/:sessionID/prompt-doc/submit/:submitID/respond",
       describeRoute({
         summary: "Respond to prompt doc submit approval",
