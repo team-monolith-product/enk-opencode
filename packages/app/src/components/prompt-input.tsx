@@ -1894,19 +1894,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // editor's submit key routes through the session's doc handle), and unwind the local queue on a
   // solo stop. Cleared on unmount so a stop pressed while a question dock is up aborts directly
   // instead of calling into a disposed composer.
-  const startBuild = async (text: string) => {
-    if (readonly) return
-    local.agent.set("build")
-    session.setApprovalSession(undefined)
-    await handleSubmit(undefined, [{ type: "text", content: text, start: 0, end: text.length }])
-  }
-
   session.setHandlers({
     submit: () => void submit(),
     abort: async () => {
       await abort()
     },
-    startBuild,
   })
   onCleanup(() => session.setHandlers({}))
 
