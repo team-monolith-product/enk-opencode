@@ -13,16 +13,21 @@ afterEach(async () => {
 })
 
 // pod 에 실리는 설정의 권한 부분만 옮겨 와 Plan 이 실제로 읽기 전용인지 본다.
-async function podPermissions() {
+async function podPermissions(withAgents = true) {
   const config = parse(await Bun.file(DOCKER_CONFIG).text())
   return tmpdir({
     init: async (dir) => {
       await Bun.write(
         path.join(dir, "opencode.json"),
-        JSON.stringify({ permission: config.permission, agent: config.agent }),
+        JSON.stringify({ permission: config.permission, agent: withAgents ? config.agent : undefined }),
       )
     },
   })
+}
+
+async function permissions(withAgents: boolean, name: string) {
+  await using tmp = await podPermissions(withAgents)
+  return Instance.provide({ directory: tmp.path, fn: async () => (await Agent.get(name)).permission })
 }
 
 describe("plan agent in the pod config", () => {
@@ -40,7 +45,7 @@ describe("plan agent in the pod config", () => {
         expect(action("edit", ".opencode/plans/plan.md")).toBe("allow")
         expect(action("bash", "rm -rf src")).toBe("deny")
         expect(action("task", "general")).toBe("deny")
-        expect(action("task", "explore")).toBe("allow")
+        expect(action("task", "explore")).toBe("deny")
         expect(action("read", "src/App.tsx")).toBe("allow")
 
         const tools = [
@@ -51,10 +56,11 @@ describe("plan agent in the pod config", () => {
           "generate_image",
           "ensure_dev_server",
           "env_request",
+          "task",
           "read",
         ]
         const disabled = Permission.disabled(tools, plan.permission)
-        for (const tool of ["bash", "generate_image", "ensure_dev_server", "env_request"])
+        for (const tool of ["bash", "generate_image", "ensure_dev_server", "env_request", "task"])
           expect(disabled.has(tool)).toBe(true)
         expect(disabled.has("read")).toBe(false)
       },
@@ -71,5 +77,11 @@ describe("plan agent in the pod config", () => {
         expect(Permission.evaluate("bash", "npm run dev", build.permission).action).toBe("allow")
       },
     })
+  })
+
+  test("leaves the other agents exactly as the pod had them", async () => {
+    for (const name of ["build", "explore", "general"]) {
+      expect(await permissions(true, name)).toEqual(await permissions(false, name))
+    }
   })
 })
