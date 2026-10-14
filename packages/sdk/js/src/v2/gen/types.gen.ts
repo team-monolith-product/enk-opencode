@@ -5141,7 +5141,7 @@ export type SessionPromptDocBuildResponse = SessionPromptDocBuildResponses[keyof
 export type SessionPromptDocSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel" | "exclude"
+    action: "approve" | "cancel"
   }
   path: {
     sessionID: string
@@ -5268,7 +5268,7 @@ export type SessionQuestionSubmitResponse = SessionQuestionSubmitResponses[keyof
 export type SessionQuestionSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel" | "exclude"
+    action: "approve" | "cancel"
   }
   path: {
     sessionID: string

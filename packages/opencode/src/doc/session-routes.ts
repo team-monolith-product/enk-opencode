@@ -231,7 +231,7 @@ export const SessionDocRoutes = () =>
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod, submitID: SubmitID.zod })),
-      validator("json", z.object({ actorID: ActorID.zod, action: z.enum(["approve", "cancel", "exclude"]) })),
+      validator("json", z.object({ actorID: ActorID.zod, action: z.enum(["approve", "cancel"]) })),
       async (c) => {
         const param = c.req.valid("param")
         return c.json(
@@ -354,7 +354,7 @@ export const SessionDocRoutes = () =>
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod, submitID: SubmitID.zod })),
-      validator("json", z.object({ actorID: ActorID.zod, action: z.enum(["approve", "cancel", "exclude"]) })),
+      validator("json", z.object({ actorID: ActorID.zod, action: z.enum(["approve", "cancel"]) })),
       async (c) => {
         const param = c.req.valid("param")
         return c.json(

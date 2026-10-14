@@ -500,8 +500,8 @@ export namespace Doc {
   // participant, so a client that blipped offline exactly at the transition can catch up.
   const REPLAY_WINDOW = 15_000
   const SubmitPrompt = SessionPrompt.PromptInput.omit({ sessionID: true })
-  // "left" = the member dropped out mid-vote. They are kept on the roster (shown as 나감) and block
-  // auto-send; the requester decides via the "exclude" respond action whether to send without them.
+  // "left" is kept only so rows written before votes were judged by the current participants still
+  // parse. A departure now removes the member (and their vote) from every pending vote.
   const SubmitActorStatus = z.enum(["pending", "approved", "left"])
   export const SubmitStatus = z.enum(["pending", "sent", "cancelled", "expired", "left"]).meta({ ref: "DocSubmitStatus" })
   export type SubmitStatus = z.infer<typeof SubmitStatus>
@@ -596,9 +596,7 @@ export namespace Doc {
     sessionID: SessionID.zod,
     submitID: SubmitID.zod,
     actorID: ActorID.zod,
-    // "exclude" — requester-only: send now without the members who left mid-vote. Valid only when
-    // the departed are the sole holdouts (every present member already approved).
-    action: z.enum(["approve", "cancel", "exclude"]),
+    action: z.enum(["approve", "cancel"]),
   })
 
   type SubmitRow = typeof DocSubmitTable.$inferSelect
@@ -967,7 +965,10 @@ export namespace Doc {
     )
     for (const row of rows) {
       const next = expire(row)
-      if (next.status === "pending") schedule(next)
+      if (next.status !== "pending") continue
+      schedule(next)
+      // 재시작 뒤 다시 접속하지 않은 참여자는 퇴장과 같다. 유예 시간 안에 돌아오면 그대로 남는다.
+      for (const actor of read(next).actors) scheduleLeave(next.target_id, actor.actorID)
     }
     // GC a question's shared draft/presence when it resolves outside the vote path (e.g. the AI
     // tool times out, or a solo participant auto-replies). The vote path GCs in send() directly.
@@ -1237,25 +1238,6 @@ export namespace Doc {
       return state
     }
 
-    if (input.action === "exclude") {
-      // Requester-only: send now without the members who left mid-vote. A departure never triggers
-      // a send by itself — this explicit click is the only path. No-ops (returning current state)
-      // when the conditions aren't met, so a stale click after someone rejoins is harmless.
-      if (next.actor_id !== input.actorID) throw new NotFoundError({ message: "Only the requester can exclude" })
-      const state = read(next)
-      if (!state.actors.some((item) => item.status === "left")) return state
-      if (state.actors.some((item) => item.status === "pending")) return state
-      Database.use((db) =>
-        db
-          .delete(DocSubmitActorTable)
-          .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.status, "left")))
-          .run(),
-      )
-      const finished = finalize(next)
-      if (!finished) throw new NotFoundError({ message: "Doc submit not found" })
-      return finished
-    }
-
     if (actor.status !== "approved") {
       Database.use((db) =>
         db
@@ -1267,7 +1249,7 @@ export namespace Doc {
     }
 
     const state = read(next)
-    if (state.actors.some((item) => item.status !== "approved")) {
+    if (!agreed(state)) {
       cast("updated", state)
       return state
     }
@@ -1276,6 +1258,11 @@ export namespace Doc {
     if (!finished) throw new NotFoundError({ message: "Doc submit not found" })
     return finished
   })
+
+  // 남은 참여 인원 전원이 동의했는지. 0명은 동의가 아니다.
+  function agreed(state: SubmitState) {
+    return state.actors.length > 0 && state.actors.every((item) => item.status === "approved")
+  }
 
   // Mark a pending submit as sent and fire its action. Shared by the last-approval path in
   // submitRespond and by leave() when the last non-approved member drops out of the vote.
@@ -1296,6 +1283,8 @@ export namespace Doc {
     return finished
   }
 
+  // 참여 인원 기준 판단, 퇴장 쪽: 나간 사람은 결론 나지 않은 모든 투표에서 표와 함께 빠지고, 남은 인원으로
+  // 다시 판단한다. 요청자도 예외가 아니다. 남은 전원이 동의했으면 바로 보내고, 아무도 남지 않으면 보내지 않는다.
   function leave(targetID: string, actorID: ActorID) {
     const rows = Database.use((db) =>
       db
@@ -1307,37 +1296,19 @@ export namespace Doc {
     for (const row of rows) {
       const next = expire(row)
       if (next.status !== "pending") continue
-      const state = read(next)
-      const member = state.actors.find((item) => item.actorID === actorID)
-      if (!member) continue
-      // The requester walking away abandons the vote — nobody is left to own the send.
-      if (next.actor_id === actorID) {
-        const item = Database.use((db) =>
-          db
-            .update(DocSubmitTable)
-            .set({ status: "left", cancelled_by: actorID, time_updated: Date.now() })
-            .where(eq(DocSubmitTable.id, next.id))
-            .returning()
-            .get(),
-        )
-        if (!item) continue
-        done(next.id)
-        cast("left", read(item))
-        continue
-      }
-      // An approved member's consent was given explicitly — their departure changes nothing.
-      if (member.status === "approved") continue
-      // A pending member is marked "left" (kept on the roster, shown as 나감) rather than removed:
-      // a departure must never trigger a send NOR kill the vote. Whether to proceed without them
-      // is the requester's call — the "exclude" respond action. The top-up buys time to decide.
+      if (!read(next).actors.some((item) => item.actorID === actorID)) continue
       Database.use((db) =>
         db
-          .update(DocSubmitActorTable)
-          .set({ status: "left" })
+          .delete(DocSubmitActorTable)
           .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
           .run(),
       )
-      cast("updated", read(extend(next)))
+      const state = read(next)
+      if (agreed(state)) {
+        finalize(next)
+        continue
+      }
+      cast("updated", state)
     }
   }
 
@@ -1379,17 +1350,6 @@ export namespace Doc {
               time_responded: null,
             })
             .onConflictDoNothing()
-            .run(),
-        )
-        state = read(extend(next))
-        cast("updated", state)
-      } else if (existing.status === "left") {
-        // A member who dropped out came back: votable again (나감 → 대기중).
-        Database.use((db) =>
-          db
-            .update(DocSubmitActorTable)
-            .set({ status: "pending" })
-            .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
             .run(),
         )
         state = read(extend(next))

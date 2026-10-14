@@ -2200,7 +2200,7 @@ export class Submit extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel" | "exclude"
+      action?: "approve" | "cancel"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2624,7 +2624,7 @@ export class Submit2 extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel" | "exclude"
+      action?: "approve" | "cancel"
     },
     options?: Options<never, ThrowOnError>,
   ) {

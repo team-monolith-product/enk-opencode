@@ -270,6 +270,43 @@ describe("initial plan build vote", () => {
 })
 
 describe("initial plan guards", () => {
+  test("a build vote runs once the teammate who had not agreed leaves", async () => {
+    await using rails = serve()
+    await using tmp = await workspace(rails.server.url.origin)
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const main = await Session.create({ title: "Main" })
+        const { docID } = Doc.prompt(main.id)
+        const alice = Doc.actorUpsert({ sessionID: main.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: main.id, name: "Bob" })
+        const stopAlice = Doc.submitConnect({
+          sessionID: main.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: () => undefined },
+        })
+        const stopBob = Doc.submitConnect({
+          sessionID: main.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+        await InitialPlan.send(PLAN, "7", "tok-1")
+        await settle(main.id)
+
+        const pending = await Doc.buildSubmitCreate({ sessionID: main.id, docID, actorID: alice.actorID, text: START })
+        expect(pending.status).toBe("pending")
+        stopBob()
+        await Bun.sleep(2_200)
+        await built(main.id)
+        expect((await InitialPlan.sessionState(main.id)).buildStarted).toBe(true)
+        stopAlice()
+      },
+    })
+  }, 20_000)
+
   test("a build whose message never got created can be started again", async () => {
     await using rails = serve()
     await using tmp = await workspace(rails.server.url.origin)
