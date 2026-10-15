@@ -90,6 +90,18 @@
   color: var(--env-hazard-ink);
 }
 
+/* 되돌리기로 지금 상태에서 빠진 버전 — 고를 수는 있지만 흐리게 지운다. */
+.history-dialog .history-item[data-undone] .history-subject {
+  color: var(--env-text-muted);
+  font-weight: 500;
+  text-decoration: line-through;
+}
+
+.history-dialog .history-badge[data-tone="undone"] {
+  border-style: dashed;
+  color: var(--env-text-muted);
+}
+
 .history-dialog .history-time {
   font-size: 11.5px;
   color: var(--env-text-muted);
