@@ -46,7 +46,7 @@ const restore = (dir: string, sha: string, after?: string) =>
   })
 
 describe("History.commit", () => {
-  test("records uploads but leaves out secrets, dependencies and the opencode marker", async () => {
+  test("records uploads but leaves out secrets, dependencies, the preview bridge and the opencode marker", async () => {
     await using tmp = await tmpdir()
     const work = await workspace(tmp.path)
     await put(work, {
@@ -55,6 +55,8 @@ describe("History.commit", () => {
       ".env": "API_KEY=secret",
       ".env.example": "API_KEY=",
       "node_modules/pkg/index.js": "module.exports = 1",
+      "__preview-bridge.js": "bridge",
+      "public/__preview-bridge.js": "bridge",
     })
 
     const saved = await History.commit(work, { message: "첫 화면", turn: "msg_1" })
@@ -127,7 +129,7 @@ describe("History.restore", () => {
     const work = await workspace(tmp.path)
     await put(work, { "index.html": "v1", "style.css": "a", ".env": "KEY=1" })
     const first = await History.commit(work, { message: "처음" })
-    await put(work, { "index.html": "v2", "game/main.js": "x" })
+    await put(work, { "index.html": "v2", "game/main.js": "x", "__preview-bridge.js": "bridge" })
     await rm(path.join(work, "style.css"))
     await History.commit(work, { message: "게임 추가" })
 
@@ -138,6 +140,7 @@ describe("History.restore", () => {
     expect(await exists(path.join(work, "game/main.js"))).toBe(false)
     expect(await exists(path.join(work, "game"))).toBe(false)
     expect(await readFile(path.join(work, ".env"), "utf8")).toBe("KEY=1")
+    expect(await readFile(path.join(work, "__preview-bridge.js"), "utf8")).toBe("bridge")
     expect(await exists(path.join(work, ".git", "opencode"))).toBe(true)
     const list = await History.list(work)
     expect(list.map((entry) => entry.subject)).toEqual(["되돌리기: 처음", "게임 추가", "처음"])
