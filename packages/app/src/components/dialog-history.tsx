@@ -62,9 +62,7 @@ export function DialogHistory(props: { sessionID: string }) {
     if (state.status.entries.length === 0) return "empty"
     return "list"
   })
-  const ready = createMemo(
-    () => !spectator && !!state.selected && state.selected !== current(),
-  )
+  const ready = createMemo(() => !spectator && !!state.selected && state.selected !== current())
 
   const restore = async () => {
     const sha = state.selected
@@ -149,7 +147,7 @@ export function DialogHistory(props: { sessionID: string }) {
                             </Match>
                             <Match when={Array.isArray(state.changes[entry.sha])}>
                               <HistoryFiles
-                                list={state.changes[entry.sha] as HistoryChange[]}
+                                list={(state.changes[entry.sha] as HistoryChange[]).filter(visible)}
                                 label={label}
                                 total={(count) => language.t("history.changes", { count })}
                               />
@@ -165,9 +163,7 @@ export function DialogHistory(props: { sessionID: string }) {
           </Branch>
 
           <Show when={view() === "list"}>
-            <span class="history-hint">
-              {spectator ? language.t("history.readonly") : language.t("history.note")}
-            </span>
+            <span class="history-hint">{spectator ? language.t("history.readonly") : language.t("history.note")}</span>
           </Show>
         </div>
 
@@ -186,6 +182,8 @@ export function DialogHistory(props: { sessionID: string }) {
     </Dialog>
   )
 }
+
+const visible = (change: HistoryChange) => !change.file.split("/").some((part) => part.startsWith("."))
 
 function HistoryFiles(props: {
   list: HistoryChange[]

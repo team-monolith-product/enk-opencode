@@ -53,17 +53,20 @@ export function createChromeActions() {
       .catch(() => setEnvCount(0))
   }
 
+  // 버전 기록은 본행사 폴더에만 있다. 목록·마감 여부는 창을 열 때 묻고, 버튼은 폴더 규약만으로 띄운다.
+  const history = () => !isTutorialDirectory(sdk.directory)
+  const historyDialog = () => import("@/components/dialog-history")
+
   const [github, setGithub] = createSignal(false)
   onMount(() => {
     refreshEnvCount()
+    if (history()) void historyDialog().catch(() => undefined)
     const o = opts()
     if (!o) return
     void getGitHubStatus(o)
       .then((status) => setGithub(status.enabled))
       .catch(() => setGithub(false))
   })
-  // 버전 기록은 본행사 폴더에만 있다. 목록·마감 여부는 창을 열 때 묻고, 버튼은 폴더 규약만으로 띄운다.
-  const history = () => !isTutorialDirectory(sdk.directory)
 
   return (): ChromeAction[] => [
     {
@@ -89,11 +92,7 @@ export function createChromeActions() {
             icon: "clock" as const,
             label: language.t("command.history"),
             title: language.t("command.history.description"),
-            open: () =>
-              void show(
-                () => import("@/components/dialog-history"),
-                (x) => <x.DialogHistory sessionID={params.id!} />,
-              ),
+            open: () => void show(historyDialog, (x) => <x.DialogHistory sessionID={params.id!} />),
           },
         ]
       : []),

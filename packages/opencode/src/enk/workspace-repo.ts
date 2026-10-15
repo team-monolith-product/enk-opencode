@@ -26,6 +26,7 @@ export namespace WorkspaceRepo {
     "__pycache__/",
     ".opencode/",
     ".DS_Store",
+    "__preview-bridge.js",
   ]
 
   export type Change = { status: "A" | "M" | "D"; file: string }
