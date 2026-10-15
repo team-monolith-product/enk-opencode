@@ -2,7 +2,8 @@
 //
 // 동작: 응답이 끝날 때(session.idle)마다 결과물 프로젝트 디렉토리에
 //   1) /__preview-bridge.js (브릿지 번들) 가 최신인지 확인해 없거나 다르면 복사하고,
-//   2) 엔트리 HTML(index.html 등) 의 <body> 끝에 브릿지 <script> 태그를 멱등하게 주입한다.
+//   2) 엔트리 HTML(index.html 등) 의 <head> 맨 앞에 브릿지 <script> 태그를 멱등하게 주입한다.
+//      다른 스크립트보다 먼저 실행돼야 인라인 스크립트의 SyntaxError 등 초기 에러를 놓치지 않는다.
 // AI 가 AGENTS.md 지침대로 이미 넣었으면 그대로 두고, 빠뜨린 경우에만 보강한다(= AI 의도 작업 보조).
 //
 // HTML 주입은 정규식이 아닌 node-html-parser 로 파싱해서 처리한다(견고).
@@ -15,7 +16,7 @@ import { readFile, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { parse } from "node-html-parser"
+import { parse, TextNode } from "node-html-parser"
 
 // 자식 dev 서버 루트에서 브릿지가 서빙될 경로 / 멱등 마커.
 const BRIDGE_SCRIPT_PATH = "/__preview-bridge.js"
@@ -44,12 +45,19 @@ async function writeIfChanged(path: string, content: string): Promise<boolean> {
   return true
 }
 
-/** <body> 끝(없으면 root)에 스크립트 태그 1회 주입. 이미 마커가 있으면 원본 그대로 반환. */
+/** <head> 맨 앞(없으면 <body>/root 맨 앞)에 스크립트 태그 1회 주입. 이미 첫 스크립트면 원본 그대로 반환. */
 function injectTag(html: string): string {
   const root = parse(html, { comment: true })
-  if (root.querySelector(`script[${BRIDGE_MARKER}]`)) return html
-  const body = root.querySelector("body") ?? root
-  body.insertAdjacentHTML("beforeend", SCRIPT_TAG)
+  const head = root.querySelector("head")
+  const existing = root.querySelector(`script[${BRIDGE_MARKER}]`)
+  if (existing && existing === root.querySelector("script") && (!head || existing.parentNode === head)) return html
+  if (existing) {
+    const prev = existing.previousSibling
+    if (prev instanceof TextNode && prev.isWhitespace) prev.remove()
+    existing.remove()
+  }
+  const target = head ?? root.querySelector("body") ?? root
+  target.insertAdjacentHTML("afterbegin", SCRIPT_TAG)
   return root.toString()
 }
 

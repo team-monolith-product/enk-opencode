@@ -220,7 +220,7 @@ echo "https://$JUPYTERHUB_USER.$OPENCODE_SERVE_DOMAIN/"
 
 ### 미리보기 연동 스크립트 (필수)
 
-결과물 HTML에는 미리보기 화면과 편집기를 연동하는 표준 스크립트를 항상 포함하세요. `</body>` 직전에 아래 한 줄을 넣고, 이미 있으면 그대로 둡니다.
+결과물 HTML에는 미리보기 화면과 편집기를 연동하는 표준 스크립트를 항상 포함하세요. `<head>` 바로 다음, 다른 어떤 `<script>`보다 앞에 아래 한 줄을 넣고, 이미 있으면 그대로 둡니다.
 
 ```html
 <script src="/__preview-bridge.js" data-preview-bridge></script>
@@ -228,7 +228,7 @@ echo "https://$JUPYTERHUB_USER.$OPENCODE_SERVE_DOMAIN/"
 
 - 이 스크립트는 dev 서버 루트(`/__preview-bridge.js`)에서 자동 제공됩니다. 학생에게 굳이 설명할 필요는 없습니다.
 - 정적 서버는 프로젝트 루트, 프레임워크(예: Vite/CRA)는 `public/` 폴더 기준으로 `/__preview-bridge.js` 경로가 서빙되도록 엔트리 HTML에 넣으세요.
-- 이 태그를 임의로 제거하거나 경로를 바꾸지 마세요.
+- 이 태그를 임의로 제거하거나 경로를 바꾸지 마세요. 다른 스크립트보다 뒤에 두면 그 스크립트의 에러가 미리보기에 표시되지 않습니다.
 
 ## 미리보기 핫 리로드
 
