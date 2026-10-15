@@ -10,6 +10,7 @@ import { Session } from "@/session"
 import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
 import { archiveSession } from "@/session/archive"
+import { InitialPlan } from "@/enk/initial-plan"
 import { Database, NotFoundError } from "@/storage/db"
 import { fn } from "@/util/fn"
 import { Color } from "@/util/color"
@@ -499,8 +500,8 @@ export namespace Doc {
   // participant, so a client that blipped offline exactly at the transition can catch up.
   const REPLAY_WINDOW = 15_000
   const SubmitPrompt = SessionPrompt.PromptInput.omit({ sessionID: true })
-  // "left" = the member dropped out mid-vote. They are kept on the roster (shown as 나감) and block
-  // auto-send; the requester decides via the "exclude" respond action whether to send without them.
+  // "left" is kept only so rows written before votes were judged by the current participants still
+  // parse. A departure now removes the member (and their vote) from every pending vote.
   const SubmitActorStatus = z.enum(["pending", "approved", "left"])
   export const SubmitStatus = z.enum(["pending", "sent", "cancelled", "expired", "left"]).meta({ ref: "DocSubmitStatus" })
   export type SubmitStatus = z.infer<typeof SubmitStatus>
@@ -517,7 +518,7 @@ export namespace Doc {
 
   // What a consent vote acts on once approved: send a prompt doc, reply/dismiss an AI question,
   // stop ('cancel') the session's in-flight AI response, or clear (archive) the session itself.
-  export const SubmitTargetKind = z.enum(["doc", "question", "stop", "clear"]).meta({ ref: "DocSubmitTargetKind" })
+  export const SubmitTargetKind = z.enum(["doc", "question", "stop", "clear", "build"]).meta({ ref: "DocSubmitTargetKind" })
   export type SubmitTargetKind = z.infer<typeof SubmitTargetKind>
 
   /** 지우기 합의와 다른 합의가 겹칠 때. 참가자가 서로 다른 것에 동의하는 상황을 막는다. */
@@ -538,6 +539,8 @@ export namespace Doc {
       // For 'question' votes: whether this vote sends a reply or dismisses the question — lets every
       // participant (not just the requester) see the right dialog copy.
       questionAction: z.enum(["send", "dismiss", "back"]).optional(),
+      // 'build' 투표: 실제로 보낼 글과 실행할 에이전트. 모든 참가자의 다이얼로그가 같은 내용을 보여준다.
+      preview: z.object({ text: z.string(), agent: z.string() }).optional(),
       actorID: ActorID.zod,
       status: SubmitStatus,
       actors: SubmitActorInfo.array(),
@@ -593,9 +596,7 @@ export namespace Doc {
     sessionID: SessionID.zod,
     submitID: SubmitID.zod,
     actorID: ActorID.zod,
-    // "exclude" — requester-only: send now without the members who left mid-vote. Valid only when
-    // the departed are the sole holdouts (every present member already approved).
-    action: z.enum(["approve", "cancel", "exclude"]),
+    action: z.enum(["approve", "cancel"]),
   })
 
   type SubmitRow = typeof DocSubmitTable.$inferSelect
@@ -705,12 +706,20 @@ export namespace Doc {
       if (payload?.step !== undefined) return "back"
       return payload?.reject ? "dismiss" : "send"
     })()
+    const preview = (() => {
+      if (row.target_kind !== "build") return undefined
+      const body = SubmitPrompt.safeParse(JSON.parse(row.prompt)).data
+      if (!body) return undefined
+      const text = body.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+      return { text, agent: body.agent ?? "build" }
+    })()
     return {
       submitID: row.id,
       sessionID: row.session_id,
       targetKind: SubmitTargetKind.parse(row.target_kind),
       targetID: row.target_id,
       questionAction,
+      preview,
       actorID: row.actor_id,
       status: SubmitStatus.parse(row.status),
       actors,
@@ -779,6 +788,10 @@ export namespace Doc {
       questionDraftReset(payload.requestID)
       return
     }
+    if (row.target_kind === "build") {
+      sendBuild(row)
+      return
+    }
     const body = SubmitPrompt.parse(JSON.parse(row.prompt))
     // Cycle recording happens centrally in the cycle recorder (subscribes to assistant
     // message completion), so it covers normal/shell prompts too — not just doc submits.
@@ -800,6 +813,28 @@ export namespace Doc {
               .run(),
           )
         if (body.noReply === true) return
+        return SessionPrompt.loop({ sessionID: row.session_id })
+      })
+      .catch((err) => fail(row, err))
+  }
+
+  // 최초 기획 뒤 첫 Build. 프롬프트 문서를 넘기지 않는다 — 공동 편집 중인 초안은 이 요청과 무관하다.
+  function sendBuild(row: SubmitRow) {
+    const body = SubmitPrompt.parse(JSON.parse(row.prompt))
+    const planningID = InitialPlan.buildPlanningID(body.parts)
+    if (!planningID) return fail(row, new Error("build request has no initial plan"))
+    InitialPlan.startBuild(planningID, row.session_id, () =>
+      SessionPrompt.prompt({ ...body, noReply: true, sessionID: row.session_id }),
+    )
+      .then((message) => {
+        if (message?.info?.id)
+          Database.use((db) =>
+            db
+              .update(DocSubmitTable)
+              .set({ user_message_id: message.info.id })
+              .where(eq(DocSubmitTable.id, row.id))
+              .run(),
+          )
         return SessionPrompt.loop({ sessionID: row.session_id })
       })
       .catch((err) => fail(row, err))
@@ -930,7 +965,10 @@ export namespace Doc {
     )
     for (const row of rows) {
       const next = expire(row)
-      if (next.status === "pending") schedule(next)
+      if (next.status !== "pending") continue
+      schedule(next)
+      // 재시작 뒤 다시 접속하지 않은 참여자는 퇴장과 같다. 유예 시간 안에 돌아오면 그대로 남는다.
+      for (const actor of read(next).actors) scheduleLeave(next.target_id, actor.actorID)
     }
     // GC a question's shared draft/presence when it resolves outside the vote path (e.g. the AI
     // tool times out, or a solo participant auto-replies). The vote path GCs in send() directly.
@@ -984,7 +1022,12 @@ export namespace Doc {
     // 투표가 도는 중에 전송이 통과하면 참가자들이 서로 다른 것에 동의한 셈이 된다. 진행 중인 투표가
     // 있으면 지우기를 시작할 수 없고, 지우기가 도는 동안에는 다른 투표를 시작할 수 없다.
     const busy = pending(input.sessionID)
-    if (busy && (input.targetKind === "clear" || busy.target_kind === "clear")) {
+    if (
+      busy &&
+      (input.targetKind === "clear" ||
+        busy.target_kind === "clear" ||
+        (input.targetKind === "build") !== (busy.target_kind === "build"))
+    ) {
       throw new VoteConflictError({ message: "Another consent vote is in progress" })
     }
 
@@ -1107,6 +1150,43 @@ export namespace Doc {
     })
   })
 
+  export const BuildSubmitCreateInput = StopSubmitCreateInput.extend({ text: z.string().min(1).max(2000) })
+
+  // 최초 기획을 본 팀이 "이 순서로 제작 시작" 을 고른 투표. 보낼 글과 에이전트(build)는 서버가 고정하고,
+  // 기획당 한 번만 통과한다.
+  export const buildSubmitCreate = fn(BuildSubmitCreateInput, async (input) => {
+    Session.get(input.sessionID)
+    get(input.docID)
+    const pending = Database.use((db) =>
+      db
+        .select()
+        .from(DocSubmitTable)
+        .where(
+          and(
+            eq(DocSubmitTable.session_id, input.sessionID),
+            eq(DocSubmitTable.target_kind, "build"),
+            eq(DocSubmitTable.status, "pending"),
+          ),
+        )
+        .get(),
+    )
+    if (pending) {
+      const found = expire(pending)
+      if (found.status === "pending") return read(found)
+    }
+    const planningID = await InitialPlan.buildTarget(input.sessionID)
+    return create({
+      sessionID: input.sessionID,
+      targetKind: "build",
+      targetID: input.docID,
+      docID: input.docID,
+      actorID: input.actorID,
+      names: input.names,
+      promptBlob: JSON.stringify(InitialPlan.buildPrompt(input.text, planningID)),
+      timeoutMs: input.timeoutMs,
+    })
+  })
+
   export const questionSubmitCreate = fn(QuestionSubmitCreateInput, (input) => {
     Session.get(input.sessionID)
     return create({
@@ -1158,25 +1238,6 @@ export namespace Doc {
       return state
     }
 
-    if (input.action === "exclude") {
-      // Requester-only: send now without the members who left mid-vote. A departure never triggers
-      // a send by itself — this explicit click is the only path. No-ops (returning current state)
-      // when the conditions aren't met, so a stale click after someone rejoins is harmless.
-      if (next.actor_id !== input.actorID) throw new NotFoundError({ message: "Only the requester can exclude" })
-      const state = read(next)
-      if (!state.actors.some((item) => item.status === "left")) return state
-      if (state.actors.some((item) => item.status === "pending")) return state
-      Database.use((db) =>
-        db
-          .delete(DocSubmitActorTable)
-          .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.status, "left")))
-          .run(),
-      )
-      const finished = finalize(next)
-      if (!finished) throw new NotFoundError({ message: "Doc submit not found" })
-      return finished
-    }
-
     if (actor.status !== "approved") {
       Database.use((db) =>
         db
@@ -1188,7 +1249,7 @@ export namespace Doc {
     }
 
     const state = read(next)
-    if (state.actors.some((item) => item.status !== "approved")) {
+    if (!agreed(state)) {
       cast("updated", state)
       return state
     }
@@ -1197,6 +1258,11 @@ export namespace Doc {
     if (!finished) throw new NotFoundError({ message: "Doc submit not found" })
     return finished
   })
+
+  // 남은 참여 인원 전원이 동의했는지. 0명은 동의가 아니다.
+  function agreed(state: SubmitState) {
+    return state.actors.length > 0 && state.actors.every((item) => item.status === "approved")
+  }
 
   // Mark a pending submit as sent and fire its action. Shared by the last-approval path in
   // submitRespond and by leave() when the last non-approved member drops out of the vote.
@@ -1217,6 +1283,8 @@ export namespace Doc {
     return finished
   }
 
+  // 참여 인원 기준 판단, 퇴장 쪽: 나간 사람은 결론 나지 않은 모든 투표에서 표와 함께 빠지고, 남은 인원으로
+  // 다시 판단한다. 요청자도 예외가 아니다. 남은 전원이 동의했으면 바로 보내고, 아무도 남지 않으면 보내지 않는다.
   function leave(targetID: string, actorID: ActorID) {
     const rows = Database.use((db) =>
       db
@@ -1228,37 +1296,19 @@ export namespace Doc {
     for (const row of rows) {
       const next = expire(row)
       if (next.status !== "pending") continue
-      const state = read(next)
-      const member = state.actors.find((item) => item.actorID === actorID)
-      if (!member) continue
-      // The requester walking away abandons the vote — nobody is left to own the send.
-      if (next.actor_id === actorID) {
-        const item = Database.use((db) =>
-          db
-            .update(DocSubmitTable)
-            .set({ status: "left", cancelled_by: actorID, time_updated: Date.now() })
-            .where(eq(DocSubmitTable.id, next.id))
-            .returning()
-            .get(),
-        )
-        if (!item) continue
-        done(next.id)
-        cast("left", read(item))
-        continue
-      }
-      // An approved member's consent was given explicitly — their departure changes nothing.
-      if (member.status === "approved") continue
-      // A pending member is marked "left" (kept on the roster, shown as 나감) rather than removed:
-      // a departure must never trigger a send NOR kill the vote. Whether to proceed without them
-      // is the requester's call — the "exclude" respond action. The top-up buys time to decide.
+      if (!read(next).actors.some((item) => item.actorID === actorID)) continue
       Database.use((db) =>
         db
-          .update(DocSubmitActorTable)
-          .set({ status: "left" })
+          .delete(DocSubmitActorTable)
           .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
           .run(),
       )
-      cast("updated", read(extend(next)))
+      const state = read(next)
+      if (agreed(state)) {
+        finalize(next)
+        continue
+      }
+      cast("updated", state)
     }
   }
 
@@ -1300,17 +1350,6 @@ export namespace Doc {
               time_responded: null,
             })
             .onConflictDoNothing()
-            .run(),
-        )
-        state = read(extend(next))
-        cast("updated", state)
-      } else if (existing.status === "left") {
-        // A member who dropped out came back: votable again (나감 → 대기중).
-        Database.use((db) =>
-          db
-            .update(DocSubmitActorTable)
-            .set({ status: "pending" })
-            .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
             .run(),
         )
         state = read(extend(next))

@@ -35,6 +35,12 @@ import type {
   DocSyncPullResponses,
   DocSyncPushErrors,
   DocSyncPushResponses,
+  EnkInitialPlanDeliverErrors,
+  EnkInitialPlanDeliverResponses,
+  EnkInitialPlanRetryErrors,
+  EnkInitialPlanRetryResponses,
+  EnkInitialPlanSessionStateErrors,
+  EnkInitialPlanSessionStateResponses,
   EnvFileListResponses,
   EnvFileRemoveErrors,
   EnvFileRemoveResponses,
@@ -186,6 +192,8 @@ import type {
   SessionPromptAsyncResponses,
   SessionPromptDocAdvanceErrors,
   SessionPromptDocAdvanceResponses,
+  SessionPromptDocBuildErrors,
+  SessionPromptDocBuildResponses,
   SessionPromptDocClearErrors,
   SessionPromptDocClearResponses,
   SessionPromptDocErrors,
@@ -2061,6 +2069,124 @@ export class ProjectSummary extends HeyApiClient {
   }
 }
 
+export class InitialPlan extends HeyApiClient {
+  /**
+   * Deliver the initial plan
+   *
+   * Claim the team's finalized initial plan from hackathon-rails and hand it to the plan agent in the main project session. Idempotent.
+   */
+  public deliver<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      EnkInitialPlanDeliverResponses,
+      EnkInitialPlanDeliverErrors,
+      ThrowOnError
+    >({
+      url: "/enk/initial-plan/deliver",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Initial plan state of a session
+   *
+   * Scan the whole session for the initial plan handoff and report whether build started and how the plan run ended.
+   */
+  public sessionState<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      EnkInitialPlanSessionStateResponses,
+      EnkInitialPlanSessionStateErrors,
+      ThrowOnError
+    >({
+      url: "/enk/initial-plan/session-state",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Retry the plan run
+   *
+   * Re-run the plan agent on the same initial plan handoff after it failed. No new handoff is sent.
+   */
+  public retry<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      sessionID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<EnkInitialPlanRetryResponses, EnkInitialPlanRetryErrors, ThrowOnError>(
+      {
+        url: "/enk/initial-plan/retry",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+}
+
+export class Enk extends HeyApiClient {
+  private _initialPlan?: InitialPlan
+  get initialPlan(): InitialPlan {
+    return (this._initialPlan ??= new InitialPlan({ client: this.client }))
+  }
+}
+
 export class Submit extends HeyApiClient {
   /**
    * Respond to prompt doc submit approval
@@ -2074,7 +2200,7 @@ export class Submit extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel" | "exclude"
+      action?: "approve" | "cancel"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2424,6 +2550,61 @@ export class PromptDoc extends HeyApiClient {
     })
   }
 
+  /**
+   * Create initial plan build approval
+   *
+   * Create a consent vote to start the first build after the initial plan. The server fixes the build agent and allows it once per plan.
+   */
+  public build<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      docID?: string
+      actorID?: string
+      actorIDs?: Array<string>
+      names?: {
+        [key: string]: string
+      }
+      timeoutMs?: number
+      text?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "docID" },
+            { in: "body", key: "actorID" },
+            { in: "body", key: "actorIDs" },
+            { in: "body", key: "names" },
+            { in: "body", key: "timeoutMs" },
+            { in: "body", key: "text" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionPromptDocBuildResponses,
+      SessionPromptDocBuildErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/prompt-doc/build",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   private _submit?: Submit
   get submit2(): Submit {
     return (this._submit ??= new Submit({ client: this.client }))
@@ -2443,7 +2624,7 @@ export class Submit2 extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel" | "exclude"
+      action?: "approve" | "cancel"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -5853,6 +6034,11 @@ export class OpencodeClient extends HeyApiClient {
   private _projectSummary?: ProjectSummary
   get projectSummary(): ProjectSummary {
     return (this._projectSummary ??= new ProjectSummary({ client: this.client }))
+  }
+
+  private _enk?: Enk
+  get enk(): Enk {
+    return (this._enk ??= new Enk({ client: this.client }))
   }
 
   private _session?: Session2

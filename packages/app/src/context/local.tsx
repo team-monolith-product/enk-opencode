@@ -127,6 +127,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       setStore("current", items[0]?.name)
     })
 
+    // 저장하지 않는 세션별 에이전트 덮어쓰기. 최초 기획 뒤 Build 전까지 Plan 으로 두는 데만 쓴다.
+    const [overrides, setOverrides] = createStore<Record<string, string | undefined>>({})
+
     const scope = createMemo<State | undefined>(() => {
       const session = id()
       if (!session) return store.draft
@@ -183,9 +186,25 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const agent = {
       list,
       current() {
-        return pickAgent(scope()?.agent ?? store.current)
+        const session = id()
+        return pickAgent((session ? overrides[session] : undefined) ?? scope()?.agent ?? store.current)
+      },
+      override(session: string, name: string | undefined) {
+        setOverrides(session, name)
+      },
+      // 덮어쓰기를 걷어 낸다. 덮어쓰는 동안 세션에 plan 이 저장됐다면(마지막 메시지 복원) fallback 으로 되돌린다.
+      release(session: string, fallback: string) {
+        if (!overrides[session]) return
+        batch(() => {
+          setOverrides(session, undefined)
+          if (saved.session[session]?.agent !== "plan") return
+          const item = pickAgent(fallback)
+          if (item) setSaved("session", session, "agent", item.name)
+        })
       },
       set(name: string | undefined) {
+        const session = id()
+        if (session && overrides[session]) setOverrides(session, undefined)
         const item = pickAgent(name)
         if (!item) {
           setStore("current", undefined)

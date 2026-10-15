@@ -29,6 +29,7 @@ import { DevServerRoutes } from "./routes/dev-server"
 import { GitHubRoutes } from "./routes/github"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProjectSummaryRoutes } from "./routes/project-summary"
+import { InitialPlanRoutes } from "./routes/initial-plan"
 import { ProviderRoutes } from "./routes/provider"
 import { EventRoutes } from "./routes/event"
 import { DocRoutes } from "../doc/routes"
@@ -58,6 +59,7 @@ export const InstanceRoutes = (app?: Hono) =>
     .route("/github", GitHubRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/project-summary", ProjectSummaryRoutes())
+    .route("/enk/initial-plan", InitialPlanRoutes())
     .route("/session", SessionRoutes().route("/", SessionDocRoutes()))
     .route("/doc", DocRoutes())
     .route("/permission", PermissionRoutes())

@@ -1000,6 +1000,8 @@ export function UserMessageDisplay(props: {
   const files = createMemo(() => (props.parts?.filter((p) => p.type === "file") as FilePart[]) ?? [])
 
   const markdown = createMemo(() => textPart()?.metadata?.format === "markdown")
+  const handoff = createMemo(() => textPart()?.metadata?.["enkInitialPlan"] === true)
+  const [expanded, setExpanded] = createSignal(false)
 
   const doc = createMemo(() => {
     const meta = textPart()?.metadata
@@ -1152,8 +1154,34 @@ export function UserMessageDisplay(props: {
               data-doc={doc() ? "true" : undefined}
               data-raw={raw() ? "true" : undefined}
             >
-              <Show when={mode() === "doc" ? view() : undefined} keyed fallback={content()}>
-                {(next) => <Dynamic component={next.comp} id={next.id} fallback={content()} />}
+              <Show
+                when={handoff()}
+                fallback={
+                  <Show when={mode() === "doc" ? view() : undefined} keyed fallback={content()}>
+                    {(next) => <Dynamic component={next.comp} id={next.id} fallback={content()} />}
+                  </Show>
+                }
+              >
+                <div data-slot="user-message-initial-plan" class="flex items-center gap-2">
+                  <span class="text-14-medium text-text-strong">{i18n.t("ui.message.initialPlan.title")}</span>
+                  <button
+                    type="button"
+                    data-slot="user-message-initial-plan-toggle"
+                    class="ml-auto text-12-regular text-text-weak hover:text-text-base"
+                    aria-expanded={expanded()}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setExpanded((value) => !value)
+                    }}
+                  >
+                    {i18n.t(expanded() ? "ui.message.initialPlan.collapse" : "ui.message.initialPlan.expand")}
+                  </button>
+                </div>
+                <Show when={expanded()}>
+                  <div data-slot="user-message-initial-plan-body" class="mt-2">
+                    <Markdown text={text()} cacheKey={textPart()?.id} />
+                  </div>
+                </Show>
               </Show>
             </div>
           </div>

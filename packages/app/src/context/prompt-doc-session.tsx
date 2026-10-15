@@ -26,6 +26,7 @@ import { sessionBusy } from "@/components/prompt-input/composer-state"
 import {
   connectSubmit,
   respondSubmit,
+  startBuildSubmit,
   startClearSubmit,
   startStopSubmit,
   type DocSubmitState,
@@ -74,7 +75,19 @@ export type PromptDocSession = {
    * The composer registers what it alone can do: build+send a prompt (the doc editor's submit key
    * routes here) and run the local abort side effects (queued followups, todos).
    */
-  setHandlers: (handlers: { submit?: () => void; abort?: () => void | Promise<void> }) => void
+  setHandlers: (handlers: Handlers) => void
+  /** 접속한 팀원이 나뿐인지. 혼자면 투표 대신 확인창을 먼저 띄운다. */
+  alone: () => boolean
+  /**
+   * 최초 기획 뒤 첫 Build 를 요청한다. 보낼 글과 build 에이전트는 서버가 고정하고, 팀이면 합의 투표를
+   * 띄운다. 입력창의 초안·문맥은 건드리지 않는다.
+   */
+  startInitialPlanBuild: (text: string) => Promise<boolean>
+}
+
+type Handlers = {
+  submit?: () => void
+  abort?: () => void | Promise<void>
 }
 
 const PromptDocSessionContext = createContext<PromptDocSession>()
@@ -103,7 +116,7 @@ export function createPromptDocSession(): PromptDocSession {
   const stopConfig = () => settings.keybinds.get("prompt.stop") ?? "escape"
 
   const [mode, setMode] = createSignal<PromptMode>("doc")
-  const handlers: { submit?: () => void; abort?: () => void | Promise<void> } = {}
+  const handlers: Handlers = {}
 
   const status = createMemo(() => sync.data.session_status[params.id ?? ""] ?? { type: "idle" as const })
   const working = createMemo(() => {
@@ -327,7 +340,7 @@ export function createPromptDocSession(): PromptDocSession {
       // A 'stop' vote shows no terminal screen — any resolution just closes. Stopping the response
       // and the response finishing on its own are the same end state, so there's nothing to show:
       // on approval the server already cancelled the run; a reject/expire simply does nothing.
-      if (state.targetKind === "stop") {
+      if (state.targetKind === "stop" || (state.targetKind === "build" && state.status === "sent")) {
         if (dialogOpen(state.submitID)) closeApproval()
         return
       }
@@ -354,7 +367,11 @@ export function createPromptDocSession(): PromptDocSession {
           state={approval}
           actorID={actorID}
           spectator={readonly}
-          kind={approval()?.targetKind === "stop" || approval()?.targetKind === "clear" ? (approval()!.targetKind as "stop" | "clear") : "doc"}
+          kind={
+            approval()?.targetKind === "stop" || approval()?.targetKind === "clear" || approval()?.targetKind === "build"
+              ? (approval()!.targetKind as "stop" | "clear" | "build")
+              : "doc"
+          }
           sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
           approve={() => {
             const current = approval()
@@ -396,28 +413,6 @@ export function createPromptDocSession(): PromptDocSession {
               .catch(() =>
                 showToast({
                   title: language.t("docSubmit.toast.cancelFailed"),
-                  description: language.t("common.requestFailed"),
-                }),
-              )
-          }}
-          exclude={() => {
-            const current = approval()
-            if (!current) return
-            void respondSubmit({
-              baseUrl: sdk.url,
-              directory: sdk.directory,
-              sessionID: current.sessionID,
-              submitID: current.submitID,
-              actorID,
-              action: "exclude",
-            })
-              // Through showApproval, not setApproval: responding to an already finished vote
-              // answers with its terminal state, which has to close the dialog (and clear the
-              // composer on a send) instead of leaving a dead "수락/거절" frame on screen.
-              .then((next) => showApproval(next))
-              .catch(() =>
-                showToast({
-                  title: language.t("docSubmit.toast.sendFailed"),
                   description: language.t("common.requestFailed"),
                 }),
               )
@@ -548,6 +543,46 @@ export function createPromptDocSession(): PromptDocSession {
     return true
   }
 
+  const voters = () => {
+    const actorID = doc.actorID()
+    const list = doc.actors()
+    const names: Record<string, string> = {}
+    for (const item of list) {
+      const name = item.name?.trim()
+      if (name && name !== item.actorID) names[item.actorID] = name
+    }
+    const ids = new Set([...(actorID ? [actorID] : []), ...list.map((item) => item.actorID)])
+    return { actorID, names, count: ids.size }
+  }
+
+  const alone = () => voters().count <= 1
+
+  const startInitialPlanBuild = async (text: string) => {
+    const sessionID = params.id
+    const docID = doc.docID()
+    const { actorID, names } = voters()
+    if (readonly || !sessionID || !docID || !actorID) return false
+    try {
+      const state = await startBuildSubmit({
+        baseUrl: sdk.url,
+        directory: sdk.directory,
+        sessionID,
+        docID,
+        actorID,
+        names,
+        text,
+      })
+      showApproval(state)
+      return true
+    } catch {
+      showToast({
+        title: language.t("session.initialPlan.toast.startFailed"),
+        description: language.t("common.requestFailed"),
+      })
+      return false
+    }
+  }
+
   // 지우기 확인창은 앱 셸에 있어 이 컨텍스트에 닿지 않는다. 지금 열린 세션이 자기 요청 함수를 걸어
   // 두면, 확인창이 "지우기" 를 누른 순간 동의를 먼저 구할 수 있다.
   createEffect(() => {
@@ -571,6 +606,8 @@ export function createPromptDocSession(): PromptDocSession {
       handlers.submit = next.submit
       handlers.abort = next.abort
     },
+    alone,
+    startInitialPlanBuild,
   }
 }
 

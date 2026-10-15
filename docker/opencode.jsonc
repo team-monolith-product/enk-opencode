@@ -64,6 +64,26 @@
       "enabled": true,
     },
   },
+  "agent": {
+    // 최상위 "permission": "allow" 가 내장 plan 의 편집 금지를 덮는다(last-match-wins). 최초 기획을 받은 Plan 이
+    // Build 전에 제품을 바꾸지 못하도록 다시 막는다.
+    "plan": {
+      "permission": {
+        "edit": {
+          "*": "deny",
+          ".opencode/plans/*.md": "allow",
+        },
+        "bash": "deny",
+        // explore 도 최상위 "allow" 를 물려받아 편집할 수 있으므로 서브에이전트를 아예 막는다.
+        "task": "deny",
+        "generate_image": "deny",
+        "ensure_dev_server": "deny",
+        "env_request": "deny",
+        // 미리보기 앱을 직접 조작하는 브라우저 도구도 막는다.
+        "playwright_*": "deny",
+      },
+    },
+  },
   "ensureSession": true,
   "ensureOneSession": true,
 }

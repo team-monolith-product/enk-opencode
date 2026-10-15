@@ -5,9 +5,7 @@ export type DocSubmitActor = {
   actorID: string
   name: string
   color: string
-  // "left" = dropped out mid-vote (shown as 나감). Blocks auto-send; the requester decides via the
-  // "exclude" respond action whether to send without them. Flips back to "pending" on reconnect.
-  status: "pending" | "approved" | "left"
+  status: "pending" | "approved"
 }
 
 export type DocSubmitState = {
@@ -16,12 +14,14 @@ export type DocSubmitState = {
   // 'doc' → targetID is the prompt doc id; 'question' → the question request id; 'stop' → the prompt
   // doc id whose in-flight AI response a consensus would cancel; 'clear' → the prompt doc id of the
   // session a consensus would delete (archive).
-  targetKind: "doc" | "question" | "stop" | "clear"
+  targetKind: "doc" | "question" | "stop" | "clear" | "build"
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
+  // For 'build' votes: the exact text and agent the vote would run.
+  preview?: { text: string; agent: string }
   actorID: string
-  status: "pending" | "sent" | "cancelled" | "expired" | "left"
+  status: "pending" | "sent" | "cancelled" | "expired"
   actors: DocSubmitActor[]
   cancelledBy?: DocSubmitActor
   timeoutMs: number
@@ -29,7 +29,7 @@ export type DocSubmitState = {
 }
 
 export type DocSubmitEvent = {
-  type: "created" | "updated" | "sent" | "cancelled" | "expired" | "left"
+  type: "created" | "updated" | "sent" | "cancelled" | "expired"
   state: DocSubmitState
 }
 
@@ -53,7 +53,7 @@ type RespondInput = {
   sessionID: string
   submitID: string
   actorID: string
-  action: "approve" | "cancel" | "exclude"
+  action: "approve" | "cancel"
 }
 
 type SocketInput = {
@@ -237,6 +237,16 @@ export async function startSubmit(input: StartInput) {
   })
 }
 
+// 최초 기획 뒤 첫 Build 합의. 보낼 글은 text 뿐이고 에이전트(build)와 기획 연결은 서버가 정한다.
+export async function startBuildSubmit(input: Omit<StopInput, "timeoutMs"> & { text: string }) {
+  return json(path(input, `/session/${input.sessionID}/prompt-doc/build`), {
+    docID: input.docID,
+    actorID: input.actorID,
+    names: input.names,
+    text: input.text,
+  })
+}
+
 type StopInput = {
   baseUrl: string
   directory: string
@@ -284,8 +294,7 @@ const state = (value: unknown): DocSubmitState | undefined => {
     item.status !== "pending" &&
     item.status !== "sent" &&
     item.status !== "cancelled" &&
-    item.status !== "expired" &&
-    item.status !== "left"
+    item.status !== "expired"
   )
     return
   if (!Array.isArray(item.actors)) return
@@ -302,8 +311,7 @@ const parse = (data: string) => {
       type !== "updated" &&
       type !== "sent" &&
       type !== "cancelled" &&
-      type !== "expired" &&
-      type !== "left"
+      type !== "expired"
     )
       return
     const next = state((value as { state?: unknown }).state)

@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import { upgradeWebSocket } from "hono/bun"
 import z from "zod"
+import { InitialPlan } from "../enk/initial-plan"
 import { Doc } from "./index"
 import { ActorID, DocID, SubmitID } from "./schema"
 import { SessionID } from "@/session/schema"
@@ -182,6 +183,36 @@ export const SessionDocRoutes = () =>
       },
     )
     .post(
+      "/:sessionID/prompt-doc/build",
+      describeRoute({
+        summary: "Create initial plan build approval",
+        description:
+          "Create a consent vote to start the first build after the initial plan. The server fixes the build agent and allows it once per plan.",
+        operationId: "session.promptDoc.build",
+        responses: {
+          200: {
+            description: "Submit approval state",
+            content: { "application/json": { schema: resolver(Doc.SubmitState) } },
+          },
+          ...errors(400, 404),
+          409: {
+            description: "Build already started or the plan is not ready",
+            content: { "application/json": { schema: resolver(InitialPlan.UnavailableError.Schema) } },
+          },
+        },
+      }),
+      validator("param", z.object({ sessionID: SessionID.zod })),
+      validator("json", Doc.BuildSubmitCreateInput.omit({ sessionID: true })),
+      async (c) => {
+        return c.json(
+          await Doc.buildSubmitCreate({
+            ...c.req.valid("json"),
+            sessionID: c.req.valid("param").sessionID,
+          }),
+        )
+      },
+    )
+    .post(
       "/:sessionID/prompt-doc/submit/:submitID/respond",
       describeRoute({
         summary: "Respond to prompt doc submit approval",
@@ -200,7 +231,7 @@ export const SessionDocRoutes = () =>
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod, submitID: SubmitID.zod })),
-      validator("json", z.object({ actorID: ActorID.zod, action: z.enum(["approve", "cancel", "exclude"]) })),
+      validator("json", z.object({ actorID: ActorID.zod, action: z.enum(["approve", "cancel"]) })),
       async (c) => {
         const param = c.req.valid("param")
         return c.json(
@@ -323,7 +354,7 @@ export const SessionDocRoutes = () =>
         },
       }),
       validator("param", z.object({ sessionID: SessionID.zod, submitID: SubmitID.zod })),
-      validator("json", z.object({ actorID: ActorID.zod, action: z.enum(["approve", "cancel", "exclude"]) })),
+      validator("json", z.object({ actorID: ActorID.zod, action: z.enum(["approve", "cancel"]) })),
       async (c) => {
         const param = c.req.valid("param")
         return c.json(
