@@ -153,6 +153,7 @@ export const dict = {
   "history.empty": "No saved versions yet. The first one is saved when a conversation with the AI ends.",
   "history.current": "Now",
   "history.reverted": "Rollback",
+  "history.undone": "Undone",
   "history.changes": "{{count}} files changed",
   "history.change.A": "Added",
   "history.change.M": "Changed",

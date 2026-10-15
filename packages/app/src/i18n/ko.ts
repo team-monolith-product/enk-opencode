@@ -149,6 +149,7 @@ export const dict = {
   "history.empty": "아직 저장된 버전이 없어요. AI와 대화가 끝나면 첫 버전이 저장돼요.",
   "history.current": "지금",
   "history.reverted": "되돌림",
+  "history.undone": "취소됨",
   "history.changes": "바뀐 파일 {{count}}개",
   "history.change.A": "추가",
   "history.change.M": "수정",

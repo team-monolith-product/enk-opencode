@@ -10,6 +10,7 @@ import { SubmitRequestError } from "@/components/prompt-input/doc-submit"
 import { useLanguage } from "@/context/language"
 import { readonlyViewer } from "@/context/parent-params"
 import { useSDK } from "@/context/sdk"
+import { undoneVersions } from "@/utils/history-undone"
 import { getRelativeTime } from "@/utils/time"
 import { SessionVote } from "@/utils/session-vote"
 import "./dialog-history.css"
@@ -56,6 +57,7 @@ export function DialogHistory(props: { sessionID: string }) {
   }
 
   const current = createMemo(() => state.status?.entries[0]?.sha)
+  const undone = createMemo(() => undoneVersions(state.status?.entries ?? []))
   const view = createMemo(() => {
     if (state.failed) return "failed"
     if (!state.status) return "loading"
@@ -121,6 +123,7 @@ export function DialogHistory(props: { sessionID: string }) {
                         class="history-item"
                         aria-selected={state.selected === entry.sha}
                         data-selected={state.selected === entry.sha ? "" : undefined}
+                        data-undone={undone().has(entry.sha) ? "" : undefined}
                         onClick={() => select(entry.sha)}
                       >
                         <span class="history-item-head">
@@ -132,6 +135,11 @@ export function DialogHistory(props: { sessionID: string }) {
                           </Show>
                           <Show when={entry.revert}>
                             <span class="history-badge">{language.t("history.reverted")}</span>
+                          </Show>
+                          <Show when={undone().has(entry.sha)}>
+                            <span class="history-badge" data-tone="undone">
+                              {language.t("history.undone")}
+                            </span>
                           </Show>
                         </span>
                         <span class="history-time">
