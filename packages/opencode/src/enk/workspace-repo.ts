@@ -27,6 +27,7 @@ export namespace WorkspaceRepo {
     ".opencode/",
     ".DS_Store",
     "__preview-bridge.js",
+    ".nfs*",
   ]
 
   export type Change = { status: "A" | "M" | "D"; file: string }

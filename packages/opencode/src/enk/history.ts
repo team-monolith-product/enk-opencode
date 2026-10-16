@@ -37,10 +37,22 @@ export namespace History {
     return (await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD))!
   }
 
+  async function recorded(repo: WorkspaceRepo.Repo, turn: string) {
+    if (!(await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD))) return false
+    const out = await repo.must([
+      "log",
+      "-n50",
+      `--format=%(trailers:key=${Trailer.message},valueonly,separator=)`,
+      WorkspaceRepo.HEAD,
+    ])
+    return out.split("\n").some((line) => line.trim() === turn)
+  }
+
   async function save(
     repo: WorkspaceRepo.Repo,
     input: { message: string | ((changes: Change[]) => Promise<string>); turn?: string },
   ): Promise<Saved | undefined> {
+    if (input.turn && (await recorded(repo, input.turn))) return
     const staged = await WorkspaceRepo.stage(repo)
     const parent = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
     if (!parent && staged.empty) return
@@ -51,7 +63,7 @@ export namespace History {
     return { sha, message, changes, skipped: staged.skipped }
   }
 
-  /** 대화 한 턴이 끝난 작업 폴더를 남긴다. 바뀐 게 없으면 아무것도 하지 않는다. */
+  /** 대화 한 턴이 끝난 작업 폴더를 남긴다. 바뀐 게 없거나 그 턴을 이미 남겼으면 아무것도 하지 않는다. */
   export async function commit(
     dir: string,
     input: { message: string | ((changes: Change[]) => Promise<string>); turn?: string },
