@@ -57,6 +57,7 @@ describe("History.commit", () => {
       "node_modules/pkg/index.js": "module.exports = 1",
       "__preview-bridge.js": "bridge",
       "public/__preview-bridge.js": "bridge",
+      ".nfs0000000012345678000001": "deleted while open",
     })
 
     const saved = await History.commit(work, { message: "첫 화면", turn: "msg_1" })
@@ -99,6 +100,21 @@ describe("History.commit", () => {
 
     expect(second?.changes).toEqual([{ status: "M", file: "index.html" }])
     expect((await History.list(work)).map((entry) => entry.subject)).toEqual(["바뀐 파일 1개", "하나"])
+  })
+
+  test("saves a turn only once, so the idle after a rollback is not filed under the last turn", async () => {
+    await using tmp = await tmpdir()
+    const work = await workspace(tmp.path)
+    await put(work, { "index.html": "v1" })
+    const first = await History.commit(work, { message: "처음", turn: "msg_1" })
+    await put(work, { "index.html": "v2" })
+    await History.commit(work, { message: "두번째", turn: "msg_2" })
+    await restore(work, first!.sha)
+    await put(work, { "notes.txt": "after" })
+
+    expect(await History.commit(work, { message: "두번째", turn: "msg_2" })).toBeUndefined()
+    expect((await History.list(work))[0]!.subject).toBe("되돌리기: 처음")
+    expect(await History.commit(work, { message: "세번째", turn: "msg_3" })).toMatchObject({ message: "세번째" })
   })
 
   test("follows folders that were git-initialized on their own", async () => {
