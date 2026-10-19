@@ -126,6 +126,7 @@
         "@opencode-ai/pty": "0.2.0",
         "@opencode/client": "workspace:*",
         "@opencode/plugin": "workspace:*",
+        "@opencode/plugin-jitda": "workspace:*",
         "@opencode/schema": "workspace:*",
         "@opencode/server": "workspace:*",
         "@opencode/tui": "workspace:*",

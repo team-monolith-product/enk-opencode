@@ -7,7 +7,8 @@
   "type": "module",
   "exports": {
     ".": "./index.ts",
-    "./server": "./index.ts"
+    "./server": "./index.ts",
+    "./dev-server": "./src/dev-server.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
