@@ -1,6 +1,7 @@
 import { Dialog as Kobalte } from "@kobalte/core/dialog"
 import { ComponentProps, JSXElement, Match, ParentProps, Show, Switch } from "solid-js"
 import { useI18n } from "../context/i18n"
+import { useDialogDismissible } from "../context/dialog"
 import { IconButton } from "./icon-button"
 
 export interface DialogProps extends ParentProps {
@@ -16,6 +17,7 @@ export interface DialogProps extends ParentProps {
 
 export function Dialog(props: DialogProps) {
   const i18n = useI18n()
+  const dismissible = useDialogDismissible()
   return (
     <div
       data-component="dialog"
@@ -30,6 +32,14 @@ export function Dialog(props: DialogProps) {
           classList={{
             ...(props.classList ?? {}),
             [props.class ?? ""]: !!props.class,
+          }}
+          // 닫을 수 없는 다이얼로그면 Kobalte 의 바깥 상호작용(오버레이·토스트 클릭, 포커스 이탈)과
+          // Escape 닫힘을 막는다. 닫기 버튼은 이 경로가 아니어서 그대로 동작한다.
+          onInteractOutside={(e) => {
+            if (!dismissible()) e.preventDefault()
+          }}
+          onEscapeKeyDown={(e) => {
+            if (!dismissible()) e.preventDefault()
           }}
           onOpenAutoFocus={(e) => {
             const target = e.currentTarget as HTMLElement | null

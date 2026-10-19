@@ -15,12 +15,21 @@ import { Dialog as Kobalte } from "@kobalte/core/dialog"
 
 type DialogElement = () => JSX.Element
 
+export type DialogOptions = {
+  /**
+   * false 면 바깥(오버레이) 클릭·Escape 로 닫지 않고, 닫기 버튼이나 dialog.close() 로만 닫는다.
+   * 실수로 닫으면 되돌릴 수 없는 작업(저장 안 된 편집 등)을 담는 다이얼로그용. 기본 true.
+   */
+  dismissible?: boolean
+}
+
 type Active = {
   id: string
   node: JSX.Element
   dispose: () => void
   owner: Owner
   onClose?: () => void
+  dismissible: boolean
   setClosing: (closing: boolean) => void
 }
 
@@ -63,6 +72,7 @@ function init() {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
+      if (!active()?.dismissible) return
       close()
       event.preventDefault()
       event.stopPropagation()
@@ -72,7 +82,7 @@ function init() {
     onCleanup(() => window.removeEventListener("keydown", onKeyDown, true))
   })
 
-  const show = (element: DialogElement, owner: Owner, onClose?: () => void) => {
+  const show = (element: DialogElement, owner: Owner, onClose?: () => void, options?: DialogOptions) => {
     // Immediately dispose any existing dialog when showing a new one
     const current = active()
     if (current) {
@@ -89,6 +99,7 @@ function init() {
     const id = Math.random().toString(36).slice(2)
     let dispose: (() => void) | undefined
     let setClosing: ((closing: boolean) => void) | undefined
+    const dismissible = options?.dismissible ?? true
 
     const node = runWithOwner(owner, () =>
       createRoot((d: () => void) => {
@@ -105,7 +116,7 @@ function init() {
             }}
           >
             <Kobalte.Portal>
-              <Kobalte.Overlay data-component="dialog-overlay" onClick={close} />
+              <Kobalte.Overlay data-component="dialog-overlay" onClick={() => dismissible && close()} />
               {element()}
             </Kobalte.Portal>
           </Kobalte>
@@ -115,7 +126,7 @@ function init() {
 
     if (!dispose || !setClosing) return
 
-    setActive({ id, node, dispose, owner, onClose, setClosing })
+    setActive({ id, node, dispose, owner, onClose, dismissible, setClosing })
   }
 
   return {
@@ -152,12 +163,21 @@ export function useDialog() {
     get active() {
       return ctx.active
     },
-    show(element: DialogElement, onClose?: () => void) {
+    show(element: DialogElement, onClose?: () => void, options?: DialogOptions) {
       const base = ctx.active?.owner ?? owner
-      ctx.show(element, base, onClose)
+      ctx.show(element, base, onClose, options)
     },
     close() {
       ctx.close()
     },
   }
+}
+
+/**
+ * 지금 열린 다이얼로그를 바깥 클릭·Escape 로 닫아도 되는지. Dialog 컴포넌트가 Kobalte 의 바깥
+ * 상호작용 닫힘을 막을 때 읽는다(Provider 밖이면 기본 true).
+ */
+export function useDialogDismissible() {
+  const ctx = useContext(Context)
+  return () => ctx?.active?.dismissible ?? true
 }
