@@ -1097,4 +1097,54 @@ describe("tool.bash truncation", () => {
       },
     })
   })
+
+  test.skipIf(process.platform === "win32")("large output keeps the tail and spills the whole output to a file", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const lineCount = 200_000
+        const result = await bash.execute(
+          {
+            command: `seq ${lineCount}`,
+            description: "Generate a large output",
+          },
+          ctx,
+        )
+        mustTruncate(result)
+        expect(result.output).toContain(String(lineCount))
+        expect(result.output).not.toContain("\n1\n2\n3\n")
+        expect(Buffer.byteLength(result.output, "utf-8")).toBeLessThan(Truncate.MAX_BYTES + 1024)
+
+        const saved = await Filesystem.readText((result.metadata as { outputPath: string }).outputPath)
+        const lines = saved.trim().split(/\r?\n/)
+        expect(lines.length).toBe(lineCount)
+        expect(lines[lineCount - 1]).toBe(String(lineCount))
+      },
+    })
+  })
+
+  test("spilled output and its file have .env values redacted", async () => {
+    await using tmp = await tmpdir()
+    const secret = "sk-spill-9f2b1c7d4e8a"
+    await Bun.write(path.join(tmp.path, ".env"), `OPENAI_API_KEY=${secret}\n`)
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const code = `const s=Bun.argv[1];for(let i=0;i<20000;i++)console.log(i+" "+s)`
+        const command = `${bin} -e ${evalarg(code)} ${secret}`
+        const result = await bash.execute(
+          { command: PS.has(sh()) ? `& ${command}` : command, description: "Print secret lines" },
+          ctx,
+        )
+        mustTruncate(result)
+        expect(result.output).not.toContain(secret)
+        expect(result.output).toContain("[redacted]")
+        const saved = await Filesystem.readText((result.metadata as { outputPath: string }).outputPath)
+        expect(saved).not.toContain(secret)
+        expect(saved.trim().split(/\r?\n/).length).toBe(20000)
+      },
+    })
+  })
 })

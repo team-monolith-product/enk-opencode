@@ -1,6 +1,7 @@
 import z from "zod"
 import os from "os"
 import { spawn } from "child_process"
+import { createWriteStream, mkdirSync } from "node:fs"
 import { Tool } from "./tool"
 import path from "path"
 import DESCRIPTION from "./bash.txt"
@@ -18,6 +19,9 @@ import { Sandbox } from "@/sandbox"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncate"
+import { TRUNCATION_DIR } from "./truncation-dir"
+import { ToolID } from "./schema"
+import { Secret } from "@/util/secret"
 import { Plugin } from "@/plugin"
 import { EnvFile } from "@/util/env-file"
 import { ChildEnv } from "@/util/child-env"
@@ -27,6 +31,7 @@ const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 
 // Drain window after the process exits, in case a backgrounded child holds the
 // stdout pipe open and "close" never fires.
 const OUTPUT_DRAIN_MS = 100
+const SPILL_PENDING_LIMIT = 64 * 1024
 const PS = new Set(["powershell", "pwsh"])
 const CWD = new Set(["cd", "push-location", "set-location"])
 const FILES = new Set([
@@ -299,7 +304,54 @@ async function collect(root: Node, cwd: string, ps: boolean, shell: string): Pro
 
 function preview(text: string) {
   if (text.length <= MAX_METADATA_LENGTH) return text
-  return text.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+  return "...\n\n" + text.slice(-MAX_METADATA_LENGTH)
+}
+
+function tail(text: string, maxLines: number, maxBytes: number) {
+  const lines = text.split("\n")
+  if (lines.length <= maxLines && Buffer.byteLength(text, "utf-8") <= maxBytes) return text
+  const out: string[] = []
+  let bytes = 0
+  for (let i = lines.length - 1; i >= 0 && out.length < maxLines; i--) {
+    const size = Buffer.byteLength(lines[i], "utf-8") + (out.length > 0 ? 1 : 0)
+    if (bytes + size > maxBytes) {
+      if (out.length === 0) {
+        const buf = Buffer.from(lines[i], "utf-8")
+        let start = Math.max(0, buf.length - maxBytes)
+        while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++
+        out.unshift(buf.subarray(start).toString("utf-8"))
+      }
+      break
+    }
+    out.unshift(lines[i])
+    bytes += size
+  }
+  return out.join("\n")
+}
+
+function spill(values: string[]) {
+  mkdirSync(TRUNCATION_DIR, { recursive: true })
+  const file = path.join(TRUNCATION_DIR, ToolID.ascending())
+  const sink = createWriteStream(file)
+  let pending = ""
+  return {
+    file,
+    write(text: string) {
+      pending += text
+      const cut = pending.length > SPILL_PENDING_LIMIT ? pending.length : pending.lastIndexOf("\n") + 1
+      if (cut === 0) return
+      sink.write(Secret.apply(pending.slice(0, cut), values))
+      pending = pending.slice(cut)
+    },
+    end() {
+      if (pending) sink.write(Secret.apply(pending, values))
+      pending = ""
+      return new Promise<void>((resolve) => {
+        sink.on("error", () => resolve())
+        sink.end(() => resolve())
+      })
+    },
+  }
 }
 
 async function parse(command: string, ps: boolean) {
@@ -399,7 +451,14 @@ async function run(
   ctx: Tool.Context,
 ) {
   const proc = await launch(input.shell, input.name, input.command, input.cwd, input.env)
-  let output = ""
+  const limits = await Truncate.limits()
+  const values = await Secret.values(Instance.directory)
+  const keep = limits.maxBytes * 2
+  const chunks: { text: string; size: number }[] = []
+  let used = 0
+  let full = ""
+  let last = ""
+  let sink: ReturnType<typeof spill> | undefined
 
   ctx.metadata({
     metadata: {
@@ -408,11 +467,28 @@ async function run(
     },
   })
 
-  const append = (chunk: Buffer) => {
-    output += chunk.toString()
+  const append = (data: Buffer) => {
+    const chunk = data.toString()
+    const size = Buffer.byteLength(chunk, "utf-8")
+    chunks.push({ text: chunk, size })
+    used += size
+    while (used > keep && chunks.length > 1) used -= chunks.shift()!.size
+    last = preview(last + chunk)
+
+    if (sink) {
+      sink.write(chunk)
+    } else {
+      full += chunk
+      if (Buffer.byteLength(full, "utf-8") > limits.maxBytes) {
+        sink = spill(values)
+        sink.write(full)
+        full = ""
+      }
+    }
+
     ctx.metadata({
       metadata: {
-        output: preview(output),
+        output: last,
         description: input.description,
       },
     })
@@ -479,18 +555,35 @@ async function run(
   const metadata: string[] = []
   if (expired) metadata.push(`bash tool terminated command after exceeding timeout ${input.timeout} ms`)
   if (aborted) metadata.push("User aborted the command")
-  if (metadata.length > 0) {
-    output += "\n\n<bash_metadata>\n" + metadata.join("\n") + "\n</bash_metadata>"
+  const extra = metadata.length > 0 ? "\n\n<bash_metadata>\n" + metadata.join("\n") + "\n</bash_metadata>" : ""
+
+  if (!sink) {
+    return {
+      title: input.description,
+      metadata: {
+        output: last,
+        exit: proc.exitCode,
+        description: input.description,
+      },
+      output: full + extra,
+    }
   }
 
+  await sink.end()
+  const end = Secret.apply(tail(chunks.map((item) => item.text).join(""), limits.maxLines, limits.maxBytes), values)
   return {
     title: input.description,
     metadata: {
-      output: preview(output),
+      output: last,
       exit: proc.exitCode,
       description: input.description,
+      truncated: true,
+      outputPath: sink.file,
     },
-    output,
+    output:
+      `...output truncated...\n\nThe tool call succeeded but the output was truncated. Full output saved to: ${sink.file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.\n\n` +
+      end +
+      extra,
   }
 }
 
