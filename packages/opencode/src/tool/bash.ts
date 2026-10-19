@@ -449,7 +449,11 @@ async function run(
     description: string
   },
   ctx: Tool.Context,
-) {
+): Promise<{
+  title: string
+  metadata: { output: string; exit: number | null; description: string; truncated?: boolean; outputPath?: string }
+  output: string
+}> {
   const proc = await launch(input.shell, input.name, input.command, input.cwd, input.env)
   const limits = await Truncate.limits()
   const values = await Secret.values(Instance.directory)
