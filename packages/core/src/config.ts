@@ -20,6 +20,7 @@ import { ConfigWatch } from "./config/watch.js"
 import { WellKnown } from "./wellknown.js"
 import { AppProcess } from "@opencode/util/process"
 import { ChildProcess } from "effect/process"
+import { ModelFallback } from "./jitda/model-fallback.js"
 
 export function latest<K extends keyof Info>(entries: readonly Entry[], key: K): Info[K] | undefined {
   return entries.findLast((entry): entry is Document => entry.type === "document" && entry.info[key] !== undefined)
@@ -243,6 +244,14 @@ export const layer = (options?: Options) =>
               )
             : []
 
+        const jitdaText = ModelFallback.defaultsConfig()
+        const jitda = jitdaText
+          ? yield* parseInfo(jitdaText, "ENK_AI_MODEL").pipe(
+              Effect.map((info) => (info ? [new Document({ type: "document", info })] : [])),
+              Effect.orDie,
+            )
+          : []
+
         // Managed settings load last so they override everything, and MDM
         // preferences outrank the system directory as in V1. Policies evaluate
         // in reverse load order, so managed policies split off and load first
@@ -281,6 +290,7 @@ export const layer = (options?: Options) =>
         return [
           ...managedPolicies,
           ...(yield* loadWellknown().pipe(Effect.orDie)),
+          ...jitda,
           ...globalSupplementary,
           ...explicit,
           ...direct,

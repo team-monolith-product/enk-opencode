@@ -1,6 +1,8 @@
 export * as SessionRunnerLLM from "./llm.js"
 
-import { Message } from "@opencode/ai"
+import { AIError, Message, isContextOverflowFailure } from "@opencode/ai"
+import { Model } from "@opencode/schema/model"
+import { Provider } from "@opencode/schema/provider"
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
 import { Cause, Effect, Exit, FiberMap, Layer, Stream } from "effect"
 import { Database } from "../../database/database.js"
@@ -32,6 +34,15 @@ import { ToolOutput } from "../../tool-output.js"
 import { Plugin } from "../../plugin.js"
 import { MAX_STEPS_PROMPT } from "./max-steps.js"
 import { CostQuota } from "../../jitda/cost-quota.js"
+import { ModelFallback } from "../../jitda/model-fallback.js"
+
+// 재시도로 못 고친 모델 오류만 다음 모델로 넘긴다. 사용자 중단과 컨텍스트 초과는 넘기지 않는다.
+const fallbackable = (cause: Cause.Cause<unknown>) => {
+  if (Cause.hasInterruptsOnly(cause)) return false
+  const error = Cause.squash(cause)
+  if (error instanceof AIError) return !isContextOverflowFailure(error)
+  return error instanceof StepFailedError && error.error.type !== "aborted"
+}
 
 const CONTINUE_AFTER_INCOMPLETE_STREAM =
   "The previous response was interrupted. Continue from where you left off without repeating completed content."
@@ -65,6 +76,7 @@ const layer = Layer.effect(
       let continuing = input.continuation !== undefined
       let step = input.continuation?.step ?? 1
       let entering = true
+      const turn = { model: 0 }
       const promotable = input.promotable ?? "input"
       if (!force && !continuing) {
         const pending = yield* SessionInbox.nextPromotable(db, sessionID, "input")
@@ -188,7 +200,10 @@ const layer = Layer.effect(
                     yield* FiberMap.run(titles, sessionID, title.generate(sessionID), {
                       onlyIfMissing: true,
                     })
-                  if (promoted > 0) step = 1
+                  if (promoted > 0) {
+                    step = 1
+                    turn.model = 0
+                  }
                   return { _tag: "Ready" as const, context: yield* context.load(selected) }
                 }),
               )
@@ -201,7 +216,7 @@ const layer = Layer.effect(
       while (true) {
         const next = yield* advanceToStep()
         if (next._tag !== "Ready") return next
-        continuing = yield* runStep(next.context, step)
+        continuing = yield* runStep(next.context, step, turn)
         step++
         force = false
         entering = false
@@ -215,11 +230,43 @@ const layer = Layer.effect(
       return selected
     })
 
+    const fallbackChain = Effect.fn("SessionRunner.fallbackChain")(function* (loaded: SessionContext.Loaded) {
+      const primary = loaded.model
+      const chain = [primary]
+      for (const item of ModelFallback.candidates({ providerID: primary.ref.providerID, modelID: primary.ref.id })) {
+        const resolve = (variant?: string) =>
+          context.resolveModel({
+            ...loaded.session,
+            model: Model.Ref.make({
+              providerID: Provider.ID.make(item.providerID),
+              id: Model.ID.make(item.modelID),
+              ...(variant ? { variant: Model.VariantID.make(variant) } : {}),
+            }),
+          })
+        const resolved = yield* resolve(item.variant ?? primary.ref.variant).pipe(
+          Effect.catch(() => resolve()),
+          Effect.orElseSucceed(() => undefined),
+        )
+        if (
+          resolved &&
+          !chain.some(
+            (existing) => existing.ref.providerID === resolved.ref.providerID && existing.ref.id === resolved.ref.id,
+          )
+        )
+          chain.push(resolved)
+      }
+      return chain
+    })
+
     /** Owns logical Step policy; each attempt owns its streaming, tools, and durable settlement. */
-    const runStep = Effect.fn("SessionRunner.runStep")(function* (first: SessionContext.Loaded, step: number) {
+    const runStep = Effect.fn("SessionRunner.runStep")(function* (
+      first: SessionContext.Loaded,
+      step: number,
+      turn: { model: number },
+    ) {
       const sessionID = first.session.id
       let assistantMessageID = SessionMessage.ID.create()
-      const retry = yield* SessionRunnerRetry.make(bus, sessionID)
+      let retry = yield* SessionRunnerRetry.make(bus, sessionID)
       let initial: SessionContext.Loaded | undefined = first
       let recoverOverflow = true
       let recoverContinuation = true
@@ -237,10 +284,20 @@ const layer = Layer.effect(
           assistantMessageID = SessionMessage.ID.create()
           continue
         }
+        let resolvedChain: Array<SessionContext.Loaded["model"]> | undefined
+        const chain = Effect.suspend(() =>
+          resolvedChain
+            ? Effect.succeed(resolvedChain)
+            : fallbackChain(loaded).pipe(Effect.tap((value) => Effect.sync(() => (resolvedChain = value)))),
+        )
+        const index = turn.model === 0 ? 0 : Math.min(turn.model, (yield* chain).length - 1)
+        const model = index === 0 ? loaded.model : (yield* chain)[index]
+        const canFallback = chain.pipe(Effect.map((value) => index < value.length - 1))
+        const retries = index === 0 && ModelFallback.degraded(sessionID) ? 0 : ModelFallback.retries()
         const stepLimitReached = loaded.agent.info.steps !== undefined && step >= loaded.agent.info.steps
         const transcript = SessionModelRequest.baseTranscript({
           agent: loaded.agent.info,
-          model: loaded.model,
+          model,
           tools: loaded.tools,
           initial: loaded.initial,
           messages: loaded.messages,
@@ -248,7 +305,7 @@ const layer = Layer.effect(
         const prepared = yield* context.request.primary({
           session: loaded.session,
           agent: loaded.agent.id,
-          model: loaded.model,
+          model,
           tools: loaded.tools,
           system: transcript.system,
           messages: stepLimitReached
@@ -259,31 +316,51 @@ const layer = Layer.effect(
           webSocket: "session",
           inputTokens: SessionCompaction.estimatePrompt(loaded),
         })
-        const outcome = yield* steps.attempt({
-          isLocationClosed: lifecycle.isClosed,
-          sessionID,
-          assistantMessageID,
-          agent: loaded.agent.id,
-          model: loaded.model,
-          prepared,
-          retry: (cause, error, proposed) =>
-            retry.decide({
-              cause,
-              error,
-              agent: loaded.agent.id,
-              model: loaded.model.ref,
-              hook: prepared.retry,
-              retry: proposed,
-            }),
-          recoverContinuation,
-          recoverOverflow: Effect.suspend(() =>
-            recoverOverflow
-              ? compaction
-                  .compact({ reason: "overflow", context: loaded })
-                  .pipe(Effect.map((result) => result.status === "completed"))
-              : Effect.succeed(false),
-          ),
-        })
+        const attempted = yield* steps
+          .attempt({
+            isLocationClosed: lifecycle.isClosed,
+            sessionID,
+            assistantMessageID,
+            agent: loaded.agent.id,
+            model,
+            prepared,
+            retry: (cause, error, proposed) =>
+              retry
+                .decide({
+                  cause,
+                  error,
+                  agent: loaded.agent.id,
+                  model: model.ref,
+                  hook: prepared.retry,
+                  retry: proposed,
+                })
+                .pipe(
+                  Effect.flatMap((decision) =>
+                    decision.retry && decision.attempt - 1 > retries
+                      ? canFallback.pipe(Effect.map((fallback) => (fallback ? { retry: false as const } : decision)))
+                      : Effect.succeed(decision),
+                  ),
+                ),
+            recoverContinuation,
+            recoverOverflow: Effect.suspend(() =>
+              recoverOverflow
+                ? compaction
+                    .compact({ reason: "overflow", context: loaded })
+                    .pipe(Effect.map((result) => result.status === "completed"))
+                : Effect.succeed(false),
+            ),
+          })
+          .pipe(Effect.exit)
+        if (Exit.isFailure(attempted)) {
+          if (!fallbackable(attempted.cause) || !(yield* canFallback)) return yield* Effect.failCause(attempted.cause)
+          yield* Effect.logWarning("model failed, falling back", { sessionID, model: model.ref })
+          ModelFallback.record(sessionID)
+          turn.model = index + 1
+          retry = yield* SessionRunnerRetry.make(bus, sessionID)
+          assistantMessageID = SessionMessage.ID.create()
+          continue
+        }
+        const outcome = attempted.value
         const completed = yield* SessionStep.Outcome.$match(outcome, {
           Completed: (outcome) => Effect.succeed(outcome.needsContinuation),
           Retry: (outcome) =>
@@ -339,7 +416,10 @@ const layer = Layer.effect(
             recoverContinuation = false
           }),
         })
-        if (completed !== undefined) return completed
+        if (completed !== undefined) {
+          if (index === 0) ModelFallback.recovered(sessionID)
+          return completed
+        }
       }
     })
 

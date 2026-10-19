@@ -7,6 +7,7 @@ import { Provider } from "@opencode/schema/provider"
 import { Context, Effect, Layer, Schema } from "effect"
 import { ModelResolver } from "../../model-resolver.js"
 import { SessionSchema } from "../schema.js"
+import { ModelFallback } from "../../jitda/model-fallback.js"
 
 export class ModelNotSelectedError extends Schema.TaggedError<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -76,8 +77,15 @@ const layer = Layer.effect(
         // Location plugins populate and filter the catalog asynchronously during layer startup.
         if (!session.model) {
           const resolved = yield* resolver.resolve()
-          if (resolved) return resolved
-          return yield* new ModelNotSelectedError({ sessionID: session.id })
+          if (!resolved) return yield* new ModelNotSelectedError({ sessionID: session.id })
+          const variant = ModelFallback.defaultVariant(session)
+          if (!variant || resolved.ref.variant) return resolved
+          return yield* resolver
+            .resolve(Model.Ref.make({ ...resolved.ref, variant: Model.VariantID.make(variant) }))
+            .pipe(
+              Effect.map((value) => value ?? resolved),
+              Effect.catch(() => Effect.succeed(resolved)),
+            )
         }
         const selected = (yield* available()).find(
           (model) => model.providerID === session.model?.providerID && model.id === session.model.id,
