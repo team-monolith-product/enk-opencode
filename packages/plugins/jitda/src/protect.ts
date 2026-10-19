@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode/plugin"
 import { Env } from "./env"
 import { Guard } from "./guard"
+import { Sandbox } from "./sandbox"
 import { Secret } from "./secret"
 
 type Context = Plugin.Context
@@ -79,6 +80,7 @@ export async function start(ctx: Context) {
       const env: Record<string, string | undefined> = { ...Env.mask({ base: event.env as NodeJS.ProcessEnv }) }
       for (const key of keys) env[key] = undefined
       for (const [key, value] of Object.entries(env)) if (value === undefined) event.env[key] = undefined
+      if (!/(^|[\\/])(cmd|powershell|pwsh)(\.exe)?$/i.test(event.shell)) event.shell = Sandbox.wrap(event.shell)
     }),
     await ctx.tool.hook("execute.after", async (event) => {
       if (event.status !== "completed") return

@@ -2,6 +2,7 @@ import type { ServerProcess } from "@opencode/server/process"
 import { Effect } from "effect"
 import { Headers, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { randomUUID } from "node:crypto"
+import { JitdaAssets } from "./jitda-assets"
 
 // JupyterHub singleuser 로 뜰 때의 경로 prefix, Hub OAuth, activity 보고, CSP.
 // 브라우저 -> CHP(/user/<name>/) -> pod:8888 이고 CHP 는 인증 없이 라우팅만 하므로 여기서 사용자를 검증한다.
@@ -184,6 +185,10 @@ export function wrap(inner: ServerProcess.Transform, password: string): ServerPr
           if (!(yield* sessionValid(request))) return login(request, `${url.pathname}${url.search}`)
           request = request.modify({ headers: Headers.set(request.headers, "authorization", basic) })
         }
+      }
+      if (url.pathname === JitdaAssets.PATH) {
+        touch()
+        return yield* JitdaAssets.handle(request, basic)
       }
       const response = yield* served.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request))
       if (tracked(request, response)) touch()

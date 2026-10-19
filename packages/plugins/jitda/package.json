@@ -9,7 +9,8 @@
     ".": "./index.ts",
     "./server": "./index.ts",
     "./dev-server": "./src/dev-server.ts",
-    "./env": "./src/env.ts"
+    "./env": "./src/env.ts",
+    "./assets": "./src/assets.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

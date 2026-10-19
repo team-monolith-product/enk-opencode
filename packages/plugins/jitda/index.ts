@@ -4,8 +4,10 @@ import { DevServerTool } from "./src/dev-server-tool"
 import { EnvRequest } from "./src/env-request"
 import { GitHub } from "./src/github"
 import { Image } from "./src/image"
+import { Locale } from "./src/locale"
 import { ProjectSummary } from "./src/project-summary"
 import { Protect } from "./src/protect"
+import { Session } from "./src/session"
 
 export default Plugin.define({
   id: "jitda",
@@ -19,6 +21,8 @@ export default Plugin.define({
       await Protect.start(ctx),
       await GitHub.start(ctx),
       await ProjectSummary.start(ctx),
+      await Locale.start(ctx),
+      await Session.start(ctx),
     ]
 
     return async () => {
