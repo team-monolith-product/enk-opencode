@@ -454,9 +454,9 @@ async function run(
   metadata: { output: string; exit: number | null; description: string; truncated?: boolean; outputPath?: string }
   output: string
 }> {
-  const proc = await launch(input.shell, input.name, input.command, input.cwd, input.env)
   const limits = await Truncate.limits()
   const values = await Secret.values(Instance.directory)
+  const proc = await launch(input.shell, input.name, input.command, input.cwd, input.env)
   const keep = limits.maxBytes * 2
   const chunks: { text: string; size: number }[] = []
   let used = 0
