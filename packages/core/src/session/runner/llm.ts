@@ -2,7 +2,7 @@ export * as SessionRunnerLLM from "./llm.js"
 
 import { Message } from "@opencode/ai"
 import { and, desc, eq, inArray, sql } from "drizzle-orm"
-import { Cause, Effect, Exit, FiberMap, Layer } from "effect"
+import { Cause, Effect, Exit, FiberMap, Layer, Stream } from "effect"
 import { Database } from "../../database/database.js"
 import { Bus } from "../../bus.js"
 import { LocationLifecycle } from "../../location-lifecycle.js"
@@ -31,6 +31,7 @@ import { SessionStep } from "./step.js"
 import { ToolOutput } from "../../tool-output.js"
 import { Plugin } from "../../plugin.js"
 import { MAX_STEPS_PROMPT } from "./max-steps.js"
+import { CostQuota } from "../../jitda/cost-quota.js"
 
 const CONTINUE_AFTER_INCOMPLETE_STREAM =
   "The previous response was interrupted. Continue from where you left off without repeating completed content."
@@ -53,6 +54,10 @@ const layer = Layer.effect(
     const steps = yield* SessionStep.make
     // Title generation starts once input is visible and must not delay model execution.
     const titles = yield* FiberMap.make<SessionSchema.ID, void, never>()
+    yield* bus.subscribe([SessionEvent.Step.Ended, SessionEvent.Step.Failed]).pipe(
+      Stream.runForEach((event) => Effect.sync(() => CostQuota.consume(event.data.cost ?? 0))),
+      Effect.forkScoped,
+    )
 
     const drain = Effect.fn("SessionRunner.drain")(function* (input: Parameters<Interface["drain"]>[0]) {
       const sessionID = input.sessionID
@@ -174,7 +179,12 @@ const layer = Layer.effect(
                   )
                   // A control admitted during context preparation owns this boundary.
                   if (promoted === undefined) return undefined
-                  if (promoted > 0 && !selected.session.parentID && SessionTitle.isUntitled(selected.session))
+                  if (
+                    promoted > 0 &&
+                    !selected.session.parentID &&
+                    SessionTitle.isUntitled(selected.session) &&
+                    !(yield* Effect.promise(() => CostQuota.check()))?.exhausted
+                  )
                     yield* FiberMap.run(titles, sessionID, title.generate(sessionID), {
                       onlyIfMissing: true,
                     })
@@ -217,6 +227,10 @@ const layer = Layer.effect(
         // Reuse boundary preparation once; retries refresh context without delivering more input.
         const loaded = initial ?? (yield* prepareContext(sessionID).pipe(Effect.flatMap(context.load)))
         initial = undefined
+        const refused = yield* Effect.promise(() =>
+          CostQuota.refusal(CostQuota.locale(loaded.messages.findLast((m) => m.type === "user")?.metadata?.locale)),
+        )
+        if (refused) return yield* new StepFailedError({ error: { type: "cost-quota", message: refused } })
         const compacted = yield* compaction.compact({ reason: "auto", context: loaded })
         if (compacted.status === "failed") return yield* new StepFailedError({ error: compacted.error })
         if (compacted.status === "completed") {
