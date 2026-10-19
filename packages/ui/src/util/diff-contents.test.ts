@@ -30,6 +30,13 @@ describe("diffContents", () => {
     expect(diffContents({ diff: deleted })).toEqual({ before: "old\nfile\n", after: "" })
   })
 
+  test("ignores malformed persisted patches", () => {
+    const patch =
+      "diff --git a/a.ts b/a.ts\nindex ff4ceb2..65a1de0 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1,3 @@\n keep\n+add\n same\r"
+    expect(diffContents({ patch })).toEqual({ before: "", after: "" })
+    expect(diffContents({ patch: "@@ -1,2 +1,2 @@\n a\nGARBAGE\n+b\n" })).toEqual({ before: "", after: "" })
+  })
+
   test("returns empty sides when nothing is stored", () => {
     expect(diffContents(undefined)).toEqual({ before: "", after: "" })
     expect(diffContents({ patch: "" })).toEqual({ before: "", after: "" })

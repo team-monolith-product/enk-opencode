@@ -12,10 +12,18 @@ export type DiffContents = {
   after: string
 }
 
-const LIMIT = 200
+const LIMIT = 16
 const cache = new Map<string, DiffContents>()
 
 function rebuild(patch: string): DiffContents {
+  try {
+    return lines(patch)
+  } catch {
+    return { before: "", after: "" }
+  }
+}
+
+function lines(patch: string): DiffContents {
   const before: string[] = []
   const after: string[] = []
   for (const file of parsePatch(patch)) {
@@ -25,8 +33,9 @@ function rebuild(patch: string): DiffContents {
         const op = line[0]
         const text = line.slice(1)
         if (op === "\\") {
-          if (prev !== "+") before[before.length - 1] = before[before.length - 1].replace(/\n$/, "")
-          if (prev !== "-") after[after.length - 1] = after[after.length - 1].replace(/\n$/, "")
+          if (prev !== "+" && before.length > 0)
+            before[before.length - 1] = before[before.length - 1].replace(/\n$/, "")
+          if (prev !== "-" && after.length > 0) after[after.length - 1] = after[after.length - 1].replace(/\n$/, "")
           continue
         }
         if (op !== "+") before.push(text + "\n")
