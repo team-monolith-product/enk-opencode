@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { Headers, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { randomUUID } from "node:crypto"
 import { JitdaAssets } from "./jitda-assets"
+import { JitdaDoc } from "./jitda-doc"
 
 // JupyterHub singleuser 로 뜰 때의 경로 prefix, Hub OAuth, activity 보고, CSP.
 // 브라우저 -> CHP(/user/<name>/) -> pod:8888 이고 CHP 는 인증 없이 라우팅만 하므로 여기서 사용자를 검증한다.
@@ -190,6 +191,10 @@ export function wrap(inner: ServerProcess.Transform, password: string): ServerPr
         touch()
         return yield* JitdaAssets.handle(request, basic)
       }
+      if (JitdaDoc.matches(url.pathname)) {
+        if (!url.pathname.endsWith("/event")) touch()
+        return yield* JitdaDoc.handle(request, basic)
+      }
       const response = yield* served.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request))
       if (tracked(request, response)) touch()
       return response
@@ -266,8 +271,7 @@ export function observe(busy: Set<string>, event: { type?: string; data?: any })
   if (busy.size > 0) touch()
 }
 
-async function watch(server: string, password: string, busy: Set<string>) {
-  const auth = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`
+async function watch(server: string, auth: string, handlers: Set<(event: any) => void>) {
   while (true) {
     const res = await fetch(`${server}/api/event`, { headers: { authorization: auth } }).catch(() => undefined)
     if (res?.ok && res.body) {
@@ -286,25 +290,41 @@ async function watch(server: string, password: string, busy: Set<string>) {
               .join("\n")
             buffer = buffer.slice(end + 2)
             if (data) {
+              let event: unknown
               try {
-                observe(busy, JSON.parse(data))
+                event = JSON.parse(data)
               } catch {}
+              if (event)
+                for (const handler of handlers) {
+                  try {
+                    handler(event)
+                  } catch (error) {
+                    console.warn("[jitda] event handler failed", String(error))
+                  }
+                }
             }
             end = buffer.indexOf("\n\n")
           }
         }
       } catch {}
     }
-    busy.clear()
+    for (const handler of handlers) handler({ type: "server.disconnected" })
     await sleep(1000)
   }
 }
 
 export function start(server: string, password: string) {
+  const auth = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`
+  const handlers = new Set<(event: any) => void>()
+  JitdaDoc.start(server, auth, (handler) => handlers.add(handler))
+  void watch(server, auth, handlers)
   const target = activityTarget()
   if (!target) return
   const busy = new Set<string>()
-  void watch(server, password, busy)
+  handlers.add((event) => {
+    if (event?.type === "server.disconnected") busy.clear()
+    else observe(busy, event)
+  })
   void (async () => {
     while (true) {
       await report(target).catch((error) => console.error("error notifying hub of activity", error))

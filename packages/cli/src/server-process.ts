@@ -19,6 +19,8 @@ import { RemoteTunnel } from "./services/remote-tunnel"
 import { WebUi } from "./services/web-ui"
 import { DevServer } from "@opencode/plugin-jitda/dev-server"
 import { JitdaHub } from "./services/jitda-hub"
+import { JitdaDoc } from "./services/jitda-doc"
+import { JitdaDatabase } from "./services/jitda-database"
 import { databasePath } from "./database-path"
 
 export type Mode = "default" | "service" | "stdio"
@@ -98,6 +100,8 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
       if (!password) return yield* Effect.fail(new Error("Missing server password"))
       const instanceID = randomUUID()
       void DevServer.replay().catch(() => {})
+      JitdaDatabase.prepare(databasePath(global.data), global.data)
+      JitdaDoc.configure({ data: global.data, database: databasePath(global.data), prefix: JitdaHub.prefix })
       const transform = JitdaHub.wrap(yield* WebUi.handler(), password)
       const remote = { urls: [] as ReadonlyArray<string> }
       const launch = start(

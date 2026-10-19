@@ -46,7 +46,7 @@ RUN userdel -r node && useradd -l -m -s /bin/bash -N -u 1000 "${NB_USER}"
 
 # auto: 쓸 수 있는 격리 백엔드가 있으면 에이전트 셸을 그 안에서 돌리고, 없으면 예전처럼 돈다.
 # 부팅 로그의 "sandbox backend" 줄로 실제로 걸렸는지 확인할 수 있다.
-ENV OPENCODE_CONFIG_DIR=/etc/opencode HOME="/home/${NB_USER}" OPENCODE_SANDBOX=auto
+ENV OPENCODE_CONFIG_DIR=/etc/opencode HOME="/home/${NB_USER}" OPENCODE_SANDBOX=auto OPENCODE_DB=opencode-v2.db OPENCODE_DB_COPY_FROM=opencode.db
 WORKDIR /home/${NB_USER}/project
 
 # 런타임 UID가 빌드 시와 다를 수 있으므로 모두에게 권한을 부여한다.
