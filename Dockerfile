@@ -11,6 +11,7 @@ RUN bun install --frozen-lockfile --ignore-scripts
 ARG OPENCODE_ASSET_BASE
 ENV OPENCODE_CHANNEL=latest OPENCODE_VERSION=0.0.0-enk OPENCODE_ASSET_BASE=${OPENCODE_ASSET_BASE}
 RUN cd packages/cli && bun run build --single
+RUN cd packages/plugins/jitda && bun run build
 
 FROM scratch AS asset-export
 COPY --from=build /app/packages/app/dist /
@@ -58,12 +59,9 @@ RUN chmod 755 /usr/local/bin/opencode-entrypoint.sh
 COPY docker/AGENTS.md /etc/opencode/AGENTS.md
 COPY docker/.gitignore /etc/opencode/.gitignore
 COPY docker/opencode.jsonc /etc/opencode/opencode.jsonc
-COPY docker/preview-bridge-plugin.js /etc/opencode/preview-bridge-plugin.js
-COPY docker/preview-bridge.js /etc/opencode/preview-bridge.js
 # .agents/skills 는 config 디렉터리(/etc/opencode)의 skills/ 로 들어가야 스킬 스캐너가 잡는다.
 COPY docker/.agents/skills /etc/opencode/skills
-COPY packages/plugins/jitda/package.json packages/plugins/jitda/index.ts /etc/opencode/plugins/jitda/
-COPY packages/plugins/jitda/src /etc/opencode/plugins/jitda/src
+COPY --from=build /app/packages/plugins/jitda/dist/index.js /etc/opencode/plugins/jitda/index.js
 
 EXPOSE 8888
 

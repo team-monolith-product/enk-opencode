@@ -1,14 +1,12 @@
-// preview-bridge-plugin 유닛 테스트 (bun test).
-// 빌드 산출물을 직접 불러와 session.idle 시 엔트리 HTML 주입 결과를 검증한다.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import plugin from "./preview-bridge-plugin.js"
+import { PreviewBridge } from "../src/preview-bridge"
 
 const TAG = '<script src="/__preview-bridge.js" data-preview-bridge></script>'
 
-let dir
+let dir: string
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "preview-bridge-"))
@@ -18,10 +16,9 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
-async function heal(html) {
+async function heal(html: string) {
   await writeFile(join(dir, "index.html"), html)
-  const hooks = await plugin({ directory: dir })
-  await hooks.event({ event: { type: "session.idle" } })
+  await PreviewBridge.heal(dir, "/* bridge */")
   return readFile(join(dir, "index.html"), "utf8")
 }
 
@@ -58,4 +55,12 @@ describe("preview-bridge-plugin", () => {
     const out = await heal("<body><script>a()</script></body>")
     expect(out).toBe(`<body>${TAG}<script>a()</script></body>`)
   })
+})
+
+test("copies the bridge bundle only where it is missing or stale", async () => {
+  await writeFile(join(dir, "index.html"), "<html><head></head></html>")
+  await PreviewBridge.heal(dir, "/* v1 */")
+  expect(await readFile(join(dir, PreviewBridge.FILENAME), "utf8")).toBe("/* v1 */")
+  await PreviewBridge.heal(dir, "/* v2 */")
+  expect(await readFile(join(dir, PreviewBridge.FILENAME), "utf8")).toBe("/* v2 */")
 })

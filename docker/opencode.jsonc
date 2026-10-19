@@ -1,8 +1,5 @@
 {
   "permission": "allow",
-  "plugin": [
-    "./preview-bridge-plugin.js",
-  ],
   "provider": {
     "anthropic": {
       "options": {
@@ -62,6 +59,4 @@
       "enabled": true,
     },
   },
-  "ensureSession": true,
-  "ensureOneSession": true,
 }

@@ -14,7 +14,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "build": "bun build index.ts --outfile dist/index.js --target bun --format esm --external @opencode/plugin"
   },
   "peerDependencies": {
     "@opencode/plugin": "^2.0.27 || ^0.0.0-dev"
@@ -23,5 +24,8 @@
     "@tsconfig/bun": "1.0.9",
     "@types/bun": "1.4.0",
     "@typescript/native": "npm:typescript@7.0.2"
+  },
+  "dependencies": {
+    "node-html-parser": "catalog:"
   }
 }

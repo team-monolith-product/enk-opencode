@@ -5,6 +5,7 @@ import { EnvRequest } from "./src/env-request"
 import { GitHub } from "./src/github"
 import { Image } from "./src/image"
 import { Locale } from "./src/locale"
+import { PreviewBridge } from "./src/preview-bridge"
 import { ProjectSummary } from "./src/project-summary"
 import { Protect } from "./src/protect"
 import { Session } from "./src/session"
@@ -23,6 +24,7 @@ export default Plugin.define({
       await ProjectSummary.start(ctx),
       await Locale.start(ctx),
       await Session.start(ctx),
+      await PreviewBridge.start(ctx),
     ]
 
     return async () => {

@@ -567,6 +567,9 @@
     "packages/plugins/jitda": {
       "name": "@opencode/plugin-jitda",
       "version": "0.0.0",
+      "dependencies": {
+        "node-html-parser": "catalog:",
+      },
       "devDependencies": {
         "@tsconfig/bun": "1.0.9",
         "@types/bun": "1.4.0",
