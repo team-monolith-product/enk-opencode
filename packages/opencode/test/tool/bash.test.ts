@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import os from "os"
+import fs from "fs/promises"
 import path from "path"
 import { Shell } from "../../src/shell/shell"
 import { BashTool } from "../../src/tool/bash"
@@ -8,6 +9,7 @@ import { Filesystem } from "../../src/util/filesystem"
 import { tmpdir } from "../fixture/fixture"
 import { Permission } from "../../src/permission"
 import { Truncate } from "../../src/tool/truncate"
+import { TRUNCATION_DIR } from "../../src/tool/truncation-dir"
 import { Sandbox } from "../../src/sandbox"
 import { SessionID, MessageID } from "../../src/session/schema"
 
@@ -1124,6 +1126,95 @@ describe("tool.bash truncation", () => {
           expect(lines[lineCount - 1]).toBe(String(lineCount))
         },
       })
+    },
+  )
+
+  test.skipIf(process.platform === "win32")("output over the line limit keeps the tail", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const lineCount = Truncate.MAX_LINES + 1000
+        const result = await bash.execute({ command: `seq ${lineCount}`, description: "Many short lines" }, ctx)
+        mustTruncate(result)
+        expect(result.output).toContain(`\n${lineCount}`)
+        expect(result.output).not.toContain("\n1\n2\n3\n")
+        const saved = await Filesystem.readText((result.metadata as { outputPath: string }).outputPath)
+        expect(saved.trim().split(/\r?\n/).length).toBe(lineCount)
+      },
+    })
+  })
+
+  test("multi-byte characters split across chunks stay intact", async () => {
+    await Instance.provide({
+      directory: projectRoot,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const code = `const b=Buffer.from("가나다");process.stdout.write(b.subarray(0,4));setTimeout(()=>process.stdout.write(b.subarray(4)),200)`
+        const command = `${bin} -e ${evalarg(code)}`
+        const result = await bash.execute(
+          { command: PS.has(sh()) ? `& ${command}` : command, description: "Split UTF-8" },
+          ctx,
+        )
+        expect(result.output).toContain("가나다")
+        expect(result.output).not.toContain("\uFFFD")
+      },
+    })
+  })
+
+  test("a secret spanning the spill flush boundary and the live preview are redacted", async () => {
+    await using tmp = await tmpdir()
+    const secret = "sk-boundary-9f2b1c7d4e8a"
+    await Bun.write(path.join(tmp.path, ".env"), `OPENAI_API_KEY=${secret}\n`)
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const bash = await BashTool.init()
+        const previews: string[] = []
+        const seen = {
+          ...ctx,
+          metadata: (input: { metadata?: { output?: string } }) => {
+            if (input.metadata?.output) previews.push(input.metadata.output)
+          },
+        }
+        const code = `const s=Bun.argv[1];process.stdout.write("x".repeat(65530)+s.slice(0,12));setTimeout(()=>process.stdout.write(s.slice(12)+"y".repeat(100000)),200)`
+        const command = `${bin} -e ${evalarg(code)} ${secret}`
+        const result = await bash.execute(
+          { command: PS.has(sh()) ? `& ${command}` : command, description: "Long line with secret" },
+          seen as typeof ctx,
+        )
+        mustTruncate(result)
+        const saved = await Filesystem.readText((result.metadata as { outputPath: string }).outputPath)
+        expect(saved).not.toContain(secret)
+        expect(saved).toContain("[redacted]")
+        expect(result.output).not.toContain(secret)
+        expect(previews.some((item) => item.includes(secret))).toBe(false)
+        expect((result.metadata as { output: string }).output).not.toContain(secret)
+      },
+    })
+  })
+
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "a failed output file does not crash and still returns the tail",
+    async () => {
+      await fs.mkdir(TRUNCATION_DIR, { recursive: true })
+      await fs.chmod(TRUNCATION_DIR, 0o500)
+      try {
+        await Instance.provide({
+          directory: projectRoot,
+          fn: async () => {
+            const bash = await BashTool.init()
+            const lineCount = 50_000
+            const result = await bash.execute({ command: `seq ${lineCount}`, description: "Unsaved output" }, ctx)
+            mustTruncate(result)
+            expect((result.metadata as { outputPath?: string }).outputPath).toBeUndefined()
+            expect(result.output).toContain("could not be saved")
+            expect(result.output).toContain(String(lineCount))
+          },
+        })
+      } finally {
+        await fs.chmod(TRUNCATION_DIR, 0o755)
+      }
     },
   )
 
