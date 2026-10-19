@@ -60,7 +60,6 @@ COPY docker/.gitignore /etc/opencode/.gitignore
 COPY docker/opencode.jsonc /etc/opencode/opencode.jsonc
 COPY docker/preview-bridge-plugin.js /etc/opencode/preview-bridge-plugin.js
 COPY docker/preview-bridge.js /etc/opencode/preview-bridge.js
-COPY docker/image-model-router-plugin.js /etc/opencode/image-model-router-plugin.js
 # .agents/skills 는 config 디렉터리(/etc/opencode)의 skills/ 로 들어가야 스킬 스캐너가 잡는다.
 COPY docker/.agents/skills /etc/opencode/skills
 COPY packages/plugins/jitda/package.json packages/plugins/jitda/index.ts /etc/opencode/plugins/jitda/

@@ -178,6 +178,38 @@ export function createReporter(options: {
 
 export type Reporter = ReturnType<typeof createReporter>
 
+// 모델 루프 밖에서 돈이 드는 도구(generate_image)는 자기 model_id 로 따로 센다. step_index -2 로 모델 스텝과 구분한다.
+export function toolAttributes(usage: {
+  directory: string
+  messageID: string
+  modelID: string
+  tokens: { input: number; output: number }
+  cost: number
+  at: number
+}): Attributes {
+  return {
+    mount_path: usage.directory,
+    model_id: usage.modelID,
+    message_id: usage.messageID,
+    step_index: -2,
+    phase: "step",
+    tokens: usage.tokens.input + usage.tokens.output,
+    input: usage.tokens.input,
+    output: usage.tokens.output,
+    reasoning: 0,
+    cache_read: 0,
+    cache_write: 0,
+    cost: usage.cost,
+    used_at: new Date(usage.at).toISOString(),
+  }
+}
+
+export function reporter(env: NodeJS.ProcessEnv = process.env) {
+  const url = env.ENK_HACKATHON_RAILS_URL
+  const token = env.ENK_AI_USAGE_TOKEN
+  return url && token ? createReporter({ url, token }) : undefined
+}
+
 const modelID = (model: { id?: string } | undefined) => model?.id ?? ""
 
 export function createTracker(reporter: Reporter, directory: string, now: () => number = Date.now) {
@@ -267,11 +299,9 @@ export function createTracker(reporter: Reporter, directory: string, now: () => 
   }
 }
 
-export function start(ctx: Context) {
-  const url = process.env.ENK_HACKATHON_RAILS_URL
-  const token = process.env.ENK_AI_USAGE_TOKEN
-  if (!url || !token) return () => {}
-  const observe = createTracker(createReporter({ url, token }), ctx.location.directory)
+export function start(ctx: Context, reporter: Reporter | undefined) {
+  if (!reporter) return () => {}
+  const observe = createTracker(reporter, ctx.location.directory)
   const controller = new AbortController()
   void (async () => {
     while (!controller.signal.aborted) {
