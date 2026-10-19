@@ -36,7 +36,23 @@ export namespace Snapshot {
   export type FileDiff = z.infer<typeof FileDiff>
 
   export function unifiedPatch(file: string, before: string, after: string) {
-    return formatPatch(structuredPatch(file, file, before, after, "", "", { context: Number.MAX_SAFE_INTEGER }))
+    const old = before.replace(/^\uFEFF/, "")
+    const next = after.replace(/^\uFEFF/, "")
+    if (old !== next || old === "") {
+      return formatPatch(structuredPatch(file, file, old, next, "", "", { context: Number.MAX_SAFE_INTEGER }))
+    }
+    const lines = old.split("\n")
+    const last = lines.pop()!
+    const body = lines.map((line) => " " + line)
+    if (last !== "") body.push(" " + last, "\\ No newline at end of file")
+    const count = lines.length + (last !== "" ? 1 : 0)
+    return formatPatch({
+      oldFileName: file,
+      newFileName: file,
+      oldHeader: "",
+      newHeader: "",
+      hunks: [{ oldStart: 1, oldLines: count, newStart: 1, newLines: count, lines: body }],
+    })
   }
 
   const log = Log.create({ service: "snapshot" })
