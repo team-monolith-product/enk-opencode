@@ -23,6 +23,7 @@ const sentry =
     : false
 
 export default defineConfig({
+  base: "./",
   plugins: [
     desktopPlugin,
     icons(channel),

@@ -7,6 +7,8 @@ import { AppBaseProviders, AppInterface } from "@/app"
 import { loadInitialLocale } from "@/runtime/i18n/language"
 import { PlatformProvider } from "@/runtime/platform/platform"
 import { createWebPlatform } from "@/runtime/platform/web"
+import { basePath } from "@/runtime/platform/base-path"
+import { PrefixRouter } from "@/runtime/platform/prefix-router"
 import { isStandalone, PwaRoutePersistence, restorePwaRoute } from "@/runtime/platform/pwa"
 import { KeyboardInsets } from "@/runtime/platform/keyboard"
 import en from "@/runtime/i18n/en"
@@ -52,7 +54,7 @@ const clearAuthToken = () => {
 const web = createWebPlatform(pkg.version)
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"), { once: true })
+  window.addEventListener("load", () => void navigator.serviceWorker.register(`${basePath()}/sw.js`, { scope: `${basePath()}/` }), { once: true })
 }
 
 if (import.meta.env.VITE_SENTRY_DSN) {
@@ -103,6 +105,7 @@ if (root instanceof HTMLElement && root.dataset.opencodeMounted === undefined) {
             <AppInterface
               canonicalLocalServer={server ? ServerConnection.key(server) : undefined}
               servers={server ? [server] : []}
+              router={basePath() ? (routerProps) => <PrefixRouter {...routerProps} prefix={basePath()} /> : undefined}
             >
               <KeyboardInsets />
               {standalone && <PwaRoutePersistence />}
