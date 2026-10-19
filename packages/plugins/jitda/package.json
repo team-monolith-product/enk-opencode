@@ -8,7 +8,8 @@
   "exports": {
     ".": "./index.ts",
     "./server": "./index.ts",
-    "./dev-server": "./src/dev-server.ts"
+    "./dev-server": "./src/dev-server.ts",
+    "./env": "./src/env.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

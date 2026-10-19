@@ -722,8 +722,9 @@ test("spawns local MCP servers through the location environment", async () => {
   if (!command || !ChildProcess.isStandardCommand(command)) throw new Error("Expected a standard process command")
   expect(command.command).toBe(process.execPath)
   expect(command.options.cwd).toBe(cwd)
-  expect(command.options.extendEnv).toBe(true)
-  expect(command.options.env).toEqual({ MCP_LOCATION_TEST: "configured" })
+  expect(command.options.extendEnv).toBe(false)
+  expect(command.options.env?.MCP_LOCATION_TEST).toBe("configured")
+  expect(Object.keys(command.options.env ?? {}).some((key) => /^(ENK_|JUPYTERHUB_|OPENCODE_)/.test(key))).toBe(false)
 })
 
 test("reports a local MCP server as failed when the location has no execution plane", async () => {

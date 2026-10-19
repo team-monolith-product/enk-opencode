@@ -1,5 +1,6 @@
 export * as Pty from "./pty.js"
 
+import { Env } from "@opencode/plugin-jitda/env"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import type { Disp, Proc } from "#pty"
 import { Context, Effect, Layer, Schema, Types } from "effect"
@@ -169,7 +170,7 @@ const layer = Layer.effect(
       const args = ShellSelect.login(command) ? [...(input.args ?? []), "-l"] : [...(input.args ?? [])]
       const cwd = input.cwd || location.directory
       const env = {
-        ...process.env,
+        ...Env.sanitize(),
         ...input.env,
         TERM: "xterm-256color",
         OPENCODE_TERMINAL: "1",

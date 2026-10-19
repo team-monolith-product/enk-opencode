@@ -1,5 +1,6 @@
 export * as McpStdio from "./stdio.js"
 
+import { Env } from "@opencode/plugin-jitda/env"
 import { ReadBuffer, serializeMessage, type JSONRPCMessage, type Transport } from "@modelcontextprotocol/client"
 import { Cause, Duration, Effect, Fiber, Option, Queue, Scope, Stream } from "effect"
 import { ChildProcess } from "effect/process"
@@ -84,8 +85,8 @@ export const make = Effect.fnUntraced(function* (options: Options) {
           const handle = yield* environment.spawner.spawn(
             ChildProcess.make(options.command, [...options.args], {
               cwd: options.cwd,
-              env: options.environment,
-              extendEnv: true,
+              env: { ...Env.sanitize(), ...options.environment },
+              extendEnv: false,
               stdin: { stream: Stream.encodeText(Stream.fromQueue(outgoing)), endOnDone: true },
               stdout: "pipe",
               stderr: "pipe",
