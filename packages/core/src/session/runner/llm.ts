@@ -35,6 +35,7 @@ import { Plugin } from "../../plugin.js"
 import { MAX_STEPS_PROMPT } from "./max-steps.js"
 import { CostQuota } from "../../jitda/cost-quota.js"
 import { ModelFallback } from "../../jitda/model-fallback.js"
+import { Vision } from "../../jitda/vision.js"
 
 // 재시도로 못 고친 모델 오류만 다음 모델로 넘긴다. 사용자 중단과 컨텍스트 초과는 넘기지 않는다.
 const fallbackable = (cause: Cause.Cause<unknown>) => {
@@ -230,19 +231,39 @@ const layer = Layer.effect(
       return selected
     })
 
-    const fallbackChain = Effect.fn("SessionRunner.fallbackChain")(function* (loaded: SessionContext.Loaded) {
-      const primary = loaded.model
+    const resolveRef = (
+      loaded: SessionContext.Loaded,
+      ref: { readonly providerID: string; readonly modelID: string },
+      variant?: string,
+    ) =>
+      context.resolveModel({
+        ...loaded.session,
+        model: Model.Ref.make({
+          providerID: Provider.ID.make(ref.providerID),
+          id: Model.ID.make(ref.modelID),
+          ...(variant ? { variant: Model.VariantID.make(variant) } : {}),
+        }),
+      })
+
+    const visionModel = Effect.fn("SessionRunner.visionModel")(function* (loaded: SessionContext.Loaded) {
+      const user = loaded.messages.findLast((message) => message.type === "user")
+      if (!Vision.wanted(user?.type === "user" ? user : undefined, loaded.model.capabilities.input)) return undefined
+      const target = Vision.target()
+      if (!target) return undefined
+      if (target.providerID === loaded.model.ref.providerID && target.modelID === loaded.model.ref.id) return undefined
+      return yield* resolveRef(loaded, target, target.variant ?? loaded.model.ref.variant).pipe(
+        Effect.catch(() => resolveRef(loaded, target)),
+        Effect.orElseSucceed(() => undefined),
+      )
+    })
+
+    const fallbackChain = Effect.fn("SessionRunner.fallbackChain")(function* (
+      loaded: SessionContext.Loaded,
+      primary: SessionContext.Loaded["model"],
+    ) {
       const chain = [primary]
       for (const item of ModelFallback.candidates({ providerID: primary.ref.providerID, modelID: primary.ref.id })) {
-        const resolve = (variant?: string) =>
-          context.resolveModel({
-            ...loaded.session,
-            model: Model.Ref.make({
-              providerID: Provider.ID.make(item.providerID),
-              id: Model.ID.make(item.modelID),
-              ...(variant ? { variant: Model.VariantID.make(variant) } : {}),
-            }),
-          })
+        const resolve = (variant?: string) => resolveRef(loaded, item, variant)
         const resolved = yield* resolve(item.variant ?? primary.ref.variant).pipe(
           Effect.catch(() => resolve()),
           Effect.orElseSucceed(() => undefined),
@@ -284,14 +305,15 @@ const layer = Layer.effect(
           assistantMessageID = SessionMessage.ID.create()
           continue
         }
+        const primary = (yield* visionModel(loaded)) ?? loaded.model
         let resolvedChain: Array<SessionContext.Loaded["model"]> | undefined
         const chain = Effect.suspend(() =>
           resolvedChain
             ? Effect.succeed(resolvedChain)
-            : fallbackChain(loaded).pipe(Effect.tap((value) => Effect.sync(() => (resolvedChain = value)))),
+            : fallbackChain(loaded, primary).pipe(Effect.tap((value) => Effect.sync(() => (resolvedChain = value)))),
         )
         const index = turn.model === 0 ? 0 : Math.min(turn.model, (yield* chain).length - 1)
-        const model = index === 0 ? loaded.model : (yield* chain)[index]
+        const model = index === 0 ? primary : (yield* chain)[index]
         const canFallback = chain.pipe(Effect.map((value) => index < value.length - 1))
         const retries = index === 0 && ModelFallback.degraded(sessionID) ? 0 : ModelFallback.retries()
         const stepLimitReached = loaded.agent.info.steps !== undefined && step >= loaded.agent.info.steps
