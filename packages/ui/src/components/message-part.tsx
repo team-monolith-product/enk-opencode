@@ -1,3 +1,4 @@
+import { diffContents } from "../util/diff-contents"
 import {
   Component,
   createEffect,
@@ -2057,11 +2058,11 @@ ToolRegistry.register({
                   mode="diff"
                   before={{
                     name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: props.metadata?.filediff?.before || props.input.oldString,
+                    contents: diffContents(props.metadata?.filediff).before || props.input.oldString,
                   }}
                   after={{
                     name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: props.metadata?.filediff?.after || props.input.newString,
+                    contents: diffContents(props.metadata?.filediff).after || props.input.newString,
                   }}
                 />
               </div>
@@ -2161,8 +2162,9 @@ interface ApplyPatchFile {
   relativePath: string
   type: "add" | "update" | "delete" | "move"
   diff: string
-  before: string
-  after: string
+  patch?: string
+  before?: string
+  after?: string
   additions: number
   deletions: number
   movePath?: string
@@ -2282,8 +2284,11 @@ ToolRegistry.register({
                                 <Dynamic
                                   component={fileComponent}
                                   mode="diff"
-                                  before={{ name: file.filePath, contents: file.before }}
-                                  after={{ name: file.movePath ?? file.filePath, contents: file.after }}
+                                  before={{ name: file.filePath, contents: diffContents(file).before }}
+                                  after={{
+                                    name: file.movePath ?? file.filePath,
+                                    contents: diffContents(file).after,
+                                  }}
                                 />
                               </div>
                             </Show>
@@ -2357,8 +2362,11 @@ ToolRegistry.register({
                 <Dynamic
                   component={fileComponent}
                   mode="diff"
-                  before={{ name: single()!.filePath, contents: single()!.before }}
-                  after={{ name: single()!.movePath ?? single()!.filePath, contents: single()!.after }}
+                  before={{ name: single()!.filePath, contents: diffContents(single()!).before }}
+                  after={{
+                    name: single()!.movePath ?? single()!.filePath,
+                    contents: diffContents(single()!).after,
+                  }}
                 />
               </div>
             </ToolFileAccordion>

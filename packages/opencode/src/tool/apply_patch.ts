@@ -9,6 +9,7 @@ import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
 import { assertExternalDirectory } from "./external-directory"
 import { trimDiff } from "./edit"
+import { Snapshot } from "@/snapshot"
 import { LSP } from "../lsp"
 import { Filesystem } from "../util/filesystem"
 import DESCRIPTION from "./apply_patch.txt"
@@ -165,8 +166,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       relativePath: path.relative(Instance.worktree, change.movePath ?? change.filePath).replaceAll("\\", "/"),
       type: change.type,
       diff: change.diff,
-      before: change.oldContent,
-      after: change.newContent,
+      patch: Snapshot.unifiedPatch(change.movePath ?? change.filePath, change.oldContent, change.newContent),
       additions: change.additions,
       deletions: change.deletions,
       movePath: change.movePath,
