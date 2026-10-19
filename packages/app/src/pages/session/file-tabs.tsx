@@ -1,4 +1,4 @@
-import { createEffect, createMemo, Match, on, onCleanup, Switch } from "solid-js"
+import { createEffect, createMemo, Match, on, onCleanup, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import type { FileSearchHandle } from "@opencode-ai/ui/file"
@@ -8,13 +8,17 @@ import { mediaKindFromPath, type MediaKind } from "@opencode-ai/ui/pierre/media"
 import { createLineCommentController } from "@opencode-ai/ui/line-comment-annotations"
 import { sampledChecksum } from "@opencode-ai/util/encode"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
+import { Button } from "@opencode-ai/ui/button"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { showToast } from "@opencode-ai/ui/toast"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { PhotocraftDialog } from "@/components/photocraft-dialog"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { useComments } from "@/context/comments"
 import { useLanguage } from "@/context/language"
+import { useSDK } from "@/context/sdk"
 import { usePrompt } from "@/context/prompt"
 import { usePromptDocBridge } from "@/context/prompt-doc-bridge"
 import { addLineContext } from "@/utils/doc-line-reference"
@@ -188,6 +192,8 @@ export function FileTabContent(props: { tab: string }) {
   const prompt = usePrompt()
   const bridge = usePromptDocBridge()
   const fileComponent = useFileComponent()
+  const dialog = useDialog()
+  const sdk = useSDK()
   const { sessionKey, tabs, view } = useSessionLayout()
   const activeFileTab = createSessionTabs({
     tabs,
@@ -421,8 +427,53 @@ export function FileTabContent(props: { tab: string }) {
     scrollSync.queueRestore()
   })
 
+  // 파일 탭의 이미지를 PhotoCraft 편집기로 넘길 File. 서버가 이미지를 base64 로 주므로 바이트로 되돌린다.
+  const imageFile = createMemo(() => {
+    const p = path()
+    const content = state()?.content
+    if (!p || mediaKindFromPath(p) !== "image") return
+    if (content?.encoding !== "base64" || !content.content) return
+    const bytes = Uint8Array.from(atob(content.content), (char) => char.charCodeAt(0))
+    return new File([bytes], p.split("/").pop() ?? p, { type: content.mimeType ?? "" })
+  })
+
+  // 편집기에서 저장한 이미지로 원본을 덮어쓰고, 탭이 새 바이트를 보이게 다시 읽는다(파일 감시 이벤트를
+  // 기다리지 않는다).
+  const saveImage = async (target: string, image: Blob) => {
+    // 생성된 메서드는 바이트 본문과 Content-Type 을 버린다(asset-upload.ts 와 같은 사정). 그래서 본문은
+    // 요청 옵션으로 직접 싣고, 그 headers 가 클라이언트 기본 헤더(x-opencode-directory)를 덮어쓰므로
+    // directory 도 쿼리로 넘긴다. 빼면 서버가 프로젝트가 아닌 자기 cwd 에서 파일을 찾는다.
+    await sdk.client.file.write({ path: target, directory: sdk.directory, body: image }, {
+      body: image,
+      bodySerializer: null,
+      headers: { "content-type": "application/octet-stream" },
+    } as unknown as Parameters<typeof sdk.client.file.write>[1])
+    await file.load(target, { force: true })
+  }
+
   const renderFile = (source: string) => (
     <div class="relative overflow-hidden" classList={{ "pb-40": mediaKindFromPath(path()) !== "pdf" }}>
+      <Show when={imageFile()}>
+        {(image) => (
+          <Button
+            icon="edit"
+            size="small"
+            class="absolute right-3 top-3 z-10"
+            onClick={() => {
+              const target = path()
+              if (!target) return
+              // 바깥 클릭·Escape 로 닫히면 저장 안 된 편집이 경고 없이 사라지므로 닫기 버튼으로만 닫는다.
+              dialog.show(
+                () => <PhotocraftDialog file={image()} onSave={(edited) => saveImage(target, edited)} />,
+                undefined,
+                { dismissible: false },
+              )
+            }}
+          >
+            {language.t("file.imageEditor.open")}
+          </Button>
+        )}
+      </Show>
       <Dynamic
         component={fileComponent}
         mode="text"

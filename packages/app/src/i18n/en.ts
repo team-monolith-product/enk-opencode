@@ -571,6 +571,15 @@ export const dict = {
   "toast.model.none.description": "Connect a provider to summarize this session",
 
   "toast.file.loadFailed.title": "Failed to load file",
+  "file.imageEditor.open": "Edit",
+  "file.imageEditor.title": "Edit image · {{name}}",
+  "file.imageEditor.loading": "Loading the image editor…",
+  "file.imageEditor.failed": "Could not start the image editor. Close this window and try again.",
+  "file.imageEditor.saveHint": "Save (⌘S·Ctrl+S) overwrites the original file",
+  "file.imageEditor.saveHintUnsupported": "Only PNG, JPEG and WebP can be saved over the original",
+  "file.imageEditor.saved": "Saved {{name}}",
+  "file.imageEditor.saveFailed": "Could not save over the original image",
+  "file.imageEditor.saveUnsupported": "{{ext}} files can't be overwritten, so the PSD was downloaded instead. Only PNG, JPEG and WebP can be saved over the original.",
   "toast.file.listFailed.title": "Failed to list files",
 
   "toast.context.noLineSelection.title": "No line selection",
