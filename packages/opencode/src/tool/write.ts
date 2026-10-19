@@ -55,8 +55,7 @@ export const WriteTool = Tool.define("write", {
     const contentNew = await Filesystem.readText(filepath)
     const filediff: Snapshot.FileDiff = {
       file: filepath,
-      before: contentOld,
-      after: contentNew,
+      patch: Snapshot.unifiedPatch(filepath, contentOld, contentNew),
       additions: 0,
       deletions: 0,
       status: exists ? "modified" : "added",

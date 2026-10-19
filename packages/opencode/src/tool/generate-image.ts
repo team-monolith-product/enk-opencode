@@ -12,6 +12,7 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { AiUsage } from "../enk/ai-usage"
 import { ImageQuota } from "../enk/image-quota"
+import { Session } from "../session"
 import { assertExternalDirectory } from "./external-directory"
 
 export namespace GenerateImage {
@@ -29,7 +30,7 @@ export namespace GenerateImage {
     input_tokens_details?: { text_tokens?: number; image_tokens?: number }
   }
 
-  export type Status = "generated" | "off" | "blocked" | "timeout" | "limited" | "disabled" | "unavailable"
+  export type Status = "generated" | "off" | "subagent" | "blocked" | "timeout" | "limited" | "disabled" | "unavailable"
 
   export type Metadata = {
     status: Status
@@ -176,6 +177,8 @@ export namespace GenerateImage {
 
   export function output(status: Exclude<Status, "generated">, quota?: ImageQuota.Quota) {
     return {
+      subagent:
+        "서브에이전트에서는 이미지를 그리지 않습니다. 여기서 만든 그림은 학생 채팅에 보이지 않기 때문입니다. 그림이 필요하면 결과에 그렇게 적어 메인 대화에서 그리게 하세요.",
       off: "학생이 이번 메시지에서 입력창의 '이미지 만들기'를 꺼 두어 그리지 않았습니다. 다시 호출하지 말고, 그림이 꼭 필요하면 '이미지 만들기'를 켜고 다시 요청해 달라고 짧게 안내하세요. 토글은 메시지마다 바뀌므로 켜진 메시지에서는 이 도구로 그릴 수 있습니다.",
       unavailable: `이 작업 공간에서는 이미지 생성을 쓸 수 없습니다. ${REFUSAL}`,
       disabled: `이 해커톤에서는 이미지 생성을 사용하지 않습니다. ${REFUSAL}`,
@@ -221,6 +224,9 @@ export const GenerateImageTool = Tool.define("generate_image", {
       output,
       metadata: { ...base, ...extra, status, ms: Date.now() - startedAt } satisfies GenerateImage.Metadata,
     })
+
+    const session = await Session.get(ctx.sessionID).catch(() => undefined)
+    if (session?.parentID) return done("subagent", GenerateImage.output("subagent"))
 
     const state = ImageQuota.state()
     if (state.kind === "unavailable" || state.kind === "disabled")

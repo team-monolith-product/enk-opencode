@@ -9,6 +9,7 @@ import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
 import { assertExternalDirectory } from "./external-directory"
 import { trimDiff } from "./edit"
+import { Snapshot } from "@/snapshot"
 import { LSP } from "../lsp"
 import { Filesystem } from "../util/filesystem"
 import DESCRIPTION from "./apply_patch.txt"
@@ -52,6 +53,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       type: "add" | "update" | "delete" | "move"
       movePath?: string
       diff: string
+      exact?: boolean
       additions: number
       deletions: number
     }> = []
@@ -67,7 +69,8 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
           const oldContent = ""
           const newContent =
             hunk.contents.length === 0 || hunk.contents.endsWith("\n") ? hunk.contents : `${hunk.contents}\n`
-          const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
+          const raw = createTwoFilesPatch(filePath, filePath, oldContent, newContent)
+          const diff = trimDiff(raw)
 
           let additions = 0
           let deletions = 0
@@ -82,6 +85,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
             newContent,
             type: "add",
             diff,
+            exact: diff === raw && !newContent.startsWith("\uFEFF"),
             additions,
             deletions,
           })
@@ -139,7 +143,8 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
           const contentToDelete = await fs.readFile(filePath, "utf-8").catch((error) => {
             throw new Error(`apply_patch verification failed: ${error}`)
           })
-          const deleteDiff = trimDiff(createTwoFilesPatch(filePath, filePath, contentToDelete, ""))
+          const raw = createTwoFilesPatch(filePath, filePath, contentToDelete, "")
+          const deleteDiff = trimDiff(raw)
 
           const deletions = contentToDelete.split("\n").length
 
@@ -149,6 +154,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
             newContent: "",
             type: "delete",
             diff: deleteDiff,
+            exact: deleteDiff === raw && !contentToDelete.startsWith("\uFEFF"),
             additions: 0,
             deletions,
           })
@@ -165,8 +171,9 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       relativePath: path.relative(Instance.worktree, change.movePath ?? change.filePath).replaceAll("\\", "/"),
       type: change.type,
       diff: change.diff,
-      before: change.oldContent,
-      after: change.newContent,
+      patch: change.exact
+        ? undefined
+        : Snapshot.unifiedPatch(change.movePath ?? change.filePath, change.oldContent, change.newContent),
       additions: change.additions,
       deletions: change.deletions,
       movePath: change.movePath,
