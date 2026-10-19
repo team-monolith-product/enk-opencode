@@ -23,6 +23,13 @@ describe("diffContents", () => {
     expect(diffContents({ before: "old", after: "new" })).toEqual({ before: "old", after: "new" })
   })
 
+  test("rebuilds added and deleted files from the tool diff when no patch is stored", () => {
+    const added = formatPatch(structuredPatch("f", "f", "", "new\nfile\n"))
+    const deleted = formatPatch(structuredPatch("f", "f", "old\nfile\n", ""))
+    expect(diffContents({ diff: added })).toEqual({ before: "", after: "new\nfile\n" })
+    expect(diffContents({ diff: deleted })).toEqual({ before: "old\nfile\n", after: "" })
+  })
+
   test("returns empty sides when nothing is stored", () => {
     expect(diffContents(undefined)).toEqual({ before: "", after: "" })
     expect(diffContents({ patch: "" })).toEqual({ before: "", after: "" })

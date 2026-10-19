@@ -166,7 +166,10 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       relativePath: path.relative(Instance.worktree, change.movePath ?? change.filePath).replaceAll("\\", "/"),
       type: change.type,
       diff: change.diff,
-      patch: Snapshot.unifiedPatch(change.movePath ?? change.filePath, change.oldContent, change.newContent),
+      patch:
+        change.type === "add" || change.type === "delete"
+          ? undefined
+          : Snapshot.unifiedPatch(change.movePath ?? change.filePath, change.oldContent, change.newContent),
       additions: change.additions,
       deletions: change.deletions,
       movePath: change.movePath,

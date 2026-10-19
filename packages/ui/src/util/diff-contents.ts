@@ -4,6 +4,7 @@ type Diffable = {
   patch?: string
   before?: string
   after?: string
+  diff?: string
 }
 
 export type DiffContents = {
@@ -39,16 +40,15 @@ function rebuild(patch: string): DiffContents {
 
 export function diffContents(diff: Diffable | undefined): DiffContents {
   if (!diff) return { before: "", after: "" }
-  if (typeof diff.patch !== "string" || diff.patch.length === 0) {
-    return {
-      before: typeof diff.before === "string" ? diff.before : "",
-      after: typeof diff.after === "string" ? diff.after : "",
-    }
+  if (typeof diff.before === "string" || typeof diff.after === "string") {
+    return { before: diff.before ?? "", after: diff.after ?? "" }
   }
-  const hit = cache.get(diff.patch)
+  const patch = diff.patch || diff.diff
+  if (!patch) return { before: "", after: "" }
+  const hit = cache.get(patch)
   if (hit) return hit
-  const next = rebuild(diff.patch)
+  const next = rebuild(patch)
   if (cache.size >= LIMIT) cache.delete(cache.keys().next().value!)
-  cache.set(diff.patch, next)
+  cache.set(patch, next)
   return next
 }
