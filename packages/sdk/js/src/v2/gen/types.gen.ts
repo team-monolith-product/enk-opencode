@@ -2230,6 +2230,11 @@ export type FileContent = {
   mimeType?: string
 }
 
+export type FileWritten = {
+  path: string
+  size: number
+}
+
 export type File = {
   path: string
   added: number
@@ -5989,6 +5994,38 @@ export type FileReadResponses = {
 }
 
 export type FileReadResponse = FileReadResponses[keyof FileReadResponses]
+
+export type FileWriteData = {
+  body: Blob | File
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    /**
+     * File path relative to the project directory
+     */
+    path: string
+  }
+  url: "/file/content"
+}
+
+export type FileWriteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type FileWriteError = FileWriteErrors[keyof FileWriteErrors]
+
+export type FileWriteResponses = {
+  /**
+   * Written file
+   */
+  200: FileWritten
+}
+
+export type FileWriteResponse = FileWriteResponses[keyof FileWriteResponses]
 
 export type FileStatusData = {
   body?: never
