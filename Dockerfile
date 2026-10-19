@@ -10,7 +10,7 @@ RUN bun install --frozen-lockfile --ignore-scripts
 
 ARG OPENCODE_ASSET_BASE
 ENV OPENCODE_CHANNEL=latest OPENCODE_VERSION=0.0.0-enk OPENCODE_ASSET_BASE=${OPENCODE_ASSET_BASE}
-RUN cd packages/cli && bun run build --single
+RUN cd packages/cli && bun run build --single && cp dist/cli-linux-*/bin/opencode /app/opencode
 RUN cd packages/plugins/jitda && bun run build
 
 FROM scratch AS asset-export
@@ -53,7 +53,7 @@ WORKDIR /home/${NB_USER}/project
 RUN chmod -R 777 ${HOME} \
     && chmod -R 777 ${PLAYWRIGHT_BROWSERS_PATH}
 
-COPY --from=build /app/packages/cli/dist/cli-linux-x64/bin/opencode /usr/local/bin/opencode
+COPY --from=build /app/opencode /usr/local/bin/opencode
 COPY docker/entrypoint.sh /usr/local/bin/opencode-entrypoint.sh
 RUN chmod 755 /usr/local/bin/opencode-entrypoint.sh
 COPY docker/AGENTS.md /etc/opencode/AGENTS.md

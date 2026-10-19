@@ -37,6 +37,9 @@ const databaseLayer = (lock: Effect.Effect<Semaphore.Semaphore>) =>
       const db = yield* makeDatabase
 
       if (supportsTuningPragmas) {
+        // EFS 같은 네트워크 FS 에서는 -shm(공유메모리 wal-index)이 노드 경계를 못 넘는다. EXCLUSIVE 면 wal-index 를
+        // 힙에 두어 단일 프로세스가 -shm 없이 WAL 을 쓴다. WAL 로 바꾸기 전에 걸어야 한다.
+        if (process.env.OPENCODE_DB_EXCLUSIVE_LOCK) yield* db.run("PRAGMA locking_mode = EXCLUSIVE")
         yield* db.run("PRAGMA journal_mode = WAL")
         yield* db.run("PRAGMA synchronous = NORMAL")
         yield* db.run("PRAGMA busy_timeout = 5000")
