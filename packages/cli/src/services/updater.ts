@@ -217,10 +217,7 @@ const make = Effect.gen(function* () {
     if (installedWinget) return "winget"
     if (!installedPackage) return
 
-    const parts = executable
-      .toLowerCase()
-      .split(path.sep)
-      .map((part) => part.replace(/^\./, ""))
+    const parts = executable.toLowerCase().split(path.sep).map((part) => part.replace(/^\./, ""))
     const checks: Array<{ method: Method; command: string[] }> = [
       { method: "npm", command: ["npm", "list", "-g", "--depth=0", installedPackage] },
       { method: "pnpm", command: ["pnpm", "list", "-g", "--depth=0", installedPackage] },
