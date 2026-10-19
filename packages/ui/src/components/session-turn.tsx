@@ -480,6 +480,7 @@ export function SessionTurn(
                           >
                             <For each={diffs()}>
                               {(diff) => {
+                                const contents = createMemo(() => diffContents(diff))
                                 const active = createMemo(() => expanded().includes(diff.file))
                                 const [visible, setVisible] = createSignal(false)
 
@@ -531,8 +532,8 @@ export function SessionTurn(
                                           <Dynamic
                                             component={fileComponent}
                                             mode="diff"
-                                            before={{ name: diff.file, contents: diffContents(diff).before }}
-                                            after={{ name: diff.file, contents: diffContents(diff).after }}
+                                            before={{ name: diff.file, contents: contents().before }}
+                                            after={{ name: diff.file, contents: contents().after }}
                                           />
                                         </div>
                                       </Show>

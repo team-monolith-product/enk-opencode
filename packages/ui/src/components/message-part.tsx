@@ -1991,6 +1991,7 @@ ToolRegistry.register({
     const fileComponent = useFileComponent()
     const diagnostics = createMemo(() => getDiagnostics(props.metadata.diagnostics, props.input.filePath))
     const path = createMemo(() => props.metadata?.filediff?.file || props.input.filePath || "")
+    const contents = createMemo(() => diffContents(props.metadata?.filediff))
     const filename = () => getFilename(props.input.filePath ?? "")
     const pending = () => props.status === "pending" || props.status === "running"
     const pendingDiff = createMemo(() => {
@@ -2058,11 +2059,11 @@ ToolRegistry.register({
                   mode="diff"
                   before={{
                     name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: diffContents(props.metadata?.filediff).before || props.input.oldString,
+                    contents: contents().before || props.input.oldString,
                   }}
                   after={{
                     name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: diffContents(props.metadata?.filediff).after || props.input.newString,
+                    contents: contents().after || props.input.newString,
                   }}
                 />
               </div>
@@ -2182,6 +2183,7 @@ ToolRegistry.register({
       if (list.length !== 1) return
       return list[0]
     })
+    const singleContents = createMemo(() => diffContents(single()))
     const [expanded, setExpanded] = createSignal<string[]>([])
     let seeded = false
 
@@ -2224,6 +2226,7 @@ ToolRegistry.register({
                   <For each={files()}>
                     {(file) => {
                       const active = createMemo(() => expanded().includes(file.filePath))
+                      const contents = createMemo(() => diffContents(file))
                       const [visible, setVisible] = createSignal(false)
 
                       createEffect(() => {
@@ -2284,10 +2287,10 @@ ToolRegistry.register({
                                 <Dynamic
                                   component={fileComponent}
                                   mode="diff"
-                                  before={{ name: file.filePath, contents: diffContents(file).before }}
+                                  before={{ name: file.filePath, contents: contents().before }}
                                   after={{
                                     name: file.movePath ?? file.filePath,
-                                    contents: diffContents(file).after,
+                                    contents: contents().after,
                                   }}
                                 />
                               </div>
@@ -2362,10 +2365,10 @@ ToolRegistry.register({
                 <Dynamic
                   component={fileComponent}
                   mode="diff"
-                  before={{ name: single()!.filePath, contents: diffContents(single()!).before }}
+                  before={{ name: single()!.filePath, contents: singleContents().before }}
                   after={{
                     name: single()!.movePath ?? single()!.filePath,
-                    contents: diffContents(single()!).after,
+                    contents: singleContents().after,
                   }}
                 />
               </div>
