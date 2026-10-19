@@ -1,25 +1,20 @@
 ;(function () {
-  // Keep in sync with packages/ui/src/theme/pin.ts
-  var THEME_ID = "jitda"
-  var COLOR_SCHEME = "system"
-  var themeKey = "opencode-theme-id"
-  var schemeKey = "opencode-color-scheme"
+  var key = "opencode-theme-id"
+  var themeId = localStorage.getItem(key) || "oc-2"
 
-  if (localStorage.getItem(themeKey) !== THEME_ID) {
-    localStorage.setItem(themeKey, THEME_ID)
-  }
-
-  if (localStorage.getItem(schemeKey) !== COLOR_SCHEME) {
-    localStorage.setItem(schemeKey, COLOR_SCHEME)
-  }
-
-  var isDark =
-    COLOR_SCHEME === "dark" ||
-    (COLOR_SCHEME === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
+  var scheme = localStorage.getItem("opencode-color-scheme") || "system"
+  var isDark = scheme === "dark" || (scheme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
   var mode = isDark ? "dark" : "light"
 
-  document.documentElement.dataset.theme = THEME_ID
+  document.documentElement.dataset.theme = themeId
   document.documentElement.dataset.colorScheme = mode
+  document.documentElement.style.backgroundColor = isDark ? "#080808" : "#fafafa"
+
+  // Update theme-color meta tag to match app color scheme
+  var metas = document.querySelectorAll("meta[name='theme-color']")
+  if (metas.length > 0) metas[0].setAttribute("content", isDark ? "#080808" : "#fafafa")
+
+  if (themeId === "oc-2") return
 
   var css = localStorage.getItem("opencode-theme-css-" + mode)
   if (css) {

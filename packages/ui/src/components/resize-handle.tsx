@@ -1,4 +1,4 @@
-import { Show, splitProps, type JSX } from "solid-js"
+import { splitProps, type JSX } from "solid-js"
 
 export interface ResizeHandleProps extends Omit<JSX.HTMLAttributes<HTMLDivElement>, "onResize"> {
   direction: "horizontal" | "vertical"
@@ -8,8 +8,9 @@ export interface ResizeHandleProps extends Omit<JSX.HTMLAttributes<HTMLDivElemen
   max: number
   onResize: (size: number) => void
   onCollapse?: () => void
+  /** Called while dragging when size crosses `collapseThreshold`. */
+  onCollapseChange?: (collapsed: boolean) => void
   collapseThreshold?: number
-  showHandle?: boolean
 }
 
 export function ResizeHandle(props: ResizeHandleProps) {
@@ -21,100 +22,89 @@ export function ResizeHandle(props: ResizeHandleProps) {
     "max",
     "onResize",
     "onCollapse",
+    "onCollapseChange",
     "collapseThreshold",
     "class",
     "classList",
-    "showHandle",
   ])
 
-  let handleRef!: HTMLDivElement
-
-  const handlePointerDown = (e: PointerEvent) => {
+  const handleMouseDown = (e: MouseEvent) => {
+    if (e.detail > 1) return
     e.preventDefault()
     const edge = local.edge ?? (local.direction === "vertical" ? "start" : "end")
     const start = local.direction === "horizontal" ? e.clientX : e.clientY
+
+    const rtl =
+      local.direction === "horizontal" &&
+      e.currentTarget instanceof Element &&
+      getComputedStyle(e.currentTarget).direction === "rtl"
+
     const startSize = local.size
+    const min = local.min
+    const max = local.max
+    const threshold = local.collapseThreshold ?? 0
+    const onResize = local.onResize
+    const onCollapse = local.onCollapse
+    const onCollapseChange = local.onCollapseChange
     let current = startSize
+    let collapsed = false
 
     document.body.style.userSelect = "none"
     document.body.style.overflow = "hidden"
-    // Disable pointer-events on iframes (e.g. the preview panel) for the drag's
-    // duration. setPointerCapture only guarantees delivery within the same
-    // document tree, so a sandboxed iframe sitting next to the handle would
-    // otherwise steal hit-testing the moment the cursor rushes over it, dropping
-    // pointermove/pointerup and re-introducing sticky drag. See index.css.
-    document.body.dataset.resizing = "true"
 
-    // Capture the pointer on the handle itself so that all subsequent pointer
-    // events are delivered here regardless of any iframe/canvas/overlay the
-    // pointer travels over (BlockSuite editor, terminal, etc). Without this the
-    // parent document stops receiving mouse events over those areas, which both
-    // loses the drag mid-move and drops the release event (sticky drag).
-    handleRef.setPointerCapture(e.pointerId)
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
+    const onMouseMove = (moveEvent: MouseEvent) => {
       const pos = local.direction === "horizontal" ? moveEvent.clientX : moveEvent.clientY
+
       const delta =
         local.direction === "vertical"
           ? edge === "end"
             ? pos - start
             : start - pos
-          : edge === "start"
+          : (edge === "start") !== rtl
             ? start - pos
             : pos - start
+
       current = startSize + delta
-      const clamped = Math.min(local.max, Math.max(local.min, current))
-      local.onResize(clamped)
+      const nextCollapsed = threshold > 0 && current < threshold
+
+      if (nextCollapsed !== collapsed) {
+        collapsed = nextCollapsed
+        onCollapseChange?.(collapsed)
+      }
+
+      onResize(Math.min(max, Math.max(min, current)))
     }
 
-    const finish = (upEvent: PointerEvent) => {
+    const onMouseUp = () => {
       document.body.style.userSelect = ""
       document.body.style.overflow = ""
-      delete document.body.dataset.resizing
-      handleRef.releasePointerCapture(upEvent.pointerId)
-      handleRef.removeEventListener("pointermove", onPointerMove)
-      handleRef.removeEventListener("pointerup", finish)
-      handleRef.removeEventListener("pointercancel", finish)
-    }
+      document.removeEventListener("mousemove", onMouseMove)
+      document.removeEventListener("mouseup", onMouseUp)
 
-    const onPointerUp = (upEvent: PointerEvent) => {
-      finish(upEvent)
-      const threshold = local.collapseThreshold ?? 0
-      if (local.onCollapse && threshold > 0 && current < threshold) {
-        local.onCollapse()
+      if (collapsed) {
+        onCollapse?.()
+
+        return
       }
+
+      onCollapseChange?.(false)
     }
 
-    // pointercancel (e.g. browser revokes capture) must clean up too, otherwise
-    // the move listener would linger and resume resizing on the next move.
-    handleRef.addEventListener("pointermove", onPointerMove)
-    handleRef.addEventListener("pointerup", onPointerUp)
-    handleRef.addEventListener("pointercancel", finish)
+    document.addEventListener("mousemove", onMouseMove)
+    document.addEventListener("mouseup", onMouseUp)
   }
 
   return (
     <div
       {...rest}
-      ref={handleRef}
       data-component="resize-handle"
       data-direction={local.direction}
       data-edge={local.edge ?? (local.direction === "vertical" ? "start" : "end")}
       classList={{
-        ...(local.classList ?? {}),
-        "justify-center items-center group flex": true,
+        ...local.classList,
         [local.class ?? ""]: !!local.class,
       }}
-      onPointerDown={handlePointerDown}
-    >
-      <Show when={local.showHandle}>
-        <div
-          classList={{
-            "rounded-none bg-border-base transition-colors group-hover:bg-border-strong-base": true,
-            "h-18 w-0.5": local.direction === "horizontal",
-            "w-18 h-0.5": local.direction === "vertical",
-          }}
-        />
-      </Show>
-    </div>
+      onMouseDown={handleMouseDown}
+    />
   )
 }

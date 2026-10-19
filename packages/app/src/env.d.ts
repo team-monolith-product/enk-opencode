@@ -1,79 +1,37 @@
-import "solid-js"
-
 interface ImportMetaEnv {
+  readonly VITE_OPENCODE_SERVER_MODE?: "none" | "origin"
   readonly VITE_OPENCODE_SERVER_HOST: string
   readonly VITE_OPENCODE_SERVER_PORT: string
-  /**
-   * @example VITE_MODEL_PIN=anthropic/claude-opus-4.1
-   */
-  readonly VITE_MODEL_PIN: string
-  /**
-   * @example VITE_MODEL_PIN_VARIANT=high
-   */
-  readonly VITE_MODEL_PIN_VARIANT: string
-  /**
-   * Set exactly to the string `true` to hide the sticky session title header.
-   * @example VITE_DISABLE_SESSION_HEADER=true
-   */
-  readonly VITE_DISABLE_SESSION_HEADER?: string
-  /**
-   * Set exactly to the string `true` to use the production/minimal app layout unless devMode is enabled.
-   * @example VITE_PRODUCTION_LAYOUT=true
-   */
-  readonly VITE_PRODUCTION_LAYOUT?: string
-  /**
-   * Set exactly to the string `true` to disable @ mention / file popover, / slash-command popover,
-   * and the leading `!` shell shortcut in the prompt input.
-   * @example VITE_DISABLE_PROMPT_TRIGGERS=true
-   */
-  readonly VITE_DISABLE_PROMPT_TRIGGERS?: string
-  /**
-   * Hide the prompt dock auto-accept permissions control.
-   * @example VITE_DISABLE_PROMPT_PERMISSIONS=true
-   */
-  readonly VITE_DISABLE_PROMPT_PERMISSIONS?: string
-  /**
-   * Hide the prompt dock footer (agent, model, variant, permissions).
-   * @example VITE_DISABLE_PROMPT_FOOTER=true
-   */
-  readonly VITE_DISABLE_PROMPT_FOOTER?: string
-  /**
-   * Hide prompt mode selection controls.
-   * @example VITE_DISABLE_WYSIWYG_ONLY=true
-   */
-  readonly VITE_DISABLE_WYSIWYG_ONLY?: string
-  /**
-   * Hide the new-session intro (title, project path, branch, last modified).
-   * @example VITE_DISABLE_CHAT_INTRO=true
-   */
-  readonly VITE_DISABLE_CHAT_INTRO?: string
-  /**
-   * Hide errors the session recovers from on its own: file tool failures (read/write/edit/...)
-   * and the rate-limit retry banner. The final error card, shown once every fallback model has
-   * failed, is never hidden. Ignored while devMode is on.
-   * @example VITE_DISABLE_MINOR_ERRORS=true
-   */
-  readonly VITE_DISABLE_MINOR_ERRORS?: string
-  /**
-   * Prompt submit shortcut (parseKeybind format). Defaults to `enter`.
-   * @example VITE_PROMPT_SUBMIT_KEY=mod+enter
-   */
-  readonly VITE_PROMPT_SUBMIT_KEY?: string
-  /**
-   * Prompt newline shortcut (parseKeybind format). Defaults to `shift+enter`.
-   * @example VITE_PROMPT_NEWLINE_KEY=shift+enter
-   */
-  readonly VITE_PROMPT_NEWLINE_KEY?: string
+  readonly VITE_OPENCODE_CHANNEL?: "local" | "dev" | "beta" | "prod"
+
+  readonly VITE_SENTRY_DSN?: string
+  readonly VITE_SENTRY_ENVIRONMENT?: string
+  readonly VITE_SENTRY_RELEASE?: string
 }
 
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
 
-declare module "solid-js" {
+declare module "*.png" {
+  const src: string
+  export default src
+}
+
+declare module "*.mp4" {
+  const src: string
+  export default src
+}
+
+export declare module "solid-js" {
   namespace JSX {
     interface Directives {
       sortable: true
+    }
+
+    // The Element Timing attribute, which Solid's DOM types do not list.
+    interface ImgHTMLAttributes<T> {
+      elementtiming?: string
     }
   }
 }

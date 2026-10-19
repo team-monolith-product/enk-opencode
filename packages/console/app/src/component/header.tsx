@@ -13,15 +13,13 @@ import copyLogoSvgLight from "../asset/lander/opencode-logo-light.svg"
 import copyLogoSvgDark from "../asset/lander/opencode-logo-dark.svg"
 import copyWordmarkSvgLight from "../asset/lander/opencode-wordmark-light.svg"
 import copyWordmarkSvgDark from "../asset/lander/opencode-wordmark-dark.svg"
-import { A, createAsync, useNavigate } from "@solidjs/router"
-import { createMemo, Match, Show, Switch } from "solid-js"
+import { A, useNavigate } from "@solidjs/router"
+import { Match, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
-import { github } from "~/lib/github"
 import { createEffect, onCleanup } from "solid-js"
 import { config } from "~/config"
 import { useI18n } from "~/context/i18n"
 import { useLanguage } from "~/context/language"
-import { useTheme } from "~/context/theme"
 import "./header-context-menu.css"
 
 const isDarkMode = () => window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -41,22 +39,23 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
   const navigate = useNavigate()
   const i18n = useI18n()
   const language = useLanguage()
-  const theme = useTheme()
-  const githubData = createAsync(() => github())
-  const starCount = createMemo(() =>
-    githubData()?.stars
-      ? new Intl.NumberFormat("en-US", {
-          notation: "compact",
-          compactDisplay: "short",
-          maximumFractionDigits: 0,
-        }).format(githubData()?.stars!)
-      : config.github.starsFormatted.compact,
-  )
 
   const [store, setStore] = createStore({
     mobileMenuOpen: false,
     contextMenuOpen: false,
     contextMenuPosition: { x: 0, y: 0 },
+  })
+
+  let mobileToggle: HTMLButtonElement | undefined
+  createEffect(() => {
+    if (!store.mobileMenuOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      setStore("mobileMenuOpen", false)
+      mobileToggle?.focus()
+    }
+    document.addEventListener("keydown", handleKeyDown)
+    onCleanup(() => document.removeEventListener("keydown", handleKeyDown))
   })
 
   createEffect(() => {
@@ -102,7 +101,7 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
 
   const copyWordmarkToClipboard = async () => {
     try {
-      const isDark = theme.isDark()
+      const isDark = isDarkMode()
       const wordmarkSvgPath = isDark ? copyWordmarkSvgDark : copyWordmarkSvgLight
       const wordmarkSvg = await fetchSvgContent(wordmarkSvgPath)
       await navigator.clipboard.writeText(wordmarkSvg)
@@ -113,7 +112,7 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
 
   const copyLogoToClipboard = async () => {
     try {
-      const isDark = theme.isDark()
+      const isDark = isDarkMode()
       const logoSvgPath = isDark ? copyLogoSvgDark : copyLogoSvgLight
       const logoSvg = await fetchSvgContent(logoSvgPath)
       await navigator.clipboard.writeText(logoSvg)
@@ -157,65 +156,51 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
         <ul>
           <li>
             <a href={config.github.repoUrl} target="_blank" style="white-space: nowrap;">
-              {i18n.t("nav.github")} <span>[{starCount()}]</span>
+              {i18n.t("nav.github")}
             </a>
           </li>
           <li>
-            <a href={language.route("/docs")}>{i18n.t("nav.docs")}</a>
+            <a href="/v2/docs">{i18n.t("nav.docs")}</a>
           </li>
           <li>
-            <A href={language.route("/zen")}>{i18n.t("nav.zen")}</A>
+            <a href={language.route("/data")}>{i18n.t("nav.data")}</a>
           </li>
           <li>
-            <A href={language.route("/go")}>{i18n.t("nav.go")}</A>
+            {/* Console links use a full page load into its separate application. */}
+            <Show
+              when={config.consoleMarketingEnabled}
+              fallback={<A href={language.route("/zen")}>{i18n.t("nav.zen")}</A>}
+            >
+              <a href="/console/models" target="_self">
+                {i18n.t("nav.models")}
+              </a>
+            </Show>
           </li>
           <li>
-            <A href={language.route("/enterprise")}>{i18n.t("nav.enterprise")}</A>
+            <Show
+              when={config.consoleMarketingEnabled}
+              fallback={<A href={language.route("/go")}>{i18n.t("nav.go")}</A>}
+            >
+              <a href="/console/go" target="_self">
+                {i18n.t("nav.go")}
+              </a>
+            </Show>
+          </li>
+          <li>
+            <Show
+              when={config.consoleMarketingEnabled}
+              fallback={<A href={language.route("/enterprise")}>{i18n.t("nav.enterprise")}</A>}
+            >
+              <a href="/console/teams" target="_self">
+                {i18n.t("nav.teams")}
+              </a>
+            </Show>
           </li>
           <Show when={props.zen || props.go}>
             <li>
-              <a href="/auth">{i18n.t("nav.login")}</a>
+              <a href="/console">{i18n.t("nav.login")}</a>
             </li>
           </Show>
-          <li>
-            <button
-              onClick={() => theme.toggle()}
-              style="background: none; border: none; cursor: pointer; color: var(--color-text); padding: 4px; display: flex; align-items: center;"
-              aria-label="Toggle theme"
-            >
-              <Show
-                when={theme.isDark()}
-                fallback={
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  >
-                    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-                  </svg>
-                }
-              >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <circle cx="12" cy="12" r="4" />
-                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-                </svg>
-              </Show>
-            </button>
-          </li>
           <Show when={!props.hideGetStarted}>
             <li>
               <A href={language.route("/download")} data-slot="cta-button">
@@ -242,9 +227,10 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
       </nav>
       <nav data-component="nav-mobile">
         <button
+          ref={mobileToggle}
           type="button"
           data-component="nav-mobile-toggle"
-          aria-expanded="false"
+          aria-expanded={store.mobileMenuOpen}
           aria-controls="nav-mobile-menu"
           class="nav-toggle"
           onClick={() => setStore("mobileMenuOpen", !store.mobileMenuOpen)}
@@ -293,73 +279,52 @@ export function Header(props: { zen?: boolean; go?: boolean; hideGetStarted?: bo
                 </li>
                 <li>
                   <a href={config.github.repoUrl} target="_blank" style="white-space: nowrap;">
-                    {i18n.t("nav.github")} <span>[{starCount()}]</span>
+                    {i18n.t("nav.github")}
                   </a>
                 </li>
                 <li>
-                  <a href={language.route("/docs")}>{i18n.t("nav.docs")}</a>
+                  <a href="/v2/docs">{i18n.t("nav.docs")}</a>
+                </li>
+                <li>
+                  <a href={language.route("/data")}>{i18n.t("nav.data")}</a>
                 </li>
                 <Show when={!props.zen}>
                   <li>
-                    <A href={language.route("/zen")}>{i18n.t("nav.zen")}</A>
+                    <Show
+                      when={config.consoleMarketingEnabled}
+                      fallback={<A href={language.route("/zen")}>{i18n.t("nav.zen")}</A>}
+                    >
+                      <a href="/console/models" target="_self">
+                        {i18n.t("nav.models")}
+                      </a>
+                    </Show>
                   </li>
                 </Show>
                 <Show when={!props.go}>
                   <li>
-                    <A href={language.route("/go")}>{i18n.t("nav.go")}</A>
+                    <Show
+                      when={config.consoleMarketingEnabled}
+                      fallback={<A href={language.route("/go")}>{i18n.t("nav.go")}</A>}
+                    >
+                      <a href="/console/go" target="_self">
+                        {i18n.t("nav.go")}
+                      </a>
+                    </Show>
                   </li>
                 </Show>
                 <li>
-                  <A href={language.route("/enterprise")}>{i18n.t("nav.enterprise")}</A>
-                </li>
-                <li>
-                  <button
-                    onClick={() => theme.toggle()}
-                    style="background: none; border: none; cursor: pointer; color: var(--color-text); padding: 8px 16px; display: flex; align-items: center; gap: 8px; font-size: inherit; font-family: inherit; font-weight: inherit; width: 100%; text-align: left;"
-                    aria-label="Toggle theme"
+                  <Show
+                    when={config.consoleMarketingEnabled}
+                    fallback={<A href={language.route("/enterprise")}>{i18n.t("nav.enterprise")}</A>}
                   >
-                    <Show
-                      when={theme.isDark()}
-                      fallback={
-                        <>
-                          <svg
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          >
-                            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-                          </svg>
-                          <span>Dark Mode</span>
-                        </>
-                      }
-                    >
-                      <>
-                        <svg
-                          width="18"
-                          height="18"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="2"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        >
-                          <circle cx="12" cy="12" r="4" />
-                          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-                        </svg>
-                        <span>Light Mode</span>
-                      </>
-                    </Show>
-                  </button>
+                    <a href="/console/teams" target="_self">
+                      {i18n.t("nav.teams")}
+                    </a>
+                  </Show>
                 </li>
                 <Show when={props.zen || props.go}>
                   <li>
-                    <a href="/auth">{i18n.t("nav.login")}</a>
+                    <a href="/console">{i18n.t("nav.login")}</a>
                   </li>
                 </Show>
                 <Show when={!props.hideGetStarted}>
