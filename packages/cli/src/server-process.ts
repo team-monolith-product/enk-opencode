@@ -17,6 +17,7 @@ import { RetainedImage } from "./services/retained-image"
 import { ServiceRegistration } from "./services/service-registration"
 import { RemoteTunnel } from "./services/remote-tunnel"
 import { WebUi } from "./services/web-ui"
+import { JitdaHub } from "./services/jitda-hub"
 import { databasePath } from "./database-path"
 
 export type Mode = "default" | "service" | "stdio"
@@ -95,7 +96,7 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
             : randomBytes(32).toString("base64url")
       if (!password) return yield* Effect.fail(new Error("Missing server password"))
       const instanceID = randomUUID()
-      const transform = yield* WebUi.handler()
+      const transform = JitdaHub.wrap(yield* WebUi.handler(), password)
       const remote = { urls: [] as ReadonlyArray<string> }
       const launch = start(
         {
@@ -203,8 +204,10 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
         )
       }
       const url = HttpServer.formatAddress(server.address)
+      if (NetAddress.isInetAddress(server.address))
+        JitdaHub.start(`http://127.0.0.1:${server.address.port}`, password)
       console.log(options.mode === "stdio" ? JSON.stringify({ url }) : `server listening on ${url}`)
-      if (foreground && !environmentPassword) console.log(`server password ${password}`)
+      if (foreground && !environmentPassword && !JitdaHub.enabled()) console.log(`server password ${password}`)
       return yield* options.mode === "service"
         ? server.shutdown
         : options.mode === "stdio"

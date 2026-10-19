@@ -3,6 +3,7 @@ import { Effect, FileSystem } from "effect"
 import { HttpServerError, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createHash } from "node:crypto"
 import { load, type AssetMap, type BrotliMap } from "../app-assets"
+import { JitdaHub } from "./jitda-hub"
 
 export const handler = Effect.fn("cli.web-ui.handler")(function* (options?: {
   readonly assets?: AssetMap
@@ -49,12 +50,13 @@ function serveUI(
   if (request.method !== "GET" && request.method !== "HEAD")
     return Effect.succeed(HttpServerResponse.empty({ status: 405 }))
   const html = name === "index.html"
+  const body = html ? JitdaHub.html(typeof file === "string" ? file : Buffer.from(file).toString()) : file
   const revalidate = html || name === "sw.js" || name === "registerSW.js"
   const headers = {
     "content-type": FSUtil.mimeType(name),
     "cache-control": revalidate ? "no-cache" : "public, max-age=31536000, immutable",
     "content-security-policy": html
-      ? cspForHtml(typeof file === "string" ? file : Buffer.from(file).toString())
+      ? cspForHtml(typeof body === "string" ? body : Buffer.from(body).toString())
       : csp(),
     "x-content-type-options": "nosniff",
     ...(!html && brotli?.[name] !== undefined ? { vary: "accept-encoding" } : {}),
@@ -63,7 +65,7 @@ function serveUI(
   return Effect.succeed(
     request.method === "HEAD"
       ? HttpServerResponse.empty({ status: 200, headers })
-      : HttpServerResponse.raw(file, { headers, contentType: headers["content-type"] }),
+      : HttpServerResponse.raw(body, { headers, contentType: headers["content-type"] }),
   )
 }
 
@@ -81,6 +83,8 @@ function isRouteNotFound(error: unknown) {
 // qr-scanner decodes in a worker it creates from a blob: URL whenever the browser has no BarcodeDetector (Safari, desktop
 // Chrome on Windows and Linux). Without worker-src that worker falls under script-src 'self' and never starts.
 function csp(hash = "") {
+  const jitda = JitdaHub.csp(hash)
+  if (jitda) return jitda
   return `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; media-src 'self' data:; connect-src * data: blob:; worker-src 'self' blob:`
 }
 
