@@ -9,6 +9,9 @@ import { readPsdComposite } from "@/utils/psd-composite"
 // 서빙돼도 이 페이지는 pod(same-origin)에서 열어야 부모가 iframe 문서에 손을 댈 수 있으므로,
 // 라우터와 같은 기준(<base href> 가 있으면 그 경로, 없으면 origin 루트)으로 주소를 만든다.
 const editorUrl = () => {
+  // Electron 패키지 앱은 렌더러를 loadFile() 로 열어 origin 이 "null" 이다. 그때는 public 이 렌더러
+  // index.html 옆에 있으므로 문서 위치 기준으로 푼다(new URL(…, "null") 은 예외를 던진다).
+  if (location.protocol === "file:") return new URL("photocraft/index.html", document.baseURI).href
   const base = document.querySelector("base")?.getAttribute("href")
   return new URL("photocraft/index.html", new URL(base || "/", location.origin)).href
 }

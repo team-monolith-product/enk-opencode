@@ -44,15 +44,17 @@ describe("PUT /file/content", () => {
     await using tmp = await tmpdir({ git: true })
     const file = path.join(tmp.path, "a.png")
     fs.writeFileSync(file, "old")
-    fs.chmodSync(file, 0o600)
+    // 0664 는 흔한 umask 022 에 걸리는 권한이라, open() 의 mode 만 믿으면 0644 로 바뀐다.
+    fs.chmodSync(file, 0o664)
+    const umask = process.umask(0o022)
 
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
         expect((await write("a.png", "new")).status).toBe(200)
-        expect(fs.statSync(file).mode & 0o777).toBe(0o600)
+        expect(fs.statSync(file).mode & 0o777).toBe(0o664)
       },
-    })
+    }).finally(() => process.umask(umask))
   })
 
   test("refuses to create a file that does not exist", async () => {

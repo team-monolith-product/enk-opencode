@@ -270,14 +270,18 @@ export const InstanceRoutes = (app?: Hono) =>
         : rawPath
 
       if (embeddedWebUI) {
-        const match = embeddedWebUI[path.replace(/^\//, "")] ?? embeddedWebUI["index.html"] ?? null
+        const key = path.replace(/^\//, "")
+        const match = embeddedWebUI[key] ?? embeddedWebUI["index.html"] ?? null
         if (!match) return c.json({ error: "Not Found" }, 404)
+        // <base> 는 SPA(루트 index.html)용이다. 하위 폴더의 독립 페이지(예: photocraft/index.html)에
+        // 넣으면 그 페이지의 ./ 상대 경로가 basePath 루트로 풀려 자기 자산을 못 찾는다.
+        const nested = embeddedWebUI[key] !== undefined && key.includes("/")
         const file = Bun.file(match)
         if (await file.exists()) {
           if (file.type.startsWith("text/html")) {
             let html = await file.text()
             const hash = themePreloadHash(html)
-            if (basePath !== "/") {
+            if (basePath !== "/" && !nested) {
               html = html
                 .replace(/(href|src)="\//g, `$1="`)
                 .replace("<head>", `<head>\n    <base href="${basePath}/" />`)

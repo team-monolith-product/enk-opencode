@@ -304,8 +304,16 @@ export const FileRoutes = lazy(() =>
               await reader.cancel().catch(() => {})
               throw new HTTPException(400, { message: "File is too large" })
             }
-            await handle.write(value)
+            // write() 는 디스크가 부족하면 일부만 쓰고 resolve 할 수 있다. 남은 바이트를 다 쓸 때까지
+            // 이어 쓰지 않으면 잘린 파일이 원본을 대신하게 된다.
+            for (let offset = 0; offset < value.byteLength; ) {
+              const { bytesWritten } = await handle.write(value, offset, value.byteLength - offset)
+              if (bytesWritten <= 0) throw new Error("Could not write file")
+              offset += bytesWritten
+            }
           }
+          // open() 의 mode 에는 프로세스 umask 가 걸려(예: 0664 → 0644) 원본 권한이 바뀌므로 다시 맞춘다.
+          await handle.chmod(target.mode)
           await handle.close()
           await fs.rename(temp, target.real)
         } catch (error) {
