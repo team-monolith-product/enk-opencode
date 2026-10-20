@@ -11,7 +11,7 @@ import { Database } from "../../src/storage/db"
 import { DocSubmitTable, DocSubmitActorTable } from "../../src/doc/doc.sql"
 import { MessageTable, PartTable } from "../../src/session/session.sql"
 import * as CycleRecorder from "../../src/doc/cycle-recorder"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { ActorID, AssetID, CycleID, DocID } from "../../src/doc/schema"
 import type { SessionID } from "../../src/session/schema"
 import { Project } from "../../src/project/project"
@@ -796,7 +796,10 @@ describe("doc", () => {
       },
     }
   }
-  const pastGrace = () => new Promise((resolve) => setTimeout(resolve, 2_200))
+  const pastGrace = () => {
+    setSystemTime(Date.now() + 10_100)
+    Doc.leaveSweep()
+  }
 
   test("a leaver who had not agreed leaves the vote, and the rest who all agreed send it", async () => {
     const prompted = spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
@@ -950,6 +953,122 @@ describe("doc", () => {
       },
     })
   }, 15_000)
+
+  test("a whole team dropping at once never sends on the votes of the offline", async () => {
+    const prompted = spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const [alice, bob, carol] = ["Alice", "Bob", "Carol"].map((name) =>
+          Doc.actorUpsert({ sessionID: session.id, name }),
+        )
+        const live = room(session.id, docID)
+        for (const actor of [alice, bob, carol]) live.connect(actor.actorID)
+
+        const state = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, prompt })
+        Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: carol.actorID,
+          action: "approve",
+        })
+
+        live.drop(bob.actorID)
+        live.drop(alice.actorID)
+        live.drop(carol.actorID)
+        pastGrace()
+
+        const row = Database.use((db) =>
+          db.select().from(DocSubmitTable).where(eq(DocSubmitTable.id, state.submitID)).get(),
+        )
+        expect(row?.status).toBe("pending")
+        expect(prompted).not.toHaveBeenCalled()
+        live.close()
+      },
+    })
+  })
+
+  test("an agreed member still in their grace holds the send until they are back", async () => {
+    const prompted = spyOn(SessionPrompt, "prompt").mockImplementation(() => Promise.resolve(undefined as never))
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const [alice, bob, carol] = ["Alice", "Bob", "Carol"].map((name) =>
+          Doc.actorUpsert({ sessionID: session.id, name }),
+        )
+        const live = room(session.id, docID)
+        for (const actor of [alice, bob, carol]) live.connect(actor.actorID)
+
+        const state = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, prompt })
+        Doc.submitRespond({
+          sessionID: session.id,
+          submitID: state.submitID,
+          actorID: carol.actorID,
+          action: "approve",
+        })
+
+        const t0 = Date.now()
+        live.drop(bob.actorID)
+        setSystemTime(t0 + 5_000)
+        live.drop(carol.actorID)
+        setSystemTime(t0 + 10_100)
+        Doc.leaveSweep()
+
+        const held = Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })
+        expect(held?.status).toBe("pending")
+        expect(held?.actors.map((actor) => actor.actorID).sort()).toEqual([alice.actorID, carol.actorID].sort())
+        expect(prompted).not.toHaveBeenCalled()
+
+        live.connect(carol.actorID)
+        expect(live.events.findLast((event) => event.type === "sent")?.state.submitID).toBe(state.submitID)
+        expect(prompted).toHaveBeenCalledTimes(1)
+        live.close()
+      },
+    })
+  })
+
+  test("a member stored as left by the old rule is asked again on reconnect", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const [alice, bob] = ["Alice", "Bob"].map((name) => Doc.actorUpsert({ sessionID: session.id, name }))
+        const live = room(session.id, docID)
+        for (const actor of [alice, bob]) live.connect(actor.actorID)
+
+        const state = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, prompt })
+        live.drop(bob.actorID)
+        Database.use((db) =>
+          db
+            .update(DocSubmitActorTable)
+            .set({ status: "left" })
+            .where(
+              and(eq(DocSubmitActorTable.submit_id, state.submitID), eq(DocSubmitActorTable.actor_id, bob.actorID)),
+            )
+            .run(),
+        )
+        live.connect(bob.actorID)
+
+        const back = Doc.submitActive({ sessionID: session.id, docID, actorID: alice.actorID })
+        expect(back?.actors.find((actor) => actor.actorID === bob.actorID)?.status).toBe("pending")
+        live.close()
+      },
+    })
+  })
 
   test("membership changes top the countdown up by 3s, capped at one full window", async () => {
     await using tmp = await tmpdir()
@@ -2140,7 +2259,8 @@ describe("doc", () => {
 
           // ...its leave-grace passes and it leaves the vote with its seat: alice and bob already
           // agreed, so the vote sends right away.
-          await new Promise((resolve) => setTimeout(resolve, 2_200))
+          setSystemTime(t0 + 6_000 + 10_100)
+          Doc.leaveSweep()
           const sent = aliceEvents.findLast((event) => event.type === "sent")!.state
           expect(sent.status).toBe("sent")
           expect(sent.actors.map((a) => a.actorID)).not.toContain(ghost.actorID)
