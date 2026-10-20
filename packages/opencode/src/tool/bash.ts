@@ -1,6 +1,8 @@
 import z from "zod"
 import os from "os"
 import { spawn } from "child_process"
+import { createWriteStream, mkdirSync } from "node:fs"
+import { StringDecoder } from "node:string_decoder"
 import { Tool } from "./tool"
 import path from "path"
 import DESCRIPTION from "./bash.txt"
@@ -18,6 +20,9 @@ import { Sandbox } from "@/sandbox"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncate"
+import { TRUNCATION_DIR } from "./truncation-dir"
+import { ToolID } from "./schema"
+import { Secret } from "@/util/secret"
 import { Plugin } from "@/plugin"
 import { EnvFile } from "@/util/env-file"
 import { ChildEnv } from "@/util/child-env"
@@ -27,6 +32,7 @@ const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 
 // Drain window after the process exits, in case a backgrounded child holds the
 // stdout pipe open and "close" never fires.
 const OUTPUT_DRAIN_MS = 100
+const SPILL_PENDING_LIMIT = 64 * 1024
 const PS = new Set(["powershell", "pwsh"])
 const CWD = new Set(["cd", "push-location", "set-location"])
 const FILES = new Set([
@@ -299,13 +305,79 @@ async function collect(root: Node, cwd: string, ps: boolean, shell: string): Pro
 
 function preview(text: string) {
   if (text.length <= MAX_METADATA_LENGTH) return text
-  return text.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+  return "...\n\n" + text.slice(-MAX_METADATA_LENGTH)
+}
+
+function tail(text: string, maxLines: number, maxBytes: number) {
+  const lines = text.split("\n")
+  if (lines.length <= maxLines && Buffer.byteLength(text, "utf-8") <= maxBytes) return text
+  const out: string[] = []
+  let bytes = 0
+  for (let i = lines.length - 1; i >= 0 && out.length < maxLines; i--) {
+    const size = Buffer.byteLength(lines[i], "utf-8") + (out.length > 0 ? 1 : 0)
+    if (bytes + size > maxBytes) {
+      if (out.length === 0) {
+        const buf = Buffer.from(lines[i], "utf-8")
+        let start = Math.max(0, buf.length - maxBytes)
+        while (start < buf.length && (buf[start] & 0xc0) === 0x80) start++
+        out.unshift(buf.subarray(start).toString("utf-8"))
+      }
+      break
+    }
+    out.unshift(lines[i])
+    bytes += size
+  }
+  return out.join("\n")
+}
+
+function spill(values: string[]) {
+  const file = path.join(TRUNCATION_DIR, ToolID.ascending())
+  const hold = Math.max(0, ...values.map((value) => value.length - 1))
+  let pending = ""
+  let failed = false
+  let ended: Promise<boolean> | undefined
+  let sink: ReturnType<typeof createWriteStream> | undefined
+  try {
+    mkdirSync(TRUNCATION_DIR, { recursive: true })
+    sink = createWriteStream(file)
+    sink.on("error", (error) => {
+      failed = true
+      log.error("failed to save bash output", { file, error })
+    })
+  } catch (error) {
+    failed = true
+    log.error("failed to save bash output", { file, error })
+  }
+  return {
+    file,
+    write(text: string) {
+      if (failed) return
+      pending = Secret.apply(pending + text, values)
+      const cut =
+        pending.length > SPILL_PENDING_LIMIT
+          ? Math.max(pending.lastIndexOf("\n") + 1, pending.length - hold)
+          : pending.lastIndexOf("\n") + 1
+      if (cut === 0) return
+      sink!.write(pending.slice(0, cut))
+      pending = pending.slice(cut)
+    },
+    end() {
+      ended ??= new Promise<boolean>((resolve) => {
+        if (failed || !sink) return resolve(false)
+        if (pending) sink.write(Secret.apply(pending, values))
+        pending = ""
+        sink.once("close", () => resolve(!failed))
+        sink.end()
+      })
+      return ended
+    },
+  }
 }
 
 async function parse(command: string, ps: boolean) {
   const tree = await parser().then((p) => (ps ? p.ps : p.bash).parse(command))
   if (!tree) throw new Error("Failed to parse command")
-  return tree.rootNode
+  return tree
 }
 
 async function ask(ctx: Tool.Context, scan: Scan) {
@@ -397,9 +469,20 @@ async function run(
     description: string
   },
   ctx: Tool.Context,
-) {
+): Promise<{
+  title: string
+  metadata: { output: string; exit: number | null; description: string; truncated?: boolean; outputPath?: string }
+  output: string
+}> {
+  const limits = await Truncate.limits()
+  const values = await Secret.values(Instance.directory)
   const proc = await launch(input.shell, input.name, input.command, input.cwd, input.env)
-  let output = ""
+  const keep = limits.maxBytes * 2
+  const chunks: { text: string; size: number }[] = []
+  let used = 0
+  let full = ""
+  let last = ""
+  let sink: ReturnType<typeof spill> | undefined
 
   ctx.metadata({
     metadata: {
@@ -408,18 +491,36 @@ async function run(
     },
   })
 
-  const append = (chunk: Buffer) => {
-    output += chunk.toString()
+  const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") }
+  const append = (chunk: string) => {
+    if (!chunk) return
+    const size = Buffer.byteLength(chunk, "utf-8")
+    chunks.push({ text: chunk, size })
+    used += size
+    while (used > keep && chunks.length > 1) used -= chunks.shift()!.size
+    last = preview(last + chunk)
+
+    if (sink) {
+      sink.write(chunk)
+    } else {
+      full += chunk
+      if (Buffer.byteLength(full, "utf-8") > limits.maxBytes) {
+        sink = spill(values)
+        sink.write(full)
+        full = ""
+      }
+    }
+
     ctx.metadata({
       metadata: {
-        output: preview(output),
+        output: Secret.apply(last, values),
         description: input.description,
       },
     })
   }
 
-  proc.stdout?.on("data", append)
-  proc.stderr?.on("data", append)
+  proc.stdout?.on("data", (data: Buffer) => append(decoders.stdout.write(data)))
+  proc.stderr?.on("data", (data: Buffer) => append(decoders.stderr.write(data)))
 
   let expired = false
   let aborted = false
@@ -474,23 +575,51 @@ async function run(
       cleanup()
       reject(error)
     })
+  }).catch(async (error) => {
+    await sink?.end()
+    throw error
   })
+
+  append(decoders.stdout.end())
+  append(decoders.stderr.end())
 
   const metadata: string[] = []
   if (expired) metadata.push(`bash tool terminated command after exceeding timeout ${input.timeout} ms`)
   if (aborted) metadata.push("User aborted the command")
-  if (metadata.length > 0) {
-    output += "\n\n<bash_metadata>\n" + metadata.join("\n") + "\n</bash_metadata>"
+  const extra = metadata.length > 0 ? "\n\n<bash_metadata>\n" + metadata.join("\n") + "\n</bash_metadata>" : ""
+
+  if (!sink && full.split("\n").length > limits.maxLines) {
+    sink = spill(values)
+    sink.write(full)
   }
 
+  if (!sink) {
+    return {
+      title: input.description,
+      metadata: {
+        output: Secret.apply(last, values),
+        exit: proc.exitCode,
+        description: input.description,
+      },
+      output: full + extra,
+    }
+  }
+
+  const saved = await sink.end()
+  const end = Secret.apply(tail(chunks.map((item) => item.text).join(""), limits.maxLines, limits.maxBytes), values)
+  const hint = saved
+    ? `The tool call succeeded but the output was truncated. Full output saved to: ${sink.file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+    : "The tool call succeeded but the output was truncated. The full output could not be saved."
   return {
     title: input.description,
     metadata: {
-      output: preview(output),
+      output: Secret.apply(last, values),
       exit: proc.exitCode,
       description: input.description,
+      truncated: true,
+      ...(saved ? { outputPath: sink.file } : {}),
     },
-    output,
+    output: `...output truncated...\n\n${hint}\n\n` + end + extra,
   }
 }
 
@@ -563,10 +692,14 @@ export const BashTool = Tool.define("bash", async () => {
       }
       const timeout = params.timeout ?? DEFAULT_TIMEOUT
       const ps = PS.has(name)
-      const root = await parse(params.command, ps)
-      const scan = await collect(root, cwd, ps, shell)
-      if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
-      await ask(ctx, scan)
+      const tree = await parse(params.command, ps)
+      try {
+        const scan = await collect(tree.rootNode, cwd, ps, shell)
+        if (!Instance.containsPath(cwd)) scan.dirs.add(cwd)
+        await ask(ctx, scan)
+      } finally {
+        tree.delete()
+      }
 
       return run(
         {
