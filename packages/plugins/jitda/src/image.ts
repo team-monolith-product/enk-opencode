@@ -5,6 +5,7 @@ import path from "node:path"
 import DESCRIPTION from "./generate-image.txt"
 import type { Reporter } from "./ai-usage"
 import { toolAttributes } from "./ai-usage"
+import * as Definitions from "./rpc"
 
 type Context = Plugin.Context
 
@@ -292,34 +293,7 @@ export async function status(storage: Pick<Context["storage"], "get">, quota: Qu
   return { enabled: state.kind === "unlimited", on }
 }
 
-export const Rpc = {
-  id: "jitda.image",
-  methods: {
-    get: {
-      input: { type: "object", additionalProperties: false },
-      output: { type: "object", additionalProperties: true },
-    },
-    toggle: {
-      input: {
-        type: "object",
-        properties: { on: { type: "boolean" } },
-        required: ["on"],
-        additionalProperties: false,
-      },
-      output: { type: "object", additionalProperties: true },
-    },
-  },
-  events: {
-    updated: {
-      schema: {
-        type: "object",
-        properties: { on: { type: "boolean" } },
-        required: ["on"],
-        additionalProperties: false,
-      },
-    },
-  },
-} as const
+export const Rpc = Definitions.Image
 
 export async function start(ctx: Context, reporter: Reporter | undefined) {
   const quota = createQuota(ctx.storage)

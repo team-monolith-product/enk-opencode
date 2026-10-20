@@ -11,7 +11,8 @@
     "./dev-server": "./src/dev-server.ts",
     "./env": "./src/env.ts",
     "./assets": "./src/assets.ts",
-    "./doc": "./src/doc/index.ts"
+    "./doc": "./src/doc/index.ts",
+    "./rpc": "./src/rpc.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

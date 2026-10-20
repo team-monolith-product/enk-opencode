@@ -4,6 +4,7 @@ import { resolve } from "node:path"
 import { DevServer } from "./dev-server"
 import DESCRIPTION from "./ensure-dev-server.txt"
 import { ServeTargets } from "./serve-targets"
+import * as Definitions from "./rpc"
 
 type Context = Plugin.Context
 
@@ -124,24 +125,7 @@ export async function ensure(
   })
 }
 
-export const Rpc = {
-  id: "jitda.dev-server",
-  methods: {
-    status: {
-      input: { type: "object", additionalProperties: false },
-      output: { type: "object", additionalProperties: true },
-    },
-    restart: {
-      input: { type: "object", additionalProperties: false },
-      output: { type: "object", additionalProperties: true },
-    },
-    logs: {
-      input: { type: "object", properties: { tail: { type: "number" } }, additionalProperties: false },
-      output: { type: "object", additionalProperties: true },
-    },
-  },
-  events: {},
-} as const
+export const Rpc = Definitions.DevServer
 
 export async function start(ctx: Context) {
   const directory = ctx.location.directory

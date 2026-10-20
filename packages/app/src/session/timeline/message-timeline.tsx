@@ -28,6 +28,7 @@ import { useCommand } from "@/shell/commands/command"
 import { SessionAncestorTrail, SessionProjectMenu, SessionTitleHeader } from "../session-identity-header"
 import { SessionHeaderSpacer } from "@/session/header/session-header"
 import { SessionRunningMenu } from "@/session/header/session-running-menu"
+import { Flags } from "@/jitda/flags"
 
 type BlockingTask = { type: "shell" | "subagent"; partID: string; id?: string; label?: string }
 
@@ -461,7 +462,7 @@ function MessageTimelineView(
         </Show>
       )}
       header={
-        <Show when={!props.hideHeader}>
+        <Show when={!props.hideHeader && !Flags.disableSessionHeader}>
           <SessionTitleHeader>
             <div class="h-12 w-full flex items-center justify-between gap-2">
               <div class="flex items-center gap-1 min-w-0 flex-1">

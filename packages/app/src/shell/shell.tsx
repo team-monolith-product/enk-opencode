@@ -11,6 +11,7 @@ import { useSettingsSurface } from "@/settings/surface"
 import { useSettings } from "@/settings/model"
 import { ExtensionServerCover } from "@/runtime/extension/server-shell"
 import { ExtensionSlot } from "@/runtime/extension/render"
+import { Flags } from "@/jitda/flags"
 
 export default function Layout(props: ParentProps) {
   const platform = usePlatform()
@@ -32,20 +33,26 @@ export default function Layout(props: ParentProps) {
         class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"
         style={{
           // Mobile panels only need clearance for their outer border.
-          "--shell-inline-inset": mobile() ? "1px" : "8px",
+          "--shell-inline-inset": Flags.productionLayout ? "0px" : mobile() ? "1px" : "8px",
           // A bottom mobile titlebar leaves main's top edge to the safe area. Native Windows chrome supplies the gap;
           // retain outer-outline clearance.
-          "--shell-top-inset": bottomTitlebar()
+          "--shell-top-inset": Flags.productionLayout
             ? "0px"
-            : platform.platform === "desktop" && platform.os === "windows"
-              ? "1px"
-              : "8px",
-          "--shell-bottom-inset": bottomTitlebar()
-            ? "8px"
-            : "max(0px, calc(8px - var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))))",
+            : bottomTitlebar()
+              ? "0px"
+              : platform.platform === "desktop" && platform.os === "windows"
+                ? "1px"
+                : "8px",
+          "--shell-bottom-inset": Flags.productionLayout
+            ? "0px"
+            : bottomTitlebar()
+              ? "8px"
+              : "max(0px, calc(8px - var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))))",
         }}
       >
-        <Titlebar verticalTabs={verticalTabs() ? { mount: state.tabsMount } : undefined} />
+        <Show when={!Flags.productionLayout}>
+          <Titlebar verticalTabs={verticalTabs() ? { mount: state.tabsMount } : undefined} />
+        </Show>
         <div class="flex flex-1 min-h-0 min-w-0 flex-row">
           <Show when={verticalTabs()}>
             <aside

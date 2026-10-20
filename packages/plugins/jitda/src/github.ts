@@ -7,6 +7,7 @@ import os from "node:os"
 import path from "node:path"
 import { Env } from "./env"
 import { ServeTargets } from "./serve-targets"
+import * as Definitions from "./rpc"
 
 // 팀이 짓다에서 연결한 GitHub 계정의 공개 저장소로 본행사 결과물을 올린다. 작업 폴더의 .git 은 건드리지 않고
 // 데이터 디렉터리의 bare gitdir 로 커밋한다. 미리보기 브릿지 태그와 .env·node_modules 등은 빼고 올린다.
@@ -459,25 +460,7 @@ export function latest(messages: ReadonlyArray<Message>): Turn | undefined {
   }
 }
 
-export const Rpc = {
-  id: "jitda.github",
-  methods: {
-    status: {
-      input: { type: "object", additionalProperties: false },
-      output: { type: "object", additionalProperties: true },
-    },
-    createRepo: {
-      input: {
-        type: "object",
-        properties: { name: { type: "string" } },
-        required: ["name"],
-        additionalProperties: false,
-      },
-      output: { type: "object", additionalProperties: true },
-    },
-  },
-  events: {},
-} as const
+export const Rpc = Definitions.Github
 
 // RPC 출력은 JSON 이어야 해서 값이 없는 필드는 뺀다.
 const json = <T>(value: T): T => JSON.parse(JSON.stringify(value))

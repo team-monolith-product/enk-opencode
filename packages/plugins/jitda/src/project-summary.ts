@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode/plugin"
 import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
+import * as Definitions from "./rpc"
 
 // 공유 갤러리에 올라갈 서비스 소개(title, description, usage)를 만든다. 짓다 프론트가 postMessage 로 부르고,
 // 세션 기록에는 남기지 않는다. 워크스페이스 파일이 권위 있는 근거이고 대화 기록은 보조 단서다.
@@ -185,21 +186,7 @@ export function transcript(messages: ReadonlyArray<Message>) {
     .join("\n\n")
 }
 
-export const Rpc = {
-  id: "jitda.project-summary",
-  methods: {
-    generate: {
-      input: {
-        type: "object",
-        properties: { sessionID: { type: "string" } },
-        required: ["sessionID"],
-        additionalProperties: false,
-      },
-      output: { type: "object", additionalProperties: true },
-    },
-  },
-  events: {},
-} as const
+export const Rpc = Definitions.ProjectSummary
 
 export async function start(ctx: Context) {
   const registration = await ctx.rpc.register(Rpc, {

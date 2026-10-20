@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode/plugin"
+import * as Definitions from "./rpc"
 
 // 작업 폴더마다 보관되지 않은 메인(루트) 세션을 하나만 둔다. 팀원이 모두 같은 대화에서 만나야 하기 때문이다.
 // 처음 열릴 때 없으면 만들고, 대화를 지울 때는 실행을 먼저 끊고 보관한 뒤 대체 세션을 하나만 만든다.
@@ -21,34 +22,7 @@ export function createMain(api: { list: () => Promise<Info[]>; create: () => Pro
   return { active, main }
 }
 
-export const Rpc = {
-  id: "jitda.session",
-  methods: {
-    main: {
-      input: { type: "object", additionalProperties: false },
-      output: { type: "object", additionalProperties: true },
-    },
-    archive: {
-      input: {
-        type: "object",
-        properties: { sessionID: { type: "string" } },
-        required: ["sessionID"],
-        additionalProperties: false,
-      },
-      output: { type: "object", additionalProperties: true },
-    },
-    remove: {
-      input: {
-        type: "object",
-        properties: { sessionID: { type: "string" } },
-        required: ["sessionID"],
-        additionalProperties: false,
-      },
-      output: { type: "object", additionalProperties: true },
-    },
-  },
-  events: {},
-} as const
+export const Rpc = Definitions.Session
 
 export async function start(ctx: Context) {
   const directory = ctx.location.directory

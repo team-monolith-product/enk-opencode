@@ -71,6 +71,8 @@ export const currentRoute = (pathname: string, search: string): LayoutRoute => {
     }
   }
 
+  if (parts.length === 1 || (parts.length === 3 && parts[1] === "session")) return { type: "home" }
+
   throw new Error("Unrecognised route!")
 }
 

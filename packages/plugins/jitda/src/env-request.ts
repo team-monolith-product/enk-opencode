@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import path from "node:path"
 import { EnvFile } from "./env-file"
 import DESCRIPTION from "./env-request.txt"
+import * as Definitions from "./rpc"
 
 // AI 가 앱에 필요한 외부 서비스 값을 참가자에게 요청한다. 값은 이 모듈 밖으로 나가지 않는다.
 //   AI → env_request   이름·표시명만 넘긴다(값 필드가 아예 없다)
@@ -119,86 +120,11 @@ const OUTPUT = {
   canceled: (name: string) => `The user dismissed the request for ${name}. Do not re-open it unless they bring it up.`,
 }
 
-const object = { type: "object", additionalProperties: true } as const
+export const RequestRpc = Definitions.EnvRequest
 
-export const RequestRpc = {
-  id: "jitda.env-request",
-  methods: {
-    list: { input: { type: "object", additionalProperties: false }, output: object },
-    submit: {
-      input: {
-        type: "object",
-        properties: { requestID: { type: "string" }, value: { type: "string" }, name: { type: "string" } },
-        required: ["requestID", "value"],
-        additionalProperties: false,
-      },
-      output: object,
-    },
-    skip: {
-      input: {
-        type: "object",
-        properties: { requestID: { type: "string" } },
-        required: ["requestID"],
-        additionalProperties: false,
-      },
-      output: object,
-    },
-    reject: {
-      input: {
-        type: "object",
-        properties: { requestID: { type: "string" } },
-        required: ["requestID"],
-        additionalProperties: false,
-      },
-      output: object,
-    },
-  },
-  events: {
-    asked: { schema: object },
-    resolved: { schema: object },
-  },
-} as const
+export const FileRpc = Definitions.EnvFile
 
-export const FileRpc = {
-  id: "jitda.env-file",
-  methods: {
-    list: { input: { type: "object", additionalProperties: false }, output: object },
-    value: {
-      input: {
-        type: "object",
-        properties: { name: { type: "string" } },
-        required: ["name"],
-        additionalProperties: false,
-      },
-      output: object,
-    },
-    set: {
-      input: {
-        type: "object",
-        properties: { values: { type: "object", additionalProperties: { type: "string" } } },
-        required: ["values"],
-        additionalProperties: false,
-      },
-      output: object,
-    },
-    remove: {
-      input: {
-        type: "object",
-        properties: { name: { type: "string" } },
-        required: ["name"],
-        additionalProperties: false,
-      },
-      output: object,
-    },
-  },
-  events: {},
-} as const
-
-export const EnvRpc = {
-  id: "jitda.env",
-  methods: { get: { input: { type: "object", additionalProperties: false }, output: object } },
-  events: {},
-} as const
+export const EnvRpc = Definitions.Env
 
 export function clientEnv(env: NodeJS.ProcessEnv = process.env) {
   return {
