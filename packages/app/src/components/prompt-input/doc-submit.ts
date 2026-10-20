@@ -14,12 +14,10 @@ export type DocSubmitState = {
   // 'doc' → targetID is the prompt doc id; 'question' → the question request id; 'stop' → the prompt
   // doc id whose in-flight AI response a consensus would cancel; 'clear' → the prompt doc id of the
   // session a consensus would delete (archive).
-  targetKind: "doc" | "question" | "stop" | "clear" | "build"
+  targetKind: "doc" | "question" | "stop" | "clear"
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
-  // For 'build' votes: the exact text and agent the vote would run.
-  preview?: { text: string; agent: string }
   actorID: string
   status: "pending" | "sent" | "cancelled" | "expired"
   actors: DocSubmitActor[]
@@ -234,16 +232,6 @@ export async function startSubmit(input: StartInput) {
     names: input.names,
     prompt: input.prompt,
     timeoutMs: input.timeoutMs,
-  })
-}
-
-// 최초 기획 뒤 첫 Build 합의. 보낼 글은 text 뿐이고 에이전트(build)와 기획 연결은 서버가 정한다.
-export async function startBuildSubmit(input: Omit<StopInput, "timeoutMs"> & { text: string }) {
-  return json(path(input, `/session/${input.sessionID}/prompt-doc/build`), {
-    docID: input.docID,
-    actorID: input.actorID,
-    names: input.names,
-    text: input.text,
   })
 }
 
