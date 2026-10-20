@@ -55,7 +55,7 @@ const context = createSimpleContext({
         if (value !== undefined) url.searchParams.set(key, value)
       const headers = new Headers(init?.headers)
       if (token) headers.set("authorization", `Basic ${token}`)
-      return (platform.fetch ?? fetch)(url, { ...init, headers, credentials: "include" })
+      return (platform.fetch ?? fetch)(url, { ...init, headers })
     }
 
     // 브라우저 WebSocket 은 헤더를 못 실으므로 로컬에서는 auth_token 쿼리로 인증한다(서버 jitda-doc 이 받는다).

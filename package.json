@@ -173,6 +173,8 @@
     "solid-js": "catalog:"
   },
   "patchedDependencies": {
+    "@blocksuite/block-std@0.0.0-canary-20250316001624": "patches/@blocksuite%2Fblock-std@0.0.0-canary-20250316001624.patch",
+    "@blocksuite/blocks@0.0.0-canary-20250316001624": "patches/@blocksuite%2Fblocks@0.0.0-canary-20250316001624.patch",
     "@ai-sdk/openai-compatible@2.0.41": "patches/@ai-sdk%2Fopenai-compatible@2.0.41.patch",
     "@dnd-kit/dom@0.5.0": "patches/@dnd-kit%2Fdom@0.5.0.patch",
     "@npmcli/agent@4.0.2": "patches/@npmcli%2Fagent@4.0.2.patch",

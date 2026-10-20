@@ -126,7 +126,14 @@ export default [
         },
         optimizeDeps: {
           exclude: [...workerDeps, ...officeDeps],
-          include: ["@opencode/session-ui > mermaid", "@opencode/session-ui > mermaid > katex"],
+          include: [
+            "@opencode/session-ui > mermaid",
+            "@opencode/session-ui > mermaid > katex",
+            "@blocksuite/presets",
+            "@blocksuite/blocks",
+            "@blocksuite/store",
+            "@blocksuite/block-std",
+          ],
           rolldownOptions: { plugins: [bundleNestedWorkerDeps] },
         },
       }

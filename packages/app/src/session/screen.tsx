@@ -42,6 +42,10 @@ import { Flags } from "@/jitda/flags"
 import { JitdaSidePanel } from "@/jitda/side-panel/side-panel"
 import { JitdaSessionPanelResize } from "@/jitda/side-panel/session-resize"
 import { sidePanelController } from "@/jitda/side-panel/controller"
+import { JitdaComposerRegion } from "@/jitda/composer/region"
+import { wireJitda } from "@/jitda/wiring"
+
+if (Flags.productionLayout) wireJitda()
 
 export function SessionScreenView(props: { session: SessionModel }) {
   // The timeline cache captures its owner when created, so link handling must be provided above it.
@@ -362,10 +366,26 @@ function SessionScreenContent(props: {
         </Switch>
       </div>
 
-      <Show when={composer.active()} keyed>
-        {(model) => (
-          <ActiveSessionComposerRegion session={session} model={model} suggestionBoundary={timeline.scroller} />
-        )}
+      <Show
+        when={!Flags.productionLayout}
+        fallback={
+          <Show when={session.identity.params.id}>
+            <JitdaComposerRegion
+              session={session}
+              scroller={timeline.scroller}
+              onSubmit={timeline.actions.resume}
+              onResponseSubmit={timeline.actions.resume}
+              setPromptDockRef={timeline.view.setDockRef}
+              onExpandedChange={sidePanelController.setComposerExpanded}
+            />
+          </Show>
+        }
+      >
+        <Show when={composer.active()} keyed>
+          {(model) => (
+            <ActiveSessionComposerRegion session={session} model={model} suggestionBoundary={timeline.scroller} />
+          )}
+        </Show>
       </Show>
       <Show when={!isDesktop() && !!session.identity.params.id && bottomMobileTabs()}>{mobileTabs()}</Show>
     </>

@@ -236,7 +236,6 @@ const json = async (input: { api: DocApi }, url: URL, body: unknown) => {
   const res = await (input.api.fetch ?? fetch)(url, {
     method: "POST",
     headers: { ...input.api.headers(), "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await res.text())
