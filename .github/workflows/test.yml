@@ -29,4 +29,4 @@ jobs:
           git config --global user.name "opencode"
 
       - name: Run unit tests
-        run: bun turbo test
+        run: bun turbo test --concurrency=2
