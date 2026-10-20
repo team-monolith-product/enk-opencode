@@ -18,6 +18,7 @@ import type { SessionRevert } from "@/session/revert"
 import { Command } from "@opencode/gui-extensions/sdk"
 import { useExtensionHost } from "@/runtime/extension/host"
 import type { Region } from "@/runtime/extension/panels"
+import { Flags } from "@/jitda/flags"
 
 type SessionCommandSource = {
   identity: SessionModel["identity"]
@@ -385,6 +386,8 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   ]
 
   const fileCmds = () => {
+    // 짓다 운영 레이아웃은 사이드 패널이 파일 열기·탭 닫기·파일 트리 명령을 따로 등록한다.
+    if (Flags.productionLayout) return []
     const tab = closableTab()
     const cycle = cycleSideTabs()
 
@@ -447,12 +450,16 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   ]
 
   const viewCmds = () => [
-    viewCommand({
-      id: "review.toggle",
-      title: language.t("command.review.toggle"),
-      keybind: "mod+shift+r",
-      onSelect: () => actions.session.layout.view().side.toggle(),
-    }),
+    ...(Flags.productionLayout
+      ? []
+      : [
+          viewCommand({
+            id: "review.toggle",
+            title: language.t("command.review.toggle"),
+            keybind: "mod+shift+r",
+            onSelect: () => actions.session.layout.view().side.toggle(),
+          }),
+        ]),
     ...(shown()
       ? [
           viewCommand({

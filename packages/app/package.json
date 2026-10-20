@@ -54,6 +54,13 @@
     "vite-plugin-solid": "2.11.14"
   },
   "dependencies": {
+    "@blocksuite/affine-model": "0.0.0-canary-20250316001624",
+    "@blocksuite/block-std": "0.0.0-canary-20250316001624",
+    "@blocksuite/blocks": "0.0.0-canary-20250316001624",
+    "@blocksuite/icons": "2.1.75",
+    "@blocksuite/presets": "0.0.0-canary-20250316001624",
+    "@blocksuite/store": "0.0.0-canary-20250316001624",
+    "@blocksuite/sync": "0.0.0-canary-20250316001624",
     "@corvu/drawer": "catalog:",
     "@dnd-kit/abstract": "0.5.0",
     "@dnd-kit/dom": "0.5.0",
@@ -82,13 +89,21 @@
     "@solidjs/router": "catalog:",
     "@tanstack/solid-query": "5.91.4",
     "@tanstack/solid-virtual": "catalog:",
+    "@team-monolith/post-message-manager": "1.1.1",
+    "@toeverything/theme": "1.1.1",
     "core-js": "3.50.0",
     "effect": "catalog:",
     "fuzzysort": "catalog:",
+    "html-to-image": "1.11.13",
+    "konva": "10.3.0",
+    "lit": "3.3.3",
+    "pdfjs-dist": "6.3.289",
+    "penpal": "7.0.6",
     "qr-scanner": "1.4.2",
     "remeda": "catalog:",
     "solid-js": "catalog:",
     "solid-presence": "0.2.0",
-    "tailwindcss": "4.3.3"
+    "tailwindcss": "4.3.3",
+    "y-protocols": "1.0.7"
   }
 }

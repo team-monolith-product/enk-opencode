@@ -173,7 +173,7 @@ export default function ArtifactView(props: {
           <Match when={kind() === "audio"}>
             <ArtifactAudio path={props.path} content={props.content} {...media} />
           </Match>
-          <Match when={kind() === "pdf" || kind() === "html"}>
+          <Match when={(kind() === "pdf" && !viewer()) || kind() === "html"}>
             <ArtifactFrame path={props.path} content={props.content} kind={kind() === "pdf" ? "pdf" : "html"} />
           </Match>
           <Match when={kind() === "font"}>

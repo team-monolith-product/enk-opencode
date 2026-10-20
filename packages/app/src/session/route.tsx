@@ -29,6 +29,9 @@ import { createSessionResolution } from "./session-resolution"
 import { SessionScreenView } from "./screen"
 import { PreparingComposer } from "./preparing-composer"
 import { JitdaProvider } from "@/jitda/context"
+import { ProjectSummaryBridge } from "@/jitda/bridge/project-summary"
+import { SessionFollow } from "@/jitda/bridge/session-follow"
+import { Flags } from "@/jitda/flags"
 
 export function TargetSessionRouteContent() {
   const params = useParams<{ serverKey: string; id: string }>()
@@ -145,6 +148,10 @@ function ResolvedTargetSessionRoute() {
           <LocationProvider directory={value()}>
             <SessionUIProvider directory={value()} server={server.key}>
               <JitdaProvider directory={value()} sessionID={params.id}>
+                <Show when={Flags.productionLayout}>
+                  <ProjectSummaryBridge />
+                  <SessionFollow />
+                </Show>
                 <TargetSessionPage />
               </JitdaProvider>
             </SessionUIProvider>

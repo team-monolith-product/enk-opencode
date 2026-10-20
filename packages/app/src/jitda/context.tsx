@@ -5,6 +5,7 @@ import { createResource, type ParentProps } from "solid-js"
 import { authTokenFromCredentials } from "@/runtime/server/api"
 import { useServer } from "@/runtime/server/current"
 import { usePlatform } from "@/runtime/platform/platform"
+import type { DocApi } from "./composer/doc-submit"
 
 export type ClientEnv = {
   serveDomain?: string
@@ -67,6 +68,16 @@ const context = createSimpleContext({
       return url.toString()
     }
 
+    const doc: DocApi = {
+      url: (path) => {
+        const url = new URL(`${base()}/api/jitda/doc${path}`, window.location.href)
+        url.searchParams.set("directory", props.directory)
+        return url
+      },
+      socket: (path) => new URL(socket(`/api/jitda/doc${path}`, {})),
+      headers: (): Record<string, string> => (token ? { authorization: `Basic ${token}` } : {}),
+    }
+
     const [env] = createResource(
       () => props.directory,
       () =>
@@ -89,6 +100,7 @@ const context = createSimpleContext({
       options,
       request,
       socket,
+      doc,
       env: () => env() ?? {},
       identity: () => parseIdentity(query().get("user")),
       locale: () => query().get("locale") ?? undefined,

@@ -6,6 +6,9 @@ import { timelinePresets, type TimelineCategory, type TimelineDetail } from "@op
 import { persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import { ScopedKey, type ServerScope } from "@/runtime/server/scope"
+import { Flags } from "@/jitda/flags"
+import { JITDA_TIMELINE } from "@/jitda/timeline/detail"
+import { JITDA_FONTS } from "@/jitda/styles/fonts"
 
 export type Settings = typeof settingsSchema.Type
 
@@ -318,9 +321,12 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     createEffect(() => {
       if (typeof document === "undefined") return
       const root = document.documentElement
-      const mono = monoFontFamily(store.appearance?.mono)
+      const mono = Flags.productionLayout ? JITDA_FONTS.mono : monoFontFamily(store.appearance?.mono)
       root.style.setProperty("--font-family-mono", mono)
-      root.style.setProperty("--font-family-sans", sansFontFamily(store.appearance?.sans))
+      root.style.setProperty(
+        "--font-family-sans",
+        Flags.productionLayout ? JITDA_FONTS.sans : sansFontFamily(store.appearance?.sans),
+      )
       // Inline code can first appear during history backfill. Load its selected
       // face with the shell so that font discovery does not resize that mount.
       void document.fonts?.load(`440 13px ${mono}`).catch(() => undefined)
@@ -345,7 +351,9 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         setShowFileTree(value: boolean) {
           setStore("general", "showFileTree", value)
         },
-        timelineDetail: withFallback(() => store.general?.timelineDetail, defaultSettings.general.timelineDetail),
+        timelineDetail: Flags.productionLayout
+          ? () => JITDA_TIMELINE
+          : withFallback(() => store.general?.timelineDetail, defaultSettings.general.timelineDetail),
         setTimelineDetail(value: TimelineDetail) {
           setStore("general", "timelineDetail", structuredClone(unwrap(value)))
         },

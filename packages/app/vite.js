@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
+import path from "node:path"
 import { createRequire } from "node:module"
 import solidPlugin from "vite-plugin-solid"
 import tailwindcss from "@tailwindcss/vite"
@@ -9,6 +10,24 @@ const theme = fileURLToPath(new URL("./public/oc-theme-preload.js", import.meta.
 const themeScript = readFileSync(theme, "utf8")
 
 const tailwind = tailwindcss()
+
+const pdfjs = path.dirname(createRequire(import.meta.url).resolve("pdfjs-dist/package.json"))
+
+// 짓다 PDF 뷰어(pdf.js)가 런타임에 읽는 cmaps·폰트·wasm·icc 를 V1 처럼 버전 폴더째 빌드 결과에 넣는다.
+const pdfjsResources = {
+  name: "jitda:pdfjs-resources",
+  apply: "build",
+  generateBundle() {
+    const { version } = JSON.parse(readFileSync(path.join(pdfjs, "package.json"), "utf8"))
+    for (const dir of ["cmaps", "standard_fonts", "wasm", "iccs"])
+      for (const name of readdirSync(path.join(pdfjs, dir)))
+        this.emitFile({
+          type: "asset",
+          fileName: `_assets/pdfjs-${version}/${dir}/${name}`,
+          source: readFileSync(path.join(pdfjs, dir, name)),
+        })
+  },
+}
 
 const tailwindGenerate = tailwind.find((plugin) => plugin.name === "@tailwindcss/vite:generate:serve")
 
@@ -114,6 +133,7 @@ export default [
     },
   },
   dropUnloadedOfficeFiles,
+  pdfjsResources,
   {
     name: "opencode-desktop:theme-preload",
     transformIndexHtml: {
