@@ -16,6 +16,12 @@ export type TimelineDetail = {
   subagents: { placement: TimelinePlacement }
   notices: { placement: TimelinePlacement }
   tools: { placement: TimelinePlacement }
+  /** Tools that join the context group whatever their category's placement. */
+  contextTools?: readonly string[]
+  /** Keeps each file-change tool in its own row instead of merging neighbours into one file list. */
+  separateFileTools?: boolean
+  /** Drops failures the session recovers from on its own: file-tool errors and the retry banner. */
+  hideMinorErrors?: boolean
 }
 
 export const timelinePresets = [
@@ -92,9 +98,7 @@ export function timelinePreset(value: TimelineDetail) {
   )
 }
 
-export function timelineCategory(
-  content: SessionMessageAssistant["content"][number],
-): keyof TimelineDetail | undefined {
+export function timelineCategory(content: SessionMessageAssistant["content"][number]): TimelineCategory | undefined {
   if (content.type === "text") return
 
   if (content.type === "reasoning") return "thinking"

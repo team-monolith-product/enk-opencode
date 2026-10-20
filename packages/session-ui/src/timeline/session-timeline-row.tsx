@@ -32,6 +32,7 @@ import { SessionRetry } from "../components/session-retry"
 import { SessionError } from "../components/session-error"
 import { timelineCategory, type TimelineDetail } from "./detail"
 import { currentToolFailed } from "../message/current-tool-state"
+import { useMessageHost } from "../message/host"
 import {
   createReactiveTimelineProjection,
   Timeline,
@@ -81,6 +82,7 @@ export function createSessionTimelineRowRenderer(input: {
 }) {
   const i18n = useI18n()
   const data = useData()
+  const host = useMessageHost()
   // Cached timelines retain file-change subgroup identities alongside their disclosure choices.
   const patchGroupKeys = input.disclosure.patchGroupKeys ?? new Map<string, string>()
   const patchPartKeys = new WeakMap<SessionMessageAssistant["content"][number], string>()
@@ -219,47 +221,71 @@ export function createSessionTimelineRowRenderer(input: {
 
       const key = () => `context:${row().group.key}`
 
+      const busy = () =>
+        workingTurn(row().userMessageID) &&
+        input.projection.lastAssistantGroupKey().get(row().userMessageID) === row().group.key
+
+      const override = createMemo(() => {
+        const group = host.contextGroup
+        const items = parts()
+
+        const tools = items.flatMap((part) => (part.type === "tool" ? [part] : []))
+
+        if (!group || tools.length === 0 || tools.length !== items.length) return undefined
+
+        return { group, tools }
+      })
+
       return (
-        <div class="contents" data-notices-only={parts().every((part) => part.type === "notice") ? "" : undefined}>
-          <SessionContextToolGroup
-            parts={parts()}
-            patchGroupKey={(tools) => {
-              const parts = tools.map((tool) => patchPartKeys.get(tool)!)
-
-              // After a split, only the subgroup with the earliest surviving member keeps the old anchor.
-              const key =
-                parts
-                  .map((part) => patchGroupKeys.get(part))
-                  .find((key) => key !== undefined && parts.includes(patchOwners().get(key)!)) ?? parts[0]!
-
-              parts.forEach((part) => patchGroupKeys.set(part, key))
-
-              return key
-            }}
-            reasoningDefaultOpen={
-              input.timelineDetail
-                ? input.timelineDetail().thinking.details === "expanded"
-                : input.reasoningMode() === "full"
-            }
-            reasoningOpen={(id) => input.disclosure.value(id)}
-            onReasoningOpenChange={(id, open) => input.disclosure.set(id, open)}
-            toolDefaultOpen={(tool) => (input.timelineDetail ? contentDefaultOpen(tool) : false)}
-            toolOpen={(id) => input.disclosure.value(`${row().group.key}:tool:${id}`)}
-            onToolOpenChange={(id, open) => input.disclosure.set(`${row().group.key}:tool:${id}`, open)}
-            fileOpen={(path) =>
-              input.disclosure.value(`patch:${path}`) ?? input.timelineDetail?.().edit.details === "expanded"
-            }
-            onFileOpenChange={(path, open) => input.disclosure.set(`patch:${path}`, open)}
-            open={input.disclosure.value(key()) === true}
-            busy={
-              workingTurn(row().userMessageID) &&
-              input.projection.lastAssistantGroupKey().get(row().userMessageID) === row().group.key
-            }
-            onOpenChange={(open) => input.disclosure.set(key(), open)}
-            onSizeChange={onSizeChange}
-          />
-        </div>
+        <Show when={override()} fallback={renderContext()}>
+          {(value) => (
+            <div class="contents">
+              <Dynamic component={value().group} tools={value().tools} busy={busy()} onSizeChange={onSizeChange} />
+            </div>
+          )}
+        </Show>
       )
+
+      function renderContext() {
+        return (
+          <div class="contents" data-notices-only={parts().every((part) => part.type === "notice") ? "" : undefined}>
+            <SessionContextToolGroup
+              parts={parts()}
+              patchGroupKey={(tools) => {
+                const parts = tools.map((tool) => patchPartKeys.get(tool)!)
+
+                // After a split, only the subgroup with the earliest surviving member keeps the old anchor.
+                const key =
+                  parts
+                    .map((part) => patchGroupKeys.get(part))
+                    .find((key) => key !== undefined && parts.includes(patchOwners().get(key)!)) ?? parts[0]!
+
+                parts.forEach((part) => patchGroupKeys.set(part, key))
+
+                return key
+              }}
+              reasoningDefaultOpen={
+                input.timelineDetail
+                  ? input.timelineDetail().thinking.details === "expanded"
+                  : input.reasoningMode() === "full"
+              }
+              reasoningOpen={(id) => input.disclosure.value(id)}
+              onReasoningOpenChange={(id, open) => input.disclosure.set(id, open)}
+              toolDefaultOpen={(tool) => (input.timelineDetail ? contentDefaultOpen(tool) : false)}
+              toolOpen={(id) => input.disclosure.value(`${row().group.key}:tool:${id}`)}
+              onToolOpenChange={(id, open) => input.disclosure.set(`${row().group.key}:tool:${id}`, open)}
+              fileOpen={(path) =>
+                input.disclosure.value(`patch:${path}`) ?? input.timelineDetail?.().edit.details === "expanded"
+              }
+              onFileOpenChange={(path, open) => input.disclosure.set(`patch:${path}`, open)}
+              open={input.disclosure.value(key()) === true}
+              busy={busy()}
+              onOpenChange={(open) => input.disclosure.set(key(), open)}
+              onSizeChange={onSizeChange}
+            />
+          </div>
+        )
+      }
     }
 
     if (row().group.type === "read") {
@@ -1013,7 +1039,9 @@ export function createSessionTimelineRowRenderer(input: {
     return (
       <Frame row={current()}>
         <div data-slot="session-turn-message-container" class={`w-full ${padding()}`}>
-          <SessionError message={current().text} />
+          <Show when={host.sessionError} fallback={<SessionError message={current().text} />}>
+            {(component) => <Dynamic component={component()} message={current().text} />}
+          </Show>
         </div>
       </Frame>
     )

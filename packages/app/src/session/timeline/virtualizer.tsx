@@ -10,6 +10,8 @@ import { isScrollKeyTarget, scrollKey, scrollKeyOwner, ScrollView } from "@openc
 import { Predicate } from "effect"
 import { Timeline, TimelineRow } from "@opencode/session-ui/timeline/projection"
 import { useLanguage } from "@/runtime/i18n/language"
+import { Flags } from "@/jitda/flags"
+import { Icon } from "@opencode/ui/icon"
 import {
   batch,
   createEffect,
@@ -849,30 +851,47 @@ export function createTimelineVirtualizer(input: Input) {
         <div
           class="absolute left-1/2 -translate-x-1/2 z-[60] pointer-events-none transition-all duration-200 ease-out"
           classList={{
-            "bottom-8": true,
+            "bottom-8": !Flags.productionLayout,
+            "bottom-6": Flags.productionLayout,
             "opacity-100 translate-y-0 scale-100": input.scroll().overflow && input.scroll().jump,
             "opacity-0 translate-y-2 pointer-events-none": !input.scroll().overflow || !input.scroll().jump,
-            "scale-[0.8]": !input.scroll().overflow || !input.scroll().jump,
+            "scale-[0.8]": !Flags.productionLayout && (!input.scroll().overflow || !input.scroll().jump),
+            "scale-95": Flags.productionLayout && (!input.scroll().overflow || !input.scroll().jump),
           }}
         >
-          <button
-            type="button"
-            aria-label={language.t("session.messages.jumpToLatest")}
-            class="pointer-events-auto flex items-center justify-center w-8 h-7 px-2 py-1.5 rounded-lg border-none cursor-pointer text-v2-text-text-base backdrop-blur-[2px]"
-            style={{
-              background: "color-mix(in srgb, var(--v2-background-bg-base) 92%, transparent)",
-              "box-shadow": "var(--v2-elevation-raised), 0px 2px 8px var(--v2-background-bg-base)",
-            }}
-            onClick={input.onResumeScroll}
+          <Show
+            when={!Flags.productionLayout}
+            fallback={
+              <button
+                type="button"
+                data-component="codle-scroll-bottom"
+                class="pointer-events-auto flex items-center justify-center"
+                onClick={input.onResumeScroll}
+                aria-label={language.t("session.messages.jumpToLatest")}
+              >
+                <Icon name="arrow-down-to-line" />
+              </button>
+            }
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M12.3333 8.66665L8 13L3.66667 8.66665M8 12.6667V2.83332"
-                stroke="currentColor"
-                stroke-linecap="square"
-              />
-            </svg>
-          </button>
+            <button
+              type="button"
+              aria-label={language.t("session.messages.jumpToLatest")}
+              class="pointer-events-auto flex items-center justify-center w-8 h-7 px-2 py-1.5 rounded-lg border-none cursor-pointer text-v2-text-text-base backdrop-blur-[2px]"
+              style={{
+                background: "color-mix(in srgb, var(--v2-background-bg-base) 92%, transparent)",
+                "box-shadow": "var(--v2-elevation-raised), 0px 2px 8px var(--v2-background-bg-base)",
+              }}
+              onClick={input.onResumeScroll}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M12.3333 8.66665L8 13L3.66667 8.66665M8 12.6667V2.83332"
+                  stroke="currentColor"
+                  stroke-linecap="square"
+                />
+              </svg>
+            </button>
+          </Show>
         </div>
         <ScrollView
           data-slot="session-timeline-scroll"

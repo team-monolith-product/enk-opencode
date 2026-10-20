@@ -15,6 +15,8 @@ import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import en from "@/runtime/i18n/en"
 import jitdaEn from "@/jitda/i18n/en"
+import { dict as jitdaOverridesEn } from "@/jitda/i18n/v1-overrides.en"
+import { Flags } from "@/jitda/flags"
 import { dict } from "@opencode/ui/i18n/en"
 import {
   createDesktopNativeBundle,
@@ -97,7 +99,15 @@ const StoredLocaleSchema = Schema.Struct({
 
 const INTL = DESKTOP_NATIVE_LOCALE_TAGS
 
-const base = flatten({ ...en, ...jitdaEn, ...dict })
+// 짓다 운영 화면은 V1 문구를 쓴다. 짓다 사전과 V1 보정을 ui 사전보다 뒤에 합친다.
+const jitdaLast = (
+  app: Record<string, string>,
+  ui: Record<string, string>,
+  jitda: Record<string, string>,
+  overrides: Record<string, string>,
+) => (Flags.productionLayout ? { ...app, ...ui, ...jitda, ...overrides } : { ...app, ...jitda, ...ui })
+
+const base = flatten(jitdaLast(en, dict, jitdaEn, jitdaOverridesEn) as RawDictionary)
 
 const dicts = new Map<Locale, Dictionary>([["en", base]])
 
@@ -108,11 +118,24 @@ const loaders: Record<Exclude<Locale, "en">, () => Promise<Dictionary>> = {
   zh: () => merge(import("@/runtime/i18n/zh"), import("@opencode/ui/i18n/zh")),
   zht: () => merge(import("@/runtime/i18n/zht"), import("@opencode/ui/i18n/zht")),
   ko: () =>
-    merge(
-      Promise.all([import("@/runtime/i18n/ko"), import("@/jitda/i18n/ko")]).then(([app, jitda]) => ({
-        dict: { ...app.dict, ...jitda.dict } as Record<string, string>,
-      })),
+    Promise.all([
+      import("@/runtime/i18n/ko"),
       import("@opencode/ui/i18n/ko"),
+      import("@/jitda/i18n/ko"),
+      import("@/jitda/i18n/v1-overrides.ko"),
+    ]).then(
+      ([app, ui, jitda, overrides]) =>
+        ({
+          ...base,
+          ...flatten(
+            jitdaLast(
+              app.dict as Record<string, string>,
+              ui.dict as Record<string, string>,
+              jitda.dict as Record<string, string>,
+              overrides.dict,
+            ),
+          ),
+        }) as Dictionary,
     ),
   de: () => merge(import("@/runtime/i18n/de"), import("@opencode/ui/i18n/de")),
   es: () => merge(import("@/runtime/i18n/es"), import("@opencode/ui/i18n/es")),

@@ -181,6 +181,17 @@ const source = {
   "ui.scrollView.ariaLabel": "scrollable content",
 
   "ui.tool.read": "Read",
+  // 짓다(V1) 대화 화면 문구
+  "ui.tool.readActive": "Reading",
+  "ui.tool.shellActive": "Running shell",
+  "ui.tool.lines": "{{count}} lines",
+  "ui.tool.lineRange": "lines {{start}}–{{end}}",
+  "ui.tool.lineFrom": "from line {{start}}",
+  "ui.messagePart.title.editActive": "Editing",
+  "ui.messagePart.title.writeActive": "Writing",
+  "ui.messagePart.title.reasoning": "Thinking",
+  "ui.message.viewPromptSnapshot": "Show sent prompt",
+  "ui.message.viewDocument": "Show document",
   "ui.tool.loaded": "Loaded",
   "ui.tool.loadedFile": "Loaded {{path}}",
   "ui.tool.loadedSkill": "Loaded {{name}} skill",

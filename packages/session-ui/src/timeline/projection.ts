@@ -17,6 +17,7 @@ import {
 } from "../message/current-tool-state"
 import { TimelineRow, type PartGroup, type PartRef, type TimelineRowMap } from "./timeline-row"
 import { timelineCategory, timelineNoticeRequired, type TimelineDetail } from "./detail"
+import { minorToolError } from "../message/minor-error"
 
 export { TimelineRow, type PartGroup, type PartRef, type TimelineRowMap }
 
@@ -561,8 +562,9 @@ export namespace Timeline {
 
       if (lastStep?.type !== "assistant") return
 
-      if (isActive && lastAssistant?.retry) rows.push(new TimelineRow.Retry({ userMessageID: turnID }))
-      else if (lastAssistant?.error && !isInterrupted(lastAssistant.error))
+      if (isActive && lastAssistant?.retry) {
+        if (!detail?.hideMinorErrors) rows.push(new TimelineRow.Retry({ userMessageID: turnID }))
+      } else if (lastAssistant?.error && !isInterrupted(lastAssistant.error))
         rows.push(
           new TimelineRow.Error({ userMessageID: turnID, text: unwrapErrorMessage(lastAssistant.error.message) }),
         )
@@ -838,6 +840,8 @@ function renderable(content: Content, showReasoning: boolean, detail?: TimelineD
   if (content.type === "reasoning")
     return (detail ? detail.thinking.placement !== "hidden" : showReasoning) && !!content.text.trim()
 
+  if (detail?.hideMinorErrors && minorToolError(content)) return false
+
   if (detail && currentToolFailed(content)) return true
 
   if (content.name === "todowrite") return false
@@ -937,13 +941,15 @@ function toolGroupType(
 ) {
   if (detail) {
     if (content.name === "question" && !currentToolFailed(content)) return undefined
+
+    if (detail.contextTools?.includes(content.name)) return "context"
     const category = timelineCategory(content)!
 
     if (detail[category].placement === "grouped") return "context"
 
     if (currentToolGroupedRead(content)) return "read"
 
-    if (currentToolFailed(content)) return undefined
+    if (currentToolFailed(content) || detail.separateFileTools) return undefined
 
     if (content.name === "patch" || content.name === "edit" || content.name === "write") return "file"
 

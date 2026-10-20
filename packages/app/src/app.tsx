@@ -19,6 +19,10 @@ import { ErrorPage } from "@/shell/errors/error"
 import { AppRoutes, File, preloadRoute } from "@/shell/routes/routes"
 import { ExtensionRoot } from "@/runtime/extension/root"
 import { Flags } from "@/jitda/flags"
+import { registerTool } from "@opencode/session-ui/message-part"
+import { registerJitdaTools } from "@/jitda/generated-image/register"
+
+registerJitdaTools(registerTool)
 
 export { preloadRoute }
 

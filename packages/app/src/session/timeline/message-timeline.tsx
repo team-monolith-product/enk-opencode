@@ -29,6 +29,10 @@ import { SessionAncestorTrail, SessionProjectMenu, SessionTitleHeader } from "..
 import { SessionHeaderSpacer } from "@/session/header/session-header"
 import { SessionRunningMenu } from "@/session/header/session-running-menu"
 import { Flags } from "@/jitda/flags"
+import { MessageHostProvider } from "@opencode/session-ui/message"
+import { createJitdaMessageHost } from "@/jitda/timeline/host"
+import { JitdaThinking } from "@/jitda/timeline/thinking"
+import { reasoningHeading } from "@opencode/session-ui/timeline/projection"
 
 type BlockingTask = { type: "shell" | "subagent"; partID: string; id?: string; label?: string }
 
@@ -304,7 +308,8 @@ function MessageTimelineView(
         voice: !!voice,
       }
     },
-    actions: props.actions,
+    // V1 짓다 운영 화면에는 메시지별 되돌리기가 없다.
+    actions: Flags.productionLayout && props.actions ? { ...props.actions, revert: undefined } : props.actions,
     reasoningMode: props.data.reasoningMode,
     shellToolDefaultOpen: props.data.shellToolPartsExpanded,
     editToolDefaultOpen: props.data.editToolPartsExpanded,
@@ -337,7 +342,31 @@ function MessageTimelineView(
     1000,
   )
 
+  // V1 짓다는 응답이 끝날 때까지(오류가 아니면) 턴 맨 아래에 "생각 중" 을 둔다. 재시도 대기 중에도 그대로다.
+  const jitdaThinking = createMemo(() => {
+    const id = sessionID()
+
+    if (!Flags.productionLayout || !id || sessionStatus().type === "idle") return false
+    const active = projection.activeMessageID()
+
+    if (!active) return false
+    const assistant = projection.assistantMessagesByParent().get(active)?.at(-1)
+
+    return !(assistant?.error && !assistant.retry)
+  })
+
+  const jitdaHeading = createMemo(() => {
+    const active = projection.activeMessageID()
+    const messages = active ? (projection.assistantMessagesByParent().get(active) ?? []) : []
+    const reasoning = messages
+      .flatMap((message) => message.content)
+      .findLast((content) => content.type === "reasoning" && !!content.text.trim())
+
+    return reasoning?.type === "reasoning" ? reasoningHeading(reasoning.text) : undefined
+  })
+
   const showWorking = createMemo(() => {
+    if (Flags.productionLayout) return false
     const id = sessionID()
 
     if (!id || sessionStatus().type !== "busy") return false
@@ -400,37 +429,55 @@ function MessageTimelineView(
   const activityRow = createMemo(() => projection.rows().some((row) => Predicate.isTagged(row, "Activity")))
 
   const activity = () => (
-    <Show when={showWorking() || backgroundHintPresence.present()}>
-      <div
-        classList={{
-          "min-w-0 w-full max-w-full": true,
-          "md:max-w-session md:mx-auto": props.centered,
-        }}
-      >
-        <div class={`flex h-9 items-center gap-2 pt-3 text-[13px] font-[530] leading-text-compact ${turnPadding()}`}>
-          <Show when={showWorking()}>
-            <div data-component="session-working" role="status">
-              <TextShimmer text={language.t("session.timeline.working")} active />
-            </div>
-          </Show>
-          <Show when={backgroundHintPresence.present()}>
-            <div
-              ref={setBackgroundHintRef}
-              data-component="session-background-hint-row"
-              class="duration-150 motion-reduce:animate-none"
-              classList={{
-                "animate-in fade-in": backgroundHintPresence.animate() && backgroundHintPresence.show(),
-                "animate-out fade-out fill-mode-forwards":
-                  backgroundHintPresence.animate() && !backgroundHintPresence.show(),
-              }}
-            >
-              <BackgroundMoveHint onMove={props.background.move} />
-            </div>
-          </Show>
+    <Show
+      when={!jitdaThinking()}
+      fallback={
+        <div
+          classList={{
+            "min-w-0 w-full max-w-full": true,
+            "md:max-w-session md:mx-auto": props.centered,
+          }}
+        >
+          <div class={turnPadding()}>
+            <JitdaThinking heading={jitdaHeading()} />
+          </div>
         </div>
-      </div>
+      }
+    >
+      <Show when={showWorking() || backgroundHintPresence.present()}>
+        <div
+          classList={{
+            "min-w-0 w-full max-w-full": true,
+            "md:max-w-session md:mx-auto": props.centered,
+          }}
+        >
+          <div class={`flex h-9 items-center gap-2 pt-3 text-[13px] font-[530] leading-text-compact ${turnPadding()}`}>
+            <Show when={showWorking()}>
+              <div data-component="session-working" role="status">
+                <TextShimmer text={language.t("session.timeline.working")} active />
+              </div>
+            </Show>
+            <Show when={backgroundHintPresence.present()}>
+              <div
+                ref={setBackgroundHintRef}
+                data-component="session-background-hint-row"
+                class="duration-150 motion-reduce:animate-none"
+                classList={{
+                  "animate-in fade-in": backgroundHintPresence.animate() && backgroundHintPresence.show(),
+                  "animate-out fade-out fill-mode-forwards":
+                    backgroundHintPresence.animate() && !backgroundHintPresence.show(),
+                }}
+              >
+                <BackgroundMoveHint onMove={props.background.move} />
+              </div>
+            </Show>
+          </div>
+        </div>
+      </Show>
     </Show>
   )
+
+  const jitdaHost = Flags.productionLayout ? createJitdaMessageHost() : undefined
 
   const runningMenu = (title?: string) => (
     <SessionRunningMenu
@@ -443,7 +490,7 @@ function MessageTimelineView(
     />
   )
 
-  return (
+  const timeline = () => (
     <VirtualizedTimeline
       workspaceSession={workspaceSession}
       bottomSpacer={<Show when={!activityRow()}>{activity()}</Show>}
@@ -616,5 +663,11 @@ function MessageTimelineView(
         </Show>
       }
     />
+  )
+
+  return (
+    <Show when={jitdaHost} fallback={timeline()}>
+      {(host) => <MessageHostProvider value={host()}>{timeline()}</MessageHostProvider>}
+    </Show>
   )
 }

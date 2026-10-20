@@ -30,6 +30,10 @@ import { TextShimmer } from "@opencode/ui/text-shimmer"
 import { BasicTool } from "../components/basic-tool"
 import { reasoningHeading } from "../timeline/projection"
 import { Card } from "@opencode/ui/card"
+import { FileIcon } from "@opencode/ui/file-icon"
+import { Dynamic } from "solid-js/web"
+import { useMessageHost } from "./host"
+import { edge } from "./paper-edge"
 import type {
   PromptAgentAttachment,
   PromptFileAttachment,
@@ -69,6 +73,20 @@ export async function writeClipboard(text: string): Promise<boolean> {
   )
 }
 
+function decodeAttachment(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function fileUrl(file: PromptFileAttachment) {
+  const source = file.source
+
+  return source.type === "uri" ? source.uri : `data:${file.mime};base64,${file.data}`
+}
+
 function modelLabel(
   data: ReturnType<typeof useData>,
   i18n: ReturnType<typeof useI18n>,
@@ -86,7 +104,7 @@ function modelLabel(
 
 function MessageActionButton(
   props: Pick<ComponentProps<"button">, "disabled" | "onMouseDown" | "onClick" | "aria-label"> & {
-    icon: "check" | "copy" | "reset" | "arrow-down-to-line" | "outline-trash"
+    icon: "check" | "copy" | "reset" | "arrow-down-to-line" | "outline-trash" | "code" | "window-cursor"
     label: JSX.Element
   },
 ) {
@@ -271,13 +289,72 @@ export function CurrentUserMessageDisplay(props: {
   const data = useData()
   const dialog = useDialog()
   const i18n = useI18n()
+  const host = useMessageHost()
 
   const [state, setState] = createStore({ copied: false, reverting: false, updating: false })
+  const [mode, setMode] = createSignal<"doc" | "prompt">("doc")
+  const [paper, setPaper] = createSignal<HTMLDivElement | undefined>()
 
   const status = createMemo(() => props.actions?.pending?.status(props.message.id))
   const pending = createMemo(() => status() !== undefined && status() !== "queued")
   const waiting = createMemo(() => status() === "steering" || status() === "stranded")
-  const attachments = createMemo(() => (props.message.files ?? []).filter(attached))
+  // 합의 투표로 문서에서 보낸 메시지는 doc 서버가 metadata.jitda.docID 를 붙인다.
+  const docID = createMemo(() => {
+    const jitda = props.message.metadata?.jitda
+    if (!jitda || typeof jitda !== "object" || !("docID" in jitda)) return undefined
+    return typeof jitda.docID === "string" && jitda.docID ? jitda.docID : undefined
+  })
+  const markdown = createMemo(() => {
+    const jitda = props.message.metadata?.jitda
+    return !!docID() || (!!jitda && typeof jitda === "object" && "format" in jitda && jitda.format === "markdown")
+  })
+  const raw = createMemo(() => !!docID() && mode() === "prompt")
+  const view = createMemo(() => (docID() ? host.doc : undefined))
+  const assetUrl = (url: string) => host.assetUrl?.(url) ?? url
+
+  const referenced = createMemo(() => {
+    if (!markdown()) return new Set<string>()
+
+    return new Set(
+      Array.from(props.text.matchAll(/attachment:\/\/([^\s)]+)/g), (match) => decodeAttachment(match[1] ?? "")),
+    )
+  })
+
+  const docText = createMemo(() => {
+    if (!markdown()) return props.text
+    const refs = new Map((props.message.files ?? []).map((file) => [file.name ?? "", assetUrl(fileUrl(file))]))
+
+    return props.text.replace(
+      /attachment:\/\/([^\s)]+)/g,
+      (value, name: string) => refs.get(decodeAttachment(name)) ?? value,
+    )
+  })
+
+  createEffect(() => {
+    void props.text
+    const el = paper()
+
+    if (!el || !host.paperEdge) return
+
+    const sync = () => {
+      if (!el.isConnected || !el.closest('[data-component="codle-session"]')) return
+      const box = el.getBoundingClientRect()
+
+      if (box.width < 1 || box.height < 1) return
+      const path = edge(box.width, box.height)
+      el.style.setProperty("--paper-edge", path)
+      el.parentElement?.style.setProperty("--paper-edge", path)
+    }
+
+    sync()
+    const observer = new ResizeObserver(sync)
+    observer.observe(el)
+    onCleanup(() => observer.disconnect())
+  })
+
+  const attachments = createMemo(() =>
+    (props.message.files ?? []).filter((file) => attached(file) && !referenced().has(file.name ?? "")),
+  )
   const references = createMemo(() => props.references ?? [])
   const inlineFiles = createMemo(() => (props.message.files ?? []).filter((file) => !!file.mention))
   const agents = createMemo(() => props.message.agents ?? [])
@@ -292,7 +369,7 @@ export function CurrentUserMessageDisplay(props: {
     const agent = props.agent
     const pendingLabel = waiting() ? i18n.t("ui.message.pending") : ""
 
-    if (mobile()) return pendingLabel
+    if (mobile() || host.hideUserMeta) return pendingLabel
 
     return [pendingLabel, agent ? agent[0]?.toUpperCase() + agent.slice(1) : "", model()]
       .filter(Boolean)
@@ -327,6 +404,18 @@ export function CurrentUserMessageDisplay(props: {
     setState("updating", false)
   }
 
+  const content = () => (
+    <Show
+      when={markdown() && !raw()}
+      fallback={<CurrentHighlightedText text={props.text} files={inlineFiles()} agents={agents()} />}
+    >
+      <Markdown text={docText()} cacheKey={`${props.message.id}:doc`} />
+    </Show>
+  )
+
+  const docToggleLabel = () =>
+    mode() === "doc" ? i18n.t("ui.message.viewPromptSnapshot") : i18n.t("ui.message.viewDocument")
+
   const renderAttachments = () => (
     <Show when={attachments().length > 0 || references().length > 0}>
       <div data-slot="user-message-attachments">
@@ -339,14 +428,11 @@ export function CurrentUserMessageDisplay(props: {
         </For>
         <Index each={attachments()}>
           {(file) => {
-            const url = () => {
-              const source = file().source
-
-              return source.type === "uri" ? source.uri : `data:${file().mime};base64,${file().data}`
-            }
-
+            const url = () => assetUrl(fileUrl(file()))
             const name = () => file().name ?? i18n.t("ui.message.attachment.alt")
-            const image = () => file().mime.startsWith("image/")
+            // 저장된 업로드가 사라졌으면(정리된 작업 공간, 다른 곳으로 복사된 세션) 깨진 그림 대신 파일 칩을 보인다.
+            const [broken, setBroken] = createSignal(false)
+            const image = () => file().mime.startsWith("image/") && !(host.fileChips && broken())
 
             return (
               <Show
@@ -358,18 +444,35 @@ export function CurrentUserMessageDisplay(props: {
                     data-clickable="true"
                     onClick={() => dialog.show(() => <ImagePreview src={url()} alt={name()} />)}
                   >
-                    <img data-slot="user-message-attachment-image" src={url()} alt={name()} />
+                    <img
+                      data-slot="user-message-attachment-image"
+                      src={url()}
+                      alt={name()}
+                      onError={() => setBroken(true)}
+                    />
                   </div>
                 }
               >
-                <AttachmentCard
-                  title={getFilename(name())}
-                  hover={name()}
-                  clickable={!!props.actions?.openAttachment}
-                  onClick={() => props.actions?.openAttachment?.(file())}
+                <Show
+                  when={!host.fileChips}
+                  fallback={
+                    <div data-slot="user-message-attachment" data-type="file" title={name()}>
+                      <div data-slot="user-message-attachment-file">
+                        <FileIcon node={{ path: name(), type: "file" }} />
+                        <span data-slot="user-message-attachment-name">{name()}</span>
+                      </div>
+                    </div>
+                  }
                 >
-                  {typeLabel(name(), file().mime, i18n.t("ui.common.file"))}
-                </AttachmentCard>
+                  <AttachmentCard
+                    title={getFilename(name())}
+                    hover={name()}
+                    clickable={!!props.actions?.openAttachment}
+                    onClick={() => props.actions?.openAttachment?.(file())}
+                  >
+                    {typeLabel(name(), file().mime, i18n.t("ui.common.file"))}
+                  </AttachmentCard>
+                </Show>
               </Show>
             )
           }}
@@ -393,7 +496,11 @@ export function CurrentUserMessageDisplay(props: {
           </Show>
         }
       >
-        <div data-slot="user-message-body" data-voice={props.voice ? "true" : undefined}>
+        <div
+          data-slot="user-message-body"
+          data-voice={props.voice ? "true" : undefined}
+          data-doc={docID() ? "true" : undefined}
+        >
           <Show when={props.voice}>
             <div data-slot="user-message-voice" role="img" aria-label={i18n.t("ui.message.voice")}>
               <Tooltip appearance="compact" value={i18n.t("ui.message.voice")} placement="top" gutter={4}>
@@ -401,8 +508,17 @@ export function CurrentUserMessageDisplay(props: {
               </Tooltip>
             </div>
           </Show>
-          <div data-slot="user-message-text" dir="auto" data-comments={comments().length > 0 ? "true" : undefined}>
-            <CurrentHighlightedText text={props.text} files={inlineFiles()} agents={agents()} />
+          <div
+            ref={setPaper}
+            data-slot="user-message-text"
+            dir="auto"
+            data-comments={comments().length > 0 ? "true" : undefined}
+            data-doc={docID() ? "true" : undefined}
+            data-raw={raw() ? "true" : undefined}
+          >
+            <Show when={mode() === "doc" ? view() : undefined} keyed fallback={content()}>
+              {(component) => <Dynamic component={component} id={docID()!} fallback={content()} />}
+            </Show>
             <Show when={comments().length > 0}>
               <UserMessageComments comments={comments()} bounded />
             </Show>
@@ -451,7 +567,19 @@ export function CurrentUserMessageDisplay(props: {
               aria-label={i18n.t("ui.message.deletePending")}
             />
           </Show>
-          <Show when={props.actions?.revert && !pending()}>
+          <Show when={view() && !host.hideUserMeta}>
+            <MessageActionButton
+              icon={mode() === "doc" ? "code" : "window-cursor"}
+              label={docToggleLabel()}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={(event) => {
+                event.stopPropagation()
+                setMode(mode() === "doc" ? "prompt" : "doc")
+              }}
+              aria-label={docToggleLabel()}
+            />
+          </Show>
+          <Show when={props.actions?.revert && !pending() && !host.hideUserMeta}>
             <MessageActionButton
               icon="reset"
               label={i18n.t("ui.message.revertMessage")}
@@ -677,6 +805,7 @@ export function AssistantTextContent(props: {
 }) {
   const data = useData()
   const i18n = useI18n()
+  const host = useMessageHost()
   const numfmt = createMemo(() => new Intl.NumberFormat(i18n.locale()))
 
   const interrupted = () => {
@@ -717,7 +846,7 @@ export function AssistantTextContent(props: {
     const agent = props.message.agent
 
     return [
-      ...(mobile() ? [] : [agent ? agent[0]?.toUpperCase() + agent.slice(1) : "", model()]),
+      ...(mobile() || host.hideUserMeta ? [] : [agent ? agent[0]?.toUpperCase() + agent.slice(1) : "", model()]),
       duration(),
       interrupted() ? i18n.t("ui.message.interrupted") : "",
     ]
