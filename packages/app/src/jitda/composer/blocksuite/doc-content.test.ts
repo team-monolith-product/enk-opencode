@@ -2,7 +2,7 @@ import { AffineSchemas } from "@blocksuite/blocks/schemas"
 import { DocCollection, Schema, Text, type Doc } from "@blocksuite/store"
 import { afterEach, describe, expect, test } from "bun:test"
 import { testDocApi } from "../test-api"
-import { docMarkdown, docPlain } from "./doc-content"
+import { codeSpan, docMarkdown, docPlain } from "./doc-content"
 import { initDoc } from "./doc-init"
 import { withFileReferenceSchema } from "./file-reference-block"
 import { withLineReferenceSchema } from "./line-reference-block"
@@ -421,5 +421,24 @@ describe("docMarkdown", () => {
     expect(out.text).toContain('"html": "<iframe src=\\"https://example.com\\"></iframe>"')
     expect(docPlain(ctx.doc)).toContain("const value = 1")
     expect(docPlain(ctx.doc)).toContain("E=mc^2")
+  })
+})
+
+describe("codeSpan", () => {
+  test("wraps plain code in single backticks", () => {
+    expect(codeSpan("const a = 1")).toBe("`const a = 1`")
+  })
+
+  test("uses a fence longer than any backtick run inside", () => {
+    expect(codeSpan("a`b")).toBe("``a`b``")
+    expect(codeSpan("x``y")).toBe("```x``y```")
+  })
+
+  test("pads code that starts or ends with a backtick", () => {
+    expect(codeSpan("`tick")).toBe("`` `tick ``")
+  })
+
+  test("keeps backslashes literal", () => {
+    expect(codeSpan("C:\\path")).toBe("`C:\\path`")
   })
 })

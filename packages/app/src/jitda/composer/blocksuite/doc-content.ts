@@ -83,10 +83,18 @@ function label(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]")
 }
 
+// CommonMark 코드 스팬은 안쪽 백슬래시를 이스케이프로 보지 않는다. 안쪽 가장 긴 백틱보다 하나 긴 울타리로 감싼다.
+export function codeSpan(text: string) {
+  const longest = Math.max(0, ...Array.from(text.matchAll(/`+/g), (match) => match[0].length))
+  const fence = "`".repeat(longest + 1)
+  const pad = text.startsWith("`") || text.endsWith("`") ? " " : ""
+  return `${fence}${pad}${text}${pad}${fence}`
+}
+
 function inline(model: BlockModel) {
   return parts(model)
     .map((op) => {
-      const code = op.code ? `\`${op.text.replace(/`/g, "\\`")}\`` : esc(op.text)
+      const code = op.code ? codeSpan(op.text) : esc(op.text)
       const bold = op.bold ? `**${code}**` : code
       const italic = op.italic ? `*${bold}*` : bold
       return op.strike ? `~~${italic}~~` : italic
