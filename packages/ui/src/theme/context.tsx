@@ -51,6 +51,7 @@ function knownThemes() {
 
 const names: Record<string, string> = {
   "oc-2": "OpenCode",
+  jitda: "Jitda",
   amoled: "AMOLED",
   aura: "Aura",
   ayu: "Ayu",
@@ -191,9 +192,10 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
   name: "Theme",
   init: (props: {
     defaultTheme?: string
+    pinned?: string
     onThemeApplied?: (theme: DesktopTheme, mode: "light" | "dark", scheme: ColorScheme) => void
   }) => {
-    const rawTheme = read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme
+    const rawTheme = props.pinned ?? read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme
     const themeId = resolveStoredTheme(rawTheme)
 
     if (rawTheme && rawTheme !== themeId) {
@@ -201,7 +203,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       clear()
     }
 
-    const colorScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system"
+    const colorScheme = props.pinned ? "system" : ((read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system")
     const mode = colorScheme === "system" ? getSystemMode() : colorScheme
 
     const [store, setStore] = createStore({
@@ -307,9 +309,11 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
 
       makeEventListener(mediaQuery, "change", onMedia)
 
-      const rawTheme = read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme
+      const rawTheme = props.pinned ?? read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme
       const savedTheme = resolveStoredTheme(rawTheme, store.themes)
-      const savedScheme = (read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system"
+      const savedScheme = props.pinned
+        ? "system"
+        : ((read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system")
 
       if (rawTheme && rawTheme !== savedTheme) {
         write(STORAGE_KEYS.THEME_ID, savedTheme)
