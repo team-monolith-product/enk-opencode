@@ -108,4 +108,58 @@ describe("ChildEnv", () => {
     const keys = await ChildEnv.envFileKeys(dir)
     expect(keys).toEqual(new Set(["OPENAI_API_KEY", "PORT", "LOCAL_ONLY"]))
   })
+
+  // 이름이 allowlist 를 통과하는 .env 키가 이 저장소가 실제로 막으려는 것 — Bun 이 부팅 때
+  // .env 를 process.env 로 올리므로 sanitize 만으로는 그대로 남는다.
+  test("forAgent removes project .env keys that the allowlist would pass", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "child-env-"))
+    await writeFile(path.join(dir, ".env"), "HTTP_PROXY=http://user:secret@proxy:8080\nNODE_ENV=from-env-file\n")
+    await writeFile(path.join(dir, ".env.local"), "NPM_CONFIG_REGISTRY=http://secret-registry\n")
+
+    const withEnvFile = {
+      ...base,
+      HTTP_PROXY: "http://user:secret@proxy:8080",
+      NODE_ENV: "from-env-file",
+      NPM_CONFIG_REGISTRY: "http://secret-registry",
+    }
+    // 대조군: sanitize 만으로는 셋 다 살아남는다
+    const sanitized = ChildEnv.sanitize({ base: withEnvFile })
+    expect(sanitized.HTTP_PROXY).toBe("http://user:secret@proxy:8080")
+
+    const env = await ChildEnv.forAgent(dir, { base: withEnvFile })
+    expect(env.HTTP_PROXY).toBeUndefined()
+    expect(env.NODE_ENV).toBeUndefined()
+    expect(env.NPM_CONFIG_REGISTRY).toBeUndefined()
+    // .env 와 무관한 툴체인 변수는 그대로 남아야 한다 — 다 지워서 통과하는 가짜 성공 방지
+    expect(env.PATH).toBe("/usr/bin")
+    expect(env.JAVA_HOME).toBe("/usr/lib/jvm")
+  })
+
+  test("forAgent keeps names that were explicitly allowed", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "child-env-"))
+    await writeFile(path.join(dir, ".env"), "HTTP_PROXY=http://proxy:8080\n")
+    const env = await ChildEnv.forAgent(dir, {
+      base: { ...base, HTTP_PROXY: "http://proxy:8080" },
+      allow: ["HTTP_PROXY"],
+    })
+    expect(env.HTTP_PROXY).toBe("http://proxy:8080")
+  })
+
+  test("maskForAgent matches forAgent when merged over the base", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "child-env-"))
+    await writeFile(path.join(dir, ".env"), "HTTP_PROXY=http://user:secret@proxy:8080\n")
+    const withEnvFile = { ...base, HTTP_PROXY: "http://user:secret@proxy:8080" }
+
+    const masked = ChildEnv.maskForAgent(dir, { base: withEnvFile })
+    expect(masked).toHaveProperty("HTTP_PROXY", undefined)
+
+    const merged: Record<string, string | undefined> = { ...withEnvFile, ...masked }
+    const kept = Object.entries(merged).filter(([, value]) => value !== undefined)
+    expect(Object.fromEntries(kept)).toEqual(await ChildEnv.forAgent(dir, { base: withEnvFile }))
+  })
+
+  test("maskForAgent on a directory without .env behaves like mask", () => {
+    const dir = path.join(tmpdir(), "child-env-missing-dir")
+    expect(ChildEnv.maskForAgent(dir, { base })).toEqual(ChildEnv.mask({ base }))
+  })
 })
