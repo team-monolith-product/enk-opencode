@@ -28,6 +28,7 @@ import { SessionErrorFallback } from "./route-error"
 import { createSessionResolution } from "./session-resolution"
 import { SessionScreenView } from "./screen"
 import { PreparingComposer } from "./preparing-composer"
+import { JitdaProvider } from "@/jitda/context"
 
 export function TargetSessionRouteContent() {
   const params = useParams<{ serverKey: string; id: string }>()
@@ -143,7 +144,9 @@ function ResolvedTargetSessionRoute() {
         {(value) => (
           <LocationProvider directory={value()}>
             <SessionUIProvider directory={value()} server={server.key}>
-              <TargetSessionPage />
+              <JitdaProvider directory={value()} sessionID={params.id}>
+                <TargetSessionPage />
+              </JitdaProvider>
             </SessionUIProvider>
           </LocationProvider>
         )}

@@ -14,6 +14,7 @@ import {
 import { Persist, persisted } from "@/runtime/persistence/storage"
 import { Persistence } from "@/runtime/persistence/schema"
 import en from "@/runtime/i18n/en"
+import jitdaEn from "@/jitda/i18n/en"
 import { dict } from "@opencode/ui/i18n/en"
 import {
   createDesktopNativeBundle,
@@ -36,11 +37,11 @@ function localeDirection(locale: Locale): Direction {
   return RTL_LOCALES.has(locale) ? "rtl" : "ltr"
 }
 
-type RawDictionary = typeof en & typeof dict
+type RawDictionary = typeof en & typeof jitdaEn & typeof dict
 
 type Dictionary = Flatten<RawDictionary>
 
-type AppI18nKey = Extract<keyof typeof en, string>
+type AppI18nKey = Extract<keyof typeof en | keyof typeof jitdaEn, string>
 
 type AppI18nPluralKey = {
   [Key in AppI18nKey]: Key extends `${infer Base}.other` ? (`${Base}.one` extends AppI18nKey ? Base : never) : never
@@ -96,7 +97,7 @@ const StoredLocaleSchema = Schema.Struct({
 
 const INTL = DESKTOP_NATIVE_LOCALE_TAGS
 
-const base = flatten({ ...en, ...dict })
+const base = flatten({ ...en, ...jitdaEn, ...dict })
 
 const dicts = new Map<Locale, Dictionary>([["en", base]])
 
@@ -106,7 +107,13 @@ const merge = (app: Promise<Source>, ui: Promise<Source>) =>
 const loaders: Record<Exclude<Locale, "en">, () => Promise<Dictionary>> = {
   zh: () => merge(import("@/runtime/i18n/zh"), import("@opencode/ui/i18n/zh")),
   zht: () => merge(import("@/runtime/i18n/zht"), import("@opencode/ui/i18n/zht")),
-  ko: () => merge(import("@/runtime/i18n/ko"), import("@opencode/ui/i18n/ko")),
+  ko: () =>
+    merge(
+      Promise.all([import("@/runtime/i18n/ko"), import("@/jitda/i18n/ko")]).then(([app, jitda]) => ({
+        dict: { ...app.dict, ...jitda.dict } as Record<string, string>,
+      })),
+      import("@opencode/ui/i18n/ko"),
+    ),
   de: () => merge(import("@/runtime/i18n/de"), import("@opencode/ui/i18n/de")),
   es: () => merge(import("@/runtime/i18n/es"), import("@opencode/ui/i18n/es")),
   fr: () => merge(import("@/runtime/i18n/fr"), import("@opencode/ui/i18n/fr")),

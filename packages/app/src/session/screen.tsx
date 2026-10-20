@@ -39,6 +39,7 @@ import { SessionRunningMenu } from "./header/session-running-menu"
 import { createAnimatedPresence } from "@/runtime/animated-presence"
 import { createTimelineCache } from "./timeline/cache"
 import { Flags } from "@/jitda/flags"
+import { JitdaSidePanel } from "@/jitda/side-panel/side-panel"
 
 export function SessionScreenView(props: { session: SessionModel }) {
   // The timeline cache captures its owner when created, so link handling must be provided above it.
@@ -367,6 +368,31 @@ function SessionScreenContent(props: {
       <Show when={!isDesktop() && !!session.identity.params.id && bottomMobileTabs()}>{mobileTabs()}</Show>
     </>
   )
+
+  if (Flags.productionLayout)
+    return (
+      <div
+        data-component="jitda-session"
+        class="relative flex-1 min-h-0 w-full overflow-hidden flex flex-col p-2 md:p-3"
+      >
+        <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-2 md:gap-3">
+          <div
+            data-slot="session-chat-panel"
+            class="@container relative flex flex-col min-h-0 h-full flex-1 min-w-0"
+            data-scrollbar-hidden={store.timelineScrollbarHidden}
+            onPointerMove={revealTimelineScrollbar}
+            onPointerDown={revealTimelineScrollbar}
+            onWheel={revealTimelineScrollbar}
+            onKeyDown={revealTimelineScrollbar}
+          >
+            <Show when={!!session.identity.params.id}>
+              <ErrorBoundary fallback={sessionErrorFallback}>{sessionPanelContent()}</ErrorBoundary>
+            </Show>
+          </div>
+          <JitdaSidePanel />
+        </div>
+      </div>
+    )
 
   return (
     <>
