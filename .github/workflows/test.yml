@@ -23,6 +23,9 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
 
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Configure git identity
         run: |
           git config --global user.email "bot@opencode.ai"

@@ -21,35 +21,35 @@ beforeEach(() => {
 
 describe("theme preload", () => {
   test.each([
-    { stored: undefined, systemDark: false, scheme: "light", background: "#fafafa" },
-    { stored: "dark", systemDark: false, scheme: "dark", background: "#080808" },
-    { stored: "light", systemDark: true, scheme: "light", background: "#fafafa" },
-    { stored: "system", systemDark: true, scheme: "dark", background: "#080808" },
+    { stored: undefined, systemDark: false, scheme: "light", background: "#f4f2ec" },
+    { stored: "dark", systemDark: false, scheme: "light", background: "#f4f2ec" },
+    { stored: "light", systemDark: true, scheme: "dark", background: "#14130f" },
+    { stored: "system", systemDark: true, scheme: "dark", background: "#14130f" },
   ])(
-    "paints the default theme in $scheme for stored scheme $stored (system dark: $systemDark)",
+    "pins jitda and follows the system scheme $scheme whatever was stored ($stored, system dark: $systemDark)",
     ({ stored, systemDark, scheme, background }) => {
       setSystemDark(systemDark)
+      localStorage.setItem("opencode-theme-id", "nightowl")
 
       if (stored) localStorage.setItem("opencode-color-scheme", stored)
       run()
 
-      expect(document.documentElement.dataset.theme).toBe("oc-2")
+      expect(document.documentElement.dataset.theme).toBe("jitda")
       expect(document.documentElement.dataset.colorScheme).toBe(scheme)
       expect(document.documentElement.style.backgroundColor).toBe(background)
+      expect(localStorage.getItem("opencode-theme-id")).toBe("jitda")
+      expect(localStorage.getItem("opencode-color-scheme")).toBe("system")
     },
   )
 
   test.each([
-    { scheme: undefined, key: "opencode-theme-css-light", css: "--background-base:#fff;", expected: "light" },
-    { scheme: "dark", key: "opencode-theme-css-dark", css: "--background-base:#010203;", expected: "dark" },
-  ])("restores the cached $expected css of a custom theme", ({ scheme, key, css, expected }) => {
-    localStorage.setItem("opencode-theme-id", "nightowl")
-
-    if (scheme) localStorage.setItem("opencode-color-scheme", scheme)
+    { systemDark: false, key: "opencode-theme-css-light", css: "--background-base:#fff;", expected: "light" },
+    { systemDark: true, key: "opencode-theme-css-dark", css: "--background-base:#010203;", expected: "dark" },
+  ])("restores the cached $expected css of the jitda theme", ({ systemDark, key, css, expected }) => {
+    setSystemDark(systemDark)
     localStorage.setItem(key, css)
     run()
 
-    expect(document.documentElement.dataset.theme).toBe("nightowl")
     expect(document.documentElement.dataset.colorScheme).toBe(expected)
     expect(document.getElementById("oc-theme-preload")?.textContent).toContain(css)
   })
