@@ -58,7 +58,13 @@ export function open(file: string, legacy?: string) {
   db.run("PRAGMA foreign_keys = ON")
   for (const statement of SCHEMA) db.run(statement)
   current = db
-  if (legacy) importLegacy(db, legacy)
+  // 가져오기는 다음 기동에 다시 시도된다(성공해야 legacy_import 를 남긴다). 실패해도 새 문서·투표는 동작한다.
+  if (legacy)
+    try {
+      importLegacy(db, legacy)
+    } catch (error) {
+      console.warn("[jitda.doc] legacy import failed", legacy, String(error))
+    }
   return db
 }
 

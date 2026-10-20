@@ -94,10 +94,15 @@ const host: Doc.Host = {
 
 export function configure(input: { data: string; database: string; prefix?: () => string }) {
   const file = process.env.OPENCODE_JITDA_DB ?? path.join(input.data, "jitda.db")
-  Store.open(file, input.database === ":memory:" ? undefined : input.database)
   if (input.prefix) prefix = input.prefix
   Doc.setHost(host)
-  Doc.recover()
+  // 짓다 문서 저장소를 못 열어도 서버는 떠야 한다. 이때 /api/jitda/doc 는 503 을 준다.
+  try {
+    Store.open(file, input.database === ":memory:" ? undefined : input.database)
+    Doc.recover()
+  } catch (error) {
+    console.warn("[jitda.doc] doc store unavailable", file, String(error))
+  }
 }
 
 const failures = new Map<string, NodeJS.Timeout>()
