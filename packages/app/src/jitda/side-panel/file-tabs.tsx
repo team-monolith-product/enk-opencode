@@ -1,4 +1,15 @@
-import { createEffect, createMemo, Match, on, onCleanup, Switch } from "solid-js"
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  ErrorBoundary,
+  Match,
+  on,
+  onCleanup,
+  Show,
+  Switch,
+  type JSX,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import type { FileSearchHandle } from "@opencode/session-ui/file"
@@ -15,7 +26,10 @@ import { useComments } from "@/composer/comments"
 import { useComposerState } from "@/composer/persistence"
 import { useLanguage } from "@/runtime/i18n/language"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/workspaces/files/model"
+import type { FileContent } from "@opencode/gui-extensions/sdk"
+import { useExtensionHost } from "@/runtime/extension/host"
 import { sidePanelController } from "./controller"
+import { FileViewer, pickFileViewer, viewerBytes } from "./file-viewer"
 
 export function FileCommentMenu(props: {
   moreLabel: string
@@ -197,6 +211,7 @@ export function FileTabContent(props: { tab: string; path: string; active: boole
   const file = useFile()
   const language = useLanguage()
   const fileComponent = useFileComponent()
+  const host = useExtensionHost()
   const context = createLineContext()
   const comments = context.comments
 
@@ -211,6 +226,11 @@ export function FileTabContent(props: { tab: string; path: string; active: boole
   const path = () => props.path
   const state = createMemo(() => file.get(path()))
   const contents = createMemo(() => state()?.content?.content ?? "")
+  const viewer = createMemo(() => {
+    const current = state()
+    if (!current?.loaded) return undefined
+    return pickFileViewer(host.list(FileViewer), path(), current.content)
+  })
   const cacheKey = createMemo(() => sampledChecksum(contents()))
   const selectedLines = createMemo<SelectedLineRange | null>(
     () => (file.selectedLines(path()) as SelectedLineRange | undefined) ?? null,
@@ -357,17 +377,63 @@ export function FileTabContent(props: { tab: string; path: string; active: boole
     </div>
   )
 
+  const scrollView = (reason?: string) => (
+    <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll}>
+      <Switch>
+        <Match when={state()?.loaded}>
+          <Show when={reason}>
+            <div class="px-6 pt-6 text-center text-14-regular text-text-weak">{reason}</div>
+          </Show>
+          {renderFile(contents())}
+        </Match>
+        <Match when={state()?.loading}>
+          <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
+        </Match>
+        <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
+      </Switch>
+    </ScrollView>
+  )
+
   return (
     <Tabs.Content value={props.tab} class="relative h-full">
-      <ScrollView class="h-full" viewportRef={scrollSync.setViewport} onScroll={scrollSync.handleScroll}>
-        <Switch>
-          <Match when={state()?.loaded}>{renderFile(contents())}</Match>
-          <Match when={state()?.loading}>
-            <div class="px-6 py-4 text-text-weak">{language.t("common.loading")}...</div>
-          </Match>
-          <Match when={state()?.error}>{(err) => <div class="px-6 py-4 text-text-weak">{err()}</div>}</Match>
-        </Switch>
-      </ScrollView>
+      <Show when={viewer()} keyed fallback={scrollView()}>
+        {(item) => (
+          <Show when={state()?.content} keyed>
+            {(content) => <FileViewerStage viewer={item} path={path()} content={content} fallback={scrollView} />}
+          </Show>
+        )}
+      </Show>
     </Tabs.Content>
+  )
+}
+
+// upstream ArtifactViewer 와 같다. 뷰어가 거부하거나 실패한 파일은 이 탭의 바이너리 안내로 돌아간다.
+function FileViewerStage(props: {
+  viewer: FileViewer
+  path: string
+  content: FileContent
+  fallback: (reason?: string) => JSX.Element
+}) {
+  const [failed, setFailed] = createSignal<{ reason?: string }>()
+  const decoded = createMemo(() => {
+    const bytes = viewerBytes(props.content)
+    return { bytes, problem: props.viewer.problem?.(bytes) }
+  })
+  const rejected = () => decoded().problem ?? failed()?.reason
+
+  return (
+    <Show when={!decoded().problem && !failed()} fallback={props.fallback(rejected())}>
+      <ErrorBoundary fallback={(_) => props.fallback()}>
+        <div class="relative flex h-full min-h-0 flex-col">
+          <Dynamic
+            component={props.viewer.View}
+            bytes={decoded().bytes}
+            path={props.path}
+            onDetails={() => {}}
+            onError={(reason) => setFailed({ reason })}
+          />
+        </div>
+      </ErrorBoundary>
+    </Show>
   )
 }
