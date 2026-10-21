@@ -51,7 +51,7 @@ const parseModel = (raw?: string) => {
   return { providerID: raw.slice(0, slash), id: raw.slice(slash + 1) }
 }
 
-const promptLocale = (value?: string | null) => (value === "ko" || value === "en" ? value : undefined)
+const promptLocale = (value?: string | null) => (value === "ko" || value === "en" || value === "ar" ? value : undefined)
 
 // V1 components/prompt-input.tsx 의 운영 경로(문서 모드 전용). 운영 빌드는 모드 전환 버튼·하단 바·트리거가 꺼져 있어
 // 일반/셸 입력창은 화면에 나오지 않는다.

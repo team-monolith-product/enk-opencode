@@ -6,7 +6,7 @@ import { Assets } from "./assets"
 
 type Context = Plugin.Context
 
-export type Locale = "ko" | "en"
+export type Locale = "ko" | "en" | "ar"
 
 const DIRECTIVE: Record<Locale, string> = {
   en: [
@@ -16,6 +16,16 @@ const DIRECTIVE: Record<Locale, string> = {
     "- Think in English as well. Do not open your reasoning in another language.",
     "- Keep code, identifiers, file paths, shell commands, and URLs exactly as they are.",
     "- Tone: friendly, short sentences, one step at a time, encouraging. Use the same polite, warm register the instructions above describe for Korean.",
+    "</response_language>",
+  ].join("\n"),
+  ar: [
+    "<response_language>",
+    "The user's interface language is Arabic.",
+    "- Respond in Modern Standard Arabic unless the user writes in another language; then reply in the language the user wrote in.",
+    "- Write every user-visible sentence in that language: acknowledgements, change summaries, questions, refusals.",
+    "- Think in English. Do not open your reasoning in another language.",
+    "- Keep code, identifiers, file paths, shell commands, and URLs exactly as they are, and do not translate them.",
+    "- Tone: friendly, short sentences, one step at a time, encouraging.",
     "</response_language>",
   ].join("\n"),
   ko: [
@@ -33,7 +43,7 @@ export function directive(locale?: Locale) {
 }
 
 export function parse(value: unknown): Locale | undefined {
-  return value === "ko" || value === "en" ? value : undefined
+  return value === "ko" || value === "en" || value === "ar" ? value : undefined
 }
 
 export async function start(ctx: Context) {

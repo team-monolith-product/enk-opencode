@@ -419,10 +419,10 @@ const LABEL = {
   en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda" },
 } as const
 
-export type Turn = { request: string; reply: string; locale: "ko" | "en"; model?: { providerID: string; id: string } }
+export type Turn = { request: string; reply: string; locale: "ko" | "en" | "ar"; model?: { providerID: string; id: string } }
 
-export function compose(subject: string, changes: Change[], locale: "ko" | "en" = "ko") {
-  const label = LABEL[locale]
+export function compose(subject: string, changes: Change[], locale: "ko" | "en" | "ar" = "ko") {
+  const label = LABEL[locale === "ko" ? "ko" : "en"]
   const lines = changes.slice(0, MAX_FILES).map((change) => `- ${label[change.status]}: ${change.file}`)
   if (changes.length > MAX_FILES) lines.push(`- … +${changes.length - MAX_FILES}`)
   const clipped = subject.length > MAX_SUBJECT ? subject.slice(0, MAX_SUBJECT - 1) + "…" : subject
@@ -455,7 +455,7 @@ export function latest(messages: ReadonlyArray<Message>): Turn | undefined {
   return {
     request: (found.text ?? "").trim(),
     reply,
-    locale: found.metadata?.locale === "en" ? "en" : "ko",
+    locale: found.metadata?.locale === "en" || found.metadata?.locale === "ar" ? found.metadata.locale : "ko",
     model: replies.at(-1)?.model,
   }
 }
@@ -498,7 +498,7 @@ export async function start(ctx: Context) {
       .split("\n")
       .map((line) => line.trim())
       .find(Boolean)
-    return compose(title || fallback || LABEL[turn.locale].fallback, changes, turn.locale)
+    return compose(title || fallback || LABEL[turn.locale === "ko" ? "ko" : "en"].fallback, changes, turn.locale)
   }
 
   const sync = async (sessionID: string) => {
