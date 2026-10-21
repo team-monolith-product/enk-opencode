@@ -579,7 +579,7 @@ export function CurrentUserMessageDisplay(props: {
               aria-label={docToggleLabel()}
             />
           </Show>
-          <Show when={props.actions?.revert && !pending() && !host.hideUserMeta}>
+          <Show when={props.actions?.revert && !pending() && (!host.hideUserMeta || host.userRevert)}>
             <MessageActionButton
               icon="reset"
               label={i18n.t("ui.message.revertMessage")}

@@ -33,6 +33,7 @@ export function createJitdaMessageHost(): MessageHost {
 
   return {
     hideUserMeta: true,
+    userRevert: true,
     fileChips: true,
     paperEdge: true,
     partialInput: true,

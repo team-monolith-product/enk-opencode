@@ -18,6 +18,7 @@ let addFile: ((path: string, nodeType?: FileNodeType) => boolean) | undefined
 let addLine: ((input: LineReferenceInput) => boolean) | undefined
 let openLine: ((input: LineRefInput) => boolean) | undefined
 let openFile: ((path: string, nodeType?: FileNodeType) => boolean) | undefined
+const [revert, setRevert] = createSignal<((messageID: string) => Promise<void>) | undefined>()
 
 export const promptDocBridge = {
   mode,
@@ -38,4 +39,6 @@ export const promptDocBridge = {
     openFile = next
   },
   openFileReference: (path: string, nodeType?: FileNodeType) => openFile?.(path, nodeType) ?? false,
+  revert,
+  setRevert: (next: ((messageID: string) => Promise<void>) | undefined) => setRevert(() => next),
 }

@@ -33,6 +33,8 @@ function fakeHost(): Doc.Host {
     formReply: record("formReply"),
     formCancel: record("formCancel"),
     archive: record("archive"),
+    revert: record("revert"),
+    unrevert: record("unrevert"),
     emit: (event) => {
       emitted.push(event)
     },
@@ -43,7 +45,7 @@ const called = (method: string) => calls.filter((call) => call.method === method
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 const flush = () => wait(5)
 const collect =
-  <T,>(list: T[]) =>
+  <T>(list: T[]) =>
   (data: string) => {
     const value = JSON.parse(data) as T & { type?: string }
     if (value.type !== "ping") list.push(value)
@@ -149,7 +151,13 @@ describe("Doc prompt doc and actors", () => {
     expect(long.name.length).toBe(64)
 
     const listed = Doc.actorList(SESSION).find((item) => item.actorID === tab1.actorID)
-    expect(listed).toEqual({ actorID: tab1.actorID, sessionID: SESSION, userID: "u1", name: "Alice", color: tab1.color })
+    expect(listed).toEqual({
+      actorID: tab1.actorID,
+      sessionID: SESSION,
+      userID: "u1",
+      name: "Alice",
+      color: tab1.color,
+    })
     expect(Doc.actorList(SESSION).find((item) => item.actorID === guest.actorID)).not.toHaveProperty("userID")
   })
 
@@ -202,7 +210,6 @@ describe("Doc sync", () => {
     const remote = new Y.Doc()
     Y.applyUpdate(remote, pulled!.data)
     expect(remote.getText("t").toString()).toBe("hi")
-
   })
 
   test("page subdoc push registers root subdoc", () => {
@@ -1101,9 +1108,9 @@ describe("Doc submit votes", () => {
     expect(() =>
       Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: "act_stranger", action: "approve" }),
     ).toThrow(Doc.NotFoundError)
-    expect(() => Doc.submitCreate({ sessionID: SESSION, docID: "doc_missing", actorID: alice!.actorID, prompt })).toThrow(
-      Doc.NotFoundError,
-    )
+    expect(() =>
+      Doc.submitCreate({ sessionID: SESSION, docID: "doc_missing", actorID: alice!.actorID, prompt }),
+    ).toThrow(Doc.NotFoundError)
     stop()
   })
 
@@ -1333,6 +1340,81 @@ describe("Doc stop, clear and question votes", () => {
     expect(Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt }).status).toBe("pending")
     stopA()
     stopB()
+  })
+
+  test("revert vote is exclusive and stages the revert on consensus", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob] = team("Alice", "Bob")
+    const alicePeer = listen(docID, alice!.actorID)
+    const stopB = quiet(docID, bob!.actorID)
+
+    const send = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+    expect(() =>
+      Doc.revertSubmitCreate({ sessionID: SESSION, docID, actorID: bob!.actorID, messageID: "msg_1" }),
+    ).toThrow(Doc.VoteConflictError)
+    Doc.submitRespond({ sessionID: SESSION, submitID: send.submitID, actorID: bob!.actorID, action: "cancel" })
+
+    const revert = Doc.revertSubmitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, messageID: "msg_1" })
+    expect(revert.status).toBe("pending")
+    expect(revert.targetKind).toBe("revert")
+    expect(revert.revertAction).toBe("revert")
+    expect(alicePeer.events.at(-1)?.state.revertAction).toBe("revert")
+
+    expect(() => Doc.submitCreate({ sessionID: SESSION, docID, actorID: bob!.actorID, prompt })).toThrow(
+      Doc.VoteConflictError,
+    )
+    expect(() => Doc.stopSubmitCreate({ sessionID: SESSION, docID, actorID: bob!.actorID })).toThrow(
+      Doc.VoteConflictError,
+    )
+    expect(() => Doc.clearSubmitCreate({ sessionID: SESSION, docID, actorID: bob!.actorID })).toThrow(
+      Doc.VoteConflictError,
+    )
+    expect(Doc.revertSubmitCreate({ sessionID: SESSION, docID, actorID: bob!.actorID, redo: true }).submitID).toBe(
+      revert.submitID,
+    )
+
+    const sent = Doc.submitRespond({
+      sessionID: SESSION,
+      submitID: revert.submitID,
+      actorID: bob!.actorID,
+      action: "approve",
+    })
+    expect(sent.status).toBe("sent")
+    expect(called("revert")).toEqual([{ method: "revert", args: [SESSION, "msg_1"] }])
+    expect(called("unrevert").length).toBe(0)
+    expect(called("prompt").length).toBe(0)
+
+    alicePeer.stop()
+    stopB()
+  })
+
+  test("redo vote clears the staged revert on consensus", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob] = team("Alice", "Bob")
+    const stopA = quiet(docID, alice!.actorID)
+    const stopB = quiet(docID, bob!.actorID)
+
+    const redo = Doc.revertSubmitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, redo: true })
+    expect(redo.status).toBe("pending")
+    expect(redo.revertAction).toBe("redo")
+
+    Doc.submitRespond({ sessionID: SESSION, submitID: redo.submitID, actorID: bob!.actorID, action: "approve" })
+    expect(called("unrevert")).toEqual([{ method: "unrevert", args: [SESSION] }])
+    expect(called("revert").length).toBe(0)
+    stopA()
+    stopB()
+  })
+
+  test("a lone reverter skips the vote, and a revert without a target is rejected", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice] = team("Alice")
+
+    const state = Doc.revertSubmitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, messageID: "msg_2" })
+    expect(state.status).toBe("sent")
+    expect(called("revert")).toEqual([{ method: "revert", args: [SESSION, "msg_2"] }])
+    expect(() => Doc.revertSubmitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID })).toThrow(
+      Doc.InvalidError,
+    )
   })
 
   test("a vote in another session does not block a clear", () => {
@@ -1608,7 +1690,14 @@ describe("Doc question drafts", () => {
     Doc.questionPresenceSet({
       sessionID: SESSION,
       requestID,
-      entry: { actorID: alice!.actorID, name: "Alice", color: "#fff", qIndex: 0, selection: ["A"], customFocused: false },
+      entry: {
+        actorID: alice!.actorID,
+        name: "Alice",
+        color: "#fff",
+        qIndex: 0,
+        selection: ["A"],
+        customFocused: false,
+      },
     })
 
     const late: ChannelEvent[] = []
@@ -1659,7 +1748,12 @@ describe("Doc question drafts", () => {
       entry: { actorID: "act_a", name: "A", color: "#fff", qIndex: 0, selection: [], customFocused: true },
     })
     stopA()
-    stopA = Doc.questionDraftConnect({ sessionID: SESSION, requestID, actorID: "act_a", peer: { send: () => undefined } })
+    stopA = Doc.questionDraftConnect({
+      sessionID: SESSION,
+      requestID,
+      actorID: "act_a",
+      peer: { send: () => undefined },
+    })
     stopA()
     watcher.length = 0
     await wait(Doc.LEAVE_GRACE / 2)
@@ -1825,7 +1919,13 @@ describe("Doc env drafts", () => {
   })
 })
 
-type Turn = { id: string; text: string; created: number; metadata?: Record<string, unknown>; files?: Recorder.Message["files"] }
+type Turn = {
+  id: string
+  text: string
+  created: number
+  metadata?: Record<string, unknown>
+  files?: Recorder.Message["files"]
+}
 type Step = {
   id: string
   created: number
@@ -1921,7 +2021,10 @@ describe("Recorder", () => {
     const { docID } = Doc.prompt(SESSION)
     Recorder.record({
       sessionID: SESSION,
-      messages: [user({ id: "msg_user_d", text: "hi", created: 1000 }), assistant({ id: "msg_a_d", created: 1000, completed: 1500, text: "yo" })],
+      messages: [
+        user({ id: "msg_user_d", text: "hi", created: 1000 }),
+        assistant({ id: "msg_a_d", created: 1000, completed: 1500, text: "yo" }),
+      ],
     })
     const cycle = cycles()[0]
     expect(cycle?.inputs[0]!.docID).toBe(docID)
@@ -2161,7 +2264,12 @@ describe("Recorder", () => {
       sessionID: SESSION,
       messages: [
         user({ id: "msg_user_err", text: "go", created: 1000 }),
-        assistant({ id: "msg_a_err", created: 1000, completed: 1500, error: { type: "ProviderError", message: "rate limited" } }),
+        assistant({
+          id: "msg_a_err",
+          created: 1000,
+          completed: 1500,
+          error: { type: "ProviderError", message: "rate limited" },
+        }),
       ],
     })
     const cycle = cycles()[0]
@@ -2267,7 +2375,9 @@ describe("Store", () => {
     db.run(
       "CREATE TABLE doc (id TEXT PRIMARY KEY, kind TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, legacy_only TEXT)",
     )
-    db.run("CREATE TABLE doc_update (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, data BLOB NOT NULL, time_created INTEGER NOT NULL)")
+    db.run(
+      "CREATE TABLE doc_update (id TEXT PRIMARY KEY, doc_id TEXT NOT NULL, data BLOB NOT NULL, time_created INTEGER NOT NULL)",
+    )
     db.run("CREATE TABLE session_prompt_doc (session_id TEXT PRIMARY KEY, doc_id TEXT NOT NULL)")
     db.run(
       "CREATE TABLE session_actor (session_id TEXT NOT NULL, actor_id TEXT NOT NULL, user_id TEXT, name TEXT NOT NULL, color TEXT NOT NULL, time_created INTEGER NOT NULL, time_seen INTEGER NOT NULL, PRIMARY KEY (session_id, actor_id))",
@@ -2342,7 +2452,9 @@ describe("Store", () => {
     const target = path.join(dir, "nested", "jitda.db")
     Store.open(target, file)
     expect(Doc.prompt("ses_legacy").docID).toBe("doc_legacy")
-    const meta = Store.db().query<{ value: string }, []>("SELECT value FROM jitda_meta WHERE key = 'legacy_import'").get()
+    const meta = Store.db()
+      .query<{ value: string }, []>("SELECT value FROM jitda_meta WHERE key = 'legacy_import'")
+      .get()
     expect(meta?.value).toBeDefined()
 
     const legacy = new Database(file)

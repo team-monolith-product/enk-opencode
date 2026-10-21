@@ -23,7 +23,14 @@ import { useJitda } from "../context"
 import { Flags } from "../flags"
 import { createDocClient } from "./doc-client"
 import { subscribeDocEvents } from "./doc-events"
-import { connectSubmit, respondSubmit, startClearSubmit, startStopSubmit, type DocSubmitState } from "./doc-submit"
+import {
+  connectSubmit,
+  respondSubmit,
+  startClearSubmit,
+  startRevert,
+  startStopSubmit,
+  type DocSubmitState,
+} from "./doc-submit"
 import { DialogDocSubmit } from "./doc-submit/dialog-doc-submit"
 import { createPromptDoc, type PromptDocConfig } from "./prompt/doc"
 import { startRtcKeepalive } from "./util/rtc-keepalive"
@@ -41,6 +48,8 @@ export type PromptDocSession = {
   requestStop: () => Promise<void>
   /** 같이 쓰는 중이면 지우기 합의를 시작하고 true. 혼자면 false — 호출한 쪽이 바로 지운다. */
   requestClear: () => Promise<boolean>
+  /** 이전 턴으로 되돌리기(messageID) 또는 되돌리기 취소(redo). 같이 쓰는 중이면 합의를 거친다. */
+  requestRevert: (input: { messageID?: string; redo?: boolean }) => Promise<void>
   /** 확인창 뒤 혼자 지우기: 보관하고 대체(메인) 세션으로 옮겨간다. */
   clear: () => Promise<void>
   votePending: Accessor<boolean>
@@ -306,8 +315,8 @@ export function createPromptDocSession(input: { session: SessionModel }): Prompt
         if (finalizedID === state.submitID) return
         finalizedID = state.submitID
       }
-      // 중지 투표는 결과 화면이 없다 — 끝나면 닫는다.
-      if (state.targetKind === "stop") {
+      // 중지·되돌리기 투표는 결과 화면이 없다 — 끝나면 닫는다.
+      if (state.targetKind === "stop" || state.targetKind === "revert") {
         if (dialogOpen(state.submitID)) closeApproval()
         return
       }
@@ -330,11 +339,12 @@ export function createPromptDocSession(input: { session: SessionModel }): Prompt
           state={approval}
           actorID={actorID}
           spectator={readonly}
-          kind={
-            approval()?.targetKind === "stop" || approval()?.targetKind === "clear"
-              ? (approval()!.targetKind as "stop" | "clear")
-              : "doc"
-          }
+          kind={(() => {
+            const current = approval()
+            if (current?.targetKind === "stop" || current?.targetKind === "clear") return current.targetKind
+            if (current?.targetKind === "revert") return current.revertAction ?? "revert"
+            return "doc"
+          })()}
           sdk={jitda.doc}
           approve={() => respond("approve", "docSubmit.toast.approveFailed")}
           cancel={() => respond("cancel", "docSubmit.toast.cancelFailed")}
@@ -410,6 +420,39 @@ export function createPromptDocSession(input: { session: SessionModel }): Prompt
     }
   }
 
+  const requestRevert = async (input: { messageID?: string; redo?: boolean }) => {
+    const id = sessionID()
+    if (!id) return
+    const docID = doc.docID()
+    const actorID = doc.actorID()
+    const direct = async () => {
+      if (input.redo) {
+        await serverSDK.api.session.revert.clear({ sessionID: id })
+        return
+      }
+      if (!input.messageID) return
+      await serverSDK.api.session.interrupt({ sessionID: id })
+      await serverSDK.api.session.wait({ sessionID: id })
+      await serverSDK.api.session.revert.stage({ sessionID: id, messageID: input.messageID })
+    }
+    const fail = () =>
+      showToast({
+        title: language.t("docSubmit.toast.revertRequestFailed"),
+        description: language.t("common.requestFailed"),
+      })
+    if (mode() !== "doc" || !docID || !actorID || peers().alone) {
+      await direct().catch(fail)
+      return
+    }
+    try {
+      const state = await startRevert({ api: jitda.doc, sessionID: id, docID, actorID, names: peers().names, ...input })
+      setApprovalSession(id)
+      showApproval(state)
+    } catch {
+      fail()
+    }
+  }
+
   const requestClear = async () => {
     const id = sessionID()
     const docID = doc.docID()
@@ -459,6 +502,7 @@ export function createPromptDocSession(input: { session: SessionModel }): Prompt
     working,
     requestStop,
     requestClear,
+    requestRevert,
     clear,
     votePending,
     showApproval,

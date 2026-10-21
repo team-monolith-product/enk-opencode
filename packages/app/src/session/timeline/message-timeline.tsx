@@ -29,6 +29,7 @@ import { SessionAncestorTrail, SessionProjectMenu, SessionTitleHeader } from "..
 import { SessionHeaderSpacer } from "@/session/header/session-header"
 import { SessionRunningMenu } from "@/session/header/session-running-menu"
 import { Flags } from "@/jitda/flags"
+import { promptDocBridge } from "@/jitda/composer/bridge"
 import { MessageHostProvider } from "@opencode/session-ui/message"
 import { createJitdaMessageHost } from "@/jitda/timeline/host"
 import { JitdaThinking } from "@/jitda/timeline/thinking"
@@ -308,8 +309,16 @@ function MessageTimelineView(
         voice: !!voice,
       }
     },
-    // V1 짓다 운영 화면에는 메시지별 되돌리기가 없다.
-    actions: Flags.productionLayout && props.actions ? { ...props.actions, revert: undefined } : props.actions,
+    actions:
+      Flags.productionLayout && props.actions
+        ? {
+            ...props.actions,
+            get revert() {
+              const revert = promptDocBridge.revert()
+              return revert ? ({ messageID }: { messageID: string }) => revert(messageID) : undefined
+            },
+          }
+        : props.actions,
     reasoningMode: props.data.reasoningMode,
     shellToolDefaultOpen: props.data.shellToolPartsExpanded,
     editToolDefaultOpen: props.data.editToolPartsExpanded,

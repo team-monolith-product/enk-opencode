@@ -24,6 +24,8 @@ export type HostToolProps = {
 export type MessageHost = {
   /** Hides agent and model labels and the per-message revert and document actions. */
   hideUserMeta?: boolean
+  /** Keeps the per-message revert button even when the user meta row is hidden. */
+  userRevert?: boolean
   /** Makes a user attachment's stored url loadable by the browser. */
   assetUrl?: (url: string) => string
   /** Renders the document a user message was sent from (`metadata.jitda.docID`). */

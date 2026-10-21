@@ -6,7 +6,7 @@ import { MSG_DOC, pack, unpack } from "./wire"
 // 협업 프롬프트 문서와 합의 투표. 규칙은 V1 src/doc/index.ts 와 같다.
 // 투표가 통과했을 때의 실제 동작(프롬프트 전송·중지·질문 응답·세션 보관)은 Host 가 V2 서버 API 로 한다.
 
-export type SubmitTargetKind = "doc" | "question" | "stop" | "clear"
+export type SubmitTargetKind = "doc" | "question" | "stop" | "clear" | "revert"
 export type SubmitStatus = "pending" | "sent" | "cancelled" | "expired" | "left"
 export type SubmitActorStatus = "pending" | "approved" | "left"
 export type SubmitEventType = "created" | "updated" | "sent" | "cancelled" | "expired" | "left"
@@ -20,6 +20,7 @@ export type SubmitState = {
   targetKind: SubmitTargetKind
   targetID: string
   questionAction?: "send" | "dismiss" | "back"
+  revertAction?: "revert" | "redo"
   actorID: string
   status: SubmitStatus
   actors: SubmitActorInfo[]
@@ -37,6 +38,8 @@ export type QuestionPayload = {
   step?: number
 }
 
+export type RevertPayload = { messageID: string } | { redo: true }
+
 export type ActorInfo = { actorID: string; sessionID: string; userID?: string; name: string; color: string }
 
 export type Host = {
@@ -45,6 +48,8 @@ export type Host = {
   formReply: (sessionID: string, formID: string, answers: string[][]) => Promise<unknown>
   formCancel: (sessionID: string, formID: string) => Promise<unknown>
   archive: (sessionID: string) => Promise<unknown>
+  revert: (sessionID: string, messageID: string) => Promise<unknown>
+  unrevert: (sessionID: string) => Promise<unknown>
   emit: (event: { type: string; properties: Record<string, unknown> }) => void
 }
 
@@ -55,6 +60,8 @@ let host: Host = {
   formReply: idle,
   formCancel: idle,
   archive: idle,
+  revert: idle,
+  unrevert: idle,
   emit: () => {},
 }
 
@@ -287,9 +294,10 @@ export function assetCreate(input: { docID: string; assetID?: string; mime: stri
 export function assetGet(input: { docID: string; assetID: string }) {
   get(input.docID)
   const row = db()
-    .query<{ id: string; doc_id: string; mime: string; data: Uint8Array; size: number }, [string, string]>(
-      "SELECT id, doc_id, mime, data, size FROM doc_asset WHERE doc_id = ? AND id = ?",
-    )
+    .query<
+      { id: string; doc_id: string; mime: string; data: Uint8Array; size: number },
+      [string, string]
+    >("SELECT id, doc_id, mime, data, size FROM doc_asset WHERE doc_id = ? AND id = ?")
     .get(input.docID, input.assetID)
   if (!row) throw new NotFoundError("Doc asset not found")
   return { assetID: row.id, docID: row.doc_id, mime: row.mime, data: toBytes(row.data), size: row.size }
@@ -361,6 +369,15 @@ function questionPayload(text: string): QuestionPayload | undefined {
   return payload
 }
 
+function revertPayload(text: string): RevertPayload | undefined {
+  const value = parseJSON(text)
+  if (!value || typeof value !== "object") return
+  const payload = value as { messageID?: unknown; redo?: unknown }
+  if (payload.redo === true) return { redo: true }
+  if (typeof payload.messageID === "string" && payload.messageID) return { messageID: payload.messageID }
+  return
+}
+
 function submitRow(id: string) {
   return db().query<SubmitRow, [string]>("SELECT * FROM doc_submit WHERE id = ?").get(id) ?? undefined
 }
@@ -393,12 +410,19 @@ function read(row: SubmitRow): SubmitState {
     if (payload?.step !== undefined) return "back" as const
     return payload?.reject ? ("dismiss" as const) : ("send" as const)
   })()
+  const revertAction = (() => {
+    if (row.target_kind !== "revert") return undefined
+    const payload = revertPayload(row.prompt)
+    if (!payload) return undefined
+    return "redo" in payload ? ("redo" as const) : ("revert" as const)
+  })()
   return {
     submitID: row.id,
     sessionID: row.session_id,
     targetKind: row.target_kind as SubmitTargetKind,
     targetID: row.target_id,
     ...(questionAction ? { questionAction } : {}),
+    ...(revertAction ? { revertAction } : {}),
     actorID: row.actor_id,
     status: row.status as SubmitStatus,
     actors: list,
@@ -445,6 +469,13 @@ function rotate(row: SubmitRow) {
 function send(row: SubmitRow) {
   if (row.target_kind === "clear") {
     host.archive(row.session_id).catch((err) => fail(row, err))
+    return
+  }
+  if (row.target_kind === "revert") {
+    const payload = revertPayload(row.prompt)
+    if (!payload) return
+    const run = "redo" in payload ? host.unrevert(row.session_id) : host.revert(row.session_id, payload.messageID)
+    run.catch((err) => fail(row, err))
     return
   }
   if (row.target_kind === "stop") {
@@ -531,9 +562,10 @@ function active(sessionID: string, targetID: string, actorID?: string, targetKin
 
 function recent(sessionID: string, targetID: string, actorID: string, now = Date.now()) {
   const rows = db()
-    .query<SubmitRow, [string, string]>(
-      "SELECT * FROM doc_submit WHERE session_id = ? AND target_id = ? ORDER BY time_updated DESC",
-    )
+    .query<
+      SubmitRow,
+      [string, string]
+    >("SELECT * FROM doc_submit WHERE session_id = ? AND target_id = ? ORDER BY time_updated DESC")
     .all(sessionID, targetID)
   for (const row of rows) {
     if (row.status === "pending") continue
@@ -609,7 +641,8 @@ function create(input: {
   if (found) return found
 
   const busy = pending(input.sessionID)
-  if (busy && (input.targetKind === "clear" || busy.target_kind === "clear"))
+  const exclusive = (kind: string) => kind === "clear" || kind === "revert"
+  if (busy && (exclusive(input.targetKind) || exclusive(busy.target_kind)))
     throw new VoteConflictError("Another consent vote is in progress")
 
   const ids = targets(input.targetID, input.actorID)
@@ -723,6 +756,26 @@ export function clearSubmitCreate(input: ControlSubmitCreateInput) {
     actorID: input.actorID,
     names: input.names,
     promptBlob: "{}",
+    timeoutMs: input.timeoutMs,
+  })
+}
+
+export function revertSubmitCreate(input: ControlSubmitCreateInput & { messageID?: string; redo?: boolean }) {
+  get(input.docID)
+  const payload: RevertPayload | undefined = input.redo
+    ? { redo: true }
+    : input.messageID
+      ? { messageID: input.messageID }
+      : undefined
+  if (!payload) throw new InvalidError("Revert needs a messageID or redo")
+  return create({
+    sessionID: input.sessionID,
+    targetKind: "revert",
+    targetID: input.docID,
+    docID: input.docID,
+    actorID: input.actorID,
+    names: input.names,
+    promptBlob: JSON.stringify(payload),
     timeoutMs: input.timeoutMs,
   })
 }
@@ -1137,8 +1190,18 @@ export function questionDraftReset(requestID: string) {
   castPresence(requestID)
 }
 
-export function questionDraftConnect(input: { sessionID: string; requestID: string; actorID: string; peer: SocketPeer }) {
-  const peer: DraftPeer = { actorID: input.actorID, send: input.peer.send, close: input.peer.close, lastSeen: Date.now() }
+export function questionDraftConnect(input: {
+  sessionID: string
+  requestID: string
+  actorID: string
+  peer: SocketPeer
+}) {
+  const peer: DraftPeer = {
+    actorID: input.actorID,
+    send: input.peer.send,
+    close: input.peer.close,
+    lastSeen: Date.now(),
+  }
   const set = draftPeers.get(input.requestID) ?? new Set<DraftPeer>()
   set.add(peer)
   draftPeers.set(input.requestID, set)
@@ -1150,7 +1213,8 @@ export function questionDraftConnect(input: { sessionID: string; requestID: stri
   if (presence.length) peer.send(JSON.stringify({ type: "presence", presence }))
   const stop = () => {
     set.delete(peer)
-    if (!Array.from(set).some((item) => item.actorID === peer.actorID)) scheduleDraftLeave(input.requestID, peer.actorID)
+    if (!Array.from(set).some((item) => item.actorID === peer.actorID))
+      scheduleDraftLeave(input.requestID, peer.actorID)
     if (set.size === 0) draftPeers.delete(input.requestID)
     heartbeatStop()
   }
@@ -1261,7 +1325,12 @@ export function envDraftConnect(input: {
     input.peer.close?.()
     return undefined
   }
-  const peer: DraftPeer = { actorID: input.actorID, send: input.peer.send, close: input.peer.close, lastSeen: Date.now() }
+  const peer: DraftPeer = {
+    actorID: input.actorID,
+    send: input.peer.send,
+    close: input.peer.close,
+    lastSeen: Date.now(),
+  }
   const set = envDraftPeers.get(input.requestID) ?? new Set<DraftPeer>()
   set.add(peer)
   envDraftPeers.set(input.requestID, set)

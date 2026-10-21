@@ -54,6 +54,8 @@ const host: Doc.Host = {
   prompt: async (sessionID, body) => {
     const id = encodeURIComponent(sessionID)
     const { model, agent, ...rest } = body as { model?: unknown; agent?: unknown } & Record<string, unknown>
+    // 되돌리기가 걸린 채 모델·에이전트를 바꾸면 접수 시점 커밋이 그 전환 기록을 지운다. 먼저 커밋한다.
+    await call("POST", `/api/session/${id}/revert/commit`).catch(() => undefined)
     if (typeof agent === "string" && agent) await call("POST", `/api/session/${id}/agent`, { agent })
     if (model && typeof model === "object") {
       const ref = model as { id?: string; modelID?: string; providerID?: string; variant?: string }
@@ -86,6 +88,13 @@ const host: Doc.Host = {
     const info = await session(sessionID)
     return call("POST", "/api/rpc/jitda.session/archive", { input: { sessionID } }, info?.directory)
   },
+  revert: async (sessionID, messageID) => {
+    const id = encodeURIComponent(sessionID)
+    await call("POST", `/api/session/${id}/interrupt`)
+    await call("POST", `/api/experimental/session/${id}/wait`)
+    return call("POST", `/api/session/${id}/revert/stage`, { messageID })
+  },
+  unrevert: (sessionID) => call("DELETE", `/api/session/${encodeURIComponent(sessionID)}/revert`),
   emit: (event) => {
     const frame = `data: ${JSON.stringify({ type: event.type, properties: event.properties })}\n\n`
     for (const write of streams) write(frame)
@@ -452,6 +461,21 @@ const sessionRoute = Effect.fn("cli.jitda-doc.session")(function* (
       }),
     )
   }
+  if (route === "prompt-doc/revert") {
+    if (!Store.valid("doc", input.docID) || !Store.valid("act", input.actorID)) return invalid()
+    const redo = input.redo === true
+    if (!redo && !string(input.messageID)) return invalid("Invalid revert target")
+    return yield* run(() =>
+      Doc.revertSubmitCreate({
+        sessionID,
+        docID: input.docID,
+        actorID: input.actorID,
+        names: names(input.names),
+        ...(redo ? { redo } : { messageID: input.messageID }),
+        timeoutMs: optionalNumber(input.timeoutMs),
+      }),
+    )
+  }
   if (route === "question/submit") {
     const payload = input.payload
     if (!string(input.requestID) || !Store.valid("act", input.actorID)) return invalid()
@@ -627,7 +651,8 @@ export const handle = Effect.fn("cli.jitda-doc.handle")(function* (
     const limit = Number(url.searchParams.get("limit") ?? 100)
     const offset = Number(url.searchParams.get("offset") ?? 0)
     const status = url.searchParams.get("status") ?? undefined
-    if (!Number.isInteger(limit) || limit < 1 || limit > 500 || !Number.isInteger(offset) || offset < 0) return invalid()
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500 || !Number.isInteger(offset) || offset < 0)
+      return invalid()
     if (status && !(Recorder.STATUSES as readonly string[]).includes(status)) return invalid()
     return json(
       Recorder.list({
@@ -639,7 +664,8 @@ export const handle = Effect.fn("cli.jitda-doc.handle")(function* (
       }),
     )
   }
-  if (parts[0] === "session" && parts[1]) return yield* sessionRoute(request, parts[1], parts.slice(2), url.searchParams)
+  if (parts[0] === "session" && parts[1])
+    return yield* sessionRoute(request, parts[1], parts.slice(2), url.searchParams)
   if (parts[0]) return yield* docRoute(request, parts[0], parts.slice(1), url.searchParams)
   return fail("NotFoundError", "Not found", 404)
 })

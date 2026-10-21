@@ -35,11 +35,14 @@ export type DocSubmitState = {
   sessionID: string
   // 'doc' → targetID is the prompt doc id; 'question' → the question request id; 'stop' → the prompt
   // doc id whose in-flight AI response a consensus would cancel; 'clear' → the prompt doc id of the
-  // session a consensus would delete (archive).
-  targetKind: "doc" | "question" | "stop" | "clear"
+  // session a consensus would delete (archive); 'revert' → the prompt doc id of the session a
+  // consensus would rewind (or un-rewind).
+  targetKind: "doc" | "question" | "stop" | "clear" | "revert"
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
+  // For 'revert' votes: whether the vote rewinds to an earlier turn or cancels the staged rewind.
+  revertAction?: "revert" | "redo"
   actorID: string
   status: "pending" | "sent" | "cancelled" | "expired" | "left"
   actors: DocSubmitActor[]
@@ -279,6 +282,20 @@ export async function startClearSubmit(input: StopInput) {
     docID: input.docID,
     actorID: input.actorID,
     names: input.names,
+    timeoutMs: input.timeoutMs,
+  })
+}
+
+type RevertInput = StopInput & { messageID?: string; redo?: boolean }
+
+// Start a consent vote to rewind the session to before messageID, or with redo to cancel the staged
+// rewind. A lone member is sent straight through by the server.
+export async function startRevert(input: RevertInput) {
+  return json(input, path(input, `/session/${input.sessionID}/prompt-doc/revert`), {
+    docID: input.docID,
+    actorID: input.actorID,
+    names: input.names,
+    ...(input.redo ? { redo: true } : { messageID: input.messageID }),
     timeoutMs: input.timeoutMs,
   })
 }
