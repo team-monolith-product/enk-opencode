@@ -377,6 +377,7 @@ function SessionScreenContent(props: {
               onResponseSubmit={timeline.actions.resume}
               setPromptDockRef={timeline.view.setDockRef}
               onExpandedChange={sidePanelController.setComposerExpanded}
+              queue={composer.active()?.queue}
             />
           </Show>
         }

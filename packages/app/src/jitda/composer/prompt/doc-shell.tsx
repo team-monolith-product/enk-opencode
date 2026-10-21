@@ -18,6 +18,7 @@ type ShellProps = {
   submitIcon: IconName
   submitLabel: string
   submitDisabled?: boolean
+  stop?: { label: string; onStop: () => void }
   /** Current prompt length in characters (code points). */
   length: number
   /** Upper bound; the counter fades in as it is approached and turns red when exceeded. */
@@ -392,6 +393,23 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
               {" / "}
               {props.maxLength.toLocaleString()}
             </span>
+          </Show>
+          <Show when={props.stop}>
+            {(stop) => (
+              <Tooltip placement="top" value={stop().label}>
+                <IconButton
+                  data-action="prompt-stop"
+                  type="button"
+                  icon="stop"
+                  variant="secondary"
+                  class="size-7.5"
+                  disabled={props.readonly}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => stop().onStop()}
+                  aria-label={stop().label}
+                />
+              </Tooltip>
+            )}
           </Show>
           <Tooltip placement="top" value={props.tip}>
             <IconButton

@@ -6,6 +6,7 @@ import { encodeFilePath, getFilename } from "@opencode/util/path"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useServerSDK } from "@/runtime/server/client"
 import { useData } from "@/runtime/server/current"
+import { useSettings } from "@/settings/model"
 import { useJitda } from "../../context"
 import { Flags } from "../../flags"
 import { previewCapture } from "../../side-panel/preview-capture"
@@ -22,6 +23,7 @@ import { CaptureEditDialog } from "./capture-edit-dialog"
 import { PromptDocShell } from "./doc-shell"
 import { createImageGeneration } from "./image-toggle"
 import { DialogClearSession } from "./clear-dialog"
+import { btwQuestion, DialogBtw } from "./btw-dialog"
 
 export type JitdaPromptInputProps = {
   ref?: (el: HTMLDivElement) => void
@@ -59,6 +61,7 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
   const data = useData()
   const dialog = useDialog()
   const language = useLanguage()
+  const settings = useSettings()
   const session = usePromptDocSession()
   const doc = session.doc
   const working = session.working
@@ -227,7 +230,8 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
   const [countShake, setCountShake] = createSignal(0)
 
   const hasDraft = createMemo(() => doc.filled())
-  const submitAction = createMemo(() => (!working() ? "send" : "stop"))
+  const submitAction = createMemo(() => (!working() || hasDraft() ? "send" : "stop"))
+  const followUp = createMemo(() => working() && hasDraft())
   const submitIcon = createMemo(() => (submitAction() === "stop" ? ("stop" as const) : ("arrow-up-bold" as const)))
   const submitLabel = createMemo(() =>
     submitAction() === "stop" ? language.t("prompt.action.stop") : language.t("prompt.action.send"),
@@ -345,6 +349,7 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
 
   const buildPrompt = (text: string, docID: string | undefined, assets: { uri: string; filename: string }[]) => {
     const pinned = model()
+    const delivery = working() ? settings.general.followUpBehavior() : undefined
     const files = [
       ...session
         .dropped()
@@ -356,6 +361,7 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
       text,
       ...(files.length > 0 ? { files } : {}),
       ...(pinned ? { model: pinned } : {}),
+      ...(delivery ? { delivery } : {}),
       metadata: {
         format: "markdown",
         source: "doc",
@@ -403,8 +409,9 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
   }
 
   const send = async (sessionID: string, prompt: DocPrompt) => {
-    const { model: pinned, metadata, ...rest } = prompt
-    if (pinned) {
+    const { model: pinned, metadata, delivery, ...rest } = prompt
+    if (!delivery) await serverSDK.api.session.revert.commit({ sessionID }).catch(() => undefined)
+    if (pinned && delivery !== "queue") {
       await serverSDK.api.session
         .switchModel({
           sessionID,
@@ -420,6 +427,7 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
       sessionID,
       text: rest.text,
       ...(rest.files ? { files: rest.files } : {}),
+      ...(delivery === "steer" || delivery === "queue" ? { delivery } : {}),
       metadata: metadata as Record<string, never>,
     })
   }
@@ -495,6 +503,13 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
       })
       return
     }
+    const question = btwQuestion(text)
+    if (question !== undefined) {
+      if (!question) return
+      dialog.show(() => <DialogBtw sessionID={sessionID} question={question} />)
+      await doc.advance(sessionID).catch(() => undefined)
+      return
+    }
     const docID = (await doc.refresh(sessionID).catch(() => undefined)) ?? doc.docID()
     const prompt = buildPrompt(text, docID, next?.assets ?? [])
     session.setApprovalSession(undefined)
@@ -539,6 +554,10 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
     abort,
   })
   onCleanup(() => session.setHandlers({}))
+  if (!readonly) {
+    bridge.setRevert((messageID) => session.requestRevert({ messageID }))
+    onCleanup(() => bridge.setRevert(undefined))
+  }
 
   return (
     <div
@@ -625,6 +644,11 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
               readonly || (submitAction() === "send" && (!hasDraft() || doc.uploading() || doc.missing().length > 0))
             }
             tip={tip()}
+            stop={
+              followUp()
+                ? { label: language.t("prompt.action.stop"), onStop: () => void session.requestStop() }
+                : undefined
+            }
             onCapture={captureTab}
             capturing={capturing()}
             canCapture={previewCapture.canCapture()}

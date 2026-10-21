@@ -2,8 +2,12 @@ import { Show, createEffect, createMemo, onCleanup, onMount, type ParentProps } 
 import { createStore } from "solid-js/store"
 import { useSpring } from "@opencode/ui/motion-spring"
 import { useData } from "@/runtime/server/current"
+import { useLanguage } from "@/runtime/i18n/language"
+import { useJitda } from "../context"
 import { createSessionRequestModel } from "@/session/requests/model"
 import { SessionPermissionDock } from "@/session/requests/session-permission-dock"
+import { SessionRunningMenu } from "@/session/header/session-running-menu"
+import type { SessionQueueView } from "@/session/composer/queue"
 import { sessionTreeIDs } from "@/session/requests/session-request-tree"
 import type { SessionModel } from "@/session/model"
 import { EnvRequestDock, createEnvRequests } from "../env/env-request-dock"
@@ -11,6 +15,7 @@ import { registerJitdaDocView } from "../timeline/host"
 import { DocMessage } from "./blocksuite/doc-message"
 import { JitdaPromptInput } from "./prompt/composer"
 import { SessionQuestionDock } from "./question-dock"
+import { JitdaQueuePanel } from "./queue-panel"
 import { createPromptDocSession, PromptDocSessionProvider } from "./session"
 
 registerJitdaDocView(DocMessage)
@@ -142,8 +147,11 @@ export function JitdaComposerRegion(props: {
   onResponseSubmit?: () => void
   setPromptDockRef?: (el: HTMLDivElement) => void
   onExpandedChange?: (expanded: boolean) => void
+  queue?: SessionQueueView
 }) {
   const data = useData()
+  const jitda = useJitda()
+  const language = useLanguage()
   const requests = createSessionRequestModel()
   const env = createEnvRequests()
   const promptDoc = createPromptDocSession({ session: props.session })
@@ -351,6 +359,31 @@ export function JitdaComposerRegion(props: {
                   />
                 </div>
               )}
+            </Show>
+
+            <Show when={!floating()}>
+              <div data-component="jitda-running" class="pointer-events-auto flex justify-end empty:hidden">
+                <SessionRunningMenu
+                  sessionID={sessionID()}
+                  owner={requests.background.running.sessionID()}
+                  blocking={requests.background.running.blocking()}
+                  tasks={requests.background.running.tasks()}
+                />
+              </div>
+              <JitdaQueuePanel queue={props.queue} />
+              <Show when={props.session.data.revertMessageID() && !jitda.readonly()}>
+                <div data-component="jitda-revert-banner" class="pointer-events-auto">
+                  <span>{language.t("jitda.revert.banner")}</span>
+                  <button
+                    type="button"
+                    data-action="jitda-revert-redo"
+                    disabled={promptDoc.votePending()}
+                    onClick={() => void promptDoc.requestRevert({ redo: true })}
+                  >
+                    {language.t("jitda.revert.redo")}
+                  </button>
+                </div>
+              </Show>
             </Show>
 
             <Show when={!blocked()}>
