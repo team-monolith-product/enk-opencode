@@ -419,28 +419,6 @@ export function createPromptDocSession(): PromptDocSession {
                 }),
               )
           }}
-          exclude={() => {
-            const current = approval()
-            if (!current) return
-            void respondSubmit({
-              baseUrl: sdk.url,
-              directory: sdk.directory,
-              sessionID: current.sessionID,
-              submitID: current.submitID,
-              actorID,
-              action: "exclude",
-            })
-              // Through showApproval, not setApproval: responding to an already finished vote
-              // answers with its terminal state, which has to close the dialog (and clear the
-              // composer on a send) instead of leaving a dead "수락/거절" frame on screen.
-              .then((next) => showApproval(next))
-              .catch(() =>
-                showToast({
-                  title: language.t("docSubmit.toast.sendFailed"),
-                  description: language.t("common.requestFailed"),
-                }),
-              )
-          }}
           close={closeApproval}
           onExpire={() => {
             // The deadline passed with no word from the server — show the timeout locally so the

@@ -42,9 +42,6 @@ type Props = {
   spectator?: boolean
   approve: () => void
   cancel: () => void
-  // Requester-only: send now without the members who left mid-vote (their rows show 나감). Offered
-  // when the departed are the sole holdouts — a departure itself never sends.
-  exclude?: () => void
   close: () => void
   // Fired when the local countdown passes the deadline (+grace) without a server terminal cast — the
   // parent synthesizes an "expired" state so a finished vote never lingers on screen. Optional so a
@@ -92,18 +89,6 @@ const approveLabel = copyKey(
     stop: "docSubmit.approve.stop",
     clear: "docSubmit.approve.clear",
     rollback: "docSubmit.approve.rollback",
-  } as const,
-  "doc",
-)
-
-const excludeLabel = copyKey(
-  {
-    doc: "docSubmit.exclude.doc",
-    "question-dismiss": "docSubmit.exclude.questionDismiss",
-    "question-back": "docSubmit.exclude.questionBack",
-    stop: "docSubmit.exclude.stop",
-    clear: "docSubmit.exclude.clear",
-    rollback: "docSubmit.exclude.rollback",
   } as const,
   "doc",
 )
@@ -403,10 +388,7 @@ function VotingBody(props: {
 }) {
   const requester = () => props.state.actors.find((item) => item.actorID === props.state.actorID)
   const nonReq = createMemo(() => props.state.actors.filter((item) => item.actorID !== props.state.actorID))
-  // 나감 members don't count toward "N명이 더 동의하면" — they can't answer; whether to proceed
-  // without them is the requester's call (exclude action in the waiting view).
   const remaining = createMemo(() => nonReq().filter((item) => item.status === "pending"))
-  const departed = createMemo(() => nonReq().filter((item) => item.status === "left"))
   const onlyMe = () => {
     const left = remaining()
     return left.length === 1 && left[0]?.actorID === props.actorID
@@ -450,22 +432,10 @@ function VotingBody(props: {
           <Show
             when={remaining().length > 0}
             fallback={
-              <Show
-                when={departed().length > 0}
-                fallback={
-                  <span>
-                    <strong class="ds-ok">{language.t("docSubmit.status.allAgreed")}</strong>{" · "}
-                    {language.t("docSubmit.status.soon", { verb: proceed() })}
-                  </span>
-                }
-              >
-                <span>
-                  {emphasize(
-                    language.t("docSubmit.status.departed"),
-                    language.t("docSubmit.count.people", { count: departed().length }),
-                  )}
-                </span>
-              </Show>
+              <span>
+                <strong class="ds-ok">{language.t("docSubmit.status.allAgreed")}</strong>{" · "}
+                {language.t("docSubmit.status.soon", { verb: proceed() })}
+              </span>
             }
           >
             <Show
@@ -531,10 +501,9 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
     if (props.actor.actorID === props.requesterID) out += language.t("docSubmit.actor.requester")
     return out
   }
-  const gone = () => props.actor.status === "left"
   return (
-    <div class="ds-status-row" classList={{ "jt-consent-row-flash": flash(), "ds-status-row--gone": gone() }}>
-      <ConsentAvatar name={props.actor.name} color={props.actor.color} size={28} on={ok()} check={ok()} dashed={gone()} />
+    <div class="ds-status-row" classList={{ "jt-consent-row-flash": flash() }}>
+      <ConsentAvatar name={props.actor.name} color={props.actor.color} size={28} on={ok()} check={ok()} />
       <span class="ds-status-row__name" classList={{ "ds-status-row__name--ok": ok() }}>
         {props.actor.name}
         {suffix()}
@@ -542,18 +511,9 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
       <Show
         when={ok()}
         fallback={
-          <Show
-            when={gone()}
-            fallback={
-              <span class="ds-status-row__wait">
-                {language.t("docSubmit.actor.waiting")} <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
-              </span>
-            }
-          >
-            <span class="ds-status-row__wait">
-              {ICON.user(12)} {language.t("docSubmit.actor.left")}
-            </span>
-          </Show>
+          <span class="ds-status-row__wait">
+            {language.t("docSubmit.actor.waiting")} <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
+          </span>
         }
       >
         <span class="jt-pill jt-pill-started ds-status-row__pill">{language.t("docSubmit.actor.agreed")}</span>
@@ -568,19 +528,10 @@ function WaitingBody(props: {
   actorID: string
   sec: number
   cancel: () => void
-  exclude?: () => void
   spectator?: boolean
 }) {
   const language = useLanguage()
   const allOk = createMemo(() => props.state.actors.every((item) => item.status === "approved"))
-  // The departed are the sole holdouts: the requester (and only the requester) may proceed without
-  // them — a departure by itself never sends.
-  const excludable = createMemo(
-    () =>
-      props.state.actorID === props.actorID &&
-      props.state.actors.some((item) => item.status === "left") &&
-      !props.state.actors.some((item) => item.status === "pending"),
-  )
   const sub = () => language.t(hintText(props.kind))
   // A readonly spectator sees the SAME waiting/status view an already-approved participant sees — same
   // copy and layout. The only difference: it cannot cancel, so the "동의 취소" button is hidden.
@@ -589,14 +540,10 @@ function WaitingBody(props: {
       <SessionPreviewMascot size={52} />
       <div class="ds-waiting-head">
         <h2 class="ds-headline ds-headline--center">
-          {excludable()
-            ? language.t("docSubmit.waiting.leftOnly")
-            : allOk()
-              ? language.t("docSubmit.waiting.allAgreed")
-              : language.t("docSubmit.waiting.pending")}
+          {allOk() ? language.t("docSubmit.waiting.allAgreed") : language.t("docSubmit.waiting.pending")}
         </h2>
         <p class="ds-waiting-sub">
-          {excludable() ? language.t("docSubmit.waiting.excludable") : sub()} ·{" "}
+          {sub()} ·{" "}
           <span class="ds-nowrap">{language.t("docSubmit.countdown.autoReject", { sec: props.sec })}</span>
         </p>
       </div>
@@ -610,12 +557,6 @@ function WaitingBody(props: {
           <button type="button" class="jt-btn jt-btn-secondary" onClick={props.cancel}>
             {language.t("docSubmit.action.cancel")} <span class="ds-kbd">Esc</span>
           </button>
-          <Show when={excludable() && props.exclude}>
-            <button type="button" class="jt-btn jt-btn-critical ds-btn-approve" onClick={props.exclude}>
-              {ICON.send(14)}
-              {language.t(excludeLabel(props.kind))}
-            </button>
-          </Show>
         </div>
       </Show>
     </div>
@@ -628,11 +569,8 @@ type Translate = ReturnType<typeof useLanguage>["t"]
 function failInfo(state: DocSubmitState, t: Translate): { title: string; sub: string; icon: JSX.Element } {
   const timeoutSec = Math.round(state.timeoutMs / 1000)
   if (state.targetKind === "rollback") {
-    const icon = state.status === "left" ? ICON.user(22) : state.status === "expired" ? ICON.clock(22) : ICON.x(22)
+    const icon = state.status === "expired" ? ICON.clock(22) : ICON.x(22)
     return { title: t("docSubmit.failed.rollback.title"), sub: t("docSubmit.failed.rollback.sub"), icon }
-  }
-  if (state.status === "left") {
-    return { title: t("docSubmit.failed.left.title"), sub: t("docSubmit.failed.left.sub"), icon: ICON.user(22) }
   }
   if (state.status === "expired") {
     return {
@@ -689,7 +627,6 @@ function ConsentFrame(props: {
   spectator?: boolean
   approve: () => void
   cancel: () => void
-  exclude?: () => void
   onExpire?: () => void
 }) {
   const remaining = useCountdown(() => props.state.expiresAt, props.onExpire)
@@ -738,7 +675,6 @@ function ConsentFrame(props: {
             actorID={props.actorID}
             sec={sec()}
             cancel={props.cancel}
-            exclude={props.exclude}
             spectator={props.spectator}
           />
         </Show>
@@ -755,7 +691,7 @@ export function DialogDocSubmit(props: Props) {
   const approved = () => me()?.status === "approved"
   const failed = () => {
     const value = state()?.status
-    return value === "cancelled" || value === "expired" || value === "left"
+    return value === "cancelled" || value === "expired"
   }
 
   // Keyboard: Enter = approve (voting only), Esc = reject/cancel. Captured so the shared dialog
@@ -807,7 +743,6 @@ export function DialogDocSubmit(props: Props) {
               spectator={props.spectator}
               approve={props.approve}
               cancel={props.cancel}
-              exclude={props.exclude}
               onExpire={props.onExpire}
             />
           </Show>

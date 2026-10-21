@@ -500,8 +500,8 @@ export namespace Doc {
   // participant, so a client that blipped offline exactly at the transition can catch up.
   const REPLAY_WINDOW = 15_000
   const SubmitPrompt = SessionPrompt.PromptInput.omit({ sessionID: true })
-  // "left" = the member dropped out mid-vote. They are kept on the roster (shown as 나감) and block
-  // auto-send; the requester decides via the "exclude" respond action whether to send without them.
+  // "left" is kept only so rows written before votes were judged by the current participants still
+  // parse. A departure now removes the member (and their vote) from every pending vote.
   const SubmitActorStatus = z.enum(["pending", "approved", "left"])
   export const SubmitStatus = z.enum(["pending", "sent", "cancelled", "expired", "left"]).meta({ ref: "DocSubmitStatus" })
   export type SubmitStatus = z.infer<typeof SubmitStatus>
@@ -604,9 +604,7 @@ export namespace Doc {
     sessionID: SessionID.zod,
     submitID: SubmitID.zod,
     actorID: ActorID.zod,
-    // "exclude" — requester-only: send now without the members who left mid-vote. Valid only when
-    // the departed are the sole holdouts (every present member already approved).
-    action: z.enum(["approve", "cancel", "exclude"]),
+    action: z.enum(["approve", "cancel"]),
   })
 
   type SubmitRow = typeof DocSubmitTable.$inferSelect
@@ -621,6 +619,8 @@ export namespace Doc {
   }
 
   const LEAVE_GRACE = 2_000
+  // 투표에서 빠지기 전 유예. 숨은 탭은 재접속 타이머가 1초 이상 밀리므로 초안·현재 위치(LEAVE_GRACE)보다 넉넉히 둔다.
+  const VOTE_LEAVE_GRACE = 10_000
   // Heartbeat: a half-open socket (laptop sleep, wifi switch, backgrounded tab) never fires WS
   // onClose and `send` does not error, so a dead peer lingers in `peers` for minutes and pollutes
   // every vote's target set. We ping each peer and reap any that stops ponging, keeping `peers`
@@ -635,6 +635,8 @@ export namespace Doc {
   // NEVER in `peers`, so targets() never counts them — they watch a vote without joining or blocking it.
   const observers = new Map<string, Set<LivePeer>>()
   const timers = new Map<SubmitID, ReturnType<typeof setTimeout>>()
+  // targetID → (actorID → 연결이 끊긴 시각). 유예가 지난 사람들을 한 번에 빼고 한 번만 판단한다.
+  const offline = new Map<string, Map<ActorID, number>>()
   const leaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let heartbeat: ReturnType<typeof setInterval> | undefined
 
@@ -953,7 +955,11 @@ export namespace Doc {
     )
     for (const row of rows) {
       const next = expire(row)
-      if (next.status === "pending") schedule(next)
+      if (next.status !== "pending") continue
+      schedule(next)
+      // 재시작 뒤 다시 접속하지 않은 참여자는 퇴장과 같다. 유예 시간 안에 돌아오면 그대로 남는다.
+      const now = Date.now()
+      for (const actor of read(next).actors) scheduleLeave(next.target_id, actor.actorID, now)
     }
     // GC a question's shared draft/presence when it resolves outside the vote path (e.g. the AI
     // tool times out, or a solo participant auto-replies). The vote path GCs in send() directly.
@@ -1202,25 +1208,6 @@ export namespace Doc {
       return state
     }
 
-    if (input.action === "exclude") {
-      // Requester-only: send now without the members who left mid-vote. A departure never triggers
-      // a send by itself — this explicit click is the only path. No-ops (returning current state)
-      // when the conditions aren't met, so a stale click after someone rejoins is harmless.
-      if (next.actor_id !== input.actorID) throw new NotFoundError({ message: "Only the requester can exclude" })
-      const state = read(next)
-      if (!state.actors.some((item) => item.status === "left")) return state
-      if (state.actors.some((item) => item.status === "pending")) return state
-      Database.use((db) =>
-        db
-          .delete(DocSubmitActorTable)
-          .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.status, "left")))
-          .run(),
-      )
-      const finished = finalize(next)
-      if (!finished) throw new NotFoundError({ message: "Doc submit not found" })
-      return finished
-    }
-
     if (actor.status !== "approved") {
       Database.use((db) =>
         db
@@ -1232,7 +1219,7 @@ export namespace Doc {
     }
 
     const state = read(next)
-    if (state.actors.some((item) => item.status !== "approved")) {
+    if (!agreed(state)) {
       cast("updated", state)
       return state
     }
@@ -1241,6 +1228,11 @@ export namespace Doc {
     if (!finished) throw new NotFoundError({ message: "Doc submit not found" })
     return finished
   })
+
+  // 남은 참여 인원 전원이 동의했는지. 0명은 동의가 아니다.
+  function agreed(state: SubmitState) {
+    return state.actors.length > 0 && state.actors.every((item) => item.status === "approved")
+  }
 
   // Mark a pending submit as sent and fire its action. Shared by the last-approval path in
   // submitRespond and by leave() when the last non-approved member drops out of the vote.
@@ -1261,7 +1253,21 @@ export namespace Doc {
     return finished
   }
 
-  function leave(targetID: string, actorID: ActorID) {
+  function online(targetID: string, actorID: ActorID) {
+    const set = peers.get(targetID)
+    return set ? Array.from(set).some((item) => item.actorID === actorID) : false
+  }
+
+  // 남은 전원이 동의했고 지금 모두 접속해 있을 때만 보낸다. 끊긴 채 유예 중인 사람의 표로는 보내지 않는다.
+  function evaluate(row: SubmitRow) {
+    const state = read(row)
+    if (agreed(state) && state.actors.every((item) => online(row.target_id, item.actorID))) return finalize(row)
+    return state
+  }
+
+  // 참여 인원 기준 판단, 퇴장 쪽: 나간 사람들은 결론 나지 않은 모든 투표에서 표와 함께 빠지고, 남은 인원으로
+  // 한 번만 다시 판단한다. 요청자도 예외가 아니다. 아무도 남지 않으면 보내지 않는다.
+  function leave(targetID: string, actorIDs: ActorID[]) {
     const rows = Database.use((db) =>
       db
         .select()
@@ -1272,37 +1278,24 @@ export namespace Doc {
     for (const row of rows) {
       const next = expire(row)
       if (next.status !== "pending") continue
-      const state = read(next)
-      const member = state.actors.find((item) => item.actorID === actorID)
-      if (!member) continue
-      // The requester walking away abandons the vote — nobody is left to own the send.
-      if (next.actor_id === actorID) {
-        const item = Database.use((db) =>
-          db
-            .update(DocSubmitTable)
-            .set({ status: "left", cancelled_by: actorID, time_updated: Date.now() })
-            .where(eq(DocSubmitTable.id, next.id))
-            .returning()
-            .get(),
-        )
-        if (!item) continue
-        done(next.id)
-        cast("left", read(item))
-        continue
-      }
-      // An approved member's consent was given explicitly — their departure changes nothing.
-      if (member.status === "approved") continue
-      // A pending member is marked "left" (kept on the roster, shown as 나감) rather than removed:
-      // a departure must never trigger a send NOR kill the vote. Whether to proceed without them
-      // is the requester's call — the "exclude" respond action. The top-up buys time to decide.
+      const gone = read(next).actors.filter((item) => actorIDs.includes(item.actorID))
+      if (gone.length === 0) continue
       Database.use((db) =>
         db
-          .update(DocSubmitActorTable)
-          .set({ status: "left" })
-          .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
+          .delete(DocSubmitActorTable)
+          .where(
+            and(
+              eq(DocSubmitActorTable.submit_id, next.id),
+              inArray(
+                DocSubmitActorTable.actor_id,
+                gone.map((item) => item.actorID),
+              ),
+            ),
+          )
           .run(),
       )
-      cast("updated", read(extend(next)))
+      const state = evaluate(next)
+      if (state?.status === "pending") cast("updated", state)
     }
   }
 
@@ -1332,6 +1325,18 @@ export namespace Doc {
       if (!timers.has(next.id)) schedule(next)
       let state = read(next)
       const existing = state.actors.find((actor) => actor.actorID === actorID)
+      if (existing?.status === "left") {
+        // 예전 규칙으로 "나감" 표시가 남은 사람이 돌아오면 다시 대기로 묻는다.
+        Database.use((db) =>
+          db
+            .update(DocSubmitActorTable)
+            .set({ status: "pending", time_responded: null })
+            .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
+            .run(),
+        )
+        state = read(extend(next))
+        cast("updated", state)
+      }
       if (!existing) {
         Database.use((db) =>
           db
@@ -1348,48 +1353,71 @@ export namespace Doc {
         )
         state = read(extend(next))
         cast("updated", state)
-      } else if (existing.status === "left") {
-        // A member who dropped out came back: votable again (나감 → 대기중).
-        Database.use((db) =>
-          db
-            .update(DocSubmitActorTable)
-            .set({ status: "pending" })
-            .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
-            .run(),
-        )
-        state = read(extend(next))
-        cast("updated", state)
+      }
+      if (existing?.status === "approved") {
+        // 동의한 채 잠깐 끊겼던 사람이 돌아와 남은 전원이 접속·동의 상태가 되면 그때 보낸다.
+        const after = evaluate(next)
+        if (after?.status !== "pending") continue
       }
       first ??= state
     }
     return first
   }
 
-  function leaveKey(targetID: string, actorID: ActorID) {
-    return `${targetID}:${actorID}`
-  }
-
   function cancelLeave(targetID: string, actorID: ActorID) {
-    const key = leaveKey(targetID, actorID)
-    const timer = leaveTimers.get(key)
-    if (!timer) return
-    clearTimeout(timer)
-    leaveTimers.delete(key)
+    const map = offline.get(targetID)
+    if (!map?.delete(actorID)) return
+    if (map.size === 0) offline.delete(targetID)
+    arm(targetID)
   }
 
-  function scheduleLeave(targetID: string, actorID: ActorID) {
-    cancelLeave(targetID, actorID)
-    const key = leaveKey(targetID, actorID)
-    leaveTimers.set(
-      key,
-      setTimeout(() => {
-        leaveTimers.delete(key)
-        const set = peers.get(targetID)
-        const online = set ? Array.from(set).some((item) => item.actorID === actorID) : false
-        if (online) return
-        leave(targetID, actorID)
-      }, LEAVE_GRACE),
+  function scheduleLeave(targetID: string, actorID: ActorID, since = Date.now()) {
+    const map = offline.get(targetID) ?? new Map<ActorID, number>()
+    if (!map.has(actorID)) map.set(actorID, since)
+    offline.set(targetID, map)
+    arm(targetID)
+  }
+
+  // 대상마다 타이머 하나: 가장 먼저 유예가 끝나는 사람에 맞춘다.
+  function arm(targetID: string) {
+    const timer = leaveTimers.get(targetID)
+    if (timer) clearTimeout(timer)
+    leaveTimers.delete(targetID)
+    const map = offline.get(targetID)
+    if (!map) return
+    const first = Math.min(...map.values())
+    const next = setTimeout(
+      () => {
+        leaveTimers.delete(targetID)
+        settleLeaves(targetID)
+      },
+      Math.max(0, first + VOTE_LEAVE_GRACE - Date.now()),
     )
+    next.unref?.()
+    leaveTimers.set(targetID, next)
+  }
+
+  function settleLeaves(targetID: string, now = Date.now()) {
+    const map = offline.get(targetID)
+    if (!map) return
+    const gone: ActorID[] = []
+    for (const [actorID, since] of map) {
+      if (online(targetID, actorID)) {
+        map.delete(actorID)
+        continue
+      }
+      if (since + VOTE_LEAVE_GRACE > now) continue
+      map.delete(actorID)
+      gone.push(actorID)
+    }
+    if (map.size === 0) offline.delete(targetID)
+    arm(targetID)
+    if (gone.length) leave(targetID, gone)
+  }
+
+  // Test-only: settle every leave whose grace has passed by Date.now() (use with setSystemTime).
+  export function leaveSweep() {
+    for (const targetID of Array.from(offline.keys())) settleLeaves(targetID)
   }
 
   export const submitActive = fn(
