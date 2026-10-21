@@ -15,6 +15,9 @@ import { SessionModelRequest } from "./model-request.js"
 import { ModelRetry } from "../model-retry.js"
 import type { SessionRunnerModel } from "./runner/model.js"
 import type { SessionSchema } from "./schema.js"
+import { SessionUsage } from "./usage.js"
+import { CostQuota } from "../jitda/cost-quota.js"
+import { GenerateUsage } from "../jitda/generate-usage.js"
 
 export type Error =
   | AgentNotFoundError
@@ -37,6 +40,8 @@ export const generate = Effect.fn("SessionGenerate.generate")(function* (input: 
     const context = yield* SessionContext.Service
     const selection = yield* context.select(input.session.id)
     const model = yield* context.resolveModel(selection.session)
+    const refused = yield* Effect.promise(() => CostQuota.refusal("ko"))
+    if (refused) return refused
     const history = yield* SessionHistory.preview(
       database.db,
       selection.session.id,
@@ -69,6 +74,13 @@ export const generate = Effect.fn("SessionGenerate.generate")(function* (input: 
     })
     const response = yield* llm.generate(prepared.request, prepared.options).pipe(ModelRetry.retry)
     yield* Effect.logInfo("session generation usage diagnostic", { usage: response.usage })
+    const recorded = SessionUsage.record(response.usage, model.cost)
+    void GenerateUsage.report({
+      directory: input.session.location.directory,
+      modelID: model.ref.id,
+      tokens: recorded.tokens,
+      cost: recorded.cost,
+    })
     return response.text
   }).pipe(instances.provide(input.session))
 })
