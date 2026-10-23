@@ -268,3 +268,13 @@ echo "http://localhost:3000"
 - `browser_snapshot` - 페이지 구조(접근성 트리) 조회
 - `browser_click` - 페이지 요소 클릭
 - `browser_fill_form` - 폼 입력
+
+### 빠르게 쓰는 법
+
+브라우저 호출 한 번마다 모델 응답을 한 번 더 기다리므로, 호출 횟수가 곧 작업 시간입니다.
+
+- 화면을 고친 뒤에는 `browser_navigate` 한 번과 `browser_console_messages` 한 번이면 충분합니다. 클릭마다 `browser_snapshot`이나 스크린샷을 찍지 마세요.
+- 여러 단계 조작(클릭 → 입력 → 확인)은 `browser_run_code` 한 번에 묶으세요. 단계마다 도구를 따로 부르지 않습니다.
+- `browser_run_code` 안의 `locator.click()`, `fill()` 등에는 `{ timeout: 3000 }`을 넣으세요. 안 넣으면 요소가 없을 때 30초를 기다린 뒤 실패합니다.
+- `browser_wait_for`에 고정 시간을 주지 말고, 기다릴 텍스트나 요소를 지정하세요.
+- 같은 방식으로 3번 실패하면 접근을 바꾸세요. `browser_evaluate`로 DOM 상태를 직접 읽는 편이 빠릅니다.

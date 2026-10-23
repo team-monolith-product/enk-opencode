@@ -60,7 +60,7 @@
   "mcp": {
     "playwright": {
       "type": "local",
-      "command": ["playwright-mcp", "--headless", "--browser", "chromium"],
+      "command": ["playwright-mcp", "--headless", "--browser", "chromium", "--timeout-navigation", "15000"],
       "enabled": true,
     },
   },
