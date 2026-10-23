@@ -571,6 +571,18 @@ export const dict = {
   "toast.model.none.description": "Connect a provider to summarize this session",
 
   "toast.file.loadFailed.title": "Failed to load file",
+  "file.imageEditor.open": "Edit",
+  "file.imageEditor.title": "{{name}} · Image editor",
+  "file.imageEditor.failed": "Could not start the image editor. Close the window and try again.",
+  "file.imageEditor.saveHint": "Save (⌘S·Ctrl+S) overwrites the original file",
+  "file.imageEditor.saveHintUnsupported": "Only PNG, JPEG and WebP can be saved over the original",
+  "file.imageEditor.saved": "Saved {{name}}",
+  "file.imageEditor.saveFailed": "Could not save over the original image, so the edit was downloaded as {{name}}",
+  "file.imageEditor.saveLossy": "This image can't be overwritten in its original format without loss ({{detail}}), so the original was kept and the edit was downloaded as {{name}}.",
+  "file.imageEditor.saveConflict": "The original changed elsewhere after the editor opened, so it was not overwritten to keep that change. Your edit was downloaded as {{name}}; reopen the original to check it.",
+  "file.imageEditor.saveUnsupported": "{{ext}} files can't be overwritten, so the PSD was downloaded instead. Only PNG, JPEG and WebP can be saved over the original.",
+  "file.imageEditor.parentGone": "The app window was closed or reloaded, so saving no longer overwrites the original. Save (⌘S) now downloads a PSD file instead, and closing this window won't warn about unsaved changes.",
+  "file.imageEditor.popupBlocked": "The image editor window was blocked. Allow pop-ups for this site and try again.",
   "toast.file.listFailed.title": "Failed to list files",
 
   "toast.context.noLineSelection.title": "No line selection",
