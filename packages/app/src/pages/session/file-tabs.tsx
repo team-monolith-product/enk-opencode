@@ -13,8 +13,7 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { showToast } from "@opencode-ai/ui/toast"
-import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { PhotocraftDialog } from "@/components/photocraft-dialog"
+import { openPhotocraftWindow } from "@/components/photocraft-window"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { useComments } from "@/context/comments"
 import { useLanguage } from "@/context/language"
@@ -192,7 +191,6 @@ export function FileTabContent(props: { tab: string }) {
   const prompt = usePrompt()
   const bridge = usePromptDocBridge()
   const fileComponent = useFileComponent()
-  const dialog = useDialog()
   const sdk = useSDK()
   const { sessionKey, tabs, view } = useSessionLayout()
   const activeFileTab = createSessionTabs({
@@ -462,12 +460,14 @@ export function FileTabContent(props: { tab: string }) {
             onClick={() => {
               const target = path()
               if (!target) return
-              // 바깥 클릭·Escape 로 닫히면 저장 안 된 편집이 경고 없이 사라지므로 닫기 버튼으로만 닫는다.
-              dialog.show(
-                () => <PhotocraftDialog file={image()} onSave={(edited) => saveImage(target, edited)} />,
-                undefined,
-                { dismissible: false },
-              )
+              const opened = openPhotocraftWindow({
+                key: target,
+                file: image(),
+                onSave: (edited) => saveImage(target, edited),
+                onError: () => showToast({ variant: "error", title: language.t("file.imageEditor.failed") }),
+                t: (key, params) => language.t(key as Parameters<typeof language.t>[0], params),
+              })
+              if (!opened) showToast({ variant: "error", title: language.t("file.imageEditor.popupBlocked") })
             }}
           >
             {language.t("file.imageEditor.open")}
