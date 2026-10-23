@@ -2012,6 +2012,14 @@ export type McpResource = {
   client: string
 }
 
+export type InitialPlanDelivery = {
+  state: "delivered" | "already_delivered" | "not_finalized" | "pending_elsewhere" | "failed"
+}
+
+export type InitialPlanDeliveryError = {
+  error: string
+}
+
 export type TextPartInput = {
   id?: string
   type: "text"
@@ -3718,6 +3726,38 @@ export type ProjectSummaryGenerateResponses = {
 
 export type ProjectSummaryGenerateResponse = ProjectSummaryGenerateResponses[keyof ProjectSummaryGenerateResponses]
 
+export type EnkInitialPlanDeliverData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/enk/initial-plan/deliver"
+}
+
+export type EnkInitialPlanDeliverErrors = {
+  /**
+   * Delivery failed
+   */
+  502: InitialPlanDeliveryError
+  /**
+   * Rails is not configured
+   */
+  503: InitialPlanDeliveryError
+}
+
+export type EnkInitialPlanDeliverError = EnkInitialPlanDeliverErrors[keyof EnkInitialPlanDeliverErrors]
+
+export type EnkInitialPlanDeliverResponses = {
+  /**
+   * Delivery state
+   */
+  200: InitialPlanDelivery
+}
+
+export type EnkInitialPlanDeliverResponse = EnkInitialPlanDeliverResponses[keyof EnkInitialPlanDeliverResponses]
+
 export type SessionListData = {
   body?: never
   path?: never
@@ -4965,7 +5005,7 @@ export type SessionPromptDocClearResponse = SessionPromptDocClearResponses[keyof
 export type SessionPromptDocSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel" | "exclude"
+    action: "approve" | "cancel"
   }
   path: {
     sessionID: string
@@ -5092,7 +5132,7 @@ export type SessionQuestionSubmitResponse = SessionQuestionSubmitResponses[keyof
 export type SessionQuestionSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel" | "exclude"
+    action: "approve" | "cancel"
   }
   path: {
     sessionID: string
