@@ -437,11 +437,11 @@ export function FileTabContent(props: { tab: string }) {
 
   // 편집기에서 저장한 이미지로 원본을 덮어쓰고, 탭이 새 바이트를 보이게 다시 읽는다(파일 감시 이벤트를
   // 기다리지 않는다).
-  const saveImage = async (target: string, image: Blob) => {
+  const saveImage = async (target: string, image: Blob, expected: string) => {
     // 생성된 메서드는 바이트 본문과 Content-Type 을 버린다(asset-upload.ts 와 같은 사정). 그래서 본문은
     // 요청 옵션으로 직접 싣고, 그 headers 가 클라이언트 기본 헤더(x-opencode-directory)를 덮어쓰므로
     // directory 도 쿼리로 넘긴다. 빼면 서버가 프로젝트가 아닌 자기 cwd 에서 파일을 찾는다.
-    await sdk.client.file.write({ path: target, directory: sdk.directory, body: image }, {
+    await sdk.client.file.write({ path: target, directory: sdk.directory, expected, body: image }, {
       body: image,
       bodySerializer: null,
       headers: { "content-type": "application/octet-stream" },
@@ -464,7 +464,7 @@ export function FileTabContent(props: { tab: string }) {
                 // 같은 상대 경로라도 서버·프로젝트가 다르면 다른 파일이다.
                 key: `${sdk.url}\n${sdk.directory}\n${target}`,
                 file: image(),
-                onSave: (edited) => saveImage(target, edited),
+                onSave: (edited, expected) => saveImage(target, edited, expected),
                 onError: () => showToast({ variant: "error", title: language.t("file.imageEditor.failed") }),
                 t: (key, params) => language.t(key as Parameters<typeof language.t>[0], params),
               })

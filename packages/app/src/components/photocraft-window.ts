@@ -83,6 +83,14 @@ const reason = (error: unknown): string | undefined => {
   }
 }
 
+/** PUT /file/content 가 원본이 바뀌어 거절할 때의 응답 본문. */
+const CONFLICT = "File changed since it was opened"
+
+const sha256 = async (blob: Blob) => {
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
 type Translate = (key: string, params?: Record<string, string>) => string
 type EditorWindow = Window & typeof globalThis
 
@@ -99,7 +107,8 @@ const opened = new Map<string, EditorWindow>()
 export function openPhotocraftWindow(input: {
   key: string
   file: File
-  onSave: (image: Blob) => Promise<void>
+  /** expected: 편집을 시작한 원본 바이트의 SHA-256. 그 뒤 원본이 바뀌었으면 서버가 거절한다. */
+  onSave: (image: Blob, expected: string) => Promise<void>
   onError: () => void
   t: Translate
 }) {
@@ -134,7 +143,10 @@ export function openPhotocraftWindow(input: {
   return true
 }
 
-function createSession(win: EditorWindow, input: { file: File; onSave: (image: Blob) => Promise<void>; t: Translate }) {
+function createSession(
+  win: EditorWindow,
+  input: { file: File; onSave: (image: Blob, expected: string) => Promise<void>; t: Translate },
+) {
   const { t, file } = input
   const original = fileExtension(file.name)
   const mime = ENCODABLE[original]
@@ -188,12 +200,17 @@ function createSession(win: EditorWindow, input: { file: File; onSave: (image: B
 
   // 저장이 연달아 눌려도 원본에는 누른 순서대로 쓰이게 한 줄로 세운다. 원본에 쓰지 못하면(서버 거절,
   // 연결 끊김, 손상 없이 바꿀 수 없는 형식) 편집이 갈 곳이 없어지므로 PhotoCraft 가 만든 파일을 내려받는다.
+  // 편집을 시작한 원본(또는 마지막으로 저장한 내용)의 해시. 서버가 이걸로 사이에 생긴 변경을 알아챈다.
+  let expected = sha256(file)
   let saving = Promise.resolve()
   const save = (produce: () => Promise<Blob>, fallback: { blob: Blob; name: string }) => {
     const at = edits
     saving = saving.then(async () => {
       try {
-        await input.onSave(await produce())
+        const image = await produce()
+        await input.onSave(image, await expected)
+        // 다음 저장은 방금 쓴 내용 위에서 이어지는 편집이다.
+        expected = sha256(image)
         if (gone || disposed) return
         savedAt = Math.max(savedAt, at)
         notify(t("file.imageEditor.saved", { name: file.name }), "success")
@@ -205,6 +222,10 @@ function createSession(win: EditorWindow, input: { file: File; onSave: (image: B
           return
         }
         const detail = reason(error)
+        if (detail === CONFLICT) {
+          notify(t("file.imageEditor.saveConflict", { name: fallback.name }), "error", true)
+          return
+        }
         notify(
           t("file.imageEditor.saveFailed", { name: fallback.name }) + (detail ? ` — ${detail}` : ""),
           "error",

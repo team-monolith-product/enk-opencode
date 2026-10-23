@@ -579,6 +579,7 @@ export const dict = {
   "file.imageEditor.saved": "Saved {{name}}",
   "file.imageEditor.saveFailed": "Could not save over the original image, so the edit was downloaded as {{name}}",
   "file.imageEditor.saveLossy": "This image can't be overwritten in its original format without loss ({{detail}}), so the original was kept and the edit was downloaded as {{name}}.",
+  "file.imageEditor.saveConflict": "The original changed elsewhere after the editor opened, so it was not overwritten to keep that change. Your edit was downloaded as {{name}}; reopen the original to check it.",
   "file.imageEditor.saveUnsupported": "{{ext}} files can't be overwritten, so the PSD was downloaded instead. Only PNG, JPEG and WebP can be saved over the original.",
   "file.imageEditor.parentGone": "The app window was closed or reloaded, so saving no longer overwrites the original. Save (⌘S) now downloads a PSD file instead, and closing this window won't warn about unsaved changes.",
   "file.imageEditor.popupBlocked": "The image editor window was blocked. Allow pop-ups for this site and try again.",

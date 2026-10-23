@@ -4797,6 +4797,7 @@ export class File extends HeyApiClient {
       directory?: string
       workspace?: string
       path: string
+      expected?: string
       body: Blob | File
     },
     options?: Options<never, ThrowOnError>,
@@ -4809,6 +4810,7 @@ export class File extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "query", key: "path" },
+            { in: "query", key: "expected" },
             { key: "body", map: "body" },
           ],
         },

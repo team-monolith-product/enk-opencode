@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import fs from "fs"
 import path from "path"
+import { createHash } from "crypto"
 import { FileRoutes } from "../../src/server/routes/file"
 import { Instance } from "../../src/project/instance"
 import { Log } from "../../src/util/log"
@@ -12,8 +13,8 @@ afterEach(async () => {
   await Instance.disposeAll()
 })
 
-const write = (target: string, body: BodyInit) =>
-  FileRoutes().request(`/file/content?path=${encodeURIComponent(target)}`, {
+const write = (target: string, body: BodyInit, expected?: string) =>
+  FileRoutes().request(`/file/content?path=${encodeURIComponent(target)}${expected ? `&expected=${expected}` : ""}`, {
     method: "PUT",
     headers: { "content-type": "application/octet-stream" },
     body,
@@ -55,6 +56,30 @@ describe("PUT /file/content", () => {
         expect(fs.statSync(file).mode & 0o777).toBe(0o664)
       },
     }).finally(() => process.umask(umask))
+  })
+
+  test("writes only when the file still matches the expected hash", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const file = path.join(tmp.path, "a.png")
+    fs.writeFileSync(file, "opened")
+    const opened = createHash("sha256").update("opened").digest("hex")
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        // 편집기를 연 뒤 다른 곳에서 바뀌었다: 거절하고 그 변경을 지키지 않는다.
+        fs.writeFileSync(file, "changed elsewhere")
+        const conflict = await write("a.png", "edit", opened)
+        expect(conflict.status).toBe(409)
+        expect(fs.readFileSync(file, "utf8")).toBe("changed elsewhere")
+        expect(fs.readdirSync(tmp.path).filter((name) => name.endsWith(".tmp"))).toEqual([])
+
+        // 그대로면 쓴다.
+        const current = createHash("sha256").update("changed elsewhere").digest("hex")
+        expect((await write("a.png", "edit", current)).status).toBe(200)
+        expect(fs.readFileSync(file, "utf8")).toBe("edit")
+      },
+    })
   })
 
   test("refuses to create a file that does not exist", async () => {

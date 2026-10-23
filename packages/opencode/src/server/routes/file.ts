@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import fs from "fs/promises"
+import { createHash } from "crypto"
 import path from "path"
 import z from "zod"
 import { File } from "../../file"
@@ -270,17 +271,36 @@ export const FileRoutes = lazy(() =>
             },
           },
           ...errors(400),
+          409: { description: "The file changed since the client read it (see `expected`)" },
         },
       }),
       validator(
         "query",
         z.object({
           path: z.string().min(1).meta({ description: "File path relative to the project directory" }),
+          expected: z
+            .string()
+            .regex(/^[0-9a-f]{64}$/)
+            .optional()
+            .meta({
+              description:
+                "SHA-256 (hex) of the bytes the client edited. When given and the file no longer matches, nothing is written and the route answers 409.",
+            }),
         }),
       ),
       async (c) => {
-        const target = await writableFile(c.req.valid("query").path)
+        const query = c.req.valid("query")
+        const target = await writableFile(query.path)
         if (!target) throw new HTTPException(400, { message: "Invalid file path" })
+
+        // 편집기를 연 뒤 에이전트·다른 사람이 같은 파일을 바꿨다면, 옛 사본에서 만든 결과로 덮어써
+        // 그 변경을 지우지 않는다.
+        if (query.expected) {
+          const current = createHash("sha256").update(await fs.readFile(target.real)).digest("hex")
+          if (current !== query.expected) {
+            throw new HTTPException(409, { message: "File changed since it was opened" })
+          }
+        }
 
         // Content-Length is a hint only; the streaming loop below is what enforces the cap.
         const declared = Number(c.req.header("content-length") ?? 0)

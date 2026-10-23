@@ -528,6 +528,7 @@ export const dict = {
   "file.imageEditor.saved": "{{name}}에 저장했어요",
   "file.imageEditor.saveFailed": "원본 이미지에 저장하지 못해 편집 결과를 {{name}}(으)로 내려받았어요",
   "file.imageEditor.saveLossy": "이 이미지는 원본 형식으로 손상 없이 덮어쓸 수 없어({{detail}}) 원본은 그대로 두고 {{name}}(으)로 내려받았어요.",
+  "file.imageEditor.saveConflict": "편집기를 연 뒤 원본이 다른 곳에서 바뀌어, 그 변경을 지키려고 덮어쓰지 않았어요. 편집 결과는 {{name}}(으)로 내려받았어요. 원본을 다시 열어 확인해 주세요.",
   "file.imageEditor.saveUnsupported": "{{ext}} 파일은 원본에 덮어쓸 수 없어 PSD로 내려받았어요. PNG·JPEG·WebP만 원본 저장을 지원해요.",
   "file.imageEditor.parentGone": "앱 창이 닫히거나 새로고침돼 원본에 저장할 수 없어요. 이제 저장(⌘S)은 PSD 파일로 내려받고, 창을 닫을 때 경고도 하지 않아요.",
   "file.imageEditor.popupBlocked": "이미지 편집 창이 차단됐어요. 이 사이트의 팝업을 허용한 뒤 다시 눌러 주세요.",

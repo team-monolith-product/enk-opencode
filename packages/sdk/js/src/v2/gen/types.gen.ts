@@ -6005,6 +6005,10 @@ export type FileWriteData = {
      * File path relative to the project directory
      */
     path: string
+    /**
+     * SHA-256 (hex) of the bytes the client edited. When given and the file no longer matches, nothing is written and the route answers 409.
+     */
+    expected?: string
   }
   url: "/file/content"
 }
@@ -6014,6 +6018,10 @@ export type FileWriteErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * The file changed since the client read it (see `expected`)
+   */
+  409: unknown
 }
 
 export type FileWriteError = FileWriteErrors[keyof FileWriteErrors]
