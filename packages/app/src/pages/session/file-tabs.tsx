@@ -13,7 +13,7 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { showToast } from "@opencode-ai/ui/toast"
-import { openPhotocraftWindow } from "@/components/photocraft-window"
+import { canEditImage, openPhotocraftWindow } from "@/components/photocraft-window"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { useComments } from "@/context/comments"
 import { useLanguage } from "@/context/language"
@@ -429,7 +429,7 @@ export function FileTabContent(props: { tab: string }) {
   const imageFile = createMemo(() => {
     const p = path()
     const content = state()?.content
-    if (!p || mediaKindFromPath(p) !== "image") return
+    if (!p || mediaKindFromPath(p) !== "image" || !canEditImage(p)) return
     if (content?.encoding !== "base64" || !content.content) return
     const bytes = Uint8Array.from(atob(content.content), (char) => char.charCodeAt(0))
     return new File([bytes], p.split("/").pop() ?? p, { type: content.mimeType ?? "" })
@@ -461,7 +461,8 @@ export function FileTabContent(props: { tab: string }) {
               const target = path()
               if (!target) return
               const opened = openPhotocraftWindow({
-                key: target,
+                // 같은 상대 경로라도 서버·프로젝트가 다르면 다른 파일이다.
+                key: `${sdk.url}\n${sdk.directory}\n${target}`,
                 file: image(),
                 onSave: (edited) => saveImage(target, edited),
                 onError: () => showToast({ variant: "error", title: language.t("file.imageEditor.failed") }),

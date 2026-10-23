@@ -24,9 +24,32 @@ const ENCODABLE: Record<string, string> = {
 }
 const sameFormat = (a: string, b: string) => !!ENCODABLE[a] && ENCODABLE[a] === ENCODABLE[b]
 
-/** PSD 합성 이미지를 원본과 같은 형식으로 인코딩한다. 브라우저가 그 형식을 못 쓰면 예외. */
+// PhotoCraft 0.7.0 이 열 수 있는 이미지(README 의 지원 형식, HEIC 는 웹 빌드에도 들어 있다).
+// AVIF 는 쓰기만 되고 읽지 못해, 편집 버튼을 보여 줘도 열리지 않는다.
+const READABLE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tif", "tiff", "heic"])
+
+/** 이 파일을 PhotoCraft 편집기로 열 수 있는지. */
+export const canEditImage = (path: string) => READABLE.has(fileExtension(path))
+
+/**
+ * 원본을 그 형식으로 정확히 덮어쓸 수 없는 결과(16 bit, CMYK 등). 실패가 아니라 정해진 한계라, 원본은
+ * 그대로 두고 편집 결과는 PSD 로 내려받게 한다.
+ */
+class LossyOverwrite extends Error {}
+
+/** PSD 합성 이미지를 원본과 같은 형식으로 인코딩한다. 원본을 손상 없이 덮어쓸 수 없으면 LossyOverwrite. */
 async function encodeComposite(psd: Blob, mime: string) {
-  const composite = readPsdComposite(new Uint8Array(await psd.arrayBuffer()))
+  const bytes = new Uint8Array(await psd.arrayBuffer())
+  const composite = (() => {
+    try {
+      return readPsdComposite(bytes)
+    } catch (error) {
+      // CMYK·Lab·32 bit 처럼 읽지 못하는 PSD: 근사 변환으로 원본 색을 바꿔 쓰지 않는다.
+      throw new LossyOverwrite(reason(error))
+    }
+  })()
+  // 16 bit 를 8 bit 로 내려 덮어쓰면 하위 바이트가 되돌릴 수 없게 사라진다. canvas 는 8 bit 만 인코딩한다.
+  if (composite.depth !== 8) throw new LossyOverwrite(`${composite.depth}-bit image`)
   const source = document.createElement("canvas")
   source.width = composite.width
   source.height = composite.height
@@ -160,9 +183,13 @@ function createSession(win: EditorWindow, input: { file: File; onSave: (image: B
     hide = sticky ? undefined : setTimeout(() => notice && (notice.style.display = "none"), 4000)
   }
 
-  // 저장이 연달아 눌려도 원본에는 누른 순서대로 쓰이게 한 줄로 세운다.
+  // 원본에 쓰지 못한 편집 결과를 PhotoCraft 원래 방식대로 내려받는다(창 고유 함수로, 가로채지 않게).
+  let download: ((blob: Blob, name: string) => void) | undefined
+
+  // 저장이 연달아 눌려도 원본에는 누른 순서대로 쓰이게 한 줄로 세운다. 원본에 쓰지 못하면(서버 거절,
+  // 연결 끊김, 손상 없이 바꿀 수 없는 형식) 편집이 갈 곳이 없어지므로 PhotoCraft 가 만든 파일을 내려받는다.
   let saving = Promise.resolve()
-  const save = (produce: () => Promise<Blob>) => {
+  const save = (produce: () => Promise<Blob>, fallback: { blob: Blob; name: string }) => {
     const at = edits
     saving = saving.then(async () => {
       try {
@@ -172,8 +199,17 @@ function createSession(win: EditorWindow, input: { file: File; onSave: (image: B
         notify(t("file.imageEditor.saved", { name: file.name }), "success")
       } catch (error) {
         if (gone || disposed) return
+        download?.(fallback.blob, fallback.name)
+        if (error instanceof LossyOverwrite) {
+          notify(t("file.imageEditor.saveLossy", { name: fallback.name, detail: error.message }), "error", true)
+          return
+        }
         const detail = reason(error)
-        notify(t("file.imageEditor.saveFailed") + (detail ? ` — ${detail}` : ""), "error")
+        notify(
+          t("file.imageEditor.saveFailed", { name: fallback.name }) + (detail ? ` — ${detail}` : ""),
+          "error",
+          true,
+        )
       }
     })
   }
@@ -201,14 +237,23 @@ function createSession(win: EditorWindow, input: { file: File; onSave: (image: B
     proto.click = function (this: HTMLAnchorElement) {
       const blob = this.download ? blobs.get(this.href) : undefined
       const saved = blob ? fileExtension(this.download) : ""
+      const fallback = { blob: blob!, name: this.download }
       // 원본과 같은 형식으로 내보낸 것은 그 바이트 그대로 쓴다(내보내기 설정을 존중).
-      if (blob && sameFormat(saved, original)) return save(async () => blob)
+      if (blob && sameFormat(saved, original)) return save(async () => blob, fallback)
       // 저장(⌘S)은 언제나 PSD 다. 원본 형식으로 인코딩할 수 있으면 합성 이미지를 꺼내 바꿔 쓴다.
       if (blob && (saved === "psd" || saved === "psb")) {
-        if (mime) return save(() => encodeComposite(blob, mime))
+        if (mime) return save(() => encodeComposite(blob, mime), fallback)
         notify(t("file.imageEditor.saveUnsupported", { ext: original.toUpperCase() }))
       }
       return click.call(this)
+    }
+
+    download = (target, name) => {
+      const anchor = win.document.createElement("a")
+      anchor.href = createObjectURL.call(url, target)
+      anchor.download = name
+      click.call(anchor)
+      setTimeout(() => revokeObjectURL.call(url, anchor.href), 60_000)
     }
 
     // 부모가 사라지면 이 함수들은 죽은 창의 코드가 되므로 창 고유의 것으로 되돌린다.

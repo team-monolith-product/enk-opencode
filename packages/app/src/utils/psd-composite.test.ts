@@ -137,6 +137,8 @@ describe("readPsdComposite", () => {
       ],
     })
     expect(pixels(readPsdComposite(psd).data)).toEqual([[0x12, 0xab, 0xff, 255]])
+    // 호출한 쪽이 8 bit 로 내려 원본을 덮어쓰지 않도록 원래 깊이를 알려 준다.
+    expect(readPsdComposite(psd).depth).toBe(16)
   })
 
   test("expands grayscale to RGB", () => {

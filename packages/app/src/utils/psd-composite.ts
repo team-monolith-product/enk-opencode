@@ -11,6 +11,8 @@
 export type PsdComposite = {
   width: number
   height: number
+  /** 원본 샘플 깊이. data 는 언제나 8 bit 라, 16 이면 하위 바이트가 버려진 것이다. */
+  depth: 8 | 16
   /** straight(비 premultiplied) RGBA, 행 우선. */
   data: Uint8ClampedArray<ArrayBuffer>
 }
@@ -103,7 +105,7 @@ export function readPsdComposite(bytes: Uint8Array): PsdComposite {
     }
     data[pixel * 4 + 3] = a
   }
-  return { width, height, data }
+  return { width, height, depth: depth as 8 | 16, data }
 }
 
 function unpackBits(
