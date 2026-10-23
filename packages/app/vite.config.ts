@@ -1,33 +1,57 @@
+import { sentryVitePlugin } from "@sentry/vite-plugin"
+import { fileURLToPath } from "node:url"
 import { defineConfig } from "vite"
-import desktopPlugin from "./vite"
+import desktopPlugin, { channel } from "./vite.js"
+import { icons } from "./vite.icons"
+import { serviceWorker } from "./vite.pwa"
+
+const sentry =
+  process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
+    ? sentryVitePlugin({
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        org: process.env.SENTRY_ORG,
+        project: process.env.SENTRY_PROJECT,
+        telemetry: false,
+        release: {
+          name: process.env.SENTRY_RELEASE ?? process.env.VITE_SENTRY_RELEASE,
+        },
+        sourcemaps: {
+          assets: "./dist/**",
+          filesToDeleteAfterUpload: "./dist/**/*.map",
+        },
+      })
+    : false
 
 export default defineConfig({
-  base: process.env.OPENCODE_ASSET_BASE || "./",
-  plugins: [desktopPlugin] as any,
+  base: "./",
+  plugins: [
+    desktopPlugin,
+    icons(channel),
+    serviceWorker(fileURLToPath(new URL("./dist", import.meta.url))),
+    sentry,
+  ] as any,
   server: {
     host: "0.0.0.0",
     allowedHosts: true,
-    port: 3001,
-  },
-  experimental: {
-    // SVG 스프라이트는 <use> 외부 참조라 cross-origin 이 차단된다. OPENCODE_ASSET_BASE 가 CDN 일 때
-    // 다른 자산은 CORS 로 로드되지만 .svg 만 same-origin 이어야 하므로, 전역 base 접두 대신 런타임에
-    // baseURI 기준으로 해석해 pod 가 서빙하는 same-origin 경로로 만든다. filename 은 base 미접두 상대경로다.
-    renderBuiltUrl(filename, { hostType }) {
-      if (hostType === "js" && filename.endsWith(".svg")) {
-        return { runtime: `globalThis.__sameOriginAsset(${JSON.stringify(filename)})` }
-      }
-      return undefined
-    },
+    port: 3000,
   },
   build: {
-    target: "esnext",
-    // sourcemap: true,
-    rollupOptions: {
-      output: {
-        // 각 청크 최상단에 prepend 되어 renderBuiltUrl 런타임 표현식보다 먼저 정의된다.
-        banner: `globalThis.__sameOriginAsset||=function(f){return new URL(f,document.baseURI).href}`,
-      },
+    rolldownOptions: {
+      // BlockSuite DI 는 서비스 클래스의 name 을 식별자로 쓴다. 압축이 이름을 지우면 짓다 문서 편집기가 뜨지 않는다.
+      output: { keepNames: true },
+      ...(process.env.VITE_OPENCODE_TEST_FIXTURES === "1"
+        ? {
+            input: [
+              "index.html",
+              "e2e/utils/settings-wsl.html",
+              "e2e/utils/app-direction.html",
+              "e2e/utils/windows-menu.html",
+            ],
+          }
+        : {}),
     },
+    assetsDir: "_assets",
+    target: "esnext",
+    sourcemap: true,
   },
 })

@@ -1,0 +1,545 @@
+import type { Plugin } from "@opencode/plugin"
+import { spawn } from "node:child_process"
+import { createHash } from "node:crypto"
+import { existsSync } from "node:fs"
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { Env } from "./env"
+import { ServeTargets } from "./serve-targets"
+import * as Definitions from "./rpc"
+
+// 팀이 짓다에서 연결한 GitHub 계정의 공개 저장소로 본행사 결과물을 올린다. 작업 폴더의 .git 은 건드리지 않고
+// 데이터 디렉터리의 bare gitdir 로 커밋한다. 미리보기 브릿지 태그와 .env·node_modules 등은 빼고 올린다.
+
+type Context = Plugin.Context
+
+const WEB = "https://github.com"
+const API = "https://api.github.com"
+const AGENT = "jitda-opencode"
+const ROUTE = "/api/v1/opencode/github"
+const LIMIT = 100 * 1024 * 1024
+const BRIDGE = "__preview-bridge.js"
+const TAG = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
+const EXCLUDE = [
+  ".env",
+  ".env.*",
+  "!.env.example",
+  "node_modules/",
+  ".next/",
+  ".nuxt/",
+  ".venv/",
+  "__pycache__/",
+  ".opencode/",
+  ".DS_Store",
+]
+const MAX_FILES = 30
+const MAX_SUBJECT = 72
+
+export type Repo = { owner: string; name: string; url: string; private?: boolean }
+export type Status = {
+  enabled: boolean
+  connectUrl?: string
+  login?: string
+  linkedBy?: string
+  repo?: Repo
+  push?: { sha: string; time: number; by?: string }
+}
+export type Change = { status: "A" | "M" | "D"; file: string }
+export type Code =
+  | "disabled"
+  | "unlinked"
+  | "norepo"
+  | "exists"
+  | "forbidden"
+  | "revoked"
+  | "missing"
+  | "empty"
+  | "remote"
+
+type Link = {
+  enabled: boolean
+  connected: boolean
+  connect_url?: string
+  login?: string
+  github_user_id?: number
+  linked_by?: string
+  token?: string
+  repo?: Repo
+  push?: { sha: string; at: number; by?: string }
+}
+type Remote = {
+  name: string
+  owner: { login: string }
+  html_url: string
+  default_branch?: string
+  private: boolean
+  permissions?: { push?: boolean }
+}
+
+export class Failure extends Error {
+  constructor(
+    readonly code: Code,
+    readonly status: 404 | 409 | 422 | 502,
+    message?: string,
+  ) {
+    super(message || code)
+    this.name = "GitHubFailure"
+  }
+}
+
+const chains = new Map<string, Promise<unknown>>()
+
+function serial<T>(key: string, fn: () => Promise<T>) {
+  const run = (chains.get(key) ?? Promise.resolve()).catch(() => undefined).then(fn)
+  chains.set(key, run)
+  return run.finally(() => {
+    if (chains.get(key) === run) chains.delete(key)
+  })
+}
+
+// 본행사 작업 폴더에서만 연다. 튜토리얼 폴더를 같은 저장소로 올리면 결과물을 덮어쓴다.
+export function serves(dir: string, env: NodeJS.ProcessEnv = process.env) {
+  const target = ServeTargets.project(env)
+  return !target || path.resolve(dir) === target.dir
+}
+
+function backend(env: NodeJS.ProcessEnv = process.env) {
+  const url = env.ENK_HACKATHON_RAILS_URL
+  const token = env.ENK_AI_USAGE_TOKEN
+  if (!url || !token) return undefined
+  return { url: url.replace(/\/+$/, "") + ROUTE, token }
+}
+
+async function link() {
+  const rails = backend()
+  if (!rails) return undefined
+  const res = await fetch(rails.url, {
+    headers: { Authorization: `token ${rails.token}` },
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => undefined)
+  if (!res?.ok) return undefined
+  return (await res.json().catch(() => undefined)) as Link | undefined
+}
+
+async function report(body: Record<string, string | boolean | null>) {
+  const rails = backend()
+  if (!rails) return
+  const res = await fetch(rails.url, {
+    method: "PUT",
+    headers: { Authorization: `token ${rails.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
+  }).catch(() => undefined)
+  if (!res?.ok) throw new Failure("remote", 502)
+}
+
+async function linked() {
+  const hit = await link()
+  if (!hit?.connected || !hit.token) throw new Failure("unlinked", 409)
+  return hit
+}
+
+export async function status(dir: string): Promise<Status> {
+  if (!serves(dir)) return { enabled: false }
+  const hit = await link()
+  if (!hit?.enabled) return { enabled: false }
+  return {
+    enabled: true,
+    connectUrl: hit.connect_url,
+    login: hit.connected ? hit.login : undefined,
+    linkedBy: hit.connected ? hit.linked_by : undefined,
+    repo: hit.repo,
+    push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
+  }
+}
+
+async function request<T>(token: string, method: string, url: string, body?: unknown): Promise<T> {
+  const res = await fetch(API + url, {
+    method,
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": AGENT,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15_000),
+  }).catch((error) => {
+    throw new Failure("remote", 502, String(error))
+  })
+  if (res.ok) return (await res.json()) as T
+  const detail = (await res.json().catch(() => undefined)) as
+    | { message?: string; errors?: { message?: string }[] }
+    | undefined
+  const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
+  if (res.status === 401) {
+    await report({ revoked: true }).catch(() => undefined)
+    throw new Failure("revoked", 409, message)
+  }
+  if (res.status === 404) throw new Failure("missing", 404, message)
+  if (res.status === 422) throw new Failure("exists", 422, message)
+  throw new Failure("remote", 502, message)
+}
+
+const shape = (remote: Remote): Repo => ({
+  owner: remote.owner.login,
+  name: remote.name,
+  url: remote.html_url,
+  private: remote.private,
+})
+
+export const REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/
+
+export async function create(dir: string, input: { name: string }) {
+  if (!REPO_NAME.test(input.name) || input.name === "." || input.name === "..")
+    throw new Failure("exists", 422, "invalid name")
+  const hit = await linked()
+  const repo = shape(
+    await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
+  )
+  await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
+  return status(dir)
+}
+
+function auth(token: string) {
+  return {
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_CONFIG_COUNT: "2",
+    GIT_CONFIG_KEY_0: `http.${WEB}/.extraheader`,
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`,
+    GIT_CONFIG_KEY_1: "credential.helper",
+    GIT_CONFIG_VALUE_1: "",
+  }
+}
+
+function dataDir(env: NodeJS.ProcessEnv = process.env) {
+  return path.join(env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "opencode")
+}
+
+export async function push(dir: string, input: { message: string | ((changes: Change[]) => Promise<string>) }) {
+  const hit = await linked()
+  if (!hit.repo) throw new Failure("norepo", 409)
+  const remote = await request<Remote>(
+    hit.token!,
+    "GET",
+    `/repos/${encodeURIComponent(hit.repo.owner)}/${encodeURIComponent(hit.repo.name)}`,
+  )
+  if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
+  const gitdir = path.join(dataDir(), "github", createHash("sha1").update(dir).digest("hex"))
+  const repo = hit.repo
+  const result = await serial(gitdir, () =>
+    publish({
+      gitdir,
+      worktree: dir,
+      remote: `${WEB}/${repo.owner}/${repo.name}.git`,
+      branch: remote.default_branch || "main",
+      message: input.message,
+      author: {
+        name: hit.login || "Jitda",
+        email: `${hit.github_user_id ? `${hit.github_user_id}+` : ""}${hit.login}@users.noreply.github.com`,
+      },
+      env: auth(hit.token!),
+    }),
+  )
+  if (result.sha) await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
+  return { ...result, url: result.sha ? `${repo.url}/commit/${result.sha}` : repo.url }
+}
+
+export function strip(text: string) {
+  let clean = text
+  for (let previous = ""; previous !== clean; ) {
+    previous = clean
+    clean = clean.replace(TAG, "")
+  }
+  return clean
+}
+
+type Run = { exitCode: number; stdout: string; stderr: string }
+
+function git(args: string[], options: { cwd: string; env?: Record<string, string> }): Promise<Run> {
+  return new Promise((done) => {
+    const child = spawn("git", args, {
+      cwd: options.cwd,
+      env: { ...Env.sanitize(), ...options.env },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 120_000,
+    })
+    const stdout: Buffer[] = []
+    const stderr: Buffer[] = []
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk))
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk))
+    child.on("error", (error) => done({ exitCode: 1, stdout: "", stderr: String(error) }))
+    child.on("close", (code) =>
+      done({ exitCode: code ?? 1, stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() }),
+    )
+  })
+}
+
+export async function publish(input: {
+  gitdir: string
+  worktree: string
+  remote: string
+  branch: string
+  message: string | ((changes: Change[]) => Promise<string>)
+  author: { name: string; email: string }
+  env?: Record<string, string>
+}): Promise<{ sha?: string; skipped: string[] }> {
+  const base = (tree?: string) => [
+    "-c",
+    "core.autocrlf=false",
+    "-c",
+    "core.quotepath=false",
+    "--git-dir",
+    input.gitdir,
+    "--work-tree",
+    tree ?? input.worktree,
+  ]
+  const run = (args: string[], options?: { env?: Record<string, string>; tree?: string }) =>
+    git([...base(options?.tree), ...args], { cwd: input.worktree, env: { ...input.env, ...options?.env } })
+  const must = async (args: string[], options?: { env?: Record<string, string>; tree?: string }) => {
+    const out = await run(args, options)
+    if (out.exitCode !== 0) throw new Failure("remote", 502, out.stderr.trim())
+    return out.stdout
+  }
+
+  if (!existsSync(path.join(input.gitdir, "HEAD"))) {
+    await mkdir(input.gitdir, { recursive: true })
+    const init = await git(["init", "--quiet", "--bare", input.gitdir], { cwd: input.gitdir })
+    if (init.exitCode !== 0) throw new Failure("remote", 502, init.stderr.trim())
+  }
+  await mkdir(path.join(input.gitdir, "info"), { recursive: true })
+  await writeFile(path.join(input.gitdir, "info", "exclude"), EXCLUDE.join("\n") + "\n")
+
+  const ref = `refs/heads/${input.branch}`
+  const track = `refs/remotes/jitda/${input.branch}`
+  const who = {
+    GIT_AUTHOR_NAME: input.author.name,
+    GIT_AUTHOR_EMAIL: input.author.email,
+    GIT_COMMITTER_NAME: input.author.name,
+    GIT_COMMITTER_EMAIL: input.author.email,
+  }
+
+  const scan = async (dir: string): Promise<string[]> => {
+    const items = (
+      await must(["ls-files", "-z", "--others", "--exclude-standard"], { tree: path.join(input.worktree, dir) })
+    )
+      .split("\0")
+      .filter(Boolean)
+    const nested = await Promise.all(
+      items.filter((item) => item.endsWith("/")).map((item) => scan(path.posix.join(dir, item.slice(0, -1)))),
+    )
+    return [...items.filter((item) => !item.endsWith("/")).map((item) => path.posix.join(dir, item)), ...nested.flat()]
+  }
+
+  const stage = async () => {
+    await must(["read-tree", "--empty"])
+    const files = await Promise.all(
+      (await scan(""))
+        .filter((file) => !Env.isSecretFile(file) && path.posix.basename(file) !== BRIDGE)
+        .map(async (file) => ({
+          file,
+          size: (await lstat(path.join(input.worktree, file)).catch(() => undefined))?.size,
+        })),
+    )
+    const keep = files.filter((item) => item.size !== undefined && item.size <= LIMIT).map((item) => item.file)
+    if (keep.length === 0) throw new Failure("empty", 422)
+    const stripped = (
+      await Promise.all(
+        keep
+          .filter((file) => /\.html?$/i.test(file))
+          .map(async (file) => {
+            const text = await readFile(path.join(input.worktree, file), "utf8").catch(() => "")
+            const clean = strip(text)
+            return clean === text ? undefined : { file, clean }
+          }),
+      )
+    ).filter((item) => item !== undefined)
+    const dirty = new Set(stripped.map((item) => item.file))
+    const plain = keep.filter((file) => !dirty.has(file))
+    for (let i = 0; i < plain.length; i += 200)
+      await must(["update-index", "--add", "--remove", "--", ...plain.slice(i, i + 200)])
+    for (const item of stripped) {
+      const tmp = path.join(input.gitdir, "stripped")
+      await writeFile(tmp, item.clean)
+      const blob = (await must(["hash-object", "-w", "--no-filters", "--", tmp])).trim()
+      await must(["update-index", "--add", "--cacheinfo", `100644,${blob},${item.file}`])
+    }
+    return {
+      tree: (await must(["write-tree"])).trim(),
+      skipped: files.filter((item) => (item.size ?? 0) > LIMIT).map((item) => item.file),
+    }
+  }
+
+  const changes = async (parent: string | undefined, tree: string): Promise<Change[]> => {
+    if (!parent)
+      return (await must(["ls-tree", "-r", "-z", "--name-only", tree]))
+        .split("\0")
+        .filter(Boolean)
+        .map((file) => ({ status: "A", file }))
+    const out = (await must(["diff-tree", "-r", "-z", "--no-renames", "--name-status", `${parent}^{tree}`, tree]))
+      .split("\0")
+      .filter(Boolean)
+    const list: Change[] = []
+    for (let i = 0; i + 1 < out.length; i += 2) {
+      const value = out[i]
+      list.push({ status: value === "A" || value === "D" ? value : "M", file: out[i + 1]! })
+    }
+    return list
+  }
+
+  let message: string | undefined
+  const attempt = async (retry: boolean): Promise<{ sha?: string; skipped: string[] }> => {
+    const heads = await must(["ls-remote", input.remote, ref])
+    const found = heads.split("\n").some((line) => line.endsWith(`\t${ref}`))
+    if (found) await must(["fetch", "--quiet", "--no-tags", "--depth=1", input.remote, `+${ref}:${track}`])
+    const parent = found ? (await must(["rev-parse", track])).trim() : undefined
+    const staged = await stage()
+    if (parent && staged.tree === (await must(["rev-parse", `${parent}^{tree}`])).trim())
+      return { skipped: staged.skipped }
+    message ??=
+      typeof input.message === "string" ? input.message : await input.message(await changes(parent, staged.tree))
+    const sha = (
+      await must(["commit-tree", "--no-gpg-sign", staged.tree, ...(parent ? ["-p", parent] : []), "-m", message], {
+        env: who,
+      })
+    ).trim()
+    const out = await run(["push", "--quiet", input.remote, `${sha}:${ref}`])
+    if (out.exitCode === 0) return { sha, skipped: staged.skipped }
+    if (retry) return attempt(false)
+    throw new Failure("remote", 502, out.stderr.trim())
+  }
+
+  return attempt(true)
+}
+
+const LABEL = {
+  ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용" },
+  en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda" },
+} as const
+
+export type Turn = { request: string; reply: string; locale: "ko" | "en"; model?: { providerID: string; id: string } }
+
+export function compose(subject: string, changes: Change[], locale: "ko" | "en" = "ko") {
+  const label = LABEL[locale]
+  const lines = changes.slice(0, MAX_FILES).map((change) => `- ${label[change.status]}: ${change.file}`)
+  if (changes.length > MAX_FILES) lines.push(`- … +${changes.length - MAX_FILES}`)
+  const clipped = subject.length > MAX_SUBJECT ? subject.slice(0, MAX_SUBJECT - 1) + "…" : subject
+  return [clipped, ...(lines.length ? ["", ...lines] : [])].join("\n")
+}
+
+type Message = {
+  type: string
+  text?: string
+  content?: Array<{ type: string; text?: string }>
+  metadata?: Record<string, unknown>
+  model?: { providerID: string; id: string }
+}
+
+// 가장 최근 사용자 요청과 그 뒤 마지막 AI 답을 고른다.
+export function latest(messages: ReadonlyArray<Message>): Turn | undefined {
+  const index = messages.findLastIndex((message) => message.type === "user" && (message.text ?? "").trim())
+  const found = messages[index]
+  if (!found) return undefined
+  const replies = messages.slice(index + 1).filter((message) => message.type === "assistant")
+  const reply =
+    replies
+      .map((message) =>
+        (message.content ?? [])
+          .flatMap((part) => (part.type === "text" && part.text?.trim() ? [part.text.trim()] : []))
+          .join("\n"),
+      )
+      .filter(Boolean)
+      .at(-1) ?? ""
+  return {
+    request: (found.text ?? "").trim(),
+    reply,
+    locale: found.metadata?.locale === "en" ? "en" : "ko",
+    model: replies.at(-1)?.model,
+  }
+}
+
+export const Rpc = Definitions.Github
+
+// RPC 출력은 JSON 이어야 해서 값이 없는 필드는 뺀다.
+const json = <T>(value: T): T => JSON.parse(JSON.stringify(value))
+
+const failure = (error: unknown) => {
+  if (error instanceof Failure) return { error: { code: error.code, status: error.status, message: error.message } }
+  throw error
+}
+
+export async function start(ctx: Context) {
+  const directory = ctx.location.directory
+  const registration = await ctx.rpc.register(Rpc, {
+    status: async () => json(await status(directory)),
+    createRepo: async (input) => json(await create(directory, input as { name: string }).catch(failure)),
+  })
+
+  const describe = async (turn: Turn, changes: Change[]) => {
+    const content = [turn.request, turn.reply].filter(Boolean).join("\n\n").slice(0, 4000)
+    const title = turn.model
+      ? await ctx.generate
+          .text({
+            model: turn.model,
+            prompt: `Generate a title for the change made in this conversation:\n\n${content}`,
+          })
+          .then((result) =>
+            result.text
+              .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
+              .split("\n")
+              .map((line) => line.trim())
+              .find(Boolean),
+          )
+          .catch(() => undefined)
+      : undefined
+    const fallback = turn.request
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean)
+    return compose(title || fallback || LABEL[turn.locale].fallback, changes, turn.locale)
+  }
+
+  const sync = async (sessionID: string) => {
+    const current = await status(directory)
+    if (!current.login || !current.repo) return
+    const session = await ctx.session.get({ sessionID }).catch(() => undefined)
+    if (!session || (session as { parentID?: string }).parentID) return
+    const turn = latest(await ctx.session.context({ sessionID }).catch(() => []))
+    if (!turn) return
+    await push(directory, { message: (changes) => describe(turn, changes) })
+  }
+
+  const sessions = new Set<string>()
+  const controller = new AbortController()
+  void (async () => {
+    while (!controller.signal.aborted) {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+          const value = event as { type: string; location?: { directory?: string }; data?: { sessionID?: string } }
+          const sessionID = value.data?.sessionID
+          if (!sessionID) continue
+          if (value.location) {
+            if (value.location.directory === directory) sessions.add(sessionID)
+            continue
+          }
+          if (value.type === "session.execution.succeeded" && sessions.has(sessionID))
+            void sync(sessionID).catch((error) => {
+              if (!(error instanceof Failure)) console.warn("[jitda.github] sync failed", String(error))
+            })
+        }
+      } catch {
+        if (controller.signal.aborted) return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+  })()
+
+  return async () => {
+    controller.abort()
+    await registration.dispose()
+  }
+}
+
+export * as GitHub from "./github"

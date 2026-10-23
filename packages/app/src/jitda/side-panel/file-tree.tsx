@@ -1,0 +1,646 @@
+import { Collapsible } from "@opencode/ui/collapsible"
+import { FileIcon } from "@opencode/ui/file-icon"
+import { encodeFilePath } from "@opencode/util/path"
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  Match,
+  on,
+  onCleanup,
+  Show,
+  splitProps,
+  Switch,
+  untrack,
+  type ComponentProps,
+  type ParentProps,
+} from "solid-js"
+import { Dynamic } from "solid-js/web"
+import { ContextAddButton } from "@/jitda/env/ui/context-add-button"
+import { Icon } from "@/jitda/env/ui/icon"
+import { IconButton } from "@/jitda/env/ui/icon-button"
+import { Skeleton } from "@/jitda/env/ui/skeleton"
+import type { FileNode } from "@/runtime/server/types"
+import { useFile } from "@/workspaces/files/model"
+import { dirsToExpand, shouldListRoot } from "./file-tree-fetch"
+
+// `active` 가 delay ms 넘게 유지될 때만 true — 즉시 끝나는 대기에서 스켈레톤이 번쩍이지 않게 한다.
+function useDelayed(active: () => boolean, delay = 180) {
+  const [on, setOn] = createSignal(false)
+  createEffect(() => {
+    if (!active()) {
+      setOn(false)
+      return
+    }
+    const timer = window.setTimeout(() => setOn(true), delay)
+    onCleanup(() => window.clearTimeout(timer))
+  })
+  return on
+}
+
+const MAX_DEPTH = 128
+
+const skeletonRows = ["72%", "54%", "63%", "41%", "58%"]
+
+function pathToFileUrl(filepath: string): string {
+  return `file://${encodeFilePath(filepath)}`
+}
+
+type Kind = "add" | "del" | "mix"
+
+type Filter = {
+  files: Set<string>
+  dirs: Set<string>
+}
+
+const kindLabel = (kind: Kind) => {
+  if (kind === "add") return "A"
+  if (kind === "del") return "D"
+  return "M"
+}
+
+const kindTextColor = (kind: Kind) => {
+  if (kind === "add") return "color: var(--icon-diff-add-base)"
+  if (kind === "del") return "color: var(--icon-diff-delete-base)"
+  return "color: var(--icon-diff-modified-base)"
+}
+
+const kindDotColor = (kind: Kind) => {
+  if (kind === "add") return "background-color: var(--icon-diff-add-base)"
+  if (kind === "del") return "background-color: var(--icon-diff-delete-base)"
+  return "background-color: var(--icon-diff-modified-base)"
+}
+
+const visibleKind = (node: FileNode, kinds?: ReadonlyMap<string, Kind>, marks?: Set<string>) => {
+  const kind = kinds?.get(node.path)
+  if (!kind) return
+  if (!marks?.has(node.path)) return
+  return kind
+}
+
+const buildDragImage = (target: HTMLElement) => {
+  const icon = target.querySelector('[data-component="file-icon"]') ?? target.querySelector("svg")
+  const text = target.querySelector("span")
+  if (!icon || !text) return
+
+  const image = document.createElement("div")
+  image.className =
+    "flex items-center gap-x-2 px-2 py-1 bg-surface-raised-base rounded-md border border-border-base text-12-regular text-text-strong"
+  image.style.position = "absolute"
+  image.style.top = "-1000px"
+  image.innerHTML = (icon as SVGElement).outerHTML + (text as HTMLSpanElement).outerHTML
+  return image
+}
+
+const withFileDragImage = (event: DragEvent) => {
+  const image = buildDragImage(event.currentTarget as HTMLElement)
+  if (!image) return
+  document.body.appendChild(image)
+  event.dataTransfer?.setDragImage(image, 0, 12)
+  setTimeout(() => document.body.removeChild(image), 0)
+}
+
+const FileTreeNode = (
+  p: ParentProps &
+    ComponentProps<"div"> &
+    ComponentProps<"button"> & {
+      node: FileNode
+      level: number
+      active?: string
+      nodeClass?: string
+      draggable: boolean
+      kinds?: ReadonlyMap<string, Kind>
+      marks?: Set<string>
+      as?: "div" | "button"
+      hideKind?: boolean
+      noIndent?: boolean
+    },
+) => {
+  const [local, rest] = splitProps(p, [
+    "node",
+    "level",
+    "active",
+    "nodeClass",
+    "draggable",
+    "kinds",
+    "marks",
+    "as",
+    "hideKind",
+    "noIndent",
+    "children",
+    "class",
+    "classList",
+  ])
+  const kind = () => visibleKind(local.node, local.kinds, local.marks)
+  const active = () => !!kind() && !local.node.ignored
+  const color = () => {
+    const value = kind()
+    if (!value) return
+    return kindTextColor(value)
+  }
+
+  return (
+    <Dynamic
+      component={local.as ?? "div"}
+      classList={{
+        "w-full min-w-0 h-6 flex items-center justify-start gap-x-1.5 rounded-md px-1.5 py-0 text-left hover:bg-surface-raised-base-hover active:bg-surface-base-active transition-colors cursor-pointer": true,
+        "bg-surface-base-active": local.node.path === local.active,
+        ...(local.classList ?? {}),
+        [local.class ?? ""]: !!local.class,
+        [local.nodeClass ?? ""]: !!local.nodeClass,
+      }}
+      style={
+        local.noIndent
+          ? undefined
+          : `padding-left: ${Math.max(0, 8 + local.level * 12 - (local.node.type === "file" ? 24 : 4))}px`
+      }
+      draggable={local.draggable}
+      onDragStart={(event: DragEvent) => {
+        if (!local.draggable) return
+        event.dataTransfer?.setData("text/plain", `file:${local.node.path}`)
+        event.dataTransfer?.setData("text/uri-list", pathToFileUrl(local.node.path))
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy"
+        withFileDragImage(event)
+      }}
+      {...rest}
+    >
+      {local.children}
+      <span
+        classList={{
+          "flex-1 min-w-0 text-12-medium whitespace-nowrap truncate": true,
+          "text-text-weaker": local.node.ignored,
+          "text-text-weak": !local.node.ignored && !active(),
+        }}
+        style={active() ? color() : undefined}
+      >
+        {local.node.name}
+      </span>
+      {(() => {
+        const value = kind()
+        if (!value || local.hideKind) return null
+        if (local.node.type === "file") {
+          return (
+            <span class="shrink-0 w-4 text-center text-12-medium" style={kindTextColor(value)}>
+              {kindLabel(value)}
+            </span>
+          )
+        }
+        return <div class="shrink-0 size-1.5 mr-1.5 rounded-full" style={kindDotColor(value)} />
+      })()}
+    </Dynamic>
+  )
+}
+
+export default function FileTree(props: {
+  path: string
+  class?: string
+  nodeClass?: string
+  active?: string
+  level?: number
+  allowed?: readonly string[]
+  modified?: readonly string[]
+  kinds?: ReadonlyMap<string, Kind>
+  draggable?: boolean
+  onFileClick?: (file: FileNode) => void
+  onContextAdd?: (path: string, type: "file" | "directory") => void
+  contextLabel?: string
+  contextFolderLabel?: string
+  deletable?: (node: FileNode) => boolean
+  onDelete?: (node: FileNode) => void
+  deleteLabel?: string
+
+  _filter?: Filter
+  _marks?: Set<string>
+  _deeps?: Map<string, number>
+  _kinds?: ReadonlyMap<string, Kind>
+  _chain?: readonly string[]
+}) {
+  const file = useFile()
+  const level = props.level ?? 0
+  const draggable = () => props.draggable ?? true
+
+  const key = (p: string) =>
+    file
+      .normalize(p)
+      .replace(/[\\/]+$/, "")
+      .replaceAll("\\", "/")
+  const chain = props._chain ? [...props._chain, key(props.path)] : [key(props.path)]
+
+  const filter = createMemo(() => {
+    if (props._filter) return props._filter
+
+    const allowed = props.allowed
+    if (!allowed) return
+
+    const files = new Set(allowed)
+    const dirs = new Set<string>()
+
+    for (const item of allowed) {
+      const parts = item.split("/")
+      const parents = parts.slice(0, -1)
+      for (const [idx] of parents.entries()) {
+        const dir = parents.slice(0, idx + 1).join("/")
+        if (dir) dirs.add(dir)
+      }
+    }
+
+    return { files, dirs }
+  })
+
+  const marks = createMemo(() => {
+    if (props._marks) return props._marks
+
+    const out = new Set<string>()
+    for (const item of props.modified ?? []) out.add(item)
+    for (const item of props.kinds?.keys() ?? []) out.add(item)
+    if (out.size === 0) return
+    return out
+  })
+
+  const kinds = createMemo(() => {
+    if (props._kinds) return props._kinds
+    return props.kinds
+  })
+
+  const deeps = createMemo(() => {
+    if (props._deeps) return props._deeps
+
+    const out = new Map<string, number>()
+
+    const root = props.path
+    if (!(file.tree.state(root)?.expanded ?? false)) return out
+
+    const seen = new Set<string>()
+    const stack: { dir: string; lvl: number; i: number; kids: string[]; max: number }[] = []
+
+    const push = (dir: string, lvl: number) => {
+      const id = key(dir)
+      if (seen.has(id)) return
+      seen.add(id)
+
+      const kids = file.tree
+        .children(dir)
+        .filter((node) => node.type === "directory" && (file.tree.state(node.path)?.expanded ?? false))
+        .map((node) => node.path)
+
+      stack.push({ dir, lvl, i: 0, kids, max: lvl })
+    }
+
+    push(root, level - 1)
+
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1]!
+
+      if (top.i < top.kids.length) {
+        const next = top.kids[top.i]!
+        top.i++
+        push(next, top.lvl + 1)
+        continue
+      }
+
+      out.set(top.dir, top.max)
+      stack.pop()
+
+      const parent = stack[stack.length - 1]
+      if (!parent) continue
+      parent.max = Math.max(parent.max, top.max)
+    }
+
+    return out
+  })
+
+  createEffect(() => {
+    const current = filter()
+    const dirs = dirsToExpand({
+      level,
+      filter: current,
+      expanded: (dir) => untrack(() => file.tree.state(dir)?.expanded) ?? false,
+    })
+    for (const dir of dirs) file.tree.expand(dir)
+  })
+
+  createEffect(
+    on(
+      () => props.path,
+      (path) => {
+        const dir = untrack(() => file.tree.state(path))
+        if (!shouldListRoot({ level, dir })) return
+        void file.tree.list(path)
+      },
+      { defer: false },
+    ),
+  )
+
+  const nodes = createMemo(() => {
+    const nodes = file.tree.children(props.path)
+    const current = filter()
+    if (!current) return nodes
+
+    const parent = (path: string) => {
+      const idx = path.lastIndexOf("/")
+      if (idx === -1) return ""
+      return path.slice(0, idx)
+    }
+
+    const leaf = (path: string) => {
+      const idx = path.lastIndexOf("/")
+      return idx === -1 ? path : path.slice(idx + 1)
+    }
+
+    const out = nodes.filter((node) => {
+      if (node.type === "file") return current.files.has(node.path)
+      return current.dirs.has(node.path)
+    })
+
+    const seen = new Set(out.map((node) => node.path))
+
+    for (const dir of current.dirs) {
+      if (parent(dir) !== props.path) continue
+      if (seen.has(dir)) continue
+      out.push({
+        name: leaf(dir),
+        path: dir,
+        absolute: dir,
+        type: "directory",
+        ignored: false,
+      })
+      seen.add(dir)
+    }
+
+    for (const item of current.files) {
+      if (parent(item) !== props.path) continue
+      if (seen.has(item)) continue
+      out.push({
+        name: leaf(item),
+        path: item,
+        absolute: item,
+        type: "file",
+        ignored: false,
+      })
+      seen.add(item)
+    }
+
+    out.sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === "directory" ? -1 : 1
+      }
+      return a.name.localeCompare(b.name)
+    })
+
+    return out
+  })
+
+  // 목록을 받아오기 전에는 행이 하나도 안 그려져 패널이 비어 보인다. 그동안 행 자리를 잡아 둔다.
+  const listing = useDelayed(() => !!file.tree.state(props.path)?.loading && nodes().length === 0)
+
+  return (
+    <div data-component="filetree" class={`flex flex-col gap-0.5 ${props.class ?? ""}`}>
+      <Show when={listing()}>
+        <For each={skeletonRows}>
+          {(width, index) => (
+            <div class="h-6 flex items-center" style={`padding-left: ${Math.max(0, 8 + level * 12 - 4)}px`}>
+              <Skeleton width={width} height={8} delay={index() * 0.1} />
+            </div>
+          )}
+        </For>
+      </Show>
+      <For each={nodes()}>
+        {(node) => {
+          const expanded = () => file.tree.state(node.path)?.expanded ?? false
+          const deep = () => deeps().get(node.path) ?? -1
+          const kind = () => visibleKind(node, kinds(), marks())
+          const active = () => !!kind() && !node.ignored
+
+          return (
+            <Switch>
+              <Match when={node.type === "directory"}>
+                <Collapsible
+                  variant="ghost"
+                  class="w-full"
+                  data-scope="filetree"
+                  forceMount={false}
+                  open={expanded()}
+                  onOpenChange={(open) => (open ? file.tree.expand(node.path) : file.tree.collapse(node.path))}
+                >
+                  <div
+                    data-file-tree-path={node.path}
+                    classList={{
+                      "group/foldernode w-full min-w-0 h-6 flex items-center justify-start gap-x-1 rounded-md pr-1.5 text-left hover:bg-surface-raised-base-hover active:bg-surface-base-active transition-colors": true,
+                      [props.nodeClass ?? ""]: !!props.nodeClass,
+                    }}
+                    style={`padding-left: ${Math.max(0, 8 + level * 12 - 4)}px`}
+                  >
+                    <Collapsible.Trigger class="flex-1 min-w-0 h-full flex items-center justify-start gap-x-0 rounded-md px-0 py-0 text-left cursor-pointer">
+                      <FileTreeNode
+                        node={node}
+                        level={level}
+                        active={props.active}
+                        nodeClass="px-0 hover:bg-transparent active:bg-transparent"
+                        hideKind
+                        noIndent
+                        draggable={draggable()}
+                        kinds={kinds()}
+                        marks={marks()}
+                      >
+                        <div class="size-4 flex shrink-0 items-center justify-center text-icon-weak">
+                          <Icon name={expanded() ? "chevron-down" : "chevron-right"} size="small" />
+                        </div>
+                        <span class="filetree-iconpair size-4 shrink-0">
+                          <FileIcon
+                            node={node}
+                            expanded={expanded()}
+                            class="size-4 filetree-icon filetree-icon--color opacity-0 group-hover/filetree:opacity-100"
+                          />
+                          <FileIcon
+                            node={node}
+                            expanded={expanded()}
+                            class="size-4 filetree-icon filetree-icon--mono group-hover/filetree:opacity-0"
+                            mono
+                          />
+                        </span>
+                      </FileTreeNode>
+                    </Collapsible.Trigger>
+                    <Show when={props.onContextAdd && !node.ignored}>
+                      <ContextAddButton
+                        label={props.contextFolderLabel ?? props.contextLabel ?? ""}
+                        class="shrink-0 opacity-0 group-hover/foldernode:opacity-100 focus-visible:opacity-100 transition-opacity"
+                        onPointerDown={(event) => {
+                          event.stopPropagation()
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          event.preventDefault()
+                          props.onContextAdd?.(node.path, "directory")
+                        }}
+                      />
+                    </Show>
+                    <Show when={props.onDelete && props.deletable?.(node)}>
+                      <IconButton
+                        icon="trash"
+                        variant="ghost"
+                        size="small"
+                        class="shrink-0 opacity-0 group-hover/foldernode:opacity-100 focus-visible:opacity-100 transition-opacity"
+                        aria-label={props.deleteLabel ?? ""}
+                        title={props.deleteLabel}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          event.preventDefault()
+                          props.onDelete?.(node)
+                        }}
+                      />
+                    </Show>
+                    <Show when={kind()}>
+                      {(value) => <div class="shrink-0 size-1.5 mr-1.5 rounded-full" style={kindDotColor(value())} />}
+                    </Show>
+                  </div>
+                  <Collapsible.Content class="relative pt-0.5">
+                    <div
+                      classList={{
+                        "absolute top-0 bottom-0 w-px pointer-events-none bg-border-weak-base opacity-0 transition-opacity duration-150 ease-out motion-reduce:transition-none": true,
+                        "group-hover/filetree:opacity-100": expanded() && deep() === level,
+                        "group-hover/filetree:opacity-50": !(expanded() && deep() === level),
+                      }}
+                      style={`left: ${Math.max(0, 8 + level * 12 - 4) + 8}px`}
+                    />
+                    <Show
+                      when={level < MAX_DEPTH && !chain.includes(key(node.path))}
+                      fallback={<div class="px-2 py-1 text-12-regular text-text-weak">...</div>}
+                    >
+                      <FileTree
+                        path={node.path}
+                        level={level + 1}
+                        allowed={props.allowed}
+                        modified={props.modified}
+                        kinds={props.kinds}
+                        active={props.active}
+                        draggable={props.draggable}
+                        onFileClick={props.onFileClick}
+                        onContextAdd={props.onContextAdd}
+                        contextLabel={props.contextLabel}
+                        contextFolderLabel={props.contextFolderLabel}
+                        deletable={props.deletable}
+                        onDelete={props.onDelete}
+                        deleteLabel={props.deleteLabel}
+                        _filter={filter()}
+                        _marks={marks()}
+                        _deeps={deeps()}
+                        _kinds={kinds()}
+                        _chain={chain}
+                      />
+                    </Show>
+                  </Collapsible.Content>
+                </Collapsible>
+              </Match>
+              <Match when={node.type === "file"}>
+                <div
+                  classList={{
+                    "group/filenode w-full min-w-0 h-6 flex items-center justify-start gap-x-1 rounded-md pr-1.5 text-left hover:bg-surface-raised-base-hover active:bg-surface-base-active transition-colors": true,
+                    "bg-surface-base-active": node.path === props.active,
+                    [props.nodeClass ?? ""]: !!props.nodeClass,
+                  }}
+                  style={`padding-left: ${Math.max(0, 8 + level * 12 - 24)}px`}
+                >
+                  <button
+                    type="button"
+                    class="flex-1 min-w-0 h-full flex items-center justify-start gap-x-1.5 rounded-md px-0 py-0 text-left cursor-pointer min-w-0"
+                    draggable={draggable()}
+                    onDragStart={(event: DragEvent) => {
+                      if (!draggable()) return
+                      event.dataTransfer?.setData("text/plain", `file:${node.path}`)
+                      event.dataTransfer?.setData("text/uri-list", pathToFileUrl(node.path))
+                      if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy"
+                      withFileDragImage(event)
+                    }}
+                    onClick={() => props.onFileClick?.(node)}
+                  >
+                    <div class="w-4 shrink-0" />
+                    <Switch>
+                      <Match when={node.ignored}>
+                        <FileIcon
+                          node={node}
+                          class="size-4 filetree-icon filetree-icon--mono"
+                          style="color: var(--icon-weak-base)"
+                          mono
+                        />
+                      </Match>
+                      <Match when={active()}>
+                        <FileIcon
+                          node={node}
+                          class="size-4 filetree-icon filetree-icon--mono"
+                          style={kindTextColor(kind()!)}
+                          mono
+                        />
+                      </Match>
+                      <Match when={!node.ignored}>
+                        <span class="filetree-iconpair size-4">
+                          <FileIcon
+                            node={node}
+                            class="size-4 filetree-icon filetree-icon--color opacity-0 group-hover/filetree:opacity-100"
+                          />
+                          <FileIcon
+                            node={node}
+                            class="size-4 filetree-icon filetree-icon--mono group-hover/filetree:opacity-0"
+                            mono
+                          />
+                        </span>
+                      </Match>
+                    </Switch>
+                    <span
+                      classList={{
+                        "flex-1 min-w-0 text-12-medium whitespace-nowrap truncate": true,
+                        "text-text-weaker": node.ignored,
+                        "text-text-weak": !node.ignored && !active(),
+                      }}
+                      style={active() ? kindTextColor(kind()!) : undefined}
+                    >
+                      {node.name}
+                    </span>
+                  </button>
+                  <Show when={props.onContextAdd && !node.ignored}>
+                    <ContextAddButton
+                      label={props.contextLabel ?? ""}
+                      class="opacity-0 group-hover/filenode:opacity-100 focus-visible:opacity-100 transition-opacity"
+                      onPointerDown={(event) => {
+                        event.stopPropagation()
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        event.preventDefault()
+                        props.onContextAdd?.(node.path, "file")
+                      }}
+                    />
+                  </Show>
+                  <Show when={props.onDelete && props.deletable?.(node)}>
+                    <IconButton
+                      icon="trash"
+                      variant="ghost"
+                      size="small"
+                      class="shrink-0 opacity-0 group-hover/filenode:opacity-100 focus-visible:opacity-100 transition-opacity"
+                      aria-label={props.deleteLabel ?? ""}
+                      title={props.deleteLabel}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        event.preventDefault()
+                        props.onDelete?.(node)
+                      }}
+                    />
+                  </Show>
+                  <Show when={kind()}>
+                    {(value) => (
+                      <span class="shrink-0 w-4 text-center text-12-medium" style={kindTextColor(value())}>
+                        {kindLabel(value())}
+                      </span>
+                    )}
+                  </Show>
+                </div>
+              </Match>
+            </Switch>
+          )
+        }}
+      </For>
+    </div>
+  )
+}

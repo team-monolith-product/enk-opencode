@@ -3,18 +3,22 @@ node_modules
 .worktrees
 .sst
 .env
+.env.local
 .idea
 .vscode
 .codex
-.worktreeinclude
 *~
 playground
 tmp
 dist
+dist-node
 ts-dist
 .turbo
+.typecheck-profiles
 **/.serena
 .serena/
+**/.omo
+.omo/
 /result
 refs
 Session.vim
@@ -22,23 +26,14 @@ Session.vim
 a.out
 target
 .scripts
+.cache
 .direnv/
 
 # Local dev files
 opencode-dev
 UPCOMING_CHANGELOG.md
+RELEASE_REVIEW.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
-
-# 개발을 위해 AI 관련 파일 스킬이 없어서 코드 제너레이트가 일괄 적이지 않아 추가합니다
-
-/.agents/**/*
-/.claude/**/*
-# 워크트리 생성용 설정/훅은 트래킹한다 (나머지 .claude 는 무시)
-!/.claude/settings.json
-!/.claude/hooks/
-!/.claude/hooks/**
-
-# opencode run continuation marker 등 로컬 상태
-.omo/
+/artifacts/

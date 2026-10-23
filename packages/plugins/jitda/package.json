@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@opencode/plugin-jitda",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Jitda hackathon integrations for OpenCode",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./server": "./index.ts",
+    "./dev-server": "./src/dev-server.ts",
+    "./env": "./src/env.ts",
+    "./assets": "./src/assets.ts",
+    "./doc": "./src/doc/index.ts",
+    "./rpc": "./src/rpc.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun build index.ts --outfile dist/index.js --target bun --format esm --external @opencode/plugin"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "^2.0.27 || ^0.0.0-dev"
+  },
+  "devDependencies": {
+    "@tsconfig/bun": "1.0.9",
+    "@types/bun": "1.4.0",
+    "@typescript/native": "npm:typescript@7.0.2"
+  },
+  "dependencies": {
+    "node-html-parser": "catalog:",
+    "y-protocols": "1.0.7",
+    "yjs": "13.6.30"
+  }
+}

@@ -8,9 +8,7 @@
     "./bridge": "./src/bridge.ts"
   },
   "scripts": {
-    "build:bridge": "bun build src/bridge.ts --outfile ../../docker/preview-bridge.js --minify --format iife",
-    "build:plugin": "bun build src/plugin.ts --outfile ../../docker/preview-bridge-plugin.js --target node --format esm --minify",
-    "build:preview-bridge": "bun run build:bridge && bun run build:plugin"
+    "build:bridge": "bun build src/bridge.ts --outfile ../../docker/preview-bridge.js --minify --format iife"
   },
   "dependencies": {
     "html-to-image": "catalog:",

@@ -1,0 +1,231 @@
+/* V1 packages/ui/src/components/button.css. 모션·포커스 토큰은 V1 theme.css 값이며 V2 테마에 없어 버튼 스코프에 둔다. */
+@layer components {
+  [data-component="button"] {
+    --dur-instant: 75ms;
+    --dur-fast: 150ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --focus-ring-color: #ffce2b;
+    --focus-ring-width: 2px;
+    --focus-ring-offset: 2px;
+    --focus-ring-soft: 0 0 0 3px rgba(255, 206, 43, 0.3);
+  }
+
+  [data-component="button"] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-style: solid;
+    border-width: 1px;
+    border-radius: var(--radius-sm);
+    transition:
+      background-color var(--dur-fast) var(--ease-standard),
+      border-color var(--dur-fast) var(--ease-standard),
+      box-shadow var(--dur-fast) var(--ease-standard),
+      transform var(--dur-instant) var(--ease-standard);
+    text-decoration: none;
+    user-select: none;
+    cursor: default;
+    outline: none;
+    white-space: nowrap;
+
+    &[data-variant="primary"] {
+      background-color: var(--button-primary-base);
+      border-color: var(--border-weak-base);
+      color: var(--icon-invert-base);
+      box-shadow: var(--shadow-xs);
+
+      [data-slot="icon-svg"] {
+        color: var(--icon-invert-base);
+      }
+
+      &:hover:not(:disabled) {
+        background-color: var(--icon-strong-hover);
+        box-shadow: var(--shadow-md);
+      }
+      &:focus:not(:disabled) {
+        background-color: var(--icon-strong-focus);
+      }
+      &:active:not(:disabled) {
+        background-color: var(--icon-strong-active);
+      }
+      &:disabled {
+        background-color: var(--icon-strong-disabled);
+
+        [data-slot="icon-svg"] {
+          color: var(--icon-invert-base);
+        }
+      }
+    }
+
+    &[data-variant="ghost"] {
+      border-color: transparent;
+      background-color: transparent;
+      color: var(--text-strong);
+
+      [data-slot="icon-svg"] {
+        color: var(--icon-base);
+      }
+
+      &:hover:not(:disabled) {
+        background-color: var(--surface-base-hover);
+      }
+      &:focus-visible:not(:disabled) {
+        background-color: var(--surface-base-hover);
+      }
+      &:active:not(:disabled) {
+        background-color: var(--surface-base-active);
+      }
+      &:disabled {
+        color: var(--text-weak);
+        cursor: not-allowed;
+
+        [data-slot="icon-svg"] {
+          color: var(--icon-disabled);
+        }
+      }
+      &[data-selected="true"]:not(:disabled) {
+        background-color: var(--surface-base-hover);
+      }
+      &[data-active="true"] {
+        background-color: var(--surface-base-active);
+      }
+    }
+
+    &[data-variant="secondary"] {
+      border-color: var(--border-weak-base);
+      background-color: var(--button-secondary-base);
+      color: var(--text-strong);
+      box-shadow: var(--shadow-xs-border-base);
+
+      &:hover:not(:disabled) {
+        background-color: var(--button-secondary-hover);
+        border-color: var(--border-strong-base);
+      }
+      &:focus:not(:disabled) {
+        background-color: var(--button-secondary-base);
+      }
+      &:focus-visible:not(:active) {
+        background-color: var(--button-secondary-base);
+        box-shadow: var(--shadow-xs-border-focus);
+      }
+      &:focus-visible:active {
+        box-shadow: none;
+      }
+      &:active:not(:disabled) {
+        background-color: var(--button-secondary-base);
+      }
+      &:disabled {
+        border-color: var(--border-disabled);
+        background-color: var(--surface-disabled);
+        color: var(--text-weak);
+        cursor: not-allowed;
+      }
+
+      [data-slot="icon-svg"] {
+        color: var(--icon-base);
+      }
+    }
+
+    &:focus-visible:not(:disabled) {
+      outline: var(--focus-ring-width) solid var(--focus-ring-color);
+      outline-offset: var(--focus-ring-offset);
+      box-shadow: var(--focus-ring-soft);
+    }
+
+    &:active:not(:disabled) {
+      transform: scale(0.97);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    &[data-size="small"] {
+      height: 28px;
+      padding: 0 10px;
+      &[data-icon] {
+        padding: 0 12px 0 4px;
+      }
+
+      font-size: var(--font-size-small);
+      line-height: var(--line-height-large);
+      gap: 8px;
+
+      /* text-12-medium */
+      font-family: var(--font-family-sans);
+      font-size: var(--font-size-small);
+      font-style: normal;
+      font-weight: 600;
+      line-height: var(--line-height-large); /* 166.667% */
+      letter-spacing: var(--letter-spacing-normal);
+    }
+
+    &[data-size="normal"] {
+      height: 36px;
+      line-height: 36px;
+      padding: 0 16px;
+      &[data-icon] {
+        padding: 0 12px 0 4px;
+      }
+
+      font-size: var(--font-size-small);
+      gap: 8px;
+
+      /* text-12-medium */
+      font-family: var(--font-family-sans);
+      font-size: var(--font-size-small);
+      font-style: normal;
+      font-weight: 600;
+      letter-spacing: var(--letter-spacing-normal);
+    }
+
+    &[data-size="large"] {
+      height: 44px;
+      padding: 0 20px;
+      font-weight: var(--font-weight-bold);
+
+      &[data-icon] {
+        padding: 0 12px 0 8px;
+      }
+
+      gap: 8px;
+
+      /* text-14-medium */
+      font-family: var(--font-family-sans);
+      font-size: 14px;
+      font-style: normal;
+      font-weight: var(--font-weight-medium);
+      line-height: var(--line-height-large); /* 142.857% */
+      letter-spacing: var(--letter-spacing-normal);
+    }
+
+    &:focus {
+      outline: none;
+    }
+  }
+
+  [data-component="button"].titlebar-icon[data-variant="ghost"][aria-expanded="true"] {
+    background-color: var(--surface-base-active);
+  }
+
+  [data-component="button"].titlebar-icon[data-variant="ghost"][aria-expanded="true"] [data-slot="icon-svg"] {
+    color: var(--icon-strong-base);
+  }
+
+  [data-component="button"].titlebar-icon[data-variant="ghost"][aria-expanded="true"]:hover:not(:disabled) {
+    background-color: var(--surface-base-active);
+  }
+
+  [data-component="button"].titlebar-icon[data-variant="ghost"][aria-current="page"] {
+    background-color: var(--surface-base-active);
+  }
+
+  [data-component="button"].titlebar-icon[data-variant="ghost"][aria-current="page"] [data-slot="icon-svg"] {
+    color: var(--icon-strong-base);
+  }
+
+  [data-component="button"].titlebar-icon[data-variant="ghost"][aria-current="page"]:hover:not(:disabled) {
+    background-color: var(--surface-base-active);
+  }
+}

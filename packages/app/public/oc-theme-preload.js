@@ -1,25 +1,19 @@
 ;(function () {
-  // Keep in sync with packages/ui/src/theme/pin.ts
-  var THEME_ID = "jitda"
-  var COLOR_SCHEME = "system"
-  var themeKey = "opencode-theme-id"
-  var schemeKey = "opencode-color-scheme"
+  // 짓다 웹은 jitda 테마·시스템 색 모드로 고정한다(packages/app/src/app.tsx 의 ThemeProvider pinned 와 같은 값).
+  var themeId = "jitda"
+  var scheme = "system"
+  localStorage.setItem("opencode-theme-id", themeId)
+  localStorage.setItem("opencode-color-scheme", scheme)
 
-  if (localStorage.getItem(themeKey) !== THEME_ID) {
-    localStorage.setItem(themeKey, THEME_ID)
-  }
-
-  if (localStorage.getItem(schemeKey) !== COLOR_SCHEME) {
-    localStorage.setItem(schemeKey, COLOR_SCHEME)
-  }
-
-  var isDark =
-    COLOR_SCHEME === "dark" ||
-    (COLOR_SCHEME === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
+  var isDark = matchMedia("(prefers-color-scheme: dark)").matches
   var mode = isDark ? "dark" : "light"
 
-  document.documentElement.dataset.theme = THEME_ID
+  document.documentElement.dataset.theme = themeId
   document.documentElement.dataset.colorScheme = mode
+  document.documentElement.style.backgroundColor = isDark ? "#14130f" : "#f4f2ec"
+
+  var metas = document.querySelectorAll("meta[name='theme-color']")
+  if (metas.length > 0) metas[0].setAttribute("content", isDark ? "#14130f" : "#f4f2ec")
 
   var css = localStorage.getItem("opencode-theme-css-" + mode)
   if (css) {

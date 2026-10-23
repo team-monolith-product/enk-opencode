@@ -1,9 +1,12 @@
-import { createEffect, onCleanup, onMount } from "solid-js"
+// @refresh reload
+
+import { createEffect, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
+import { makeEventListener } from "@solid-primitives/event-listener"
 import { createSimpleContext } from "../context/helper"
 import oc2ThemeJson from "./themes/oc-2.json"
 import { resolveThemeVariant, themeToCss } from "./resolve"
-import { COLOR_SCHEME, THEME_ID } from "./pin"
+import { resolveThemeVariantV2, themeV2ToCss } from "./v2/resolve"
 import type { DesktopTheme } from "./types"
 
 export type ColorScheme = "light" | "dark" | "system"
@@ -16,13 +19,17 @@ const STORAGE_KEYS = {
 } as const
 
 const THEME_STYLE_ID = "oc-theme"
+
 let files: Record<string, () => Promise<{ default: DesktopTheme }>> | undefined
+
 let ids: string[] | undefined
+
 let known: Set<string> | undefined
 
 function getFiles() {
   if (files) return files
   files = import.meta.glob<{ default: DesktopTheme }>("./themes/*.json")
+
   return files
 }
 
@@ -31,17 +38,20 @@ function themeIDs() {
   ids = Object.keys(getFiles())
     .map((path) => path.slice("./themes/".length, -".json".length))
     .sort()
+
   return ids
 }
 
 function knownThemes() {
   if (known) return known
   known = new Set(themeIDs())
+
   return known
 }
 
 const names: Record<string, string> = {
-  "oc-2": "OC-2",
+  "oc-2": "OpenCode",
+  jitda: "Jitda",
   amoled: "AMOLED",
   aura: "Aura",
   ayu: "Ayu",
@@ -58,8 +68,6 @@ const names: Record<string, string> = {
   gruvbox: "Gruvbox",
   kanagawa: "Kanagawa",
   "lucent-orng": "Lucent Orng",
-  codle: "Codle",
-  jitda: "Jitda",
   material: "Material",
   matrix: "Matrix",
   mercury: "Mercury",
@@ -68,7 +76,6 @@ const names: Record<string, string> = {
   nord: "Nord",
   "one-dark": "One Dark",
   onedarkpro: "One Dark Pro",
-  opencode: "OpenCode",
   orng: "Orng",
   "osaka-jade": "Osaka Jade",
   palenight: "Palenight",
@@ -81,35 +88,60 @@ const names: Record<string, string> = {
   vesper: "Vesper",
   zenburn: "Zenburn",
 }
+
 const oc2Theme = oc2ThemeJson as DesktopTheme
 
-function normalize(_id?: string | null) {
-  return THEME_ID
+function resolveStoredTheme(id: string | null | undefined, registered?: Record<string, DesktopTheme>) {
+  if (id === "oc-2" || (id && (knownThemes().has(id) || registered?.[id]))) return id
+
+  return "oc-2"
 }
 
-function pin() {
-  write(STORAGE_KEYS.THEME_ID, THEME_ID)
-  write(STORAGE_KEYS.COLOR_SCHEME, COLOR_SCHEME)
+function read(key: string) {
+  if (typeof localStorage !== "object") return null
+
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
 }
 
 function write(key: string, value: string) {
   if (typeof localStorage !== "object") return
+
   try {
     localStorage.setItem(key, value)
   } catch {}
 }
 
+function drop(key: string) {
+  if (typeof localStorage !== "object") return
+
+  try {
+    localStorage.removeItem(key)
+  } catch {}
+}
+
+function clear() {
+  drop(STORAGE_KEYS.THEME_CSS_LIGHT)
+  drop(STORAGE_KEYS.THEME_CSS_DARK)
+}
+
 function ensureThemeStyleElement(): HTMLStyleElement {
   const existing = document.getElementById(THEME_STYLE_ID) as HTMLStyleElement | null
+
   if (existing) return existing
   const element = document.createElement("style")
   element.id = THEME_STYLE_ID
   document.head.appendChild(element)
+
   return element
 }
 
 function getSystemMode(): "light" | "dark" {
   if (typeof window !== "object") return "light"
+
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
 }
 
@@ -118,46 +150,69 @@ function applyThemeCss(theme: DesktopTheme, themeId: string, mode: "light" | "da
   const variant = isDark ? theme.dark : theme.light
   const tokens = resolveThemeVariant(variant, isDark)
   const css = themeToCss(tokens)
+  const v2 = themeV2ToCss(resolveThemeVariantV2(variant, isDark))
 
   if (themeId !== "oc-2") {
-    write(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, css)
+    write(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, `${css}\n  ${v2}`)
   }
 
   const fullCss = `:root {
   color-scheme: ${mode};
   --text-mix-blend-mode: ${isDark ? "plus-lighter" : "multiply"};
   ${css}
+  ${v2}
 }`
 
   document.getElementById("oc-theme-preload")?.remove()
   ensureThemeStyleElement().textContent = fullCss
   document.documentElement.dataset.theme = themeId
   document.documentElement.dataset.colorScheme = mode
+  document.documentElement.style.backgroundColor = isDark ? "#080808" : "#fafafa"
+
+  // Update theme-color meta tag to match light/dark mode
+  const meta = document.querySelector('meta[name="theme-color"]')
+
+  if (meta) meta.setAttribute("content", isDark ? "#080808" : "#fafafa")
 }
 
 function cacheThemeVariants(theme: DesktopTheme, themeId: string) {
   if (themeId === "oc-2") return
+
   for (const mode of ["light", "dark"] as const) {
     const isDark = mode === "dark"
     const variant = isDark ? theme.dark : theme.light
     const tokens = resolveThemeVariant(variant, isDark)
     const css = themeToCss(tokens)
-    write(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, css)
+    const v2 = themeV2ToCss(resolveThemeVariantV2(variant, isDark))
+    write(isDark ? STORAGE_KEYS.THEME_CSS_DARK : STORAGE_KEYS.THEME_CSS_LIGHT, `${css}\n  ${v2}`)
   }
 }
 
 export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
   name: "Theme",
-  init: (props: { onThemeApplied?: (theme: DesktopTheme, mode: "light" | "dark") => void }) => {
-    pin()
-    const mode = getSystemMode()
+  init: (props: {
+    defaultTheme?: string
+    pinned?: string
+    onThemeApplied?: (theme: DesktopTheme, mode: "light" | "dark", scheme: ColorScheme) => void
+  }) => {
+    const rawTheme = props.pinned ?? read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme
+    const themeId = resolveStoredTheme(rawTheme)
+
+    if (rawTheme && rawTheme !== themeId) {
+      write(STORAGE_KEYS.THEME_ID, themeId)
+      clear()
+    }
+
+    const colorScheme = props.pinned ? "system" : ((read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system")
+    const mode = colorScheme === "system" ? getSystemMode() : colorScheme
+
     const [store, setStore] = createStore({
       themes: {
         "oc-2": oc2Theme,
       } as Record<string, DesktopTheme>,
-      themeId: THEME_ID,
-      colorScheme: COLOR_SCHEME as ColorScheme,
-      mode: mode as "light" | "dark",
+      themeId,
+      colorScheme,
+      mode,
       previewThemeId: null as string | null,
       previewScheme: null as ColorScheme | null,
     })
@@ -165,107 +220,158 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     const loads = new Map<string, Promise<DesktopTheme | undefined>>()
 
     const load = (id: string) => {
-      const next = normalize(id)
+      const next = id
+
       if (!next) return Promise.resolve(undefined)
       const hit = store.themes[next]
+
       if (hit) return Promise.resolve(hit)
       const pending = loads.get(next)
+
       if (pending) return pending
       const file = getFiles()[`./themes/${next}.json`]
+
       if (!file) return Promise.resolve(undefined)
+
       const task = file()
         .then((mod) => {
           const theme = mod.default
           setStore("themes", next, theme)
+
           return theme
         })
         .finally(() => {
           loads.delete(next)
         })
+
       loads.set(next, task)
+
       return task
     }
 
-    const applyTheme = (theme: DesktopTheme, themeId: string, mode: "light" | "dark") => {
+    const applyTheme = (theme: DesktopTheme, themeId: string, mode: "light" | "dark", scheme: ColorScheme) => {
       applyThemeCss(theme, themeId, mode)
-      props.onThemeApplied?.(theme, mode)
+      props.onThemeApplied?.(theme, mode, scheme)
     }
 
     const ids = () => {
       const extra = Object.keys(store.themes)
         .filter((id) => !knownThemes().has(id))
         .sort()
+
       const all = themeIDs()
+
       if (extra.length === 0) return all
+
       return [...all, ...extra]
     }
 
     const loadThemes = () => Promise.all(themeIDs().map(load)).then(() => store.themes)
 
     const onStorage = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEYS.THEME_ID && e.newValue !== THEME_ID) {
-        pin()
-        setStore("themeId", THEME_ID)
-        void load(THEME_ID).then((theme) => {
-          if (!theme || store.themeId !== THEME_ID) return
-          cacheThemeVariants(theme, THEME_ID)
+      if (e.key === STORAGE_KEYS.THEME_ID && e.newValue) {
+        const next = resolveStoredTheme(e.newValue, store.themes)
+
+        if (next !== e.newValue) {
+          write(STORAGE_KEYS.THEME_ID, next)
+          clear()
+        }
+
+        setStore("themeId", next)
+
+        if (next === "oc-2") {
+          clear()
+
+          return
+        }
+
+        void load(next).then((theme) => {
+          if (!theme || store.themeId !== next) return
+          cacheThemeVariants(theme, next)
         })
       }
-      if (e.key === STORAGE_KEYS.COLOR_SCHEME && e.newValue !== COLOR_SCHEME) {
-        pin()
-        setStore("colorScheme", COLOR_SCHEME)
-        setStore("mode", getSystemMode())
-      }
-    }
 
-    if (typeof window === "object") {
-      window.addEventListener("storage", onStorage)
-      onCleanup(() => window.removeEventListener("storage", onStorage))
+      if (e.key === STORAGE_KEYS.COLOR_SCHEME && e.newValue) {
+        setStore("colorScheme", e.newValue as ColorScheme)
+        setStore("mode", e.newValue === "system" ? getSystemMode() : (e.newValue as "light" | "dark"))
+      }
     }
 
     onMount(() => {
+      makeEventListener(window, "storage", onStorage)
+
       const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)")
+
       const onMedia = () => {
         if (store.colorScheme !== "system") return
         setStore("mode", getSystemMode())
       }
-      mediaQuery.addEventListener("change", onMedia)
-      onCleanup(() => mediaQuery.removeEventListener("change", onMedia))
 
-      pin()
-      setStore("themeId", THEME_ID)
-      setStore("colorScheme", COLOR_SCHEME)
-      setStore("mode", getSystemMode())
-      void load(THEME_ID).then((theme) => {
-        if (!theme || store.themeId !== THEME_ID) return
-        cacheThemeVariants(theme, THEME_ID)
+      makeEventListener(mediaQuery, "change", onMedia)
+
+      const rawTheme = props.pinned ?? read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme
+      const savedTheme = resolveStoredTheme(rawTheme, store.themes)
+      const savedScheme = props.pinned
+        ? "system"
+        : ((read(STORAGE_KEYS.COLOR_SCHEME) as ColorScheme | null) ?? "system")
+
+      if (rawTheme && rawTheme !== savedTheme) {
+        write(STORAGE_KEYS.THEME_ID, savedTheme)
+        clear()
+      }
+
+      if (savedTheme !== store.themeId) setStore("themeId", savedTheme)
+
+      if (savedScheme !== store.colorScheme) setStore("colorScheme", savedScheme)
+      setStore("mode", savedScheme === "system" ? getSystemMode() : savedScheme)
+      void load(savedTheme).then((theme) => {
+        if (!theme || store.themeId !== savedTheme) return
+        cacheThemeVariants(theme, savedTheme)
       })
     })
 
     createEffect(() => {
       const theme = store.themes[store.themeId]
+
       if (!theme) return
-      applyTheme(theme, store.themeId, store.mode)
+      applyTheme(theme, store.themeId, store.mode, store.colorScheme)
     })
 
-    const setTheme = (_id?: string) => {
-      pin()
-      if (store.themeId === THEME_ID) return
-      setStore("themeId", THEME_ID)
-      void load(THEME_ID).then((theme) => {
-        if (!theme || store.themeId !== THEME_ID) return
-        cacheThemeVariants(theme, THEME_ID)
+    const setTheme = (id: string) => {
+      const next = id
+
+      if (!next) {
+        console.warn(`Theme "${id}" not found`)
+
+        return
+      }
+
+      if (next !== "oc-2" && !knownThemes().has(next) && !store.themes[next]) {
+        console.warn(`Theme "${id}" not found`)
+
+        return
+      }
+
+      setStore("themeId", next)
+
+      if (next === "oc-2") {
+        write(STORAGE_KEYS.THEME_ID, next)
+        clear()
+
+        return
+      }
+
+      void load(next).then((theme) => {
+        if (!theme || store.themeId !== next) return
+        cacheThemeVariants(theme, next)
+        write(STORAGE_KEYS.THEME_ID, next)
       })
     }
 
-    const setColorScheme = (_scheme?: ColorScheme) => {
-      pin()
-      if (store.colorScheme === COLOR_SCHEME) {
-        setStore("mode", getSystemMode())
-        return
-      }
-      setStore("colorScheme", COLOR_SCHEME)
-      setStore("mode", getSystemMode())
+    const setColorScheme = (scheme: ColorScheme) => {
+      setStore("colorScheme", scheme)
+      write(STORAGE_KEYS.COLOR_SCHEME, scheme)
+      setStore("mode", scheme === "system" ? getSystemMode() : scheme)
     }
 
     return {
@@ -279,9 +385,47 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       setTheme,
       setColorScheme,
       registerTheme: (theme: DesktopTheme) => setStore("themes", theme.id, theme),
-      previewTheme: (_id?: string) => {},
-      previewColorScheme: (_scheme?: ColorScheme) => {},
+      previewTheme: (id: string) => {
+        const next = id
+
+        if (!next) return
+
+        if (next !== "oc-2" && !knownThemes().has(next) && !store.themes[next]) return
+        setStore("previewThemeId", next)
+        void load(next).then((theme) => {
+          if (!theme || store.previewThemeId !== next) return
+
+          const mode = store.previewScheme
+            ? store.previewScheme === "system"
+              ? getSystemMode()
+              : store.previewScheme
+            : store.mode
+
+          applyTheme(theme, next, mode, store.previewScheme ?? store.colorScheme)
+        })
+      },
+      previewColorScheme: (scheme: ColorScheme) => {
+        setStore("previewScheme", scheme)
+        const mode = scheme === "system" ? getSystemMode() : scheme
+        const id = store.previewThemeId ?? store.themeId
+        void load(id).then((theme) => {
+          if (!theme) return
+
+          if ((store.previewThemeId ?? store.themeId) !== id) return
+
+          if (store.previewScheme !== scheme) return
+          applyTheme(theme, id, mode, scheme)
+        })
+      },
       commitPreview: () => {
+        if (store.previewThemeId) {
+          setTheme(store.previewThemeId)
+        }
+
+        if (store.previewScheme) {
+          setColorScheme(store.previewScheme)
+        }
+
         setStore("previewThemeId", null)
         setStore("previewScheme", null)
       },
@@ -290,7 +434,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         setStore("previewScheme", null)
         void load(store.themeId).then((theme) => {
           if (!theme) return
-          applyTheme(theme, store.themeId, store.mode)
+          applyTheme(theme, store.themeId, store.mode, store.colorScheme)
         })
       },
     }
