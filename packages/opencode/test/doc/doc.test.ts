@@ -165,6 +165,39 @@ describe("doc", () => {
     })
   })
 
+  test("doc asset list returns this doc's ids and nothing else", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const other = Doc.prompt((await Session.create({})).id)
+        const data = new Uint8Array([1, 2, 3])
+
+        expect(Doc.assetList({ docID })).toEqual([])
+
+        Doc.assetCreate({ docID, assetID: AssetID.make("one"), mime: "image/png", data })
+        Doc.assetCreate({ docID, assetID: AssetID.make("two"), mime: "image/png", data })
+        Doc.assetCreate({ docID: other.docID, assetID: AssetID.make("elsewhere"), mime: "image/png", data })
+        // Re-uploading the same id is an upsert, so it must not show up twice.
+        Doc.assetCreate({ docID, assetID: AssetID.make("one"), mime: "image/png", data })
+
+        expect(Doc.assetList({ docID }).sort()).toEqual([AssetID.make("one"), AssetID.make("two")])
+
+        const app = Server.Default()
+        const dir = encodeURIComponent(tmp.path)
+        // The list path is the upload path with a different method, and it sits next to
+        // /asset/:assetID — so route it, don't let it fall through to the single-asset GET.
+        const res = await app.request(`/doc/${docID}/asset?directory=${dir}`)
+        expect(res.status).toBe(200)
+        expect(((await res.json()) as string[]).sort()).toEqual([AssetID.make("one"), AssetID.make("two")])
+      },
+    })
+  })
+
   test("doc asset route returns uploaded asset data", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
