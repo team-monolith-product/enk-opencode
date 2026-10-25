@@ -92,6 +92,9 @@ import type {
   HistoryChangesResponses,
   HistoryListErrors,
   HistoryListResponses,
+  ImageQuotaGetResponses,
+  ImageQuotaToggleErrors,
+  ImageQuotaToggleResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -1363,6 +1366,75 @@ export class EnvRequest extends HeyApiClient {
   }
 }
 
+export class ImageQuota extends HeyApiClient {
+  /**
+   * Image generation quota
+   *
+   * Whether image generation is available here, whether the team's toggle is on, and how many images the team has left.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ImageQuotaGetResponses, unknown, ThrowOnError>({
+      url: "/image-quota",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Set image generation toggle
+   *
+   * Turn the team's image generation toggle on or off. Every open screen of the workspace follows it.
+   */
+  public toggle<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      on?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "on" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<ImageQuotaToggleResponses, ImageQuotaToggleErrors, ThrowOnError>({
+      url: "/image-quota/toggle",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class DevServer extends HeyApiClient {
   /**
    * Preview dev server status
@@ -2274,6 +2346,7 @@ export class PromptDoc extends HeyApiClient {
         format?: OutputFormat
         system?: string
         locale?: PromptLocale
+        imageGeneration?: boolean
         variant?: string
         parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
       }
@@ -3414,6 +3487,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       variant?: string
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
@@ -3435,6 +3509,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "format" },
             { in: "body", key: "system" },
             { in: "body", key: "locale" },
+            { in: "body", key: "imageGeneration" },
             { in: "body", key: "variant" },
             { in: "body", key: "parts" },
           ],
@@ -3548,6 +3623,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       variant?: string
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
@@ -3569,6 +3645,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "format" },
             { in: "body", key: "system" },
             { in: "body", key: "locale" },
+            { in: "body", key: "imageGeneration" },
             { in: "body", key: "variant" },
             { in: "body", key: "parts" },
           ],
@@ -3604,6 +3681,7 @@ export class Session2 extends HeyApiClient {
       command?: string
       variant?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       parts?: Array<{
         id?: string
         type: "file"
@@ -3631,6 +3709,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
             { in: "body", key: "locale" },
+            { in: "body", key: "imageGeneration" },
             { in: "body", key: "parts" },
           ],
         },
@@ -5864,6 +5943,11 @@ export class OpencodeClient extends HeyApiClient {
   private _envRequest?: EnvRequest
   get envRequest(): EnvRequest {
     return (this._envRequest ??= new EnvRequest({ client: this.client }))
+  }
+
+  private _imageQuota?: ImageQuota
+  get imageQuota(): ImageQuota {
+    return (this._imageQuota ??= new ImageQuota({ client: this.client }))
   }
 
   private _devServer?: DevServer

@@ -1,3 +1,4 @@
+import { diffContents } from "../util/diff-contents"
 import {
   Component,
   createEffect,
@@ -49,6 +50,7 @@ import { Checkbox } from "./checkbox"
 import { DiffChanges } from "./diff-changes"
 import { Markdown } from "./markdown"
 import { ImagePreview } from "./image-preview"
+import { GeneratedImage } from "./generated-image"
 import { getDirectory as _getDirectory, getFilename } from "@opencode-ai/util/path"
 import { checksum } from "@opencode-ai/util/encode"
 import { Tooltip } from "./tooltip"
@@ -1794,6 +1796,11 @@ ToolRegistry.register({
 })
 
 ToolRegistry.register({
+  name: "generate_image",
+  render: GeneratedImage,
+})
+
+ToolRegistry.register({
   name: "websearch",
   render(props) {
     const i18n = useI18n()
@@ -1984,6 +1991,7 @@ ToolRegistry.register({
     const fileComponent = useFileComponent()
     const diagnostics = createMemo(() => getDiagnostics(props.metadata.diagnostics, props.input.filePath))
     const path = createMemo(() => props.metadata?.filediff?.file || props.input.filePath || "")
+    const contents = createMemo(() => diffContents(props.metadata?.filediff))
     const filename = () => getFilename(props.input.filePath ?? "")
     const pending = () => props.status === "pending" || props.status === "running"
     const pendingDiff = createMemo(() => {
@@ -2051,11 +2059,11 @@ ToolRegistry.register({
                   mode="diff"
                   before={{
                     name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: props.metadata?.filediff?.before || props.input.oldString,
+                    contents: contents().before || props.input.oldString,
                   }}
                   after={{
                     name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: props.metadata?.filediff?.after || props.input.newString,
+                    contents: contents().after || props.input.newString,
                   }}
                 />
               </div>
@@ -2155,8 +2163,9 @@ interface ApplyPatchFile {
   relativePath: string
   type: "add" | "update" | "delete" | "move"
   diff: string
-  before: string
-  after: string
+  patch?: string
+  before?: string
+  after?: string
   additions: number
   deletions: number
   movePath?: string
@@ -2174,6 +2183,7 @@ ToolRegistry.register({
       if (list.length !== 1) return
       return list[0]
     })
+    const singleContents = createMemo(() => diffContents(single()))
     const [expanded, setExpanded] = createSignal<string[]>([])
     let seeded = false
 
@@ -2216,6 +2226,7 @@ ToolRegistry.register({
                   <For each={files()}>
                     {(file) => {
                       const active = createMemo(() => expanded().includes(file.filePath))
+                      const contents = createMemo(() => diffContents(file))
                       const [visible, setVisible] = createSignal(false)
 
                       createEffect(() => {
@@ -2276,8 +2287,11 @@ ToolRegistry.register({
                                 <Dynamic
                                   component={fileComponent}
                                   mode="diff"
-                                  before={{ name: file.filePath, contents: file.before }}
-                                  after={{ name: file.movePath ?? file.filePath, contents: file.after }}
+                                  before={{ name: file.filePath, contents: contents().before }}
+                                  after={{
+                                    name: file.movePath ?? file.filePath,
+                                    contents: contents().after,
+                                  }}
                                 />
                               </div>
                             </Show>
@@ -2351,8 +2365,11 @@ ToolRegistry.register({
                 <Dynamic
                   component={fileComponent}
                   mode="diff"
-                  before={{ name: single()!.filePath, contents: single()!.before }}
-                  after={{ name: single()!.movePath ?? single()!.filePath, contents: single()!.after }}
+                  before={{ name: single()!.filePath, contents: singleContents().before }}
+                  after={{
+                    name: single()!.movePath ?? single()!.filePath,
+                    contents: singleContents().after,
+                  }}
                 />
               </div>
             </ToolFileAccordion>

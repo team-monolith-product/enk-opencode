@@ -35,9 +35,13 @@ export interface MockServerConfig {
   pageMessages?: (sessionID: string, limit: number, before?: string) => { items: Json[]; cursor?: string }
   permissions?: () => Json[]
   questions?: () => Json[]
+  imageQuota?: () => Json
+  imageQuotaDelay?: number
+  /** PUT /image-quota/toggle — the team's shared image toggle. Returns the new quota status. */
+  imageToggle?: (on: boolean) => Json
 }
 
-const emptyList = new Set(["/skill", "/command", "/lsp", "/formatter", "/vcs/status", "/vcs/diff", "/mcp/list"])
+const emptyList = new Set(["/env-request", "/skill", "/command", "/lsp", "/formatter", "/vcs/status", "/vcs/diff", "/mcp/list"])
 const emptyObject = new Set(["/global/config", "/config", "/provider/auth", "/mcp"])
 
 const defaultProvider = { all: [], connected: [], default: {} }
@@ -90,6 +94,14 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     if (path === "/global/health") return json(route, { healthy: true })
     if (path === "/permission") return json(route, config.permissions?.() ?? [])
     if (path === "/question") return json(route, config.questions?.() ?? [])
+    if (path === "/image-quota/toggle") {
+      const body = route.request().postDataJSON() as { on: boolean }
+      return json(route, config.imageToggle?.(body.on) ?? {})
+    }
+    if (path === "/image-quota") {
+      if (config.imageQuotaDelay) await new Promise((r) => setTimeout(r, config.imageQuotaDelay))
+      return json(route, config.imageQuota?.() ?? { enabled: false })
+    }
     if (emptyObject.has(path)) return json(route, {})
     if (emptyList.has(path)) return json(route, [])
 

@@ -188,6 +188,38 @@ describe("session.prompt missing file", () => {
   })
 })
 
+describe("session.prompt image generation toggle", () => {
+  test("records the image toggle on the user message without touching tools", async () => {
+    await using tmp = await tmpdir({ git: true, config: { agent: { build: { model: "openai/gpt-5.2" } } } })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const send = (imageGeneration?: boolean) =>
+          SessionPrompt.prompt({
+            sessionID: session.id,
+            agent: "build",
+            noReply: true,
+            imageGeneration,
+            parts: [{ type: "text", text: "고양이 그려줘" }],
+          })
+
+        const off = await send(false)
+        const on = await send(true)
+        const unset = await send()
+        if (off.info.role !== "user" || on.info.role !== "user" || unset.info.role !== "user")
+          throw new Error("expected user messages")
+        expect(off.info.imageGeneration).toBe(false)
+        expect(on.info.imageGeneration).toBe(true)
+        expect(unset.info.imageGeneration).toBeUndefined()
+        expect([off.info.tools, on.info.tools, unset.info.tools]).toEqual([undefined, undefined, undefined])
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+})
+
 describe("session.prompt uploaded text attachments", () => {
   function dataUrl(content: string) {
     return `data:text/plain;base64,${Buffer.from(content, "utf8").toString("base64")}`
@@ -692,6 +724,32 @@ describe("session.agent-resolution", () => {
       },
     })
   }, 30000)
+
+  test("slash commands carry the image toggle into the user message", async () => {
+    await using tmp = await tmpdir({ git: true, config: { agent: { build: { model: "openai/gpt-5.2" } } } })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const send = (imageGeneration?: boolean) =>
+          SessionPrompt.command({ sessionID: session.id, command: "init", arguments: "", imageGeneration }).catch(
+            () => undefined,
+          )
+        const toggle = async () => {
+          const messages = await Session.messages({ sessionID: session.id })
+          const last = messages.findLast((m) => m.info.role === "user")
+          return last?.info.role === "user" ? last.info.imageGeneration : undefined
+        }
+
+        await send(true)
+        expect(await toggle()).toBe(true)
+        await send()
+        expect(await toggle()).toBeUndefined()
+
+        await Session.remove(session.id)
+      },
+    })
+  }, 60000)
 
   test("unknown command throws typed error with available names", async () => {
     await using tmp = await tmpdir({ git: true })

@@ -395,8 +395,9 @@ export type EventCommandExecuted = {
 
 export type FileDiff = {
   file: string
-  before: string
-  after: string
+  patch?: string
+  before?: string
+  after?: string
   additions: number
   deletions: number
   status?: "added" | "deleted" | "modified"
@@ -576,6 +577,13 @@ export type EventPtyDeleted = {
   }
 }
 
+export type EventImageGenerationUpdated = {
+  type: "image.generation.updated"
+  properties: {
+    on: boolean
+  }
+}
+
 export type EventWorktreeReady = {
   type: "worktree.ready"
   properties: {
@@ -632,6 +640,7 @@ export type UserMessage = {
   tools?: {
     [key: string]: boolean
   }
+  imageGeneration?: boolean
   variant?: string
 }
 
@@ -1086,6 +1095,7 @@ export type Event =
   | EventPtyUpdated
   | EventPtyExited
   | EventPtyDeleted
+  | EventImageGenerationUpdated
   | EventWorktreeReady
   | EventWorktreeFailed
   | EventMessageUpdated
@@ -1876,6 +1886,18 @@ export type EnvFileKeys = {
 export type EnvFileValue = {
   name: string
   value: string
+}
+
+export type ImageQuota = {
+  limit: number
+  used: number
+  remaining: number
+}
+
+export type ImageQuotaStatus = {
+  enabled: boolean
+  on: boolean
+  quota?: ImageQuota
 }
 
 export type DevServerStatus = {
@@ -3227,6 +3249,55 @@ export type EnvRequestRejectResponses = {
 
 export type EnvRequestRejectResponse = EnvRequestRejectResponses[keyof EnvRequestRejectResponses]
 
+export type ImageQuotaGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/image-quota"
+}
+
+export type ImageQuotaGetResponses = {
+  /**
+   * Quota
+   */
+  200: ImageQuotaStatus
+}
+
+export type ImageQuotaGetResponse = ImageQuotaGetResponses[keyof ImageQuotaGetResponses]
+
+export type ImageQuotaToggleData = {
+  body?: {
+    on: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/image-quota/toggle"
+}
+
+export type ImageQuotaToggleErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ImageQuotaToggleError = ImageQuotaToggleErrors[keyof ImageQuotaToggleErrors]
+
+export type ImageQuotaToggleResponses = {
+  /**
+   * Quota
+   */
+  200: ImageQuotaStatus
+}
+
+export type ImageQuotaToggleResponse = ImageQuotaToggleResponses[keyof ImageQuotaToggleResponses]
+
 export type DevServerStatusData = {
   body?: never
   path?: never
@@ -4314,6 +4385,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     locale?: PromptLocale
+    imageGeneration?: boolean
     variant?: string
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
@@ -4515,6 +4587,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     locale?: PromptLocale
+    imageGeneration?: boolean
     variant?: string
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
@@ -4559,6 +4632,7 @@ export type SessionCommandData = {
     command: string
     variant?: string
     locale?: PromptLocale
+    imageGeneration?: boolean
     parts?: Array<{
       id?: string
       type: "file"
@@ -4874,6 +4948,7 @@ export type SessionPromptDocSubmitData = {
       format?: OutputFormat
       system?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       variant?: string
       parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     }
