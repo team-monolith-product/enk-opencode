@@ -117,7 +117,7 @@ export const dict = {
   "command.github.description": "이 프로젝트를 GitHub 저장소에 올리기",
   "github.title": "GitHub에 올리기",
   "github.description.unlinked": "GitHub 계정을 연결하면 이 프로젝트를 저장소에 올릴 수 있어요.",
-  "github.description.choose": "프로젝트를 올릴 저장소 이름을 정해 주세요.",
+  "github.description.choose": "프로젝트를 올릴 저장소 이름을 정해 주세요. 저장소를 만들면 바로 한 번 올라가요.",
   "github.description.linked": "AI와 대화가 한 번 끝날 때마다 바뀐 내용이 이 저장소에 자동으로 올라가요.",
   "github.intro.team": "팀에서는 한 명만 짓다에서 GitHub를 연결해요. 연결한 사람의 계정에 저장소가 만들어지고, 올리기는 팀원 누구나 할 수 있어요.",
   "github.intro.secret": "외부 연동에 저장한 값(.env)과 node_modules 같은 폴더는 올라가지 않아요.",

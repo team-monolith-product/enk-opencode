@@ -324,6 +324,51 @@ describe("GitHub.status", () => {
   })
 })
 
+describe("GitHub.create", () => {
+  const link = {
+    enabled: true,
+    connected: true,
+    login: "octocat",
+    token: "gho_1",
+    repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+  }
+  const remote = {
+    name: "jitda-app",
+    owner: { login: "octocat" },
+    html_url: "https://github.com/octocat/jitda-app",
+    private: false,
+  }
+
+  test("tries the first push right after the repository is made and survives its failure", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve(link)
+    const original = globalThis.fetch
+    const calls: string[] = []
+    const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (url.host !== "api.github.com") return original(input, init)
+      calls.push(`${init?.method} ${url.pathname}`)
+      return Promise.resolve(
+        init?.method === "POST"
+          ? Response.json(remote, { status: 201 })
+          : Response.json({ message: "Server Error" }, { status: 500 }),
+      )
+    }) as typeof fetch)
+
+    try {
+      const status = await GitHub.create(tmp.path, { name: "jitda-app" })
+
+      expect(status.repo?.name).toBe("jitda-app")
+      expect(calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
+      expect(rails.reports).toEqual([
+        { repo_owner: "octocat", repo_name: "jitda-app", repo_url: "https://github.com/octocat/jitda-app" },
+      ])
+    } finally {
+      github.mockRestore()
+    }
+  })
+})
+
 describe("GitHub.push", () => {
   test("pushing without a link is refused", async () => {
     await using tmp = await tmpdir()

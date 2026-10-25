@@ -193,6 +193,9 @@ export namespace GitHub {
       await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
     )
     await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
+    await push(dir, { message: "Initial commit from Jitda" }).catch((err) => {
+      log.warn("first push skipped", { error: err instanceof Error ? err.message : String(err) })
+    })
     return status(dir)
   }
 
