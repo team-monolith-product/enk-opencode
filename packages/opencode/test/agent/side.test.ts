@@ -115,3 +115,33 @@ test("path-scoped config rules for blocked tools do not re-expose them", async (
     },
   })
 })
+
+// 설정의 허용 예외(전체 deny 안의 src/* allow)도 메인과 같게 지켜야 한다.
+test("side agent keeps configured allow exceptions for its own tools", async () => {
+  await using tmp = await tmpdir({ config: { permission: { read: { "*": "deny", "src/*": "allow" } } } as never })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const side = await Agent.get(Agent.SIDE)
+      const build = await Agent.get("build")
+      for (const file of ["src/app.ts", "secret/key.txt"])
+        expect(Permission.evaluate("read", file, side.permission).action).toBe(
+          Permission.evaluate("read", file, build.permission).action,
+        )
+      expect(Permission.evaluate("read", "src/app.ts", side.permission).action).toBe("allow")
+    },
+  })
+})
+
+test("a wildcard allow in config does not reopen write tools", async () => {
+  await using tmp = await tmpdir({ config: { permission: "allow" } as never })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const side = await Agent.get(Agent.SIDE)
+      expect(Permission.disabled(["bash", "edit", "task", "read"], side.permission)).toEqual(
+        new Set(["bash", "edit", "task"]),
+      )
+    },
+  })
+})

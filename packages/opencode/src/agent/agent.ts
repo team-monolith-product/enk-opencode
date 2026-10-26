@@ -83,17 +83,18 @@ export namespace Agent {
   }
 
   /**
-   * 설정의 제한 중 사이드가 쓰는 도구에 걸리는 것만 남긴 규칙. 사이드 규칙 뒤에 붙여, 배포가 막은 읽기
-   * 경로·네트워크 도구는 사이드에서도 막히게 한다.
-   * - allow 는 버린다 — 사이드의 쓰기 금지를 풀면 안 된다.
+   * 설정 규칙 중 사이드가 쓰는 도구에 걸리는 것을 순서대로 다시 붙인다. 사이드 규칙 뒤에 오므로 배포의
+   * 읽기·네트워크 정책(막은 경로와 그 안의 허용 예외 모두)이 사이드에서도 메인과 같게 적용된다.
    * - ask 는 deny 로 — 사이드는 권한 요청 독을 띄우지 않으므로 묻는 대신 막는다.
+   * - allow 는 도구 이름이 정확히 사이드 도구일 때만 남긴다. "*" 같은 와일드카드 allow 는 사이드가 막은
+   *   쓰기 도구까지 다시 열기 때문이다(그 deny·ask 는 사이드 도구에도 걸리므로 남긴다).
    * - 사이드가 이미 통째로 막은 도구의 규칙은 버린다. 경로별 규칙(edit "migration/*" 등)이 마지막에 오면
    *   그 도구가 "통째로 막힘"으로 보이지 않아 도구 목록에 다시 나타난다(Permission.disabled).
    */
-  export function restrictive(ruleset: Permission.Ruleset): Permission.Ruleset {
+  export function configured(ruleset: Permission.Ruleset): Permission.Ruleset {
     return ruleset.flatMap((rule) => {
-      if (rule.action === "allow") return []
       if (!SIDE_TOOLS.some((tool) => Wildcard.match(tool, rule.permission))) return []
+      if (rule.action === "allow") return SIDE_TOOLS.includes(rule.permission) ? [rule] : []
       return [{ ...rule, action: "deny" as const }]
     })
   }
@@ -242,7 +243,7 @@ export namespace Agent {
               prompt: PROMPT_SIDE,
               // 사이드 규칙은 사용자 설정의 allow 보다 뒤에 둔다 — 전역 "bash": "allow" 같은 설정이 읽기 전용을
               // 풀면 안 된다. 사용자 설정의 deny·ask 는 그 뒤에 다시 붙여, 배포가 막은 것은 사이드에서도 막힌다.
-              permission: Permission.merge(defaults, user, sidePermission(), restrictive(user)),
+              permission: Permission.merge(defaults, user, sidePermission(), configured(user)),
               options: {},
             },
             compaction: {

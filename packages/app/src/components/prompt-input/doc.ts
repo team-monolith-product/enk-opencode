@@ -418,6 +418,10 @@ export function createPromptDoc(input: PromptDocInput) {
   const assets = () => handle?.assets() ?? { count: 0, bytes: 0, keys: [] as string[] }
 
   const addFiles = async (files: File[]) => {
+    // Bind the whole call to the doc that is current now. Hashing below awaits, and a session switch or
+    // a doc pivot can replace `handle` meanwhile — the budget was counted against this doc, so the files
+    // must land in it or not at all (callers report "not added" instead of filling an unrelated draft).
+    const target = handle
     // Pre-filter on file.size (synchronous, no read) so an oversized file never
     // reaches blobSync. tooLarge lets callers show the size-specific toast.
     const tooLarge = files.some((file) => file.size > MAX_ATTACHMENT_BYTES)
@@ -425,7 +429,7 @@ export function createPromptDoc(input: PromptDocInput) {
     // The per-prompt budget counts what the doc already holds, and the running total is computed up
     // front rather than re-read per file: the adds below run concurrently, so re-reading would let a
     // batch race past the limit. Files that don't fit are dropped and reported via `overflow`.
-    const current = assets()
+    const current = target?.assets() ?? { count: 0, bytes: 0, keys: [] as string[] }
     // Attachments living on the composer side of the same prompt. They are not doc blocks, so they
     // can never match an incoming file's asset key — they only ever spend budget.
     const base = input.baseUsage?.() ?? { count: 0, bytes: 0 }
@@ -452,7 +456,8 @@ export function createPromptDoc(input: PromptDocInput) {
     }
     // addFile resolves once the block exists; the bytes keep uploading in the background under
     // `uploads`. Callers get their toast decision immediately instead of after the transfer.
-    const result = await Promise.all(accepted.map((file) => handle?.addFile(file) ?? false))
+    if (!target || handle !== target) return { added: false, tooLarge, overflow }
+    const result = await Promise.all(accepted.map((file) => target.addFile(file)))
     return { added: result.some(Boolean), tooLarge, overflow }
   }
 
