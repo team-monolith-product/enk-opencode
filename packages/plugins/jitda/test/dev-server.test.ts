@@ -365,7 +365,7 @@ describe("DevServerReplay", () => {
         }
       })
 
-      const child = await DevServerReplay.launch(`printenv > ${out}`, dir)
+      const child = await DevServerReplay.launch(`printenv > ${out}.tmp && mv ${out}.tmp ${out}`, dir)
       cleanups.push(async () => {
         try {
           process.kill(-child.pid!, "SIGKILL")
