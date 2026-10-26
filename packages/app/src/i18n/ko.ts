@@ -593,6 +593,7 @@ export const dict = {
   "sideChat.empty.title": "옆에서 물어보기",
   "sideChat.empty.description":
     "지금까지의 대화를 복사해서, 메인 AI가 일하는 동안 읽기 전용으로 답해요. 넘겨 달라고 하면 메인 입력창에 들어가요.",
+  "sideChat.history.loadMore": "이전 대화 더 보기",
   "sideChat.ready": "대화나 코드에 대해 무엇이든 물어보세요.",
   "sideChat.placeholder": "사이드로 물어보기",
   "sideChat.send": "보내기",

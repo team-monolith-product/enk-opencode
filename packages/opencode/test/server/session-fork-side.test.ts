@@ -8,6 +8,7 @@ import { Session } from "../../src/session"
 import type { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { Log } from "../../src/util/log"
+import { isSideSession } from "../../src/tool/handoff"
 import { tmpdir } from "../fixture/fixture"
 
 Log.init({ print: false })
@@ -82,6 +83,36 @@ describe("POST /session/:id/fork side", () => {
         const copied = await Session.messages({ sessionID: side.id })
         expect(copied.map((m) => m.info.role)).toEqual(["user", "assistant", "user"])
         expect(copied.every((m) => m.info.role !== "assistant" || m.info.time.completed !== undefined)).toBe(true)
+      },
+    })
+  })
+
+  // 메인이 슬래시 명령 서브태스크를 돌리는 중에 열면, 복사된 subtask 파트를 사이드의 첫 턴이 집어 쓰기 권한 있는
+  // 하위 에이전트로 다시 실행한다. 맥락으로만 복사해야 한다.
+  test("side fork drops executable task parts copied from the main turn", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const main = await Session.create({})
+        const msg = await user(main.id, "/review")
+        await Session.updatePart({
+          id: PartID.ascending(),
+          sessionID: main.id,
+          messageID: msg.id,
+          type: "subtask",
+          prompt: "review the code",
+          description: "review",
+          agent: "general",
+        })
+        await assistant(main.id, msg.id, false)
+
+        const side = await fork(main.id, { side: true })
+
+        const copied = await Session.messages({ sessionID: side.id })
+        expect(copied.flatMap((m) => m.parts.map((part) => part.type))).toEqual(["text"])
+        expect(isSideSession(side)).toBe(true)
+        expect(isSideSession(main)).toBe(false)
       },
     })
   })

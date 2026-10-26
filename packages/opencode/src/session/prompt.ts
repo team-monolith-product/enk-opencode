@@ -7,6 +7,7 @@ import { Log } from "../util/log"
 import { SessionRevert } from "./revert"
 import { Session } from "."
 import { Agent } from "../agent/agent"
+import { isSideSession } from "../tool/handoff"
 import { Provider } from "../provider/provider"
 import { ModelID, ProviderID } from "../provider/schema"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
@@ -1696,6 +1697,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const task = tasks.pop()
 
             if (task?.type === "subtask") {
+              // 사이드 채팅은 읽기 전용이다 — 서브태스크는 세션 권한을 물려받지 않는 하위 에이전트로 돈다.
+              if (isSideSession(session)) continue
               yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
               continue
             }
@@ -1788,7 +1791,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 }
 
                 // 사이드 채팅은 요약 diff 를 만들지 않는다 — 워크트리 diff 에 메인 에이전트의 수정이 섞인다.
-                if (step === 1 && agent.name !== Agent.SIDE)
+                if (step === 1 && !isSideSession(session))
                   SessionSummary.summarize({ sessionID, messageID: lastUser.id })
 
                 yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })

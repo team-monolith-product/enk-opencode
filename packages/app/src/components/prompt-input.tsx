@@ -604,8 +604,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       })
     })
     // 관전자(readonly)는 doc 을 고칠 수 없으니 등록하지 않는다 — 넘기기는 "준비 안 됨"으로 대기한다.
-    bridge.setAddText(docMode() === "doc" && !readonly ? (text) => doc.addText(text) : undefined)
-    bridge.setAddFiles(docMode() === "doc" && !readonly ? (files) => doc.addFiles(files) : undefined)
+    // 에디터가 붙기 전(doc.ready 전)에 등록하면 넘기기가 받는 쪽 없이 처리돼 버린다. ready 를 읽어 두면
+    // 붙는 순간 이 효과가 다시 돌아 등록되고, bridge.revision 이 올라 대기 중이던 넘기기가 다시 시도된다.
+    const target = docMode() === "doc" && !readonly && doc.ready()
+    bridge.setAddText(target ? (text) => doc.addText(text) : undefined)
+    bridge.setAddFiles(target ? (files) => doc.addFiles(files) : undefined)
     bridge.setOpenLineReference((input) => {
       openSessionFile({ path: input.path, selection: lineRefToSelection(input) })
       return true

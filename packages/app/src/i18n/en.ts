@@ -667,6 +667,7 @@ export const dict = {
   "sideChat.empty.title": "Ask on the side",
   "sideChat.empty.description":
     "Copies the conversation so far and answers with read-only tools while the main AI keeps working. Ask it to hand something over and it lands in the main input.",
+  "sideChat.history.loadMore": "Show earlier messages",
   "sideChat.ready": "Ask anything about the conversation or the code.",
   "sideChat.placeholder": "Ask a side question",
   "sideChat.send": "Send",

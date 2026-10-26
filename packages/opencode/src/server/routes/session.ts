@@ -377,7 +377,7 @@ export const SessionRoutes = lazy(() =>
           title: `${original.title} (side)`,
           parentID: sessionID,
           permission: Agent.sidePermission(),
-          completed: true,
+          inert: true,
         })
         return c.json(result)
       },

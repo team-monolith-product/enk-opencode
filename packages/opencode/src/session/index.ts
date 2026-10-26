@@ -525,7 +525,7 @@ export namespace Session {
           if (input.messageID && msg.info.id >= input.messageID) break
           // 원본이 응답을 쓰는 중이면 그 미완료 메시지까지 복사된다. 포크 쪽에선 영원히 끝나지 않아
           // 계속 "실행 중"으로 보이므로, 원하는 호출자(사이드 채팅)는 끝난 턴만 가져간다.
-          if (input.completed && msg.info.role === "assistant" && msg.info.time.completed === undefined) continue
+          if (input.inert && msg.info.role === "assistant" && msg.info.time.completed === undefined) continue
           const newID = MessageID.ascending()
           idMap.set(msg.info.id, newID)
 
@@ -538,6 +538,9 @@ export namespace Session {
           })
 
           for (const part of msg.parts) {
+            // 실행형 파트(서브태스크·압축)는 다음 턴의 루프가 집어 실행한다. 맥락으로만 복사하는 포크에서
+            // 남기면 원본에서 돌던 작업이 여기서 다시 돈다 — 서브태스크는 쓰기 권한 있는 하위 에이전트로.
+            if (input.inert && (part.type === "subtask" || part.type === "compaction")) continue
             yield* updatePart({
               ...part,
               id: PartID.ascending(),
@@ -712,8 +715,11 @@ export namespace Session {
     title: z.string().optional(),
     parentID: SessionID.zod.optional(),
     permission: Info.shape.permission,
-    /** 끝나지 않은 assistant 메시지는 복사하지 않는다. */
-    completed: z.boolean().optional(),
+    /**
+     * 기록을 맥락으로만 복사한다: 끝나지 않은 assistant 메시지와 실행형 파트(subtask·compaction)를
+     * 빼서, 포크에서 원본의 진행 중이던 작업이 다시 실행되지 않게 한다.
+     */
+    inert: z.boolean().optional(),
   })
   export type ForkInput = z.infer<typeof ForkInput>
 

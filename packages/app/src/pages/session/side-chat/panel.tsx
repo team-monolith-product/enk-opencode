@@ -82,10 +82,13 @@ export function SideChatPanel() {
 
   // 포크로 복사된 메인 기록은 메인 화면에 이미 있다 — 사이드에서 오간 턴만 보여 준다.
   // 복사된 메시지는 원래 생성 시각을 그대로 갖는다(Session.fork 가 info 를 펼쳐 복사).
-  const turns = createMemo(() => {
-    const since = side.session()?.time.created ?? Number.POSITIVE_INFINITY
-    return (side.messages() ?? []).filter((message) => message.role === "user" && message.time.created >= since)
-  })
+  const since = createMemo(() => side.session()?.time.created ?? Number.POSITIVE_INFINITY)
+  const turns = createMemo(() =>
+    (side.messages() ?? []).filter((message) => message.role === "user" && message.time.created >= since()),
+  )
+  // 처음엔 최근 80개만 받는다. 받은 것 중 가장 오래된 메시지도 사이드에서 오간 것이면 그 앞에 사이드 턴이
+  // 더 있을 수 있다 — 복사된 메인 기록까지 내려왔다면 더 볼 사이드 턴이 없다.
+  const olderTurns = createMemo(() => side.history.more() && (side.messages()?.[0]?.time.created ?? 0) >= since())
   const lastTurn = createMemo(() => turns().at(-1)?.id)
 
   const autoScroll = createAutoScroll({ working: side.busy, overflowAnchor: "dynamic" })
@@ -152,14 +155,12 @@ export function SideChatPanel() {
 
   const submit = async () => {
     if (sending() || side.busy()) return
-    const value = text()
-    const list = images()
-    if (!value.trim() && list.length === 0) return
+    if (!text().trim() && images().length === 0) return
+    const { draft, restore } = side.takeDraft()
     setSending(true)
-    const ok = await side.send(value, list)
+    const ok = await side.send(draft.text, draft.attachments)
     setSending(false)
-    if (!ok) return
-    side.clearDraft()
+    if (!ok) return restore()
     autoScroll.forceScrollToBottom()
     input?.focus()
   }
@@ -168,6 +169,18 @@ export function SideChatPanel() {
     <div data-component="side-chat" class="flex flex-col h-full min-h-0">
       <div ref={autoScroll.scrollRef} onScroll={autoScroll.handleScroll} class="flex-1 min-h-0 overflow-y-auto">
         <div ref={autoScroll.contentRef} class="flex flex-col gap-4 py-4">
+          <Show when={olderTurns()}>
+            <div class="flex justify-center">
+              <Button
+                size="small"
+                variant="ghost"
+                disabled={side.history.loading()}
+                onClick={() => side.history.loadMore()}
+              >
+                {language.t("sideChat.history.loadMore")}
+              </Button>
+            </div>
+          </Show>
           <Switch>
             <Match when={!side.sessionID()}>
               <div class="flex flex-col items-center gap-3 px-6 pt-16 text-center">

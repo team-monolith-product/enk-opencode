@@ -9,6 +9,16 @@ import DESCRIPTION from "./handoff.txt"
 /** handoff 를 쓸 수 있는 유일한 에이전트(agent.ts Agent.SIDE 와 같은 값). */
 export const SIDE_AGENT = "side"
 
+/**
+ * 사이드 채팅 세션인지 — fork({ side: true }) 가 만든 자식 세션은 세션 permission 에 handoff 허용 규칙을
+ * 갖는다. 메시지의 에이전트 이름이 아니라 세션으로 판별해야 압축(compaction) 같은 다른 에이전트가
+ * 사이드 세션에서 돌 때도 같은 규칙이 적용된다.
+ */
+export function isSideSession(session: { parentID?: string; permission?: { permission: string; action: string }[] }) {
+  if (!session.parentID) return false
+  return !!session.permission?.some((rule) => rule.permission === "handoff" && rule.action === "allow")
+}
+
 export const HandoffFile = z.object({
   path: z.string().describe("Workspace file path, relative to the project root or absolute"),
   start: z.number().int().positive().optional().describe("First line of the relevant range (1-based)"),

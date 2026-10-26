@@ -229,7 +229,9 @@ function createSideChat() {
   const workspace = async (path: string): Promise<Blob | undefined> => {
     const res = await sdk.client.file.read({ path }).catch(() => undefined)
     const data = res?.data
-    if (!data || data.type !== "binary" || data.encoding !== "base64") return
+    // 이미지는 type "text" + encoding "base64" 로 온다(file/index.ts). type 이 아니라 인코딩과 내용으로 본다 —
+    // 이미지가 아닌 바이너리는 내용이 비어 온다.
+    if (!data || data.encoding !== "base64" || !data.content) return
     const bin = atob(data.content)
     return new Blob([Uint8Array.from(bin, (c) => c.charCodeAt(0))], {
       type: data.mimeType ?? "application/octet-stream",
@@ -300,10 +302,23 @@ function createSideChat() {
     const k = key()
     return (k && drafts[k]) || EMPTY_DRAFT
   }
-  const updateDraft = (next: (current: SideDraft) => SideDraft) => {
-    const k = untrack(key)
+  const updateDraft = (next: (current: SideDraft) => SideDraft, k = untrack(key)) => {
     if (!k) return
     setDrafts(k, next(drafts[k] ?? EMPTY_DRAFT))
+  }
+
+  /**
+   * 보낼 초안을 꺼내며 비운다. 요청이 늦게 끝나는 동안 새로 쓴 글이나 다른 세션의 초안을 지우지 않도록
+   * 비우기는 보내기 전에 하고, 실패하면 그 세션 초안이 아직 비어 있을 때만 되돌린다.
+   */
+  const takeDraft = () => {
+    const k = untrack(key)
+    const taken = k ? (drafts[k] ?? EMPTY_DRAFT) : EMPTY_DRAFT
+    updateDraft(() => EMPTY_DRAFT, k)
+    return {
+      draft: taken,
+      restore: () => updateDraft((current) => (current.text || current.attachments.length ? current : taken), k),
+    }
   }
 
   return {
@@ -311,7 +326,22 @@ function createSideChat() {
     setDraftText: (text: string) => updateDraft((current) => ({ ...current, text })),
     setDraftAttachments: (next: (list: SideAttachment[]) => SideAttachment[]) =>
       updateDraft((current) => ({ ...current, attachments: next(current.attachments) })),
-    clearDraft: () => updateDraft(() => EMPTY_DRAFT),
+    takeDraft,
+    /** 사이드 대화의 더 이전 기록(처음 동기화는 최근 80개만 받는다). */
+    history: {
+      more: () => {
+        const id = sessionID()
+        return !!id && sync.session.history.more(id)
+      },
+      loading: () => {
+        const id = sessionID()
+        return !!id && sync.session.history.loading(id)
+      },
+      loadMore: () => {
+        const id = sessionID()
+        if (id) void sync.session.history.loadMore(id)
+      },
+    },
     enabled: () => !readonly && !!params.id,
     sessionID,
     session,

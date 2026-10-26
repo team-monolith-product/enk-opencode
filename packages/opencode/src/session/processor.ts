@@ -1,6 +1,7 @@
 import { Cause, Effect, Layer, ServiceMap } from "effect"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
+import { isSideSession } from "@/tool/handoff"
 import { Bus } from "@/bus"
 import { Config } from "@/config/config"
 import { Permission } from "@/permission"
@@ -115,7 +116,9 @@ export namespace SessionProcessor {
         // 스냅샷은 워크트리 전체를 찍는다. 사이드 채팅은 메인 에이전트가 같은 워크트리를 고치는 중에도
         // 돌기 때문에, 찍으면 메인의 수정이 사이드의 패치로 기록되고 사이드에서 되돌리면 메인 작업이
         // 지워진다. 사이드는 읽기 전용이라 남길 변경도 없다.
-        const tracked = () => ctx.assistantMessage.agent !== Agent.SIDE
+        // 에이전트 이름이 아니라 세션으로 본다 — 사이드 세션의 압축은 "compaction" 에이전트로 이 프로세서를 탄다.
+        const side = isSideSession(yield* session.get(input.sessionID))
+        const tracked = () => !side
 
         const parse = (e: unknown) =>
           MessageV2.fromError(e, {
