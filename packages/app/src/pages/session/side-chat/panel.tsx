@@ -96,14 +96,16 @@ export function SideChatPanel() {
   // 메인 컴포저와 같은 규칙: 한 장 10MB, 한 번에 10개·합계 25MB, 이미지·PDF·텍스트만.
   // 붙여넣기·드롭이 연달아 와도 한 번에 하나씩 — 각자 같은 "현재 개수"를 보고 한도를 같이 넘지 않게.
   let adding = Promise.resolve()
+  // 파일을 고른 시점의 초안에 붙인다 — 읽는 사이 다른 메인 세션으로 옮겨도 그 세션 초안에 섞이지 않게.
   const addFiles = (files: File[]) => {
-    adding = adding.then(() => addNow(files)).catch(() => undefined)
+    const target = side.draftKey()
+    adding = adding.then(() => addNow(files, target)).catch(() => undefined)
     return adding
   }
 
-  const addNow = async (files: File[]) => {
-    if (files.length === 0) return
-    const current = images()
+  const addNow = async (files: File[], target: string | undefined) => {
+    if (files.length === 0 || !target) return
+    const current = side.draftFor(target).attachments
     let count = current.length
     let bytes = current.reduce((sum, item) => sum + item.size, 0)
     const rejected = new Set<"size" | "type" | "overflow">()
@@ -132,7 +134,7 @@ export function SideChatPanel() {
         size: file.size,
       })
     }
-    side.setDraftAttachments((list) => [...list, ...next])
+    side.setDraftAttachments((list) => [...list, ...next], target)
     if (rejected.has("size"))
       showToast({
         title: language.t("prompt.toast.fileTooLarge.title"),

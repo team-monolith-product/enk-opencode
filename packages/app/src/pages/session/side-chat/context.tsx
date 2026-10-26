@@ -38,7 +38,6 @@ export type SideDraft = { text: string; attachments: SideAttachment[] }
 
 // 다시 찾지 않는 메인 세션(지워졌는데 이 브라우저가 몰랐던 것 등)의 항목이 끝없이 쌓이지 않게 최근 것만 둔다.
 const MAX_ENTRIES = 50
-const MAX_HANDLED = 200
 // 스토어에 넣으면 프록시로 감싸져 이후 병합으로 바뀐다 — 공유 상수 대신 매번 새 객체를 쓴다.
 const emptyDraft = (): SideDraft => ({ text: "", attachments: [] })
 
@@ -88,7 +87,11 @@ function createSideChat() {
     const k = key()
     if (!id || !k) return
     onCleanup(globalSync.session.pin(id))
-    void sync.session.sync(id).catch(() => {
+    // 이 매핑이 숨은 사이드 세션을 다시 여는 유일한 길이다. 네트워크·서버 오류로 잃으면 안 되므로,
+    // 세션이 정말 없다고(404) 확인됐을 때만 잊는다. 그 밖의 실패는 재연결 때 다시 받는다.
+    void sync.session.sync(id).catch(async () => {
+      const res = await sdk.client.session.get({ sessionID: id }, { throwOnError: false }).catch(() => undefined)
+      if (res?.response?.status !== 404) return
       if (untrack(key) === k && untrack(sessionID) === id) forget(k)
     })
   })
@@ -259,7 +262,9 @@ function createSideChat() {
   })
 
   const markHandled = (k: string, callID: string) =>
-    setStore("entries", k, "handled", (list) => [...(list ?? []), callID].slice(-MAX_HANDLED))
+    // 개수로 자르지 않는다 — 아직 대화에 남아 있는 호출을 밀어내면 그 호출이 다시 대기로 올라와 flush 가
+    // 끝없이 돈다. 이 목록은 사이드 세션 하나의 넘기기 수만큼만 자라고, 닫으면 항목째 지워진다(MAX_ENTRIES).
+    setStore("entries", k, "handled", (list) => [...(list ?? []), callID])
 
   const flush = async () => {
     if (flushing) return
@@ -311,6 +316,9 @@ function createSideChat() {
     const k = key()
     return (k && drafts[k]) || emptyDraft()
   }
+  /** 비동기 작업이 끝났을 때 처음 시작한 세션의 초안에 쓰도록, 시작 시점의 초안 키를 잡아 둔다. */
+  const draftKey = () => untrack(key)
+  const draftFor = (k: string | undefined) => (k && drafts[k]) || emptyDraft()
   const snapshot = (value: SideDraft | undefined): SideDraft =>
     value ? { text: value.text, attachments: value.attachments.map((item) => ({ ...item })) } : emptyDraft()
   const updateDraft = (next: (current: SideDraft) => SideDraft, k = untrack(key)) => {
@@ -337,8 +345,10 @@ function createSideChat() {
   return {
     draft,
     setDraftText: (text: string) => updateDraft((current) => ({ ...current, text })),
-    setDraftAttachments: (next: (list: SideAttachment[]) => SideAttachment[]) =>
-      updateDraft((current) => ({ ...current, attachments: next(current.attachments) })),
+    draftKey,
+    draftFor,
+    setDraftAttachments: (next: (list: SideAttachment[]) => SideAttachment[], k = untrack(key)) =>
+      updateDraft((current) => ({ ...current, attachments: next(current.attachments) }), k),
     takeDraft,
     /** 사이드 대화의 더 이전 기록(처음 동기화는 최근 80개만 받는다). */
     history: {
