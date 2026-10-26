@@ -294,6 +294,9 @@ function createSideChat() {
       }
     } finally {
       flushing = false
+      // 이 flush 가 도는 동안 들어온 호출(다른 세션으로 옮겨 생긴 대기 등)은 가드에 막혀 그냥 돌아갔다.
+      // 가드는 반응형이 아니라 풀려도 효과가 다시 돌지 않으므로, 남은 일이 있고 받을 곳이 있으면 다시 돈다.
+      if (untrack(pending).length > 0 && untrack(bridge.ready)) queueMicrotask(() => void flush())
     }
   }
 
