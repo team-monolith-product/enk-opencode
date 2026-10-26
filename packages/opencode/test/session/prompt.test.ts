@@ -726,30 +726,50 @@ describe("session.agent-resolution", () => {
   }, 30000)
 
   test("slash commands carry the image toggle into the user message", async () => {
-    await using tmp = await tmpdir({ git: true, config: { agent: { build: { model: "openai/gpt-5.2" } } } })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const session = await Session.create({})
-        const send = (imageGeneration?: boolean) =>
-          SessionPrompt.command({ sessionID: session.id, command: "init", arguments: "", imageGeneration }).catch(
-            () => undefined,
-          )
-        const toggle = async () => {
-          const messages = await Session.messages({ sessionID: session.id })
-          const last = messages.findLast((m) => m.info.role === "user")
-          return last?.info.role === "user" ? last.info.imageGeneration : undefined
-        }
-
-        await send(true)
-        expect(await toggle()).toBe(true)
-        await send()
-        expect(await toggle()).toBeUndefined()
-
-        await Session.remove(session.id)
+    let calls = 0
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        if (!new URL(req.url).pathname.endsWith("/chat/completions")) return new Response("not found", { status: 404 })
+        calls++
+        return new Response(chat("done"), { status: 200, headers: { "Content-Type": "text/event-stream" } })
       },
     })
-  }, 60000)
+
+    try {
+      await using tmp = await tmpdir({
+        git: true,
+        config: {
+          enabled_providers: ["alibaba"],
+          provider: { alibaba: { options: { apiKey: "test-key", baseURL: `${server.url.origin}/v1` } } },
+          model: "alibaba/qwen-plus",
+        },
+      })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const session = await Session.create({ title: "Slash command image toggle" })
+          const send = (imageGeneration?: boolean) =>
+            SessionPrompt.command({ sessionID: session.id, command: "init", arguments: "", imageGeneration })
+          const toggle = async () => {
+            const messages = await Session.messages({ sessionID: session.id })
+            const last = messages.findLast((m) => m.info.role === "user")
+            return last?.info.role === "user" ? last.info.imageGeneration : undefined
+          }
+
+          await send(true)
+          expect(await toggle()).toBe(true)
+          await send()
+          expect(await toggle()).toBeUndefined()
+          expect(calls).toBe(2)
+
+          await Session.remove(session.id)
+        },
+      })
+    } finally {
+      server.stop(true)
+    }
+  })
 
   test("unknown command throws typed error with available names", async () => {
     await using tmp = await tmpdir({ git: true })
