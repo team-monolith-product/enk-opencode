@@ -54,11 +54,15 @@ async function assistant(sessionID: SessionID, parentID: MessageID, completed: b
 }
 
 async function fork(sessionID: SessionID, body: Record<string, unknown>) {
-  const res = await Server.Default().request(`/session/${sessionID}/fork`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  })
+  // directory 를 안 주면 서버가 process.cwd()(이 저장소)의 설정으로 에이전트를 만든다 — 임시 프로젝트를 쓰게 한다.
+  const res = await Server.Default().request(
+    `/session/${sessionID}/fork?directory=${encodeURIComponent(Instance.directory)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  )
   expect(res.status).toBe(200)
   return (await res.json()) as Session.Info
 }
@@ -79,7 +83,7 @@ describe("POST /session/:id/fork side", () => {
         const side = await fork(main.id, { side: true })
 
         expect(side.parentID).toBe(main.id)
-        expect(side.permission).toEqual(Agent.sidePermission())
+        expect(side.permission).toEqual((await Agent.get(Agent.SIDE)).permission)
         const copied = await Session.messages({ sessionID: side.id })
         expect(copied.map((m) => m.info.role)).toEqual(["user", "assistant", "user"])
         expect(copied.every((m) => m.info.role !== "assistant" || m.info.time.completed !== undefined)).toBe(true)

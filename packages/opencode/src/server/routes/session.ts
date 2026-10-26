@@ -376,7 +376,9 @@ export const SessionRoutes = lazy(() =>
           messageID: body.messageID,
           title: `${original.title} (side)`,
           parentID: sessionID,
-          permission: Agent.sidePermission(),
+          // 에이전트와 같은 최종 규칙(설정의 제한 포함)을 세션에도 넣는다. 세션 규칙은 실행 때 마지막에
+          // 붙으므로, 사이드 규칙만 넣으면 설정이 막은 읽기·네트워크가 다시 열린다.
+          permission: (await Agent.get(Agent.SIDE)).permission,
           inert: true,
         })
         return c.json(result)

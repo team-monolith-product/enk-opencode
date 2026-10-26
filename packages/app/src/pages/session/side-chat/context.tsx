@@ -25,7 +25,7 @@ import { sessionBusy } from "@/components/prompt-input/composer-state"
 import { Persist, persisted } from "@/utils/persist"
 import { Identifier } from "@/utils/id"
 import { SIDE_AGENT, findAttachment, pendingHandoffs, type AttachmentSource } from "@/utils/side-session"
-import { claimHandoff, excerpt, insertHandoff, prepareHandoff, type HandoffSources } from "./handoff"
+import { claimHandoff, excerpt, insertHandoff, prepareHandoff, releaseHandoff, type HandoffSources } from "./handoff"
 
 /** 사이드 컴포저에 붙인 이미지·파일. url 은 data url. */
 export type SideAttachment = { id: string; name: string; mime: string; url: string; size: number }
@@ -230,8 +230,16 @@ function createSideChat() {
       .catch(() => undefined)
   }
 
+  // /file/content 는 경로를 작업 디렉터리에 그대로 이어 붙인다 — 절대 경로는 디렉터리 기준 상대 경로로 바꾼다.
+  const relative = (path: string) => {
+    const dir = sdk.directory.replace(/\/+$/, "")
+    if (path === dir) return ""
+    if (path.startsWith(`${dir}/`)) return path.slice(dir.length + 1)
+    return path
+  }
+
   const workspace = async (path: string): Promise<Blob | undefined> => {
-    const res = await sdk.client.file.read({ path }).catch(() => undefined)
+    const res = await sdk.client.file.read({ path: relative(path) }).catch(() => undefined)
     const data = res?.data
     // 이미지는 type "text" + encoding "base64" 로 온다(file/index.ts). type 이 아니라 인코딩과 내용으로 본다 —
     // 이미지가 아닌 바이너리는 내용이 비어 온다.
@@ -279,8 +287,15 @@ function createSideChat() {
           const prepared = await prepareHandoff(next.input, sources(id))
           // 모으는 동안 다른 세션으로 옮겼거나 메인 입력창이 내려갔다 — 아직 아무것도 넣지 않았으니
           // 다음 기회(입력창이 다시 붙어 revision 이 오를 때)로 미룬다.
-          if (untrack(key) !== k || !untrack(bridge.ready)) return
+          const here = () => untrack(key) === k && untrack(sessionID) === id && untrack(bridge.ready)
+          if (!here()) return
           const claimed = await claimHandoff(next.callID)
+          // 탭 간 잠금을 기다리는 사이에도 세션을 옮기거나 입력창이 내려갈 수 있다. 그때 넣으면 엉뚱한 초안에
+          // 들어가거나 사라지므로, 잡은 것을 놓고 처리하지 않은 채 다음 기회로 미룬다.
+          if (!here()) {
+            if (claimed) await releaseHandoff(next.callID)
+            return
+          }
           markHandled(k, next.callID)
           // 같은 브라우저의 다른 탭이 이미 넣었다.
           if (!claimed) continue

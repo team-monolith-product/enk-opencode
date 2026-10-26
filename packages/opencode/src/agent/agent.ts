@@ -17,6 +17,7 @@ import { SIDE_AGENT } from "../tool/handoff"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { Permission } from "@/permission"
+import { Wildcard } from "@/util/wildcard"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@/global"
 import path from "path"
@@ -59,6 +60,9 @@ export namespace Agent {
   // 않아서 권한 요청 독이 뜰 일이 없다. 포크한 세션의 permission 에도 그대로 넣어(세션 규칙이 마지막에
   // 적용된다) 에이전트를 바꿔 불러도 풀리지 않게 한다.
   export const SIDE = SIDE_AGENT
+  /** 사이드 에이전트가 쓰는 도구. 나머지는 전부 막힌다. */
+  const SIDE_TOOLS = ["read", "grep", "glob", "codesearch", "webfetch", "websearch", "handoff", "external_directory"]
+
   // 모듈 로드 시점이 아니라 호출 시점에 만든다 — Truncate 와 순환 import 가 생겨도 undefined 를 읽지 않게.
   export function sidePermission(): Permission.Ruleset {
     return Permission.fromConfig({
@@ -75,6 +79,22 @@ export namespace Agent {
         [Truncate.GLOB]: "allow",
         [ATTACHMENT_GLOB]: "allow",
       },
+    })
+  }
+
+  /**
+   * 설정의 제한 중 사이드가 쓰는 도구에 걸리는 것만 남긴 규칙. 사이드 규칙 뒤에 붙여, 배포가 막은 읽기
+   * 경로·네트워크 도구는 사이드에서도 막히게 한다.
+   * - allow 는 버린다 — 사이드의 쓰기 금지를 풀면 안 된다.
+   * - ask 는 deny 로 — 사이드는 권한 요청 독을 띄우지 않으므로 묻는 대신 막는다.
+   * - 사이드가 이미 통째로 막은 도구의 규칙은 버린다. 경로별 규칙(edit "migration/*" 등)이 마지막에 오면
+   *   그 도구가 "통째로 막힘"으로 보이지 않아 도구 목록에 다시 나타난다(Permission.disabled).
+   */
+  export function restrictive(ruleset: Permission.Ruleset): Permission.Ruleset {
+    return ruleset.flatMap((rule) => {
+      if (rule.action === "allow") return []
+      if (!SIDE_TOOLS.some((tool) => Wildcard.match(tool, rule.permission))) return []
+      return [{ ...rule, action: "deny" as const }]
     })
   }
 
@@ -220,8 +240,9 @@ export namespace Agent {
               native: true,
               hidden: true,
               prompt: PROMPT_SIDE,
-              // 사용자 설정(user)보다 뒤에 둔다 — 전역 "bash": "allow" 같은 설정이 읽기 전용을 풀면 안 된다.
-              permission: Permission.merge(defaults, user, sidePermission()),
+              // 사이드 규칙은 사용자 설정의 allow 보다 뒤에 둔다 — 전역 "bash": "allow" 같은 설정이 읽기 전용을
+              // 풀면 안 된다. 사용자 설정의 deny·ask 는 그 뒤에 다시 붙여, 배포가 막은 것은 사이드에서도 막힌다.
+              permission: Permission.merge(defaults, user, sidePermission(), restrictive(user)),
               options: {},
             },
             compaction: {

@@ -84,3 +84,34 @@ test("side agent is never picked as the default agent", async () => {
     },
   })
 })
+
+// 배포 설정이 막은 읽기 경로·네트워크 도구를 사이드가 다시 열면 안 된다(세션 규칙으로도).
+test("side agent keeps configured denials and turns asks into denials", async () => {
+  await using tmp = await tmpdir({
+    config: { permission: { read: { "secret/*": "deny" }, webfetch: "deny", websearch: "ask" } } as never,
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const side = await Agent.get(Agent.SIDE)
+      expect(Permission.evaluate("read", "secret/key.txt", side.permission).action).toBe("deny")
+      expect(Permission.evaluate("read", "src/app.ts", side.permission).action).toBe("allow")
+      expect(Permission.disabled(["webfetch", "websearch"], side.permission)).toEqual(
+        new Set(["webfetch", "websearch"]),
+      )
+      expect(Permission.evaluate("bash", "*", side.permission).action).toBe("deny")
+    },
+  })
+})
+
+// 사이드가 이미 막은 도구에 대한 경로별 설정 규칙이 뒤에 붙어도, 그 도구는 계속 목록에서 빠져 있어야 한다.
+test("path-scoped config rules for blocked tools do not re-expose them", async () => {
+  await using tmp = await tmpdir({ config: { permission: { edit: { "migration/*": "deny" }, bash: "ask" } } as never })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const side = await Agent.get(Agent.SIDE)
+      expect(Permission.disabled(["edit", "bash", "read"], side.permission)).toEqual(new Set(["edit", "bash"]))
+    },
+  })
+})

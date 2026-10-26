@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { claimHandoff, insertHandoff, prepareHandoff, type HandoffTarget } from "./handoff"
+import { claimHandoff, insertHandoff, prepareHandoff, releaseHandoff, type HandoffTarget } from "./handoff"
 
 function memoryStorage() {
   const data = new Map<string, string>()
@@ -29,6 +29,13 @@ describe("claimHandoff", () => {
     }
     const results = await Promise.all([claimHandoff("call_1", shared, locks), claimHandoff("call_1", shared, locks)])
     expect(results.filter(Boolean)).toHaveLength(1)
+  })
+
+  test("a released claim can be claimed again", async () => {
+    const shared = memoryStorage()
+    expect(await claimHandoff("call_1", shared, undefined)).toBe(true)
+    await releaseHandoff("call_1", shared, undefined)
+    expect(await claimHandoff("call_1", shared, undefined)).toBe(true)
   })
 
   test("claims when storage is unusable rather than dropping the handoff", async () => {

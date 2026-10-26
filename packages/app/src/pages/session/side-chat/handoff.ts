@@ -112,3 +112,22 @@ export async function claimHandoff(
   if (!locks) return run()
   return locks.request(CLAIMS, run)
 }
+
+/** 잡아 둔 호출을 놓는다 — 잡은 뒤 넣을 곳이 사라져, 이 탭이든 다른 탭이든 나중에 다시 넣을 수 있게. */
+export async function releaseHandoff(
+  callID: string,
+  storage: ClaimStorage | undefined = globalThis.localStorage,
+  locks: ClaimLocks | undefined = (globalThis.navigator as Navigator | undefined)?.locks,
+) {
+  const run = () => {
+    if (!storage) return
+    try {
+      const raw = storage.getItem(CLAIMS)
+      const list: unknown = raw ? JSON.parse(raw) : []
+      if (!Array.isArray(list)) return
+      storage.setItem(CLAIMS, JSON.stringify(list.filter((item) => item !== callID)))
+    } catch {}
+  }
+  if (!locks) return run()
+  return locks.request(CLAIMS, run)
+}
