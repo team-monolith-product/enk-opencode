@@ -12,6 +12,8 @@ import { ProviderTransform } from "../provider/transform"
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
+import PROMPT_SIDE from "./prompt/side.txt"
+import { SIDE_AGENT } from "../tool/handoff"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { Permission } from "@/permission"
@@ -51,6 +53,30 @@ export namespace Agent {
       ref: "Agent",
     })
   export type Info = z.infer<typeof Info>
+
+  // 사이드 채팅(메인 세션을 포크한 개인용 대화) 전용. 메인 에이전트가 같은 워크트리에서 일하는 중에도
+  // 돌기 때문에 읽기만 한다 — bash 는 읽기 전용으로 묶을 방법이 없어 통째로 막는다. "ask" 규칙을 두지
+  // 않아서 권한 요청 독이 뜰 일이 없다. 포크한 세션의 permission 에도 그대로 넣어(세션 규칙이 마지막에
+  // 적용된다) 에이전트를 바꿔 불러도 풀리지 않게 한다.
+  export const SIDE = SIDE_AGENT
+  // 모듈 로드 시점이 아니라 호출 시점에 만든다 — Truncate 와 순환 import 가 생겨도 undefined 를 읽지 않게.
+  export function sidePermission(): Permission.Ruleset {
+    return Permission.fromConfig({
+      "*": "deny",
+      read: "allow",
+      grep: "allow",
+      glob: "allow",
+      codesearch: "allow",
+      webfetch: "allow",
+      websearch: "allow",
+      handoff: "allow",
+      external_directory: {
+        "*": "deny",
+        [Truncate.GLOB]: "allow",
+        [ATTACHMENT_GLOB]: "allow",
+      },
+    })
+  }
 
   export interface Interface {
     readonly get: (agent: string) => Effect.Effect<Agent.Info>
@@ -93,6 +119,8 @@ export namespace Agent {
             question: "deny",
             plan_enter: "deny",
             plan_exit: "deny",
+            // 사이드 채팅 → 메인 입력창 전달 툴. side 에이전트만 쓴다.
+            handoff: "deny",
             // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
             read: {
               "*": "allow",
@@ -184,6 +212,17 @@ export namespace Agent {
               options: {},
               mode: "subagent",
               native: true,
+            },
+            [SIDE]: {
+              name: SIDE,
+              description: "Side chat. Answers questions about the forked conversation using read-only tools.",
+              mode: "primary",
+              native: true,
+              hidden: true,
+              prompt: PROMPT_SIDE,
+              // 사용자 설정(user)보다 뒤에 둔다 — 전역 "bash": "allow" 같은 설정이 읽기 전용을 풀면 안 된다.
+              permission: Permission.merge(defaults, user, sidePermission()),
+              options: {},
             },
             compaction: {
               name: "compaction",

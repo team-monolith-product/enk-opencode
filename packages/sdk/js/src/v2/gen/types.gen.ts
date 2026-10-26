@@ -4034,6 +4034,10 @@ export type SessionInitResponse = SessionInitResponses[keyof SessionInitResponse
 export type SessionForkData = {
   body?: {
     messageID?: string
+    /**
+     * Fork as a read-only side chat: a hidden child session limited to the side agent's tools.
+     */
+    side?: boolean
   }
   path: {
     sessionID: string

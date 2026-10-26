@@ -321,7 +321,7 @@ export namespace Session {
       permission?: Permission.Ruleset
       workspaceID?: WorkspaceID
     }) => Effect.Effect<Info>
-    readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info>
+    readonly fork: (input: ForkInput) => Effect.Effect<Info>
     readonly touch: (sessionID: SessionID) => Effect.Effect<void>
     readonly get: (id: SessionID) => Effect.Effect<Info>
     readonly share: (id: SessionID) => Effect.Effect<{ url: string }>
@@ -508,19 +508,24 @@ export namespace Session {
         })
       })
 
-      const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
+      const fork = Effect.fn("Session.fork")(function* (input: ForkInput) {
         const original = yield* get(input.sessionID)
-        const title = getForkedTitle(original.title)
+        const title = input.title ?? getForkedTitle(original.title)
         const session = yield* createNext({
           directory: Instance.directory,
           workspaceID: original.workspaceID,
           title,
+          parentID: input.parentID,
+          permission: input.permission,
         })
         const msgs = yield* messages({ sessionID: input.sessionID })
         const idMap = new Map<string, MessageID>()
 
         for (const msg of msgs) {
           if (input.messageID && msg.info.id >= input.messageID) break
+          // 원본이 응답을 쓰는 중이면 그 미완료 메시지까지 복사된다. 포크 쪽에선 영원히 끝나지 않아
+          // 계속 "실행 중"으로 보이므로, 원하는 호출자(사이드 채팅)는 끝난 턴만 가져간다.
+          if (input.completed && msg.info.role === "assistant" && msg.info.time.completed === undefined) continue
           const newID = MessageID.ascending()
           idMap.set(msg.info.id, newID)
 
@@ -701,9 +706,18 @@ export namespace Session {
     (input) => runPromise((svc) => svc.create(input)),
   )
 
-  export const fork = fn(z.object({ sessionID: SessionID.zod, messageID: MessageID.zod.optional() }), (input) =>
-    runPromise((svc) => svc.fork(input)),
-  )
+  export const ForkInput = z.object({
+    sessionID: SessionID.zod,
+    messageID: MessageID.zod.optional(),
+    title: z.string().optional(),
+    parentID: SessionID.zod.optional(),
+    permission: Info.shape.permission,
+    /** 끝나지 않은 assistant 메시지는 복사하지 않는다. */
+    completed: z.boolean().optional(),
+  })
+  export type ForkInput = z.infer<typeof ForkInput>
+
+  export const fork = fn(ForkInput, (input) => runPromise((svc) => svc.fork(input)))
 
   export const touch = fn(SessionID.zod, (id) => runPromise((svc) => svc.touch(id)))
   export const get = fn(SessionID.zod, (id) => runPromise((svc) => svc.get(id)))

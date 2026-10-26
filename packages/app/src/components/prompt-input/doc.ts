@@ -460,6 +460,8 @@ export function createPromptDoc(input: PromptDocInput) {
 
   const addLineReference = (ref: LineRefInput) => handle?.addLineReference(ref) ?? false
 
+  const addText = (value: string) => handle?.addText(value) ?? false
+
   const actors = () => {
     const list: DocActor[] = handle?.actors() ?? []
     const own = actor()
@@ -522,6 +524,7 @@ export function createPromptDoc(input: PromptDocInput) {
     addFiles,
     addReference,
     addLineReference,
+    addText,
     empty,
     advance,
     undo,

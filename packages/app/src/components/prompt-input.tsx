@@ -603,6 +603,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         preview: input.preview,
       })
     })
+    // 관전자(readonly)는 doc 을 고칠 수 없으니 등록하지 않는다 — 넘기기는 "준비 안 됨"으로 대기한다.
+    bridge.setAddText(docMode() === "doc" && !readonly ? (text) => doc.addText(text) : undefined)
+    bridge.setAddFiles(docMode() === "doc" && !readonly ? (files) => doc.addFiles(files) : undefined)
     bridge.setOpenLineReference((input) => {
       openSessionFile({ path: input.path, selection: lineRefToSelection(input) })
       return true
@@ -614,6 +617,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onCleanup(() => {
       bridge.setAddReference(undefined)
       bridge.setAddLineReference(undefined)
+      bridge.setAddText(undefined)
+      bridge.setAddFiles(undefined)
       bridge.setOpenLineReference(undefined)
       bridge.setOpenFileReference(undefined)
       bridge.setMode("normal")

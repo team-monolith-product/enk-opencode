@@ -1,4 +1,5 @@
 import type { EnvRequest, PermissionRequest, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
+import { isSideSession } from "@/utils/side-session"
 
 function sessionTreeRequest<T>(
   session: Session[],
@@ -10,6 +11,8 @@ function sessionTreeRequest<T>(
 
   const map = session.reduce((acc, item) => {
     if (!item.parentID) return acc
+    // 사이드 채팅은 개인용 곁가지다. 거기서 생긴 요청이 메인 컴포저 독을 차지해 메인을 막으면 안 된다.
+    if (isSideSession(item)) return acc
     const list = acc.get(item.parentID)
     if (list) list.push(item.id)
     if (!list) acc.set(item.parentID, [item.id])

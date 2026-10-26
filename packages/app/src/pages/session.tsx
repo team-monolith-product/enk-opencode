@@ -3,6 +3,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useMutation } from "@tanstack/solid-query"
 import {
   type Component,
+  type ParentProps,
   batch,
   onCleanup,
   Show,
@@ -47,7 +48,7 @@ import { useTerminal } from "@/context/terminal"
 import { sessionBusy } from "@/components/prompt-input/composer-state"
 import { type FollowupDraft, sendFollowupDraft } from "@/components/prompt-input/submit"
 import { createSessionComposerState, SessionComposerRegion } from "@/pages/session/composer"
-import { createPromptDocSession, PromptDocSessionProvider } from "@/context/prompt-doc-session"
+import { createPromptDocSession, PromptDocSessionProvider, type PromptDocSession } from "@/context/prompt-doc-session"
 import {
   createOpenDiffTab,
   createOpenReviewFile,
@@ -63,6 +64,7 @@ import { type DiffStyle, SessionReviewTab, type SessionReviewTabProps } from "@/
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { syncSessionModel } from "@/pages/session/session-model-helpers"
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
+import { SideChatProvider } from "@/pages/session/side-chat/context"
 import { TerminalPanel } from "@/pages/session/terminal-panel"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
@@ -321,6 +323,15 @@ function createSessionHistoryWindow(input: SessionHistoryWindowInput) {
     loadAndReveal,
     onScrollerScroll,
   }
+}
+
+// 세션 레벨 상태 — 컴포저는 질문·권한 독이 뜰 때 언마운트되므로 그보다 오래 살아야 하는 것들을 여기 둔다.
+function SessionProviders(props: ParentProps<{ promptDoc: PromptDocSession }>) {
+  return (
+    <PromptDocSessionProvider value={props.promptDoc}>
+      <SideChatProvider>{props.children}</SideChatProvider>
+    </PromptDocSessionProvider>
+  )
 }
 
 export default function Page() {
@@ -1927,7 +1938,7 @@ export default function Page() {
 
   if (env.productionLayout()) {
     return (
-      <PromptDocSessionProvider value={promptDocSession}>
+      <SessionProviders promptDoc={promptDocSession}>
         <div data-component="codle-session" class="relative size-full overflow-hidden flex flex-col p-2 md:p-3">
           <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-2 md:gap-3">
             <SessionPanelColumn class="@container relative flex flex-col min-h-0 h-full flex-1 min-w-0" />
@@ -1940,12 +1951,12 @@ export default function Page() {
             />
           </div>
         </div>
-      </PromptDocSessionProvider>
+      </SessionProviders>
     )
   }
 
   return (
-    <PromptDocSessionProvider value={promptDocSession}>
+    <SessionProviders promptDoc={promptDocSession}>
       <div data-component="codle-session" class="relative size-full overflow-hidden flex flex-col p-2 md:p-3">
         <SessionHeader />
         <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-2 md:gap-3">
@@ -1997,6 +2008,6 @@ export default function Page() {
 
         <TerminalPanel />
       </div>
-    </PromptDocSessionProvider>
+    </SessionProviders>
   )
 }

@@ -1787,7 +1787,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   })
                 }
 
-                if (step === 1) SessionSummary.summarize({ sessionID, messageID: lastUser.id })
+                // 사이드 채팅은 요약 diff 를 만들지 않는다 — 워크트리 diff 에 메인 에이전트의 수정이 섞인다.
+                if (step === 1 && agent.name !== Agent.SIDE)
+                  SessionSummary.summarize({ sessionID, messageID: lastUser.id })
 
                 yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 

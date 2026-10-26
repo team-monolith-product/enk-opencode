@@ -112,6 +112,11 @@ export namespace SessionProcessor {
         }
         let aborted = false
 
+        // 스냅샷은 워크트리 전체를 찍는다. 사이드 채팅은 메인 에이전트가 같은 워크트리를 고치는 중에도
+        // 돌기 때문에, 찍으면 메인의 수정이 사이드의 패치로 기록되고 사이드에서 되돌리면 메인 작업이
+        // 지워진다. 사이드는 읽기 전용이라 남길 변경도 없다.
+        const tracked = () => ctx.assistantMessage.agent !== Agent.SIDE
+
         const parse = (e: unknown) =>
           MessageV2.fromError(e, {
             providerID: ctx.model.providerID,
@@ -283,7 +288,7 @@ export namespace SessionProcessor {
               throw value.error
 
             case "start-step":
-              ctx.snapshot = yield* snapshot.track()
+              ctx.snapshot = tracked() ? yield* snapshot.track() : undefined
               yield* session.updatePart({
                 id: PartID.ascending(),
                 messageID: ctx.assistantMessage.id,
@@ -319,7 +324,7 @@ export namespace SessionProcessor {
               yield* session.updatePart({
                 id: PartID.ascending(),
                 reason: value.finishReason,
-                snapshot: yield* snapshot.track(),
+                snapshot: tracked() ? yield* snapshot.track() : undefined,
                 messageID: ctx.assistantMessage.id,
                 sessionID: ctx.assistantMessage.sessionID,
                 type: "step-finish",
@@ -341,12 +346,13 @@ export namespace SessionProcessor {
                 }
                 ctx.snapshot = undefined
               }
-              yield* Effect.promise(() =>
-                SessionSummary.summarize({
-                  sessionID: ctx.sessionID,
-                  messageID: ctx.assistantMessage.parentID,
-                }),
-              ).pipe(Effect.ignoreCause({ log: true, message: "session summary failed" }), Effect.forkDetach)
+              if (tracked())
+                yield* Effect.promise(() =>
+                  SessionSummary.summarize({
+                    sessionID: ctx.sessionID,
+                    messageID: ctx.assistantMessage.parentID,
+                  }),
+                ).pipe(Effect.ignoreCause({ log: true, message: "session summary failed" }), Effect.forkDetach)
               if (
                 !ctx.assistantMessage.summary &&
                 isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
