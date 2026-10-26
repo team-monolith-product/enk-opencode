@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.11 AS build
+FROM oven/bun:1.4.4 AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs build-essential python3 \
@@ -15,7 +15,7 @@ RUN cd packages/opencode && bun run build --single
 FROM scratch AS asset-export
 COPY --from=build /app/packages/app/dist /
 
-FROM node:22-slim AS dev
+FROM node:22.23.4-bookworm-slim AS dev
 
 ARG PYTHON_VERSION=3.11.2-1+b1
 

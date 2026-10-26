@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { DocCollection } from "@blocksuite/store"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { MSG_AWARENESS, MSG_DOC, pack, unpack } from "./doc-sync-protocol"
@@ -33,7 +33,29 @@ function prefixed(fetch: Fetch): DocSyncOpts {
 
 const wait = () => new Promise((resolve) => setTimeout(resolve, 0))
 
+// upload() 은 진행률용 XHR 을 먼저 쏘고, 실패하면 client 의 fetch 로 한 번 더 보낸다.
+// 진짜 XHR(happy-dom)은 baseUrl 로 실제 접속을 시도해 테스트가 네트워크·포트 상태에 기대게 되므로,
+// 항상 전송 단계에서 실패하는 가짜로 바꿔 재시도 경로만 탄다.
+class OfflineXHR extends EventTarget {
+  upload = new EventTarget()
+  responseType = ""
+  open() {}
+  setRequestHeader() {}
+  abort() {}
+  send() {
+    queueMicrotask(() => this.dispatchEvent(new Event("error")))
+  }
+}
+
 describe("OpencodeBlobSource", () => {
+  const xhr = globalThis.XMLHttpRequest
+  beforeAll(() => {
+    globalThis.XMLHttpRequest = OfflineXHR as unknown as typeof XMLHttpRequest
+  })
+  afterAll(() => {
+    globalThis.XMLHttpRequest = xhr
+  })
+
   test("uploads blob using the blocksuite source id", async () => {
     const reqs: Array<RequestInfo | URL> = []
     const source = new OpencodeBlobSource(
