@@ -35,6 +35,8 @@ import type {
   DocSyncPullResponses,
   DocSyncPushErrors,
   DocSyncPushResponses,
+  EnkInitialPlanDeliverErrors,
+  EnkInitialPlanDeliverResponses,
   EnvFileListResponses,
   EnvFileRemoveErrors,
   EnvFileRemoveResponses,
@@ -2061,6 +2063,49 @@ export class ProjectSummary extends HeyApiClient {
   }
 }
 
+export class InitialPlan extends HeyApiClient {
+  /**
+   * Deliver the initial plan
+   *
+   * Claim the team's finalized initial plan from hackathon-rails and hand it to the plan agent in the main project session. Idempotent.
+   */
+  public deliver<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      EnkInitialPlanDeliverResponses,
+      EnkInitialPlanDeliverErrors,
+      ThrowOnError
+    >({
+      url: "/enk/initial-plan/deliver",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Enk extends HeyApiClient {
+  private _initialPlan?: InitialPlan
+  get initialPlan(): InitialPlan {
+    return (this._initialPlan ??= new InitialPlan({ client: this.client }))
+  }
+}
+
 export class Submit extends HeyApiClient {
   /**
    * Respond to prompt doc submit approval
@@ -2074,7 +2119,7 @@ export class Submit extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel" | "exclude"
+      action?: "approve" | "cancel"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2443,7 +2488,7 @@ export class Submit2 extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel" | "exclude"
+      action?: "approve" | "cancel"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -5853,6 +5898,11 @@ export class OpencodeClient extends HeyApiClient {
   private _projectSummary?: ProjectSummary
   get projectSummary(): ProjectSummary {
     return (this._projectSummary ??= new ProjectSummary({ client: this.client }))
+  }
+
+  private _enk?: Enk
+  get enk(): Enk {
+    return (this._enk ??= new Enk({ client: this.client }))
   }
 
   private _session?: Session2

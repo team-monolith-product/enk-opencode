@@ -493,22 +493,6 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               .then((next) => showApproval(next))
               .catch(() => showToast({ title: language.t("docSubmit.toast.cancelFailed"), description: language.t("common.requestFailed") }))
           }}
-          exclude={() => {
-            const current = approval()
-            if (!current) return
-            void respondQuestionSubmit({
-              baseUrl: sdk.url,
-              directory: sdk.directory,
-              sessionID,
-              submitID: current.submitID,
-              actorID: a.actorID,
-              action: "exclude",
-            })
-              // Through showApproval: responding to an already finished vote answers with its
-              // terminal state, which must close the dialog rather than leave a dead frame up.
-              .then((next) => showApproval(next))
-              .catch(() => showToast({ title: language.t("docSubmit.toast.sendFailed"), description: language.t("common.requestFailed") }))
-          }}
           close={closeApproval}
           onExpire={() => {
             // The deadline passed with no word from the server — show the timeout locally so the
