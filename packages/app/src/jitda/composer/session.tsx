@@ -290,7 +290,7 @@ export function createPromptDocSession(input: { session: SessionModel }): Prompt
   // V2 다이얼로그는 다른 창이 열리면 말없이 교체된다. id 로 실제 화면에 떠 있는지 확인한다.
   const dialogOpen = (submitID: string) => approvalID === submitID && dialog.active?.id === dialogKey(submitID)
 
-  const respond = (action: "approve" | "cancel" | "exclude", failed: string) => {
+  const respond = (action: "approve" | "cancel", failed: string) => {
     const current = approval()
     const actorID = doc.actorID()
     if (!current || !actorID) return
@@ -348,7 +348,6 @@ export function createPromptDocSession(input: { session: SessionModel }): Prompt
           sdk={jitda.doc}
           approve={() => respond("approve", "docSubmit.toast.approveFailed")}
           cancel={() => respond("cancel", "docSubmit.toast.cancelFailed")}
-          exclude={() => respond("exclude", "docSubmit.toast.sendFailed")}
           close={closeApproval}
           onExpire={() => {
             const current = approval()

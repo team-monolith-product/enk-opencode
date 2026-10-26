@@ -485,7 +485,7 @@ export const SessionQuestionDock: Component<{
         props.onSubmit()
         return
       }
-      // Cancelled/expired/left: resolve the dialog for whoever is looking at this vote; with none on
+      // Cancelled/expired: resolve the dialog for whoever is looking at this vote; with none on
       // screen there is nothing to resolve.
       if (!dialogOpen(state.submitID)) return
       setApproval(state)
@@ -539,26 +539,6 @@ export const SessionQuestionDock: Component<{
               .catch(() =>
                 showToast({
                   title: language.t("docSubmit.toast.cancelFailed"),
-                  description: language.t("common.requestFailed"),
-                }),
-              )
-          }}
-          exclude={() => {
-            const current = approval()
-            if (!current) return
-            void respondQuestionSubmit({
-              api: jitda.doc,
-              sessionID,
-              submitID: current.submitID,
-              actorID: a.actorID,
-              action: "exclude",
-            })
-              // Through showApproval: responding to an already finished vote answers with its
-              // terminal state, which must close the dialog rather than leave a dead frame up.
-              .then((next) => showApproval(next))
-              .catch(() =>
-                showToast({
-                  title: language.t("docSubmit.toast.sendFailed"),
                   description: language.t("common.requestFailed"),
                 }),
               )

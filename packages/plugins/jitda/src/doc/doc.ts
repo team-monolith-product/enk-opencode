@@ -8,9 +8,10 @@ import { MSG_DOC, pack, unpack } from "./wire"
 
 export type SubmitTargetKind = "doc" | "question" | "stop" | "clear" | "revert"
 export type SubmitStatus = "pending" | "sent" | "cancelled" | "expired" | "left"
+// "left" 는 예전 규칙으로 저장된 행을 읽기 위해서만 남긴다. 지금은 나가면 모든 대기 투표에서 표와 함께 빠진다.
 export type SubmitActorStatus = "pending" | "approved" | "left"
 export type SubmitEventType = "created" | "updated" | "sent" | "cancelled" | "expired" | "left"
-export type RespondAction = "approve" | "cancel" | "exclude"
+export type RespondAction = "approve" | "cancel"
 
 export type SubmitActorInfo = { actorID: string; name: string; color: string; status: SubmitActorStatus }
 
@@ -108,6 +109,8 @@ export const MAX_EXTEND = 30_000
 const MAX_NAME = 64
 export const REPLAY_WINDOW = 15_000
 export const LEAVE_GRACE = 2_000
+// 투표에서 빠지기 전 유예. 숨은 탭은 재접속 타이머가 1초 이상 밀리므로 초안·현재 위치(LEAVE_GRACE)보다 넉넉히 둔다.
+export const VOTE_LEAVE_GRACE = 10_000
 export const PING_INTERVAL = 2_000
 export const PING_TIMEOUT = 4_500
 
@@ -310,6 +313,8 @@ type DraftPeer = SubmitPeer
 const peers = new Map<string, Set<SubmitPeer>>()
 const observers = new Map<string, Set<LivePeer>>()
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
+// targetID → (actorID → 연결이 끊긴 시각). 유예가 지난 사람들을 한 번에 빼고 한 번만 판단한다.
+const offline = new Map<string, Map<string, number>>()
 const leaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let heartbeat: ReturnType<typeof setInterval> | undefined
 const ping = JSON.stringify({ type: "ping" })
@@ -608,7 +613,11 @@ export function recover() {
   const rows = db().query<SubmitRow, []>("SELECT * FROM doc_submit WHERE status = 'pending'").all()
   for (const row of rows) {
     const next = expire(row)
-    if (next.status === "pending") schedule(next)
+    if (next.status !== "pending") continue
+    schedule(next)
+    // 재시작 뒤 다시 접속하지 않은 참여자는 퇴장과 같다. 유예 시간 안에 돌아오면 그대로 남는다.
+    const now = Date.now()
+    for (const actor of read(next).actors) scheduleLeave(next.target_id, actor.actorID, now)
   }
 }
 
@@ -835,17 +844,6 @@ export function submitRespond(input: { sessionID: string; submitID: string; acto
     return state
   }
 
-  if (input.action === "exclude") {
-    if (next.actor_id !== input.actorID) throw new NotFoundError("Only the requester can exclude")
-    const state = read(next)
-    if (!state.actors.some((item) => item.status === "left")) return state
-    if (state.actors.some((item) => item.status === "pending")) return state
-    db().run("DELETE FROM doc_submit_actor WHERE submit_id = ? AND status = 'left'", [next.id])
-    const finished = finalize(next)
-    if (!finished) throw new NotFoundError("Doc submit not found")
-    return finished
-  }
-
   if (actor.status !== "approved")
     db().run(
       "UPDATE doc_submit_actor SET status = 'approved', time_responded = ? WHERE submit_id = ? AND actor_id = ?",
@@ -853,7 +851,7 @@ export function submitRespond(input: { sessionID: string; submitID: string; acto
     )
 
   const state = read(next)
-  if (state.actors.some((item) => item.status !== "approved")) {
+  if (!agreed(state)) {
     cast("updated", state)
     return state
   }
@@ -861,6 +859,11 @@ export function submitRespond(input: { sessionID: string; submitID: string; acto
   const finished = finalize(next)
   if (!finished) throw new NotFoundError("Doc submit not found")
   return finished
+}
+
+// 남은 참여 인원 전원이 동의했는지. 0명은 동의가 아니다.
+function agreed(state: SubmitState) {
+  return state.actors.length > 0 && state.actors.every((item) => item.status === "approved")
 }
 
 function finalize(row: SubmitRow) {
@@ -873,26 +876,35 @@ function finalize(row: SubmitRow) {
   return finished
 }
 
-function leave(targetID: string, actorID: string) {
+function online(targetID: string, actorID: string) {
+  const set = peers.get(targetID)
+  return set ? Array.from(set).some((item) => item.actorID === actorID) : false
+}
+
+// 남은 전원이 동의했고 지금 모두 접속해 있을 때만 보낸다. 끊긴 채 유예 중인 사람의 표로는 보내지 않는다.
+function evaluate(row: SubmitRow) {
+  const state = read(row)
+  if (agreed(state) && state.actors.every((item) => online(row.target_id, item.actorID))) return finalize(row)
+  return state
+}
+
+// 참여 인원 기준 판단, 퇴장 쪽: 나간 사람들은 결론 나지 않은 모든 투표에서 표와 함께 빠지고, 남은 인원으로
+// 한 번만 다시 판단한다. 요청자도 예외가 아니다. 아무도 남지 않으면 보내지 않는다.
+function leave(targetID: string, actorIDs: string[]) {
   const rows = db()
     .query<SubmitRow, [string]>("SELECT * FROM doc_submit WHERE target_id = ? AND status = 'pending'")
     .all(targetID)
   for (const row of rows) {
     const next = expire(row)
     if (next.status !== "pending") continue
-    const state = read(next)
-    const member = state.actors.find((item) => item.actorID === actorID)
-    if (!member) continue
-    if (next.actor_id === actorID) {
-      const item = updateSubmit(next.id, { status: "left", cancelled_by: actorID, time_updated: Date.now() })
-      if (!item) continue
-      done(next.id)
-      cast("left", read(item))
-      continue
-    }
-    if (member.status === "approved") continue
-    db().run("UPDATE doc_submit_actor SET status = 'left' WHERE submit_id = ? AND actor_id = ?", [next.id, actorID])
-    cast("updated", read(extend(next)))
+    const gone = read(next).actors.filter((item) => actorIDs.includes(item.actorID))
+    if (gone.length === 0) continue
+    db().run(`DELETE FROM doc_submit_actor WHERE submit_id = ? AND actor_id IN (${gone.map(() => "?").join(", ")})`, [
+      next.id,
+      ...gone.map((item) => item.actorID),
+    ])
+    const state = evaluate(next)
+    if (state?.status === "pending") cast("updated", state)
   }
 }
 
@@ -904,6 +916,15 @@ function join(sessionID: string, targetID: string, actorID: string) {
     if (!timers.has(next.id)) schedule(next)
     let state = read(next)
     const existing = state.actors.find((actor) => actor.actorID === actorID)
+    if (existing?.status === "left") {
+      // 예전 규칙으로 "나감" 표시가 남은 사람이 돌아오면 다시 대기로 묻는다.
+      db().run(
+        "UPDATE doc_submit_actor SET status = 'pending', time_responded = NULL WHERE submit_id = ? AND actor_id = ?",
+        [next.id, actorID],
+      )
+      state = read(extend(next))
+      cast("updated", state)
+    }
     if (!existing) {
       db().run(
         "INSERT OR IGNORE INTO doc_submit_actor (submit_id, actor_id, name, status, time_responded) VALUES (?, ?, ?, 'pending', NULL)",
@@ -911,43 +932,71 @@ function join(sessionID: string, targetID: string, actorID: string) {
       )
       state = read(extend(next))
       cast("updated", state)
-    } else if (existing.status === "left") {
-      db().run("UPDATE doc_submit_actor SET status = 'pending' WHERE submit_id = ? AND actor_id = ?", [
-        next.id,
-        actorID,
-      ])
-      state = read(extend(next))
-      cast("updated", state)
+    }
+    if (existing?.status === "approved") {
+      // 동의한 채 잠깐 끊겼던 사람이 돌아와 남은 전원이 접속·동의 상태가 되면 그때 보낸다.
+      const after = evaluate(next)
+      if (after?.status !== "pending") continue
     }
     first ??= state
   }
   return first
 }
 
-function leaveKey(targetID: string, actorID: string) {
-  return `${targetID}:${actorID}`
-}
-
 function cancelLeave(targetID: string, actorID: string) {
-  const key = leaveKey(targetID, actorID)
-  const timer = leaveTimers.get(key)
-  if (!timer) return
-  clearTimeout(timer)
-  leaveTimers.delete(key)
+  const map = offline.get(targetID)
+  if (!map?.delete(actorID)) return
+  if (map.size === 0) offline.delete(targetID)
+  arm(targetID)
 }
 
-function scheduleLeave(targetID: string, actorID: string) {
-  cancelLeave(targetID, actorID)
-  const key = leaveKey(targetID, actorID)
-  const timer = setTimeout(() => {
-    leaveTimers.delete(key)
-    const set = peers.get(targetID)
-    const online = set ? Array.from(set).some((item) => item.actorID === actorID) : false
-    if (online) return
-    leave(targetID, actorID)
-  }, LEAVE_GRACE)
-  timer.unref?.()
-  leaveTimers.set(key, timer)
+function scheduleLeave(targetID: string, actorID: string, since = Date.now()) {
+  const map = offline.get(targetID) ?? new Map<string, number>()
+  if (!map.has(actorID)) map.set(actorID, since)
+  offline.set(targetID, map)
+  arm(targetID)
+}
+
+// 대상마다 타이머 하나: 가장 먼저 유예가 끝나는 사람에 맞춘다.
+function arm(targetID: string) {
+  const timer = leaveTimers.get(targetID)
+  if (timer) clearTimeout(timer)
+  leaveTimers.delete(targetID)
+  const map = offline.get(targetID)
+  if (!map) return
+  const first = Math.min(...map.values())
+  const next = setTimeout(
+    () => {
+      leaveTimers.delete(targetID)
+      settleLeaves(targetID)
+    },
+    Math.max(0, first + VOTE_LEAVE_GRACE - Date.now()),
+  )
+  next.unref?.()
+  leaveTimers.set(targetID, next)
+}
+
+function settleLeaves(targetID: string, now = Date.now()) {
+  const map = offline.get(targetID)
+  if (!map) return
+  const gone: string[] = []
+  for (const [actorID, since] of map) {
+    if (online(targetID, actorID)) {
+      map.delete(actorID)
+      continue
+    }
+    if (since + VOTE_LEAVE_GRACE > now) continue
+    map.delete(actorID)
+    gone.push(actorID)
+  }
+  if (map.size === 0) offline.delete(targetID)
+  arm(targetID)
+  if (gone.length) leave(targetID, gone)
+}
+
+// 테스트 전용: Date.now() 기준 유예가 지난 퇴장을 모두 처리한다(setSystemTime 과 함께 쓴다).
+export function leaveSweep() {
+  for (const targetID of Array.from(offline.keys())) settleLeaves(targetID)
 }
 
 export function submitActive(input: { sessionID: string; docID: string; actorID: string }) {
@@ -1404,6 +1453,7 @@ export function resetForTest() {
   heartbeat = undefined
   timers.clear()
   leaveTimers.clear()
+  offline.clear()
   draftLeaveTimers.clear()
   envDraftLeaveTimers.clear()
   peers.clear()

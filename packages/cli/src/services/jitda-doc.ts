@@ -500,7 +500,7 @@ const sessionRoute = Effect.fn("cli.jitda-doc.session")(function* (
   const respond = route.match(/^(prompt-doc|question)\/submit\/([^/]+)\/respond$/)
   if (respond) {
     const action = input.action
-    if (!Store.valid("act", input.actorID) || !["approve", "cancel", "exclude"].includes(action)) return invalid()
+    if (!Store.valid("act", input.actorID) || !["approve", "cancel"].includes(action)) return invalid()
     return yield* run(() =>
       Doc.submitRespond({ sessionID, submitID: decodeURIComponent(respond[2]!), actorID: input.actorID, action }),
     )

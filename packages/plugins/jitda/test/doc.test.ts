@@ -642,162 +642,87 @@ describe("Doc submit votes", () => {
     stop()
   })
 
-  test("a leaver is marked left on the roster; only the requester leaving fails the vote", async () => {
+  const room = (docID: string) => {
+    const events: Event[] = []
+    const stops = new Map<string, () => void>()
+    return {
+      events,
+      connect(actorID: string) {
+        stops.set(actorID, Doc.submitConnect({ sessionID: SESSION, docID, actorID, peer: { send: collect(events) } }))
+      },
+      drop(actorID: string) {
+        stops.get(actorID)?.()
+        stops.delete(actorID)
+      },
+      close() {
+        for (const stop of stops.values()) stop()
+      },
+    }
+  }
+  const pastGrace = () => {
+    setSystemTime(Date.now() + Doc.VOTE_LEAVE_GRACE + 100)
+    Doc.leaveSweep()
+  }
+
+  test("a leaver who had not agreed leaves the vote, and the rest who all agreed send it", () => {
     const { docID } = Doc.prompt(SESSION)
     const [alice, bob, carol] = team("Alice", "Bob", "Carol")
-    const stopAlice = quiet(docID, alice!.actorID)
-    let stopBob = quiet(docID, bob!.actorID)
-    const carolPeer = listen(docID, carol!.actorID)
+    const live = room(docID)
+    for (const actor of [alice!, bob!, carol!]) live.connect(actor.actorID)
 
     const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
-    expect(state.status).toBe("pending")
-    expect(state.actors.length).toBe(3)
+    Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: carol!.actorID, action: "approve" })
 
-    stopBob()
-    stopBob = quiet(docID, bob!.actorID)
-    await wait(Doc.LEAVE_GRACE + 200)
-    const held = Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })
-    expect(held?.status).toBe("pending")
-    expect(held?.actors.length).toBe(3)
-    expect(held?.actors.every((actor) => actor.status !== "left")).toBe(true)
+    live.drop(bob!.actorID)
+    live.connect(bob!.actorID)
+    pastGrace()
+    expect(Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })?.actors).toHaveLength(3)
 
-    stopBob()
-    await wait(Doc.LEAVE_GRACE + 200)
-
-    const updated = carolPeer.events.findLast((event) => event.type === "updated")
-    expect(updated?.state.actors.find((actor) => actor.actorID === bob!.actorID)?.status).toBe("left")
-    const survived = Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })
-    expect(survived?.status).toBe("pending")
-    expect(survived?.actors.length).toBe(3)
-
-    stopAlice()
-    await wait(Doc.LEAVE_GRACE + 200)
-
-    const left = carolPeer.events.find((event) => event.type === "left")
-    expect(left).toBeDefined()
-    expect(left?.state.status).toBe("left")
-    expect(left?.state.cancelledBy?.actorID).toBe(alice!.actorID)
-    expect(left?.state.cancelledBy?.name).toBe("Alice")
-    expect(Doc.submitActive({ sessionID: SESSION, docID, actorID: carol!.actorID })).toBeUndefined()
-    expect(called("prompt").length).toBe(0)
-
-    carolPeer.stop()
-  }, 15_000)
-
-  test("an approved member leaving changes nothing", async () => {
-    const { docID } = Doc.prompt(SESSION)
-    const [alice, bob, carol] = team("Alice", "Bob", "Carol")
-    const stopAlice = quiet(docID, alice!.actorID)
-    const stopBob = quiet(docID, bob!.actorID)
-    const stopCarol = quiet(docID, carol!.actorID)
-    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
-    Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: bob!.actorID, action: "approve" })
-
-    stopBob()
-    await wait(Doc.LEAVE_GRACE + 200)
-    const held = Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })
-    expect(held?.actors.find((actor) => actor.actorID === bob!.actorID)?.status).toBe("approved")
-
-    stopCarol()
-    stopAlice()
-  }, 10_000)
-
-  test("a departure never sends by itself; the requester's exclude action does", async () => {
-    const { docID } = Doc.prompt(SESSION)
-    const [alice, bob] = team("Alice", "Bob")
-    const alicePeer = listen(docID, alice!.actorID)
-    const stopBob = quiet(docID, bob!.actorID)
-
-    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
-    expect(state.status).toBe("pending")
-
-    stopBob()
-    await wait(Doc.LEAVE_GRACE + 200)
-
-    expect(alicePeer.events.some((event) => event.type === "sent")).toBe(false)
-    const held = Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })
-    expect(held?.status).toBe("pending")
-    expect(held?.actors.find((actor) => actor.actorID === bob!.actorID)?.status).toBe("left")
-    expect(called("prompt").length).toBe(0)
-
-    expect(() =>
-      Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: bob!.actorID, action: "exclude" }),
-    ).toThrow(Doc.NotFoundError)
-
-    const sent = Doc.submitRespond({
-      sessionID: SESSION,
-      submitID: state.submitID,
-      actorID: alice!.actorID,
-      action: "exclude",
-    })
-    expect(sent.status).toBe("sent")
-    expect(sent.actors.map((actor) => actor.actorID)).toEqual([alice!.actorID])
-    expect(Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })).toBeUndefined()
+    live.drop(bob!.actorID)
+    pastGrace()
+    const sent = live.events.findLast((event) => event.type === "sent")
+    expect(sent?.state.actors.map((actor) => actor.actorID).sort()).toEqual([alice!.actorID, carol!.actorID].sort())
+    expect(live.events.some((event) => event.type === "left" || event.type === "cancelled")).toBe(false)
     expect(called("prompt").length).toBe(1)
-
-    alicePeer.stop()
-  }, 10_000)
-
-  test("exclude is a no-op while a present member is still deciding", async () => {
-    const { docID } = Doc.prompt(SESSION)
-    const [alice, bob, carol] = team("Alice", "Bob", "Carol")
-    const stopAlice = quiet(docID, alice!.actorID)
-    const stopBob = quiet(docID, bob!.actorID)
-    const stopCarol = quiet(docID, carol!.actorID)
-
-    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
-
-    stopBob()
-    await wait(Doc.LEAVE_GRACE + 200)
-    const held = Doc.submitRespond({
-      sessionID: SESSION,
-      submitID: state.submitID,
-      actorID: alice!.actorID,
-      action: "exclude",
-    })
-    expect(held.status).toBe("pending")
-    expect(held.actors.length).toBe(3)
-
-    stopCarol()
-    stopAlice()
-  }, 10_000)
-
-  test("exclude is a no-op when nobody has left", () => {
-    const { docID } = Doc.prompt(SESSION)
-    const [alice, bob] = team("Alice", "Bob")
-    const stopBob = quiet(docID, bob!.actorID)
-    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
-    const held = Doc.submitRespond({
-      sessionID: SESSION,
-      submitID: state.submitID,
-      actorID: alice!.actorID,
-      action: "exclude",
-    })
-    expect(held.status).toBe("pending")
-    expect(held.actors.length).toBe(2)
-    stopBob()
+    live.close()
   })
 
-  test("a left member who reconnects becomes pending again and can complete the vote", async () => {
+  test("a voter who leaves takes their vote along and the vote waits for the others", () => {
     const { docID } = Doc.prompt(SESSION)
-    const [alice, bob] = team("Alice", "Bob")
-    const stopAlice = quiet(docID, alice!.actorID)
-    const stopBob = quiet(docID, bob!.actorID)
+    const [alice, bob, carol] = team("Alice", "Bob", "Carol")
+    const live = room(docID)
+    for (const actor of [alice!, bob!, carol!]) live.connect(actor.actorID)
 
     const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+    Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: carol!.actorID, action: "approve" })
+    live.drop(carol!.actorID)
+    pastGrace()
 
-    stopBob()
-    await wait(Doc.LEAVE_GRACE + 200)
-    expect(
-      Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })?.actors.find(
-        (actor) => actor.actorID === bob!.actorID,
-      )?.status,
-    ).toBe("left")
+    const held = Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })
+    expect(held?.status).toBe("pending")
+    expect(held?.actors.map((actor) => `${actor.actorID}:${actor.status}`).sort()).toEqual(
+      [`${alice!.actorID}:approved`, `${bob!.actorID}:pending`].sort(),
+    )
+    live.close()
+  })
 
-    const bobAgain = listen(docID, bob!.actorID)
-    const replay = bobAgain.events.find((event) => event.type === "created")
-    expect(replay?.state.actors.find((actor) => actor.actorID === bob!.actorID)?.status).toBe("pending")
+  test("rejoining does not bring a vote back: the member is asked again", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob, carol] = team("Alice", "Bob", "Carol")
+    const live = room(docID)
+    for (const actor of [alice!, bob!, carol!]) live.connect(actor.actorID)
 
+    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+    Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: bob!.actorID, action: "approve" })
+    live.drop(bob!.actorID)
+    pastGrace()
+    live.connect(bob!.actorID)
+
+    const back = Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })
+    expect(back?.actors.find((actor) => actor.actorID === bob!.actorID)?.status).toBe("pending")
+
+    Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: carol!.actorID, action: "approve" })
+    expect(called("prompt").length).toBe(0)
     const sent = Doc.submitRespond({
       sessionID: SESSION,
       submitID: state.submitID,
@@ -805,10 +730,120 @@ describe("Doc submit votes", () => {
       action: "approve",
     })
     expect(sent.status).toBe("sent")
+    live.close()
+  })
 
-    bobAgain.stop()
-    stopAlice()
-  }, 10_000)
+  test("the requester leaving does not end the vote, and nobody left never sends", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob] = team("Alice", "Bob")
+    const live = room(docID)
+    for (const actor of [alice!, bob!]) live.connect(actor.actorID)
+
+    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+    live.drop(alice!.actorID)
+    pastGrace()
+    const held = Doc.submitActive({ sessionID: SESSION, docID, actorID: bob!.actorID })
+    expect(held?.status).toBe("pending")
+    expect(held?.actors.map((actor) => actor.actorID)).toEqual([bob!.actorID])
+
+    live.drop(bob!.actorID)
+    pastGrace()
+    const row = Store.db()
+      .query<{ status: string }, [string]>("SELECT status FROM doc_submit WHERE id = ?")
+      .get(state.submitID)
+    expect(row?.status).toBe("pending")
+    expect(called("prompt").length).toBe(0)
+    live.close()
+  })
+
+  test("a whole team dropping at once never sends on the votes of the offline", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob, carol] = team("Alice", "Bob", "Carol")
+    const live = room(docID)
+    for (const actor of [alice!, bob!, carol!]) live.connect(actor.actorID)
+
+    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+    Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: carol!.actorID, action: "approve" })
+
+    live.drop(bob!.actorID)
+    live.drop(alice!.actorID)
+    live.drop(carol!.actorID)
+    pastGrace()
+
+    const row = Store.db()
+      .query<{ status: string }, [string]>("SELECT status FROM doc_submit WHERE id = ?")
+      .get(state.submitID)
+    expect(row?.status).toBe("pending")
+    expect(called("prompt").length).toBe(0)
+    live.close()
+  })
+
+  test("an agreed member still in their grace holds the send until they are back", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob, carol] = team("Alice", "Bob", "Carol")
+    const live = room(docID)
+    for (const actor of [alice!, bob!, carol!]) live.connect(actor.actorID)
+
+    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+    Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: carol!.actorID, action: "approve" })
+
+    const t0 = Date.now()
+    live.drop(bob!.actorID)
+    setSystemTime(t0 + 5_000)
+    live.drop(carol!.actorID)
+    setSystemTime(t0 + Doc.VOTE_LEAVE_GRACE + 100)
+    Doc.leaveSweep()
+
+    const held = Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })
+    expect(held?.status).toBe("pending")
+    expect(held?.actors.map((actor) => actor.actorID).sort()).toEqual([alice!.actorID, carol!.actorID].sort())
+    expect(called("prompt").length).toBe(0)
+
+    live.connect(carol!.actorID)
+    expect(live.events.findLast((event) => event.type === "sent")?.state.submitID).toBe(state.submitID)
+    expect(called("prompt").length).toBe(1)
+    live.close()
+  })
+
+  test("a member stored as left by the old rule is asked again on reconnect", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob] = team("Alice", "Bob")
+    const live = room(docID)
+    for (const actor of [alice!, bob!]) live.connect(actor.actorID)
+
+    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+    live.drop(bob!.actorID)
+    Store.db().run("UPDATE doc_submit_actor SET status = 'left' WHERE submit_id = ? AND actor_id = ?", [
+      state.submitID,
+      bob!.actorID,
+    ])
+    live.connect(bob!.actorID)
+
+    const back = Doc.submitActive({ sessionID: SESSION, docID, actorID: alice!.actorID })
+    expect(back?.actors.find((actor) => actor.actorID === bob!.actorID)?.status).toBe("pending")
+    live.close()
+  })
+
+  test("after a restart, members who do not reconnect within the grace leave the vote", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob, carol] = team("Alice", "Bob", "Carol")
+    const live = room(docID)
+    for (const actor of [alice!, bob!, carol!]) live.connect(actor.actorID)
+    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+    Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: carol!.actorID, action: "approve" })
+
+    Doc.resetForTest()
+    live.events.length = 0
+    Doc.recover()
+    live.connect(alice!.actorID)
+    live.connect(carol!.actorID)
+    pastGrace()
+
+    const sent = live.events.findLast((event) => event.type === "sent")
+    expect(sent?.state.actors.map((actor) => actor.actorID).sort()).toEqual([alice!.actorID, carol!.actorID].sort())
+    expect(called("prompt").length).toBe(1)
+    live.close()
+  })
 
   test("membership changes top the countdown up by 3s, capped at one full window", () => {
     const { docID } = Doc.prompt(SESSION)
@@ -1189,7 +1224,7 @@ describe("Doc submit votes", () => {
     bobPeer.stop()
   })
 
-  test("a stale zombie peer joins the vote but is reaped and marked left, so the requester can finish", async () => {
+  test("a stale zombie peer joins the vote but is reaped and removed, so the remaining consensus sends", () => {
     const { docID } = Doc.prompt(SESSION)
     const [alice, bob, ghost] = team("Alice", "Bob", "Ghost")
 
@@ -1238,22 +1273,15 @@ describe("Doc submit votes", () => {
     setSystemTime(t0 + 6_000)
     Doc.heartbeatSweep()
 
-    await wait(Doc.LEAVE_GRACE + 200)
-    const marked = aliceEvents.findLast((event) => event.type === "updated")
-    expect(marked?.state.actors.find((actor) => actor.actorID === ghost!.actorID)?.status).toBe("left")
-
-    const sent = Doc.submitRespond({
-      sessionID: SESSION,
-      submitID: state.submitID,
-      actorID: alice!.actorID,
-      action: "exclude",
-    })
+    setSystemTime(t0 + 6_000 + Doc.VOTE_LEAVE_GRACE + 100)
+    Doc.leaveSweep()
+    const sent = aliceEvents.findLast((event) => event.type === "sent")!.state
     expect(sent.status).toBe("sent")
     expect(sent.actors.map((actor) => actor.actorID)).not.toContain(ghost!.actorID)
 
     stopA()
     stopB()
-  }, 15_000)
+  })
 })
 
 describe("Doc stop, clear and question votes", () => {
