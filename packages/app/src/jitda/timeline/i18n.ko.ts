@@ -8,4 +8,7 @@ export const dict: Partial<Record<keyof typeof en, string>> = {
   "jitda.btw.retry": "다시 묻기",
   "jitda.revert.banner": "이전 시점으로 되돌렸어요. 새 메시지를 보내면 그대로 확정돼요.",
   "jitda.revert.redo": "되돌리기 취소",
+  "jitda.initialPlan.title": "우리 팀의 최초 기획을 전달했어요",
+  "jitda.initialPlan.expand": "전체 보기",
+  "jitda.initialPlan.collapse": "접기",
 }

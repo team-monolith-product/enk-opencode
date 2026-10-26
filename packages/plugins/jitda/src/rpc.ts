@@ -193,3 +193,14 @@ export const ProjectSummary = {
   },
   events: {},
 } as const
+
+export const InitialPlan = {
+  id: "jitda.initial-plan",
+  methods: {
+    deliver: {
+      input: { type: "object", additionalProperties: false },
+      output: { type: "object", additionalProperties: true },
+    },
+  },
+  events: {},
+} as const

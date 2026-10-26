@@ -4,6 +4,7 @@ import { DevServerTool } from "./src/dev-server-tool"
 import { EnvRequest } from "./src/env-request"
 import { GitHub } from "./src/github"
 import { Image } from "./src/image"
+import { InitialPlan } from "./src/initial-plan"
 import { Locale } from "./src/locale"
 import { PreviewBridge } from "./src/preview-bridge"
 import { ProjectSummary } from "./src/project-summary"
@@ -25,6 +26,7 @@ export default Plugin.define({
       await Locale.start(ctx),
       await Session.start(ctx),
       await PreviewBridge.start(ctx),
+      await InitialPlan.start(ctx),
     ]
 
     return async () => {

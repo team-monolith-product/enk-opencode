@@ -310,6 +310,7 @@ export function CurrentUserMessageDisplay(props: {
   })
   const raw = createMemo(() => !!docID() && mode() === "prompt")
   const view = createMemo(() => (docID() ? host.doc : undefined))
+  const body = createMemo(() => host.userBody?.(props.message))
   const assetUrl = (url: string) => host.assetUrl?.(url) ?? url
 
   const referenced = createMemo(() => {
@@ -516,8 +517,16 @@ export function CurrentUserMessageDisplay(props: {
             data-doc={docID() ? "true" : undefined}
             data-raw={raw() ? "true" : undefined}
           >
-            <Show when={mode() === "doc" ? view() : undefined} keyed fallback={content()}>
-              {(component) => <Dynamic component={component} id={docID()!} fallback={content()} />}
+            <Show
+              when={body()}
+              keyed
+              fallback={
+                <Show when={mode() === "doc" ? view() : undefined} keyed fallback={content()}>
+                  {(component) => <Dynamic component={component} id={docID()!} fallback={content()} />}
+                </Show>
+              }
+            >
+              {(component) => <Dynamic component={component} id={props.message.id} text={props.text} />}
             </Show>
             <Show when={comments().length > 0}>
               <UserMessageComments comments={comments()} bounded />

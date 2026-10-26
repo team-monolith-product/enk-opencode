@@ -29,6 +29,7 @@ import { createSessionResolution } from "./session-resolution"
 import { SessionScreenView } from "./screen"
 import { PreparingComposer } from "./preparing-composer"
 import { JitdaProvider } from "@/jitda/context"
+import { InitialPlanBridge } from "@/jitda/bridge/initial-plan"
 import { ProjectSummaryBridge } from "@/jitda/bridge/project-summary"
 import { SessionFollow } from "@/jitda/bridge/session-follow"
 import { Flags } from "@/jitda/flags"
@@ -150,6 +151,7 @@ function ResolvedTargetSessionRoute() {
               <JitdaProvider directory={value()} sessionID={params.id}>
                 <Show when={Flags.productionLayout}>
                   <ProjectSummaryBridge />
+                  <InitialPlanBridge />
                   <SessionFollow />
                 </Show>
                 <TargetSessionPage />

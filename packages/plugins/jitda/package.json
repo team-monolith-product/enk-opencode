@@ -12,7 +12,8 @@
     "./env": "./src/env.ts",
     "./assets": "./src/assets.ts",
     "./doc": "./src/doc/index.ts",
-    "./rpc": "./src/rpc.ts"
+    "./rpc": "./src/rpc.ts",
+    "./serve-targets": "./src/serve-targets.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

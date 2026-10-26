@@ -24,9 +24,14 @@ export function createMain(api: { list: () => Promise<Info[]>; create: () => Pro
 
 export const Rpc = Definitions.Session
 
-export async function start(ctx: Context) {
+const mains = new WeakMap<Context, ReturnType<typeof createMain>>()
+
+// 같은 플러그인 컨텍스트(작업 폴더)에서는 메인 세션 판정과 생성 묶음을 하나만 쓴다(최초 기획 전달도 여기로 간다).
+export function mainOf(ctx: Context) {
+  const known = mains.get(ctx)
+  if (known) return known
   const directory = ctx.location.directory
-  const sessions = createMain({
+  const created = createMain({
     list: async () =>
       (
         (await ctx.session.list({ parentID: null, archived: false, directory, order: "desc", limit: 50 }))
@@ -34,6 +39,13 @@ export async function start(ctx: Context) {
       ).filter((session) => session.location.directory === directory),
     create: async () => (await ctx.session.create({ location: { directory } })) as unknown as Info,
   })
+  mains.set(ctx, created)
+  return created
+}
+
+export async function start(ctx: Context) {
+  const directory = ctx.location.directory
+  const sessions = mainOf(ctx)
 
   const archived = new Set<string>()
   const archive = async (sessionID: string) => {

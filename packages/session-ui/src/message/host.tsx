@@ -1,5 +1,5 @@
 import { createContext, useContext, type Component, type JSX } from "solid-js"
-import type { SessionMessageAssistantTool } from "@opencode/client/promise"
+import type { SessionMessageAssistantTool, SessionMessageUser } from "@opencode/client/promise"
 
 export type MessageDocView = Component<{ id: string; fallback?: JSX.Element }>
 
@@ -30,6 +30,8 @@ export type MessageHost = {
   assetUrl?: (url: string) => string
   /** Renders the document a user message was sent from (`metadata.jitda.docID`). */
   doc?: MessageDocView
+  /** Replaces the text of a user message the host recognizes, such as a handoff it sent for the team. */
+  userBody?: (message: SessionMessageUser) => Component<{ id: string; text: string }> | undefined
   /** Clips the user bubble to a torn-paper edge sized to the bubble (`--paper-edge`). */
   paperEdge?: boolean
   /** Shows non-image attachments as compact file chips, and a missing image as one. */

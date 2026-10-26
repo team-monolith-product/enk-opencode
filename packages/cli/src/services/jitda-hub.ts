@@ -4,6 +4,7 @@ import { Headers, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { randomUUID } from "node:crypto"
 import { JitdaAssets } from "./jitda-assets"
 import { JitdaDoc } from "./jitda-doc"
+import { JitdaInitialPlan } from "./jitda-initial-plan"
 
 // JupyterHub singleuser 로 뜰 때의 경로 prefix, Hub OAuth, activity 보고, CSP.
 // 브라우저 -> CHP(/user/<name>/) -> pod:8888 이고 CHP 는 인증 없이 라우팅만 하므로 여기서 사용자를 검증한다.
@@ -191,6 +192,10 @@ export function wrap(inner: ServerProcess.Transform, password: string): ServerPr
         touch()
         return yield* JitdaAssets.handle(request, basic)
       }
+      if (url.pathname === JitdaInitialPlan.PATH) {
+        touch()
+        return yield* JitdaInitialPlan.handle(request, basic)
+      }
       if (JitdaDoc.matches(url.pathname)) {
         if (!url.pathname.endsWith("/event")) touch()
         return yield* JitdaDoc.handle(request, basic)
@@ -317,6 +322,7 @@ export function start(server: string, password: string) {
   const auth = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`
   const handlers = new Set<(event: any) => void>()
   JitdaDoc.start(server, auth, (handler) => handlers.add(handler))
+  JitdaInitialPlan.start(server, auth)
   void watch(server, auth, handlers)
   const target = activityTarget()
   if (!target) return

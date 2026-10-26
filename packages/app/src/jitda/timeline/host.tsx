@@ -3,6 +3,7 @@ import type { MessageDocView, MessageHost } from "@opencode/session-ui/message"
 import { useJitda } from "@/jitda/context"
 import { Flags } from "@/jitda/flags"
 import { JitdaContextToolGroup } from "./context-tool-group"
+import { InitialPlanMessage, isInitialPlan } from "./initial-plan"
 import { JitdaSessionError, JitdaToolError } from "./tool-error"
 import { jitdaTool } from "./tools"
 import "./timeline.css"
@@ -41,6 +42,7 @@ export function createJitdaMessageHost(): MessageHost {
     get doc() {
       return docView()
     },
+    userBody: (message) => (isInitialPlan(message) ? InitialPlanMessage : undefined),
     tool: jitdaTool,
     toolError: JitdaToolError,
     sessionError: JitdaSessionError,

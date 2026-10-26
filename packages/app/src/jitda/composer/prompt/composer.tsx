@@ -51,6 +51,9 @@ const parseModel = (raw?: string) => {
   return { providerID: raw.slice(0, slash), id: raw.slice(slash + 1) }
 }
 
+// V1 은 매 전송에 기본 에이전트(build)를 실었다. V2 는 에이전트가 세션에 남으므로 최초 기획의 Plan 뒤에도 build 로 돌려놓는다.
+const BUILD = "build"
+
 const promptLocale = (value?: string | null) => (value === "ko" || value === "en" || value === "ar" ? value : undefined)
 
 // V1 components/prompt-input.tsx 의 운영 경로(문서 모드 전용). 운영 빌드는 모드 전환 버튼·하단 바·트리거가 꺼져 있어
@@ -361,7 +364,7 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
       text,
       ...(files.length > 0 ? { files } : {}),
       ...(pinned ? { model: pinned } : {}),
-      ...(delivery ? { delivery } : {}),
+      ...(delivery ? { delivery } : { agent: BUILD }),
       metadata: {
         format: "markdown",
         source: "doc",
@@ -409,8 +412,10 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
   }
 
   const send = async (sessionID: string, prompt: DocPrompt) => {
-    const { model: pinned, metadata, delivery, ...rest } = prompt
+    const { model: pinned, metadata, delivery, agent, ...rest } = prompt
     if (!delivery) await serverSDK.api.session.revert.commit({ sessionID }).catch(() => undefined)
+    if (agent && data.session.get(sessionID)?.agent !== agent)
+      await serverSDK.api.session.switchAgent({ sessionID, agent }).catch(() => undefined)
     if (pinned && delivery !== "queue") {
       await serverSDK.api.session
         .switchModel({
