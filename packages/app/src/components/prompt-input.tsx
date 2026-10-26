@@ -572,6 +572,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   createEffect(() => {
     bridge.setMode(docMode())
   })
+  // 모드는 컴포저가 내려갈 때만 되돌린다. 아래 등록 효과는 doc.ready 가 바뀔 때마다 다시 도는데, 그 정리에서
+  // 되돌리면 모드 효과는 docMode 가 그대로라 다시 돌지 않아 bridge.ready 가 영영 false 로 남는다.
+  onCleanup(() => bridge.setMode("normal"))
   const relPath = (path: string) => {
     const dir = sdk.directory.replace(/\/+$/, "")
     if (path.startsWith(dir) && (path === dir || path[dir.length] === "/")) {
@@ -624,7 +627,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       bridge.setAddFiles(undefined)
       bridge.setOpenLineReference(undefined)
       bridge.setOpenFileReference(undefined)
-      bridge.setMode("normal")
     })
   })
 

@@ -520,8 +520,13 @@ export namespace Session {
         })
         const msgs = yield* messages({ sessionID: input.sessionID })
         const idMap = new Map<string, MessageID>()
+        // 루프는 마지막으로 끝난 응답 뒤의 subtask·compaction 파트만 실행할 일로 집는다(prompt.ts). 그 앞의
+        // compaction 파트는 이미 끝난 압축의 경계라 filterCompacted 가 옛 기록을 자르는 데 쓴다 — 남긴다.
+        const settled = msgs.findLastIndex(
+          (msg) => msg.info.role === "assistant" && !!msg.info.finish && msg.info.time.completed !== undefined,
+        )
 
-        for (const msg of msgs) {
+        for (const [index, msg] of msgs.entries()) {
           if (input.messageID && msg.info.id >= input.messageID) break
           // 원본이 응답을 쓰는 중이면 그 미완료 메시지까지 복사된다. 포크 쪽에선 영원히 끝나지 않아
           // 계속 "실행 중"으로 보이므로, 원하는 호출자(사이드 채팅)는 끝난 턴만 가져간다.
@@ -538,11 +543,15 @@ export namespace Session {
           })
 
           for (const part of msg.parts) {
-            // 실행형 파트(서브태스크·압축)는 다음 턴의 루프가 집어 실행한다. 맥락으로만 복사하는 포크에서
+            // 아직 실행되지 않은 서브태스크·압축은 다음 턴의 루프가 집어 실행한다. 맥락으로만 복사하는 포크에서
             // 남기면 원본에서 돌던 작업이 여기서 다시 돈다 — 서브태스크는 쓰기 권한 있는 하위 에이전트로.
-            if (input.inert && (part.type === "subtask" || part.type === "compaction")) continue
+            const pending = index > settled && (part.type === "subtask" || part.type === "compaction")
+            if (input.inert && pending) continue
+            // 끝난 압축 경계는 남은 꼬리의 첫 메시지를 가리킨다. 그 메시지는 앞서 복사됐으니 새 ID 로 바꾼다.
+            const tail = part.type === "compaction" && part.tail_start_id ? idMap.get(part.tail_start_id) : undefined
             yield* updatePart({
               ...part,
+              ...(tail && { tail_start_id: tail }),
               id: PartID.ascending(),
               messageID: cloned.id,
               sessionID: session.id,

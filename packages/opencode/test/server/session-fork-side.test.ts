@@ -5,7 +5,7 @@ import { Instance } from "../../src/project/instance"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Server } from "../../src/server/server"
 import { Session } from "../../src/session"
-import type { MessageV2 } from "../../src/session/message-v2"
+import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { Log } from "../../src/util/log"
 import { isSideSession } from "../../src/tool/handoff"
@@ -113,6 +113,45 @@ describe("POST /session/:id/fork side", () => {
         expect(copied.flatMap((m) => m.parts.map((part) => part.type))).toEqual(["text"])
         expect(isSideSession(side)).toBe(true)
         expect(isSideSession(main)).toBe(false)
+      },
+    })
+  })
+
+  // 끝난 압축의 경계(compaction 파트)를 지우면 filterCompacted 가 옛 기록을 자르지 못해 사이드 첫 질문에
+  // 압축 전 기록이 통째로 실린다. 끝난 경계는 남기고 꼬리 참조도 새 ID 로 옮겨야 한다.
+  test("side fork keeps completed compaction boundaries", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const main = await Session.create({})
+        const old = await user(main.id, "old turn")
+        await assistant(main.id, old.id, true)
+        const tail = await user(main.id, "kept tail")
+        await assistant(main.id, tail.id, true)
+        const compact = await user(main.id, "compact")
+        await Session.updatePart({
+          id: PartID.ascending(),
+          sessionID: main.id,
+          messageID: compact.id,
+          type: "compaction",
+          auto: true,
+          tail_start_id: tail.id,
+        })
+        const summary = await assistant(main.id, compact.id, true)
+        await Session.updateMessage({ ...summary, summary: true })
+        const next = await user(main.id, "after compaction")
+        await assistant(main.id, next.id, true)
+
+        const side = await fork(main.id, { side: true })
+
+        const effective = (id: SessionID) =>
+          MessageV2.filterCompacted(MessageV2.stream(id)).then((list) =>
+            list.map((msg) => msg.parts.find((part) => part.type === "text")?.text),
+          )
+        const [mainView, sideView] = await Promise.all([effective(main.id), effective(side.id)])
+        expect(sideView).toEqual(mainView)
+        expect(sideView).not.toContain("old turn")
       },
     })
   })

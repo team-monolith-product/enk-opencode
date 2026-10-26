@@ -39,7 +39,8 @@ export type SideDraft = { text: string; attachments: SideAttachment[] }
 // 다시 찾지 않는 메인 세션(지워졌는데 이 브라우저가 몰랐던 것 등)의 항목이 끝없이 쌓이지 않게 최근 것만 둔다.
 const MAX_ENTRIES = 50
 const MAX_HANDLED = 200
-const EMPTY_DRAFT: SideDraft = { text: "", attachments: [] }
+// 스토어에 넣으면 프록시로 감싸져 이후 병합으로 바뀐다 — 공유 상수 대신 매번 새 객체를 쓴다.
+const emptyDraft = (): SideDraft => ({ text: "", attachments: [] })
 
 function createSideChat() {
   const params = useParams()
@@ -239,10 +240,17 @@ function createSideChat() {
   }
 
   // 넘길 첨부의 바이트 — 사이드 세션 대화(포크된 메인 기록 포함)의 파일 파트에서 이름으로 찾는다.
-  const sources = (list: Message[] | undefined): HandoffSources => ({
+  // 처음엔 최근 80개만 받아 두므로, 없으면 이전 페이지를 받아 가며 찾는다 — 서버 handoff 툴은 모델이 보는
+  // 전체 기록으로 이름을 확인했으니, 화면에 안 받은 페이지에 있을 수 있다.
+  const MAX_HISTORY_PAGES = 20
+  const sources = (id: string): HandoffSources => ({
     workspace,
     attachment: async (name) => {
-      const source = findAttachment(list, sync.data.part, name)
+      let source = findAttachment(sync.data.message[id], sync.data.part, name)
+      for (let page = 0; !source && page < MAX_HISTORY_PAGES && sync.session.history.more(id); page++) {
+        await sync.session.history.loadMore(id)
+        source = findAttachment(sync.data.message[id], sync.data.part, name)
+      }
       if (!source) return
       const blob = await bytes(source).catch(() => undefined)
       if (!blob) return
@@ -259,10 +267,11 @@ function createSideChat() {
     try {
       for (;;) {
         const k = untrack(key)
+        const id = untrack(sessionID)
         const next = untrack(pending)[0]
-        if (!k || !next || !untrack(bridge.ready)) return
+        if (!k || !id || !next || !untrack(bridge.ready)) return
         try {
-          const prepared = await prepareHandoff(next.input, sources(untrack(messages)))
+          const prepared = await prepareHandoff(next.input, sources(id))
           // 모으는 동안 다른 세션으로 옮겼거나 메인 입력창이 내려갔다 — 아직 아무것도 넣지 않았으니
           // 다음 기회(입력창이 다시 붙어 revision 이 오를 때)로 미룬다.
           if (untrack(key) !== k || !untrack(bridge.ready)) return
@@ -300,11 +309,14 @@ function createSideChat() {
   const [drafts, setDrafts] = createStore<Record<string, SideDraft | undefined>>({})
   const draft = () => {
     const k = key()
-    return (k && drafts[k]) || EMPTY_DRAFT
+    return (k && drafts[k]) || emptyDraft()
   }
+  const snapshot = (value: SideDraft | undefined): SideDraft =>
+    value ? { text: value.text, attachments: value.attachments.map((item) => ({ ...item })) } : emptyDraft()
   const updateDraft = (next: (current: SideDraft) => SideDraft, k = untrack(key)) => {
     if (!k) return
-    setDrafts(k, next(drafts[k] ?? EMPTY_DRAFT))
+    // 객체를 그냥 넘기면 기존 항목에 얕게 병합된다 — 통째로 바꾼다.
+    setDrafts(k, reconcile(next(snapshot(drafts[k]))))
   }
 
   /**
@@ -313,8 +325,9 @@ function createSideChat() {
    */
   const takeDraft = () => {
     const k = untrack(key)
-    const taken = k ? (drafts[k] ?? EMPTY_DRAFT) : EMPTY_DRAFT
-    updateDraft(() => EMPTY_DRAFT, k)
+    // 스토어 프록시를 들고 있으면 바로 아래 비우기가 그 값까지 지운다 — 평범한 사본으로 꺼낸다.
+    const taken = snapshot(k ? drafts[k] : undefined)
+    updateDraft(emptyDraft, k)
     return {
       draft: taken,
       restore: () => updateDraft((current) => (current.text || current.attachments.length ? current : taken), k),
