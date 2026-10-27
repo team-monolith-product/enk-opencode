@@ -683,13 +683,9 @@ export function SessionBrowserChrome(props: {
     if (previewBlocked() || !props.url) return
     window.open(props.url, "_blank", "noopener")
   }
-  const copyAddress = async () => {
+  const copyAddress = () => {
     if (previewBlocked() || !props.url) return
-    const ok = await writeClipboard(props.url)
-    if (!ok) {
-      showToast({ title: language.t("common.requestFailed") })
-      return
-    }
+    void writeClipboard(props.url)
     setCopied(true)
     if (copyTimer) clearTimeout(copyTimer)
     copyTimer = setTimeout(() => setCopied(false), 1500)
