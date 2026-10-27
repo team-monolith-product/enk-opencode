@@ -22,6 +22,7 @@ export namespace GitHub {
   const detail = 300
   const transient: Code[] = ["remote", "missing"]
   const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
+  const ignored = [".playwright-mcp/"]
   const exclude = [
     ".env",
     ".env.*",
@@ -32,6 +33,7 @@ export namespace GitHub {
     ".venv/",
     "__pycache__/",
     ".opencode/",
+    ...ignored,
     ".DS_Store",
   ]
 
@@ -235,6 +237,16 @@ export namespace GitHub {
     }
   }
 
+  /** 에이전트가 남기는 부산물 폴더를 학생 작업 폴더의 .gitignore 에 적어 둔다. 이미 있으면 건드리지 않는다. */
+  export async function ignore(dir: string) {
+    const file = path.join(dir, ".gitignore")
+    const text = await readFile(file, "utf8").catch(() => "")
+    const lines = new Set(text.split(/\r?\n/).map((line) => line.trim().replace(/\/$/, "")))
+    const missing = ignored.filter((item) => !lines.has(item.replace(/\/$/, "")))
+    if (missing.length === 0) return
+    await writeFile(file, text + (text && !text.endsWith("\n") ? "\n" : "") + missing.join("\n") + "\n")
+  }
+
   export async function push(dir: string, input: { message: string | Describe }, known?: Link) {
     const hit = known ?? (await linked())
     if (!hit.repo) throw new Failure("norepo", 409)
@@ -244,6 +256,7 @@ export namespace GitHub {
       `/repos/${encodeURIComponent(hit.repo.owner)}/${encodeURIComponent(hit.repo.name)}`,
     )
     if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
+    await ignore(dir).catch((err) => log.warn("gitignore skipped", { error: String(err) }))
     const gitdir = path.join(Global.Path.data, "github", Hash.fast(dir))
     const result = await serial(gitdir, () =>
       publish({

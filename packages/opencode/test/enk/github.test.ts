@@ -66,6 +66,35 @@ async function put(root: string, files: Record<string, string>) {
   }
 }
 
+describe("GitHub.ignore", () => {
+  test("creates a .gitignore that lists the agent leftovers", async () => {
+    await using tmp = await tmpdir()
+
+    await GitHub.ignore(tmp.path)
+
+    expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe(".playwright-mcp/\n")
+  })
+
+  test("appends to an existing .gitignore without touching its lines", async () => {
+    await using tmp = await tmpdir()
+    await writeFile(path.join(tmp.path, ".gitignore"), "dist")
+
+    await GitHub.ignore(tmp.path)
+    await GitHub.ignore(tmp.path)
+
+    expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe("dist\n.playwright-mcp/\n")
+  })
+
+  test("leaves a .gitignore that already covers the folder alone", async () => {
+    await using tmp = await tmpdir()
+    await writeFile(path.join(tmp.path, ".gitignore"), ".playwright-mcp\n")
+
+    await GitHub.ignore(tmp.path)
+
+    expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe(".playwright-mcp\n")
+  })
+})
+
 describe("GitHub.publish", () => {
   test("first push leaves out secrets, dependencies and the opencode marker", async () => {
     await using tmp = await tmpdir()
@@ -88,6 +117,17 @@ describe("GitHub.publish", () => {
     expect((await $`git --git-dir=${ws.remote} log -1 --format=%an/%ae main`.quiet().text()).trim()).toBe(
       `${author.name}/${author.email}`,
     )
+  })
+
+  test("the folder the agent leaves behind stays out once the workspace .gitignore lists it", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "a", ".playwright-mcp/console.log": "log" })
+    await GitHub.ignore(ws.work)
+
+    await ws.publish("first")
+
+    expect(await ws.files()).toEqual([".gitignore", "index.html"])
   })
 
   test("an unchanged workspace pushes nothing", async () => {
