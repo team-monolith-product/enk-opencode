@@ -639,11 +639,8 @@
     },
   },
   "trustedDependencies": [
-    "esbuild",
-    "tree-sitter-powershell",
     "electron",
-    "web-tree-sitter",
-    "tree-sitter-bash",
+    "esbuild",
   ],
   "patchedDependencies": {
     "@ai-sdk/provider-utils@4.0.21": "patches/@ai-sdk%2Fprovider-utils@4.0.21.patch",
