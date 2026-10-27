@@ -8,10 +8,11 @@ const writeWithClipboardAPI = (value: string) => {
 }
 
 const writeWithSelection = (value: string) => {
-  const body = typeof document === "undefined" ? undefined : document.body
-  if (!body) return false
+  if (typeof document === "undefined" || !document.body) return false
 
   const restore = document.activeElement
+  const host = restore instanceof HTMLElement ? restore.closest<HTMLElement>('[role="menu"],[role="dialog"]') : null
+  const body = host ?? document.body
   const textarea = document.createElement("textarea")
   textarea.value = value
   textarea.setAttribute("readonly", "")
@@ -31,7 +32,7 @@ const writeWithSelection = (value: string) => {
     copied = false
   }
 
-  body.removeChild(textarea)
+  textarea.remove()
   if (restore instanceof HTMLElement) restore.focus()
   return copied
 }
