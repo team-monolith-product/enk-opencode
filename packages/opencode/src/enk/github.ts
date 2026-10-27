@@ -15,6 +15,9 @@ export namespace GitHub {
   const route = "/api/v1/opencode/github"
   const limit = 100 * 1024 * 1024
   const bridge = "__preview-bridge.js"
+  const attempts = 3
+  const backoff = 500
+  const detail = 300
   const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
   const exclude = [
     ".env",
@@ -31,6 +34,7 @@ export namespace GitHub {
 
   export type Repo = { owner: string; name: string; url: string; private?: boolean }
   export type Push = { sha: string; time: number; by?: string }
+  export type FirstPush = { attempts: number; code: Code; reason: string }
   export type Status = {
     enabled: boolean
     connectUrl?: string
@@ -38,6 +42,7 @@ export namespace GitHub {
     linkedBy?: string
     repo?: Repo
     push?: Push
+    firstPush?: FirstPush
   }
   export type Result = { sha?: string; skipped: string[] }
   export type Change = { status: "A" | "M" | "D"; file: string }
@@ -85,6 +90,7 @@ export namespace GitHub {
   }
 
   const chains = new Map<string, Promise<unknown>>()
+  const failed = new Map<string, FirstPush>()
 
   function serial<T>(key: string, fn: () => Promise<T>) {
     const run = (chains.get(key) ?? Promise.resolve()).catch(() => undefined).then(fn)
@@ -148,6 +154,7 @@ export namespace GitHub {
       linkedBy: hit.connected ? hit.linked_by : undefined,
       repo: hit.repo,
       push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
+      firstPush: failed.get(dir),
     }
   }
 
@@ -187,16 +194,30 @@ export namespace GitHub {
     private: remote.private,
   })
 
-  export async function create(dir: string, input: { name: string }) {
+  export async function create(dir: string, input: { name: string; message?: string | Describe }) {
     const hit = await linked()
     const repo = shape(
       await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
     )
     await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
-    await push(dir, { message: "Initial commit from Jitda" }).catch((err) => {
-      log.warn("first push skipped", { error: err instanceof Error ? err.message : String(err) })
-    })
+    await firstPush(dir, { ...hit, repo }, input.message ?? "Initial commit from Jitda")
     return status(dir)
+  }
+
+  async function firstPush(dir: string, hit: Link, message: string | Describe) {
+    for (let attempt = 1; ; attempt++) {
+      const failure = await push(dir, { message }, hit).then(
+        () => undefined,
+        (err) => (err instanceof Failure ? err : new Failure("remote", 502, String(err))),
+      )
+      if (!failure) return failed.delete(dir)
+      log.warn("first push failed", { attempt, code: failure.code, error: failure.message })
+      if (failure.code !== "remote" || attempt >= attempts) {
+        failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
+        return
+      }
+      await Bun.sleep(backoff * attempt)
+    }
   }
 
   function auth(token: string) {
@@ -210,8 +231,8 @@ export namespace GitHub {
     }
   }
 
-  export async function push(dir: string, input: { message: string | Describe }) {
-    const hit = await linked()
+  export async function push(dir: string, input: { message: string | Describe }, known?: Link) {
+    const hit = known ?? (await linked())
     if (!hit.repo) throw new Failure("norepo", 409)
     const remote = await request<Remote>(
       hit.token!,
@@ -235,6 +256,7 @@ export namespace GitHub {
       }),
     )
     if (result.sha) {
+      failed.delete(dir)
       await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
       log.info("pushed", { sha: result.sha })
     }

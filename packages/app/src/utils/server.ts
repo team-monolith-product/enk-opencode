@@ -140,6 +140,7 @@ export type GitHubStatus = {
   linkedBy?: string
   repo?: GitHubRepo
   push?: { sha: string; time: number; by?: string }
+  firstPush?: { attempts: number; code: string; reason: string }
 }
 
 export function githubCode(err: unknown) {
@@ -153,7 +154,7 @@ export function getGitHubStatus(opts: GitHubOpts): Promise<GitHubStatus> {
     .then((res) => res.data as GitHubStatus)
 }
 
-export function createGitHubRepo(opts: GitHubOpts, input: { name: string }): Promise<GitHubStatus> {
+export function createGitHubRepo(opts: GitHubOpts, input: { name: string; locale?: "ko" | "en" }): Promise<GitHubStatus> {
   return devServerClient(opts)
     .post({ url: "/github/repo", body: input })
     .then((res) => res.data as GitHubStatus)
