@@ -17,6 +17,7 @@ afterEach(async () => {
   delete process.env["ENK_HACKATHON_RAILS_URL"]
   delete process.env["ENK_AI_USAGE_TOKEN"]
   delete process.env["ENK_PROJECT_DIRECTORY"]
+  delete process.env["GIT_CONFIG_GLOBAL"]
 })
 
 /** 팀 pod 가 이야기하는 hackathon-rails 역할. 실제 HTTP 를 그대로 태운다. */
@@ -339,6 +340,27 @@ describe("GitHub.create", () => {
     private: false,
   }
 
+  async function hub(root: string) {
+    const bare = path.join(root, "hub", "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(root, "gitconfig")
+    await writeFile(config, `[url "file://${path.join(root, "hub")}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    return {
+      files: () =>
+        $`git --git-dir=${bare} ls-tree -r --name-only main`
+          .quiet()
+          .text()
+          .then((text) => text.split("\n").filter(Boolean)),
+      subjects: () =>
+        $`git --git-dir=${bare} log --format=%s main`
+          .quiet()
+          .text()
+          .then((text) => text.split("\n").filter(Boolean)),
+    }
+  }
+
   function mockGitHub(read: () => Response) {
     const original = globalThis.fetch
     const calls: string[] = []
@@ -350,6 +372,71 @@ describe("GitHub.create", () => {
     }) as typeof fetch)
     return { calls, [Symbol.dispose]: () => spy.mockRestore() }
   }
+
+  test("pushes the workspace to the new repository and clears the failure", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>", ".env": "KEY=secret" })
+    using github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    const status = await GitHub.create(work, { name: "jitda-app" })
+
+    expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual(["index.html"])
+    expect(await origin.subjects()).toEqual(["Initial commit from Jitda"])
+    expect(rails.reports).toHaveLength(2)
+    expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
+  })
+
+  test("a transient failure is retried and the second attempt succeeds", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a" })
+    let reads = 0
+    using github = mockGitHub(() =>
+      ++reads === 1
+        ? Response.json({ message: "Bad Gateway" }, { status: 502 })
+        : Response.json({ ...remote, default_branch: "main", permissions: { push: true } }),
+    )
+
+    const status = await GitHub.create(work, { name: "jitda-app" })
+
+    expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(2)
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual(["index.html"])
+  })
+
+  test("an empty workspace is reported without retrying", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await mkdir(work, { recursive: true })
+    using github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    const status = await GitHub.create(work, { name: "jitda-app" })
+
+    expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(1)
+    expect(status.firstPush).toMatchObject({ attempts: 1, code: "empty" })
+  })
+
+  test("a message builder names the first commit", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    await GitHub.create(work, { name: "jitda-app", message: async (changes) => `first: ${changes.length}` })
+
+    expect(await origin.subjects()).toEqual(["first: 1"])
+  })
 
   test("retries the first push three times and keeps the failure reason", async () => {
     await using tmp = await tmpdir()
