@@ -18,6 +18,7 @@ export namespace GitHub {
   const bridge = "__preview-bridge.js"
   const attempts = 3
   const backoff = 500
+  const budget = 60_000
   const detail = 300
   const transient: Code[] = ["remote", "missing"]
   const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
@@ -207,6 +208,7 @@ export namespace GitHub {
   }
 
   async function firstPush(dir: string, hit: Link, message: string | Describe) {
+    const started = Date.now()
     for (let attempt = 1; ; attempt++) {
       const failure = await push(dir, { message }, hit).then(
         () => undefined,
@@ -214,7 +216,7 @@ export namespace GitHub {
       )
       if (!failure) return
       log.warn("first push failed", { attempt, code: failure.code, error: failure.message })
-      if (!transient.includes(failure.code) || attempt >= attempts) {
+      if (!transient.includes(failure.code) || attempt >= attempts || Date.now() - started > budget) {
         failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
         return
       }

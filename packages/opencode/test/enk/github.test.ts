@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, spyOn, test } from "bun:test"
 import { $ } from "bun"
 import path from "path"
 import { mkdir, rm, truncate, writeFile } from "fs/promises"
@@ -499,6 +499,25 @@ describe("GitHub.create", () => {
 
     expect((await GitHub.status(work)).firstPush).toBeUndefined()
     expect(await origin.subjects()).toEqual(["later"])
+  })
+
+  test("stops retrying once the first push has used up its time budget", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const now = Date.now()
+    using github = mockGitHub(() => {
+      setSystemTime(now + 61_000)
+      return Response.json({ message: "Bad Gateway" }, { status: 502 })
+    })
+
+    try {
+      const status = await GitHub.create(tmp.path, { name: "jitda-app" })
+
+      expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(1)
+      expect(status.firstPush).toMatchObject({ attempts: 1, code: "remote" })
+    } finally {
+      setSystemTime()
+    }
   })
 
   test("a refusal that retrying cannot fix is reported after one attempt", async () => {
