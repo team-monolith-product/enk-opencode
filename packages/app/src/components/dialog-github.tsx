@@ -119,7 +119,10 @@ export function DialogGitHub() {
     const first = state.status?.firstPush
     if (!first) return
     const code = first.code in ERRORS ? language.t(ERRORS[first.code as keyof typeof ERRORS]) : undefined
-    return { attempts: first.attempts, reason: [code, first.reason].filter(Boolean).join(" · ") }
+    return {
+      attempts: first.attempts,
+      reason: [code, first.reason === first.code ? undefined : first.reason].filter(Boolean).join(" · "),
+    }
   })
 
   const view = createMemo(() => {

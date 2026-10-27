@@ -459,6 +459,26 @@ describe("GitHub.create", () => {
     ])
   })
 
+  test("a repository that GitHub has not made visible yet is retried", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a" })
+    let reads = 0
+    using github = mockGitHub(() =>
+      ++reads === 1
+        ? Response.json({ message: "Not Found" }, { status: 404 })
+        : Response.json({ ...remote, default_branch: "main", permissions: { push: true } }),
+    )
+
+    const status = await GitHub.create(work, { name: "jitda-app" })
+
+    expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(2)
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual(["index.html"])
+  })
+
   test("a refusal that retrying cannot fix is reported after one attempt", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)

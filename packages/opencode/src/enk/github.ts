@@ -18,6 +18,7 @@ export namespace GitHub {
   const attempts = 3
   const backoff = 500
   const detail = 300
+  const transient: Code[] = ["remote", "missing"]
   const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
   const exclude = [
     ".env",
@@ -215,7 +216,7 @@ export namespace GitHub {
         return
       }
       log.warn("first push failed", { attempt, code: failure.code, error: failure.message })
-      if (failure.code !== "remote" || attempt >= attempts) {
+      if (!transient.includes(failure.code) || attempt >= attempts) {
         failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
         return
       }
