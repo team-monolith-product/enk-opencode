@@ -1,5 +1,6 @@
 import { mkdir, lstat, readFile, writeFile } from "fs/promises"
 import path from "path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { Global } from "../global"
 import { EnvFile } from "../util/env-file"
 import { git } from "../util/git"
@@ -211,16 +212,13 @@ export namespace GitHub {
         () => undefined,
         (err) => (err instanceof Failure ? err : new Failure("remote", 502, String(err))),
       )
-      if (!failure) {
-        failed.delete(dir)
-        return
-      }
+      if (!failure) return
       log.warn("first push failed", { attempt, code: failure.code, error: failure.message })
       if (!transient.includes(failure.code) || attempt >= attempts) {
         failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
         return
       }
-      await Bun.sleep(backoff * attempt)
+      await sleep(backoff * attempt)
     }
   }
 
@@ -259,8 +257,8 @@ export namespace GitHub {
         env: auth(hit.token!),
       }),
     )
+    failed.delete(dir)
     if (result.sha) {
-      failed.delete(dir)
       await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
       log.info("pushed", { sha: result.sha })
     }
