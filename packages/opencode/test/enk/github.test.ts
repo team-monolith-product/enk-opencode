@@ -130,6 +130,16 @@ describe("GitHub.publish", () => {
     expect(await ws.files()).toEqual([".gitignore", "index.html"])
   })
 
+  test("the agent leftovers stay out even when the workspace .gitignore tries to bring them back", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "a", ".gitignore": "!.playwright-mcp/\n", ".playwright-mcp/page.yml": "page" })
+
+    await ws.publish("first")
+
+    expect(await ws.files()).toEqual([".gitignore", "index.html"])
+  })
+
   test("an unchanged workspace pushes nothing", async () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)
@@ -425,7 +435,7 @@ describe("GitHub.create", () => {
 
     expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
     expect(status.firstPush).toBeUndefined()
-    expect(await origin.files()).toEqual(["index.html"])
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
     expect(await origin.subjects()).toEqual(["Initial commit from Jitda"])
     expect(rails.reports).toHaveLength(2)
     expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
@@ -448,21 +458,21 @@ describe("GitHub.create", () => {
 
     expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(2)
     expect(status.firstPush).toBeUndefined()
-    expect(await origin.files()).toEqual(["index.html"])
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
   })
 
-  test("an empty workspace is reported without retrying", async () => {
+  test("an empty workspace still gets its .gitignore pushed", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)
-    await hub(tmp.path)
+    const origin = await hub(tmp.path)
     const work = path.join(tmp.path, "work")
     await mkdir(work, { recursive: true })
-    using github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
 
     const status = await GitHub.create(work, { name: "jitda-app" })
 
-    expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(1)
-    expect(status.firstPush).toMatchObject({ attempts: 1, code: "empty" })
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual([".gitignore"])
   })
 
   test("a message builder names the first commit", async () => {
@@ -475,7 +485,7 @@ describe("GitHub.create", () => {
 
     await GitHub.create(work, { name: "jitda-app", message: async (changes) => `first: ${changes.length}` })
 
-    expect(await origin.subjects()).toEqual(["first: 1"])
+    expect(await origin.subjects()).toEqual(["first: 2"])
   })
 
   test("retries the first push three times and keeps the failure reason", async () => {
@@ -516,7 +526,21 @@ describe("GitHub.create", () => {
 
     expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(2)
     expect(status.firstPush).toBeUndefined()
-    expect(await origin.files()).toEqual(["index.html"])
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+  })
+
+  test("the first push lists the agent leftovers in the workspace .gitignore and keeps them out", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a", ".playwright-mcp/console.log": "log" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    await GitHub.create(work, { name: "jitda-app" })
+
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+    expect(await Bun.file(path.join(work, ".gitignore")).text()).toBe(".playwright-mcp/\n")
   })
 
   test("a later successful push clears the recorded first push failure", async () => {

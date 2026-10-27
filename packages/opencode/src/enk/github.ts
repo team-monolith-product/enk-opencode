@@ -23,6 +23,7 @@ export namespace GitHub {
   const transient: Code[] = ["remote", "missing"]
   const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
   const ignored = [".playwright-mcp/"]
+  const leftovers = ignored.map((item) => item.replace(/\/$/, ""))
   const exclude = [
     ".env",
     ".env.*",
@@ -280,6 +281,11 @@ export namespace GitHub {
     return { ...result, url: result.sha ? `${hit.repo.url}/commit/${result.sha}` : hit.repo.url }
   }
 
+  /** 학생 .gitignore 의 부정 패턴(!)이 info/exclude 보다 앞서므로, 부산물 폴더는 경로로도 한 번 더 거른다. */
+  function leftover(file: string) {
+    return file.split("/").some((part) => leftovers.includes(part))
+  }
+
   function strip(text: string) {
     let clean = text
     for (let previous = ""; previous !== clean; ) {
@@ -355,7 +361,7 @@ export namespace GitHub {
       await must(["read-tree", "--empty"])
       const files = await Promise.all(
         (await scan(""))
-          .filter((file) => !EnvFile.isSecretFile(file) && path.posix.basename(file) !== bridge)
+          .filter((file) => !EnvFile.isSecretFile(file) && path.posix.basename(file) !== bridge && !leftover(file))
           .map(async (file) => ({
             file,
             size: (await lstat(path.join(input.worktree, file)).catch(() => undefined))?.size,
