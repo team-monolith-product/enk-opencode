@@ -257,10 +257,10 @@ export namespace GitHub {
       `/repos/${encodeURIComponent(hit.repo.owner)}/${encodeURIComponent(hit.repo.name)}`,
     )
     if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
-    await ignore(dir).catch((err) => log.warn("gitignore skipped", { error: String(err) }))
     const gitdir = path.join(Global.Path.data, "github", Hash.fast(dir))
-    const result = await serial(gitdir, () =>
-      publish({
+    const result = await serial(gitdir, async () => {
+      await ignore(dir).catch((err) => log.warn("gitignore skipped", { error: String(err) }))
+      return publish({
         gitdir,
         worktree: dir,
         remote: `${web}/${hit.repo!.owner}/${hit.repo!.name}.git`,
@@ -271,8 +271,8 @@ export namespace GitHub {
           email: `${hit.github_user_id ? `${hit.github_user_id}+` : ""}${hit.login}@users.noreply.github.com`,
         },
         env: auth(hit.token!),
-      }),
-    )
+      })
+    })
     failed.delete(dir)
     if (result.sha) {
       await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)

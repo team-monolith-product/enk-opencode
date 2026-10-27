@@ -384,7 +384,7 @@ export namespace Project {
         if (result.code !== 0) {
           throw new Error(result.stderr.trim() || result.text.trim() || "Failed to initialize git repository")
         }
-        yield* Effect.promise(() => GitHub.ignore(input.directory)).pipe(Effect.ignore)
+        yield* Effect.tryPromise(() => GitHub.ignore(input.directory)).pipe(Effect.ignore)
         const { project } = yield* fromDirectory(input.directory)
         return project
       })
