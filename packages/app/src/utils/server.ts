@@ -1,6 +1,7 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createClient } from "@opencode-ai/sdk/v2/gen/client"
 import type { ServerConnection } from "@/context/server"
+import type { PromptLocale } from "@/utils/prompt-locale"
 
 function basicAuth(server: ServerConnection.HttpBase) {
   if (!server.password) return
@@ -154,7 +155,10 @@ export function getGitHubStatus(opts: GitHubOpts): Promise<GitHubStatus> {
     .then((res) => res.data as GitHubStatus)
 }
 
-export function createGitHubRepo(opts: GitHubOpts, input: { name: string; locale?: "ko" | "en" }): Promise<GitHubStatus> {
+export function createGitHubRepo(
+  opts: GitHubOpts,
+  input: { name: string; locale?: PromptLocale },
+): Promise<GitHubStatus> {
   return devServerClient(opts)
     .post({ url: "/github/repo", body: input })
     .then((res) => res.data as GitHubStatus)

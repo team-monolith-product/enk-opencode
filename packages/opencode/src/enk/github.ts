@@ -210,7 +210,10 @@ export namespace GitHub {
         () => undefined,
         (err) => (err instanceof Failure ? err : new Failure("remote", 502, String(err))),
       )
-      if (!failure) return failed.delete(dir)
+      if (!failure) {
+        failed.delete(dir)
+        return
+      }
       log.warn("first push failed", { attempt, code: failure.code, error: failure.message })
       if (failure.code !== "remote" || attempt >= attempts) {
         failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
