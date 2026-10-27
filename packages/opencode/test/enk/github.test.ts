@@ -479,6 +479,28 @@ describe("GitHub.create", () => {
     expect(await origin.files()).toEqual(["index.html"])
   })
 
+  test("a later successful push clears the recorded first push failure", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a" })
+    let healthy = false
+    using _github = mockGitHub(() =>
+      healthy
+        ? Response.json({ ...remote, default_branch: "main", permissions: { push: true } })
+        : Response.json({ message: "Server Error" }, { status: 500 }),
+    )
+    const created = await GitHub.create(work, { name: "jitda-app" })
+    expect(created.firstPush).toMatchObject({ attempts: 3, code: "remote" })
+
+    healthy = true
+    await GitHub.push(work, { message: "later" })
+
+    expect((await GitHub.status(work)).firstPush).toBeUndefined()
+    expect(await origin.subjects()).toEqual(["later"])
+  })
+
   test("a refusal that retrying cannot fix is reported after one attempt", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)
