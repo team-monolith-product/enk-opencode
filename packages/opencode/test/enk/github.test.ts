@@ -77,6 +77,8 @@ describe("GitHub.publish", () => {
       ".env.example": "API_KEY=",
       ".gitignore": "!.env\n",
       "node_modules/pkg/index.js": "module.exports = 1",
+      ".playwright-mcp/console.log": "log",
+      ".playwright-mcp/page.yml": "page",
     })
 
     const result = await ws.publish("first")

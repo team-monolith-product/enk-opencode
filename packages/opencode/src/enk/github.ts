@@ -26,6 +26,7 @@ export namespace GitHub {
     ".venv/",
     "__pycache__/",
     ".opencode/",
+    ".playwright-mcp/",
     ".DS_Store",
   ]
 
