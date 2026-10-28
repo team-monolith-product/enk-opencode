@@ -151,6 +151,36 @@ describe("rollback consent vote", () => {
     }
   })
 
+  test("rolling back to a rollback does not stack the title prefix", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session, docID, alice, first } = await team(tmp.path)
+        const rollTo = (sha: string, subject: string) =>
+          Doc.rollbackSubmitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            sha,
+            target: { subject, time: 0 },
+          })
+
+        rollTo(first.sha, "처음")
+        await until(async () => (await History.list(tmp.path))[0]?.subject === "되돌리기: 처음")
+        const rolled = (await History.list(tmp.path))[0]!
+        await Bun.write(path.join(tmp.path, "index.html"), "v3")
+        await History.commit(tmp.path, { message: "세번째", turn: "msg_9" })
+
+        rollTo(rolled.sha, rolled.subject)
+        await until(async () => (await History.list(tmp.path))[0]?.revert === rolled.sha)
+
+        expect((await History.list(tmp.path))[0]!.subject).toBe("되돌리기: 처음")
+      },
+    })
+  })
+
   test("waits until everyone agrees", async () => {
     await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
     await Instance.provide({

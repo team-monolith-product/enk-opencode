@@ -157,7 +157,7 @@ export const dict = {
   "history.current": "Now",
   "history.reverted": "Rollback",
   "history.undone": "Undone",
-  "history.changes": "{{count}} files changed",
+  "history.changes": "Changed files: {{count}}",
   "history.change.A": "Added",
   "history.change.M": "Changed",
   "history.change.D": "Deleted",

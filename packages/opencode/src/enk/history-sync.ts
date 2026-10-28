@@ -19,9 +19,20 @@ import { TurnSummary } from "./turn"
 export namespace HistorySync {
   const log = Log.create({ service: "history-sync" })
 
+  const REVERT = { ko: "되돌리기: ", en: "Roll back to: " } as const
+
+  // 되돌리기 커밋으로 다시 되돌릴 때 제목이 "되돌리기: 되돌리기: …" 로 겹치지 않게 앞의 접두어를 걷어 낸다.
+  function plain(subject: string) {
+    for (;;) {
+      const prefix = Object.values(REVERT).find((item) => subject.startsWith(item))
+      if (!prefix) return subject
+      subject = subject.slice(prefix.length)
+    }
+  }
+
   const LABEL: Record<Locale.Value, { revert: (subject: string) => string; backup: string }> = {
-    ko: { revert: (subject) => `되돌리기: ${subject}`, backup: "되돌리기 전 자동 저장" },
-    en: { revert: (subject) => `Roll back to: ${subject}`, backup: "Saved before rolling back" },
+    ko: { revert: (subject) => `${REVERT.ko}${plain(subject)}`, backup: "되돌리기 전 자동 저장" },
+    en: { revert: (subject) => `${REVERT.en}${plain(subject)}`, backup: "Saved before rolling back" },
   }
 
   const MANIFESTS = new Set([
