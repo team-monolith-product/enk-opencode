@@ -196,6 +196,28 @@ describe("History.restore", () => {
     expect(Bun.file(path.join(work, "media/intro.mp4")).size).toBe(101 * 1024 * 1024)
   })
 
+  test("does not bring back files that an older version kept but are now left out", async () => {
+    await using tmp = await tmpdir()
+    const work = await workspace(tmp.path)
+    await put(work, { "index.html": "v1" })
+    const repo = WorkspaceRepo.open(work)
+    await History.commit(work, { message: "처음" })
+    await put(work, { "__preview-bridge.js": "old bridge" })
+    await repo.must(["update-index", "--add", "--", "__preview-bridge.js"])
+    await repo.must(["commit", "--quiet", "-m", "예전 기록"], {
+      env: { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" },
+    })
+    const old = (await History.list(work))[0]!
+    await rm(path.join(work, "__preview-bridge.js"))
+    await put(work, { "index.html": "v2" })
+    await History.commit(work, { message: "두번째" })
+
+    await restore(work, old.sha)
+
+    expect(await readFile(path.join(work, "index.html"), "utf8")).toBe("v1")
+    expect(await exists(path.join(work, "__preview-bridge.js"))).toBe(false)
+  })
+
   test("works inside folders that were git-initialized on their own", async () => {
     await using tmp = await tmpdir()
     const work = await workspace(tmp.path)

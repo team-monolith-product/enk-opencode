@@ -16,7 +16,7 @@ export function errorHandler(log: Log.Logger): ErrorHandler {
         log.error("failed", { error: err })
         SentryReporter.captureException(err, { path: c.req.path, method: c.req.method })
       }
-      return c.json({ code: err.code, message: err.message }, { status: err.status })
+      return c.json({ code: err.code, message: err.status === 500 ? err.code : err.message }, { status: err.status })
     }
     log.error("failed", {
       error: err,
