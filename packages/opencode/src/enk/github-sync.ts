@@ -32,7 +32,7 @@ export namespace GitHubSync {
 
   export function failed(err: unknown, sessionID: SessionID) {
     if (err instanceof GitHub.Failure && !GitHub.notify.includes(err.code)) {
-      return log.info("skipped", { sessionID, reason: err.message })
+      return log.info("skipped", { sessionID, code: err.code, reason: err.message })
     }
     GitHub.alert("sync failed", err, { sessionID })
   }

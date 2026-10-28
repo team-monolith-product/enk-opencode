@@ -229,7 +229,7 @@ export namespace GitHub {
     }
   }
 
-  const secret = /^(set-cookie|cookie|authorization|proxy-authorization)$/i
+  const secret = /^(set-cookie|cookie|authorization|proxy-authorization|x-github-sso)$/i
 
   async function text(res: globalThis.Response) {
     return res.text().catch((err) => `<unreadable body: ${String(err)}>`)

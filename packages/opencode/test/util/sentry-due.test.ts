@@ -12,4 +12,11 @@ describe("SentryReporter.due", () => {
     expect(SentryReporter.due("due-b", 1000, 0)).toBe(true)
     expect(SentryReporter.due("due-c", 1000, 0)).toBe(true)
   })
+
+  test("forgets expired keys once the table grows", () => {
+    for (let i = 0; i < 300; i++) SentryReporter.due(`due-many-${i}`, 10, 0)
+
+    expect(SentryReporter.due("due-many-0", 10, 5)).toBe(false)
+    expect(SentryReporter.due("due-many-0", 10, 20)).toBe(true)
+  })
 })

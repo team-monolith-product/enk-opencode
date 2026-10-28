@@ -42,11 +42,13 @@ export namespace SentryReporter {
   }
 
   const seen = new Map<string, number>()
+  const limit = 200
 
   export function due(key: string, ttl = 10 * 60_000, now = Date.now()) {
-    const last = seen.get(key)
-    if (last !== undefined && now - last < ttl) return false
-    seen.set(key, now)
+    const until = seen.get(key)
+    if (until !== undefined && now < until) return false
+    seen.set(key, now + ttl)
+    if (seen.size > limit) seen.forEach((expiry, name) => expiry <= now && seen.delete(name))
     return true
   }
 
