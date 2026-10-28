@@ -7,6 +7,8 @@ import { History } from "../../src/enk/history"
 import { WorkspaceRepo } from "../../src/enk/workspace-repo"
 import { GitHubRoutes } from "../../src/server/routes/github"
 import { Instance } from "../../src/project/instance"
+import { SessionID } from "../../src/session/schema"
+import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
 
@@ -380,6 +382,9 @@ describe("GitHub.status", () => {
   })
 })
 
+const create = (dir: string, input: Parameters<typeof GitHub.create>[1]) =>
+  Instance.provide({ directory: dir, fn: () => GitHub.create(dir, input) })
+
 describe("GitHub.create", () => {
   const link = {
     enabled: true,
@@ -436,7 +441,7 @@ describe("GitHub.create", () => {
     await put(work, { "index.html": "<h1>hi</h1>", ".env": "KEY=secret" })
     using github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
 
-    const status = await GitHub.create(work, { name: "jitda-app" })
+    const status = await create(work, { name: "jitda-app" })
 
     expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
     expect(status.firstPush).toBeUndefined()
@@ -460,7 +465,7 @@ describe("GitHub.create", () => {
         : Response.json({ ...remote, default_branch: "main", permissions: { push: true } }),
     )
 
-    const status = await GitHub.create(work, { name: "jitda-app" })
+    const status = await create(work, { name: "jitda-app" })
 
     expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(2)
     expect(status.firstPush).toBeUndefined()
@@ -475,7 +480,7 @@ describe("GitHub.create", () => {
     await mkdir(work, { recursive: true })
     using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
 
-    const status = await GitHub.create(work, { name: "jitda-app" })
+    const status = await create(work, { name: "jitda-app" })
 
     expect(status.firstPush).toBeUndefined()
     expect(await origin.files()).toEqual([".gitignore"])
@@ -489,7 +494,7 @@ describe("GitHub.create", () => {
     await put(work, { "index.html": "a" })
     using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
 
-    await GitHub.create(work, { name: "jitda-app", locale: "en" })
+    await create(work, { name: "jitda-app", locale: "en" })
 
     expect(await origin.subjects()).toEqual(["First push from Jitda"])
   })
@@ -499,7 +504,7 @@ describe("GitHub.create", () => {
     await using rails = serve(link)
     using github = mockGitHub(() => Response.json({ message: "Server Error" }, { status: 500 }))
 
-    const status = await GitHub.create(tmp.path, { name: "jitda-app" })
+    const status = await create(tmp.path, { name: "jitda-app" })
 
     expect(status.repo?.name).toBe("jitda-app")
     expect(github.calls).toEqual([
@@ -528,7 +533,7 @@ describe("GitHub.create", () => {
         : Response.json({ ...remote, default_branch: "main", permissions: { push: true } }),
     )
 
-    const status = await GitHub.create(work, { name: "jitda-app" })
+    const status = await create(work, { name: "jitda-app" })
 
     expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(2)
     expect(status.firstPush).toBeUndefined()
@@ -543,7 +548,7 @@ describe("GitHub.create", () => {
     await put(work, { "index.html": "a", ".playwright-mcp/console.log": "log" })
     using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
 
-    await GitHub.create(work, { name: "jitda-app" })
+    await create(work, { name: "jitda-app" })
 
     expect(await origin.files()).toEqual([".gitignore", "index.html"])
     expect(await Bun.file(path.join(work, ".gitignore")).text()).toBe(".playwright-mcp/\n")
@@ -561,7 +566,7 @@ describe("GitHub.create", () => {
         ? Response.json({ ...remote, default_branch: "main", permissions: { push: true } })
         : Response.json({ message: "Server Error" }, { status: 500 }),
     )
-    const created = await GitHub.create(work, { name: "jitda-app" })
+    const created = await create(work, { name: "jitda-app" })
     expect(created.firstPush).toMatchObject({ attempts: 3, code: "remote" })
 
     healthy = true
@@ -583,7 +588,7 @@ describe("GitHub.create", () => {
     })
 
     try {
-      const status = await GitHub.create(tmp.path, { name: "jitda-app" })
+      const status = await create(tmp.path, { name: "jitda-app" })
 
       expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(1)
       expect(status.firstPush).toMatchObject({ attempts: 1, code: "remote" })
@@ -592,12 +597,34 @@ describe("GitHub.create", () => {
     }
   })
 
+  test("while the AI is answering, the first push sends the last saved version instead of half-edited files", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "saved" })
+    await History.commit(work, { message: "저장된 턴" })
+    await put(work, { "index.html": "half", "draft.js": "x" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    await Instance.provide({
+      directory: work,
+      fn: async () => {
+        await SessionStatus.set(SessionID.make("ses_busy"), { type: "busy" })
+        await GitHub.create(work, { name: "jitda-app" })
+      },
+    })
+
+    expect(await origin.files()).toEqual(["index.html"])
+    expect((await History.list(work)).map((entry) => entry.subject)).toEqual(["저장된 턴"])
+  })
+
   test("a refusal that retrying cannot fix is reported after one attempt", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)
     using github = mockGitHub(() => Response.json({ ...remote, permissions: { push: false } }))
 
-    const status = await GitHub.create(tmp.path, { name: "jitda-app" })
+    const status = await create(tmp.path, { name: "jitda-app" })
 
     expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
     expect(status.firstPush).toMatchObject({ attempts: 1, code: "forbidden" })

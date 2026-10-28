@@ -11,8 +11,13 @@ import { EnkFailure } from "../enk/failure"
 
 export function errorHandler(log: Log.Logger): ErrorHandler {
   return (err, c) => {
-    // 예상된 사용자 실패라 에러 로그·Sentry 로 보내지 않는다.
-    if (err instanceof EnkFailure) return c.json({ code: err.code, message: err.message }, { status: err.status })
+    if (err instanceof EnkFailure) {
+      if (err.status === 500) {
+        log.error("failed", { error: err })
+        SentryReporter.captureException(err, { path: c.req.path, method: c.req.method })
+      }
+      return c.json({ code: err.code, message: err.message }, { status: err.status })
+    }
     log.error("failed", {
       error: err,
     })

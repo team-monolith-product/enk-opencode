@@ -1,3 +1,5 @@
+import { writeFile } from "fs/promises"
+import path from "path"
 import { Log } from "../util/log"
 import { EnkFailure } from "./failure"
 import { ServeTargets } from "./serve-targets"
@@ -159,11 +161,26 @@ export namespace History {
       await save(repo, { message: input.backup })
       const parent = (await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD))!
       const goal = (await WorkspaceRepo.rev(repo, `${input.sha}^{tree}`))!
-      const changes = await WorkspaceRepo.diff(repo, `${parent}^{tree}`, goal)
+      let changes = await WorkspaceRepo.diff(repo, `${parent}^{tree}`, goal)
       const [found] = await read(repo, ["-1", input.sha])
       const target: Entry = { sha: input.sha, time: found!.time, subject: found!.subject }
       if (changes.length === 0) return { sha: parent, target, changes }
-      await repo.must(["restore", `--source=${input.sha}`, "--staged", "--worktree", "--", "."])
+      const added = changes.filter((change) => change.status === "A").map((change) => change.file)
+      const kept = await WorkspaceRepo.unrecorded(repo, added)
+      const spec = path.join(repo.root, "restore-pathspec")
+      await writeFile(spec, [".", ...kept.map((file) => `:(exclude,literal)${file}`)].join("\0"))
+      await repo.must([
+        "restore",
+        `--source=${input.sha}`,
+        "--staged",
+        "--worktree",
+        `--pathspec-from-file=${spec}`,
+        "--pathspec-file-nul",
+      ])
+      if (kept.length > 0) {
+        changes = await WorkspaceRepo.diff(repo, `${parent}^{tree}`, (await repo.must(["write-tree"])).trim())
+        if (changes.length === 0) return { sha: parent, target, changes }
+      }
       const message = input.message(target)
       const sha = await commitIndex(
         repo,

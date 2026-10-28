@@ -60,7 +60,7 @@ export namespace HistorySync {
     // 합의가 서고 나서 되돌리지 못했을 때. 사유는 버전 기록 창의 거절 사유와 같은 이름을 쓴다.
     Failed: BusEvent.define(
       "history.failed",
-      z.object({ sessionID: SessionID.zod, code: z.enum([...REFUSALS, "failed"]) }),
+      z.object({ sessionID: SessionID.zod, code: z.enum([...REFUSALS, "same", "failed"]) }),
     ),
   }
 
@@ -126,6 +126,10 @@ export namespace HistorySync {
       backup: label.backup,
       after: messages.at(-1)?.info.id,
     })
+    if (result.changes.length === 0) {
+      await Bus.publish(Event.Failed, { sessionID: input.sessionID, code: "same" })
+      return
+    }
     await Bus.publish(Event.Restored, {
       sessionID: input.sessionID,
       sha: result.sha,
@@ -134,6 +138,6 @@ export namespace HistorySync {
       files: result.changes.length,
       deps: result.changes.some((change) => MANIFESTS.has(path.posix.basename(change.file))),
     })
-    if (result.changes.length > 0) void GitHub.sync(session.directory, locale).catch(skip)
+    void GitHub.sync(session.directory, locale).catch(skip)
   }
 }

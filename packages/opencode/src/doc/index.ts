@@ -292,8 +292,7 @@ export namespace Doc {
     )
     for (const row of rows) {
       const raw = row.data
-      const data =
-        raw instanceof Uint8Array ? new Uint8Array(raw) : new Uint8Array(Buffer.from(raw as Buffer))
+      const data = raw instanceof Uint8Array ? new Uint8Array(raw) : new Uint8Array(Buffer.from(raw as Buffer))
       const msg = unpack(data)
       if (msg?.type === MSG_DOC) {
         Room.apply(id, msg.guid, msg.data)
@@ -351,8 +350,7 @@ export namespace Doc {
       Session.get(input.sessionID)
       get(input.docID)
       Database.use((db) => {
-        db
-          .insert(SessionPromptDocTable)
+        db.insert(SessionPromptDocTable)
           .values({ session_id: input.sessionID, doc_id: input.docID })
           .onConflictDoUpdate({
             target: SessionPromptDocTable.session_id,
@@ -503,7 +501,9 @@ export namespace Doc {
   // "left" is kept only so rows written before votes were judged by the current participants still
   // parse. A departure now removes the member (and their vote) from every pending vote.
   const SubmitActorStatus = z.enum(["pending", "approved", "left"])
-  export const SubmitStatus = z.enum(["pending", "sent", "cancelled", "expired", "left"]).meta({ ref: "DocSubmitStatus" })
+  export const SubmitStatus = z
+    .enum(["pending", "sent", "cancelled", "expired", "left"])
+    .meta({ ref: "DocSubmitStatus" })
   export type SubmitStatus = z.infer<typeof SubmitStatus>
 
   export const SubmitActorInfo = z
@@ -791,11 +791,17 @@ export namespace Doc {
       // Navigation vote: don't resolve the question — just move the shared step for everyone and
       // keep the draft/presence alive so editing continues on the target question.
       if (payload.step !== undefined) {
-        questionDraftApply({ sessionID: row.session_id, requestID: payload.requestID, op: { kind: "step", value: payload.step } })
+        questionDraftApply({
+          sessionID: row.session_id,
+          requestID: payload.requestID,
+          op: { kind: "step", value: payload.step },
+        })
         return
       }
       const requestID = QuestionID.make(payload.requestID)
-      const run = payload.reject ? Question.reject(requestID) : Question.reply({ requestID, answers: payload.answers ?? [] })
+      const run = payload.reject
+        ? Question.reject(requestID)
+        : Question.reply({ requestID, answers: payload.answers ?? [] })
       run.catch((err) => fail(row, err))
       questionDraftReset(payload.requestID)
       return
@@ -841,6 +847,10 @@ export namespace Doc {
     if (!next) return row
     cast("expired", read(next))
     return next
+  }
+
+  function rollbackSha(blob: string) {
+    return RollbackTarget.safeParse(JSON.parse(blob)).data?.sha
   }
 
   function exclusive(kind: string) {
@@ -1007,6 +1017,9 @@ export namespace Doc {
     timeoutMs?: number
   }) {
     const found = active(input.sessionID, input.targetID, undefined, input.targetKind)
+    if (found && found.rollback && found.rollback.sha !== rollbackSha(input.promptBlob)) {
+      throw new VoteConflictError({ message: "Another consent vote is in progress" })
+    }
     if (found) return found
 
     // 지우기·되돌리기 합의는 다른 합의와 겹치면 안 된다. 전송 투표가 도는 중에 세션이 사라지거나
@@ -1213,7 +1226,9 @@ export namespace Doc {
         db
           .update(DocSubmitActorTable)
           .set({ status: "approved", time_responded: Date.now() })
-          .where(and(eq(DocSubmitActorTable.submit_id, input.submitID), eq(DocSubmitActorTable.actor_id, input.actorID)))
+          .where(
+            and(eq(DocSubmitActorTable.submit_id, input.submitID), eq(DocSubmitActorTable.actor_id, input.actorID)),
+          )
           .run(),
       )
     }
@@ -1463,7 +1478,11 @@ export namespace Doc {
         if (set.size === 0) observers.delete(input.targetID)
         heartbeatStop()
       }
-      return Object.assign(stop, { pong: () => { peer.lastSeen = Date.now() } })
+      return Object.assign(stop, {
+        pong: () => {
+          peer.lastSeen = Date.now()
+        },
+      })
     }
     const peer: SubmitPeer = {
       actorID: input.actorID,
@@ -1486,7 +1505,8 @@ export namespace Doc {
       // No live vote — but if one resolved moments ago, replay its terminal state so a
       // client that missed the cast() (e.g. reconnected just after) can update its dialog.
       const last = recent(input.sessionID, input.targetID, input.actorID)
-      if (last) peer.send(JSON.stringify({ type: last.status as SubmitEvent["type"], state: last } satisfies SubmitEvent))
+      if (last)
+        peer.send(JSON.stringify({ type: last.status as SubmitEvent["type"], state: last } satisfies SubmitEvent))
     }
     // Returns the disposer (run on socket close); `.pong` refreshes liveness on a heartbeat reply.
     const stop = () => {
@@ -1920,9 +1940,7 @@ export namespace Doc {
         db
           .select()
           .from(SessionActorTable)
-          .where(
-            and(eq(SessionActorTable.session_id, input.sessionID), eq(SessionActorTable.actor_id, input.actorID)),
-          )
+          .where(and(eq(SessionActorTable.session_id, input.sessionID), eq(SessionActorTable.actor_id, input.actorID)))
           .get(),
       )
       if (!actor) {
@@ -1986,7 +2004,9 @@ export namespace Doc {
               db
                 .select()
                 .from(SessionActorTable)
-                .where(and(eq(SessionActorTable.session_id, input.sessionID), eq(SessionActorTable.user_id, input.userID!)))
+                .where(
+                  and(eq(SessionActorTable.session_id, input.sessionID), eq(SessionActorTable.user_id, input.userID!)),
+                )
                 .get(),
             )
           : undefined

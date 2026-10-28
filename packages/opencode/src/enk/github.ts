@@ -3,6 +3,7 @@ import path from "path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { Log } from "../util/log"
 import { EnkFailure } from "./failure"
+import { SessionStatus } from "../session/status"
 import { History } from "./history"
 import { Rails } from "./rails"
 import { ServeTargets } from "./serve-targets"
@@ -163,15 +164,19 @@ export namespace GitHub {
   }
 
   /**
-   * 저장소를 만들자마자 지금 작업 폴더를 한 번 올린다. 마지막 기록 뒤에 바뀐 파일이 있으면 먼저 기록에 남긴다.
+   * 저장소를 만들자마자 지금 작업 폴더를 한 번 올린다. 마지막 기록 뒤에 바뀐 파일이 있으면 먼저 기록에 남긴다. AI 가
+   * 답하는 중이면 고치다 만 파일을 남기지 않도록 마지막 기록을 올리고, 나머지는 그 턴이 끝날 때 올라간다.
    * 끝내 실패해도 저장소 생성은 성공으로 두고, 사유를 상태에 남겨 다음 대화가 끝날 때 다시 올린다.
    */
   async function firstPush(dir: string, hit: Link, locale?: Locale.Value) {
     const subject = TurnSummary.first(locale)
     await WorkspaceRepo.ignore(dir).catch((err) => log.warn("gitignore skipped", { error: String(err) }))
-    await History.commit(dir, { message: subject }).catch((err) =>
-      log.warn("first snapshot failed", { error: err instanceof Error ? err.message : String(err) }),
-    )
+    const working = [...(await SessionStatus.list()).values()].some((item) => item.type !== "idle")
+    if (!working) {
+      await History.commit(dir, { message: subject }).catch((err) =>
+        log.warn("first snapshot failed", { error: err instanceof Error ? err.message : String(err) }),
+      )
+    }
     const started = Date.now()
     for (let attempt = 1; ; attempt++) {
       const failure = await push(dir, { locale, subject }, hit).then(

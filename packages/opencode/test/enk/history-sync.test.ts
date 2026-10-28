@@ -77,6 +77,38 @@ describe("rollback consent vote", () => {
     })
   })
 
+  test("rolling back to what the files already are tells everyone nothing changed", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session, docID, alice } = await team(tmp.path)
+        const latest = (await History.list(tmp.path))[0]!
+        const restored: unknown[] = []
+        const failed: unknown[] = []
+        const subs = [
+          Bus.subscribe(HistorySync.Event.Restored, (event) => void restored.push(event.properties)),
+          Bus.subscribe(HistorySync.Event.Failed, (event) => void failed.push(event.properties)),
+        ]
+
+        Doc.rollbackSubmitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          sha: latest.sha,
+          target: { subject: latest.subject, time: latest.time },
+        })
+
+        await until(async () => failed.length > 0)
+        expect(failed[0]).toEqual({ sessionID: session.id, code: "same" })
+        expect(restored).toEqual([])
+        expect((await History.list(tmp.path)).length).toBe(2)
+        subs.forEach((unsub) => unsub())
+      },
+    })
+  })
+
   test("waits until everyone agrees", async () => {
     await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
     await Instance.provide({
@@ -147,6 +179,16 @@ describe("rollback consent vote", () => {
         })
         expect(rollback.status).toBe("pending")
         expect(() => Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: alice.actorID })).toThrow()
+        const latest = (await History.list(tmp.path))[0]!
+        expect(() =>
+          Doc.rollbackSubmitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: bob.actorID,
+            sha: latest.sha,
+            target: { subject: latest.subject, time: latest.time },
+          }),
+        ).toThrow(Doc.VoteConflictError)
         close()
       },
     })

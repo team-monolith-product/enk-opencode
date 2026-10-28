@@ -150,6 +150,28 @@ export namespace WorkspaceRepo {
     }
   }
 
+  /** 기록에 담지 않는 파일(크기 초과로 디스크에만 있는 파일, 제외 규칙·비밀 파일). 되돌리기가 이 경로는 건드리지 않는다. */
+  export async function unrecorded(repo: Repo, files: string[]) {
+    const ignored = new Set<string>()
+    for (let i = 0; i < files.length; i += chunk) {
+      const out = await repo.run(["check-ignore", "--no-index", "--", ...files.slice(i, i + chunk)])
+      for (const line of out.text().split("\n")) if (line) ignored.add(line)
+    }
+    const flags = await Promise.all(
+      files.map(
+        async (file) =>
+          ignored.has(file) ||
+          EnvFile.isSecretFile(file) ||
+          file.split("/").some((part) => leftovers.includes(part)) ||
+          (await lstat(path.join(repo.dir, file)).then(
+            () => true,
+            () => false,
+          )),
+      ),
+    )
+    return files.filter((_, i) => flags[i])
+  }
+
   export async function diff(repo: Repo, from: string | undefined, to: string): Promise<Change[]> {
     if (!from) {
       const files = (await repo.must(["ls-tree", "-r", "-z", "--name-only", to])).split("\0").filter(Boolean)

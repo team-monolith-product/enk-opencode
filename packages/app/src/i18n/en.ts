@@ -168,6 +168,7 @@ export const dict = {
   "history.error.changes": "Could not load the changed files. Tap again to retry",
   "history.error.busy": "You can't roll back while the AI is answering. Try again when it's done",
   "history.error.missing": "This version could not be found",
+  "history.error.same": "The files already match this version",
   "history.error.conflict": "Another consent request is in progress. Try again when it's done",
   "history.error.unavailable": "Still connecting. Try again in a moment",
   "history.error.failed": "Could not roll back. Try again in a moment",

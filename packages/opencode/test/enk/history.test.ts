@@ -180,6 +180,22 @@ describe("History.restore", () => {
     expect(await readFile(path.join(work, "__assets__/upload.png"), "utf8")).toBe("img")
   })
 
+  test("leaves a file that grew past 100MB alone instead of overwriting it with the old copy", async () => {
+    await using tmp = await tmpdir()
+    const work = await workspace(tmp.path)
+    await put(work, { "index.html": "v1", "media/intro.mp4": "small" })
+    const first = await History.commit(work, { message: "처음" })
+    await put(work, { "index.html": "v2" })
+    await truncate(path.join(work, "media/intro.mp4"), 101 * 1024 * 1024)
+    await History.commit(work, { message: "큰 영상" })
+
+    const restored = await restore(work, first!.sha)
+
+    expect(restored.changes).toEqual([{ status: "M", file: "index.html" }])
+    expect(await readFile(path.join(work, "index.html"), "utf8")).toBe("v1")
+    expect(Bun.file(path.join(work, "media/intro.mp4")).size).toBe(101 * 1024 * 1024)
+  })
+
   test("works inside folders that were git-initialized on their own", async () => {
     await using tmp = await tmpdir()
     const work = await workspace(tmp.path)
@@ -250,5 +266,8 @@ describe("HistoryNote.text", () => {
     expect(await HistoryNote.text(work, before, "msg_3")).toContain('"되돌리기: 처음"')
     const after = [...before, message("msg_3", "user"), message("msg_4", "assistant")]
     expect(await HistoryNote.text(work, after, "msg_5")).toBeUndefined()
+
+    const skewed = [...after, message("msg_3a", "user")]
+    expect(await HistoryNote.text(work, skewed, "msg_3a")).toBeUndefined()
   })
 })

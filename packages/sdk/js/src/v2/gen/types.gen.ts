@@ -503,7 +503,7 @@ export type EventHistoryFailed = {
   type: "history.failed"
   properties: {
     sessionID: string
-    code: "missing" | "busy" | "failed"
+    code: "missing" | "busy" | "same" | "failed"
   }
 }
 

@@ -164,6 +164,7 @@ export const dict = {
   "history.error.changes": "바뀐 파일을 불러오지 못했어요. 다시 눌러 주세요",
   "history.error.busy": "AI가 답하는 중에는 되돌릴 수 없어요. 답이 끝난 뒤 다시 해 주세요",
   "history.error.missing": "이 버전을 찾을 수 없어요",
+  "history.error.same": "이미 지금 파일과 같은 버전이에요",
   "history.error.conflict": "다른 동의 요청이 진행 중이에요. 끝난 뒤 다시 해 주세요",
   "history.error.unavailable": "아직 연결 중이에요. 잠시 후 다시 해 주세요",
   "history.error.failed": "되돌리지 못했어요. 잠시 후 다시 해 주세요",
