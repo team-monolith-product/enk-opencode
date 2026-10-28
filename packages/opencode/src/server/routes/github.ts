@@ -2,6 +2,8 @@ import { Hono, type Context } from "hono"
 import { describeRoute, resolver, validator } from "hono-openapi"
 import z from "zod"
 import { GitHub } from "../../enk/github"
+import { GitHubSync } from "../../enk/github-sync"
+import { Locale } from "../../enk/locale"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
 
@@ -19,6 +21,13 @@ const Status = z
     linkedBy: z.string().optional(),
     repo: Repo.optional(),
     push: z.object({ sha: z.string(), time: z.number(), by: z.string().optional() }).optional(),
+    firstPush: z
+      .object({
+        attempts: z.number(),
+        code: z.string(),
+        reason: z.string(),
+      })
+      .optional(),
   })
   .meta({ ref: "GitHubStatus" })
 const Failure = z.object({ code: z.string(), message: z.string() }).meta({ ref: "GitHubError" })
@@ -74,7 +83,11 @@ export const GitHubRoutes = lazy(() =>
         operationId: "github.repo.create",
         responses: { ...ok("Link status", Status), ...failures(409, 422, 502) },
       }),
-      validator("json", z.object({ name: RepoName })),
-      (c) => handle(c, () => GitHub.create(Instance.directory, c.req.valid("json"))),
+      validator("json", z.object({ name: RepoName, locale: Locale.Schema.optional() })),
+      (c) =>
+        handle(c, () => {
+          const { name, locale } = c.req.valid("json")
+          return GitHub.create(Instance.directory, { name, message: GitHubSync.first(locale) })
+        }),
     ),
 )

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { GitHub } from "../../src/enk/github"
 import { GitHubSync } from "../../src/enk/github-sync"
 import type { MessageV2 } from "../../src/session/message-v2"
 
@@ -37,6 +38,15 @@ describe("GitHubSync.compose", () => {
     expect(lines[0]).toHaveLength(72)
     expect(lines).toHaveLength(2 + 30 + 1)
     expect(lines.at(-1)).toBe("- … +2")
+  })
+})
+
+describe("GitHubSync.first", () => {
+  test("names the first commit in the viewer locale", async () => {
+    const changes: GitHub.Change[] = [{ status: "A", file: "index.html" }]
+
+    expect(await GitHubSync.first("en")(changes)).toBe("First push from Jitda\n\n- Add: index.html")
+    expect(await GitHubSync.first()(changes)).toBe("짓다에서 처음 올린 내용\n\n- 추가: index.html")
   })
 })
 

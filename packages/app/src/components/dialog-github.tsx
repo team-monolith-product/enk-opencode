@@ -12,6 +12,7 @@ import { readonlyViewer } from "@/context/parent-params"
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
+import { promptLocale } from "@/utils/prompt-locale"
 import { getRelativeTime } from "@/utils/time"
 import { createGitHubRepo, getGitHubStatus, githubCode, type GitHubStatus } from "@/utils/server"
 
@@ -105,9 +106,24 @@ export function DialogGitHub() {
   const create = async () => {
     const o = opts()
     if (!o || spectator) return
-    const status = await run(() => createGitHubRepo(o, { name: state.name.trim() }))
-    if (status) setState("status", status)
+    const status = await run(() =>
+      createGitHubRepo(o, { name: state.name.trim(), locale: promptLocale(language.locale()) }),
+    )
+    if (!status) return
+    setState("status", status)
+    const first = status.firstPush
+    if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
   }
+
+  const firstFailure = createMemo(() => {
+    const first = state.status?.firstPush
+    if (!first) return
+    const code = first.code in ERRORS ? language.t(ERRORS[first.code as keyof typeof ERRORS]) : undefined
+    return {
+      attempts: first.attempts,
+      reason: [code, first.reason === first.code ? undefined : first.reason].filter(Boolean).join(" · "),
+    }
+  })
 
   const view = createMemo(() => {
     if (state.failed) return "failed"
@@ -209,6 +225,21 @@ export function DialogGitHub() {
                   </Show>
                   <span class="text-12-regular text-text-weak">{pushed()}</span>
                 </div>
+                <Show when={firstFailure()}>
+                  {(failure) => (
+                    <div class="github-panel flex flex-col gap-1">
+                      <span class="text-12-medium text-text-diff-remove-base">
+                        {language.t("github.firstPush.failed", { count: failure().attempts })}
+                      </span>
+                      <Show when={failure().reason}>
+                        <span class="text-12-regular text-text-weak break-all">
+                          {language.t("github.firstPush.reason", { reason: failure().reason })}
+                        </span>
+                      </Show>
+                      <span class="text-12-regular text-text-weak">{language.t("github.firstPush.retry")}</span>
+                    </div>
+                  )}
+                </Show>
               </Show>
             </Match>
           </Branch>

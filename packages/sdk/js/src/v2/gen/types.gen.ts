@@ -1915,6 +1915,11 @@ export type GitHubStatus = {
     time: number
     by?: string
   }
+  firstPush?: {
+    attempts: number
+    code: string
+    reason: string
+  }
 }
 
 export type GitHubError = {
@@ -3339,6 +3344,7 @@ export type GithubStatusResponse = GithubStatusResponses[keyof GithubStatusRespo
 export type GithubRepoCreateData = {
   body?: {
     name: string
+    locale?: PromptLocale
   }
   path?: never
   query?: {
