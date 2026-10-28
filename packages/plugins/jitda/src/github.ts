@@ -5,7 +5,9 @@ import { existsSync } from "node:fs"
 import { lstat, mkdir, readFile, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { Env } from "./env"
+import { Locale } from "./locale"
 import { ServeTargets } from "./serve-targets"
 import * as Definitions from "./rpc"
 
@@ -21,6 +23,13 @@ const ROUTE = "/api/v1/opencode/github"
 const LIMIT = 100 * 1024 * 1024
 const BRIDGE = "__preview-bridge.js"
 const TAG = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
+const ATTEMPTS = 3
+const BACKOFF = 500
+const BUDGET = 60_000
+const DETAIL = 300
+const TRANSIENT: Code[] = ["remote", "missing"]
+const IGNORED = [".playwright-mcp/"]
+const LEFTOVERS = IGNORED.map((item) => item.replace(/\/$/, ""))
 const EXCLUDE = [
   ".env",
   ".env.*",
@@ -31,12 +40,14 @@ const EXCLUDE = [
   ".venv/",
   "__pycache__/",
   ".opencode/",
+  ...IGNORED,
   ".DS_Store",
 ]
 const MAX_FILES = 30
 const MAX_SUBJECT = 72
 
 export type Repo = { owner: string; name: string; url: string; private?: boolean }
+export type FirstPush = { attempts: number; code: Code; reason: string }
 export type Status = {
   enabled: boolean
   connectUrl?: string
@@ -44,6 +55,7 @@ export type Status = {
   linkedBy?: string
   repo?: Repo
   push?: { sha: string; time: number; by?: string }
+  firstPush?: FirstPush
 }
 export type Change = { status: "A" | "M" | "D"; file: string }
 export type Code =
@@ -89,6 +101,7 @@ export class Failure extends Error {
 }
 
 const chains = new Map<string, Promise<unknown>>()
+const failed = new Map<string, FirstPush>()
 
 function serial<T>(key: string, fn: () => Promise<T>) {
   const run = (chains.get(key) ?? Promise.resolve()).catch(() => undefined).then(fn)
@@ -151,6 +164,7 @@ export async function status(dir: string): Promise<Status> {
     linkedBy: hit.connected ? hit.linked_by : undefined,
     repo: hit.repo,
     push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
+    firstPush: failed.get(dir),
   }
 }
 
@@ -192,7 +206,9 @@ const shape = (remote: Remote): Repo => ({
 
 export const REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/
 
-export async function create(dir: string, input: { name: string }) {
+type Describe = (changes: Change[]) => Promise<string>
+
+export async function create(dir: string, input: { name: string; message?: string | Describe }) {
   if (!REPO_NAME.test(input.name) || input.name === "." || input.name === "..")
     throw new Failure("exists", 422, "invalid name")
   const hit = await linked()
@@ -200,7 +216,26 @@ export async function create(dir: string, input: { name: string }) {
     await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
   )
   await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
+  await firstPush(dir, { ...hit, repo }, input.message ?? "Initial commit from Jitda")
   return status(dir)
+}
+
+// 막 만든 저장소는 GitHub 에서 바로 안 보일 수 있어 일시적인 실패만 다시 시도한다.
+async function firstPush(dir: string, hit: Link, message: string | Describe) {
+  const started = Date.now()
+  for (let attempt = 1; ; attempt++) {
+    const failure = await push(dir, { message }, hit).then(
+      () => undefined,
+      (error) => (error instanceof Failure ? error : new Failure("remote", 502, String(error))),
+    )
+    if (!failure) return
+    console.warn("[jitda.github] first push failed", attempt, failure.code, failure.message)
+    if (!TRANSIENT.includes(failure.code) || attempt >= ATTEMPTS || Date.now() - started > BUDGET) {
+      failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, DETAIL) })
+      return
+    }
+    await sleep(BACKOFF * attempt)
+  }
 }
 
 function auth(token: string) {
@@ -218,8 +253,18 @@ function dataDir(env: NodeJS.ProcessEnv = process.env) {
   return path.join(env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "opencode")
 }
 
-export async function push(dir: string, input: { message: string | ((changes: Change[]) => Promise<string>) }) {
-  const hit = await linked()
+// 에이전트가 남기는 부산물 폴더를 작업 폴더의 .gitignore 에 적어 둔다. 이미 있으면 건드리지 않는다.
+export async function ignore(dir: string) {
+  const file = path.join(dir, ".gitignore")
+  const text = await readFile(file, "utf8").catch(() => "")
+  const lines = new Set(text.split(/\r?\n/).map((line) => line.trim().replace(/\/$/, "")))
+  const missing = IGNORED.filter((item) => !lines.has(item.replace(/\/$/, "")))
+  if (missing.length === 0) return
+  await writeFile(file, text + (text && !text.endsWith("\n") ? "\n" : "") + missing.join("\n") + "\n")
+}
+
+export async function push(dir: string, input: { message: string | Describe }, known?: Link) {
+  const hit = known ?? (await linked())
   if (!hit.repo) throw new Failure("norepo", 409)
   const remote = await request<Remote>(
     hit.token!,
@@ -229,8 +274,9 @@ export async function push(dir: string, input: { message: string | ((changes: Ch
   if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
   const gitdir = path.join(dataDir(), "github", createHash("sha1").update(dir).digest("hex"))
   const repo = hit.repo
-  const result = await serial(gitdir, () =>
-    publish({
+  const result = await serial(gitdir, async () => {
+    await ignore(dir).catch((error) => console.warn("[jitda.github] gitignore skipped", String(error)))
+    return publish({
       gitdir,
       worktree: dir,
       remote: `${WEB}/${repo.owner}/${repo.name}.git`,
@@ -241,10 +287,16 @@ export async function push(dir: string, input: { message: string | ((changes: Ch
         email: `${hit.github_user_id ? `${hit.github_user_id}+` : ""}${hit.login}@users.noreply.github.com`,
       },
       env: auth(hit.token!),
-    }),
-  )
+    })
+  })
+  failed.delete(dir)
   if (result.sha) await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
   return { ...result, url: result.sha ? `${repo.url}/commit/${result.sha}` : repo.url }
+}
+
+// 작업 폴더 .gitignore 의 부정 패턴(!)이 info/exclude 보다 앞서므로 부산물 폴더는 경로로도 한 번 더 거른다.
+function leftover(file: string) {
+  return file.split("/").some((part) => LEFTOVERS.includes(part))
 }
 
 export function strip(text: string) {
@@ -282,7 +334,7 @@ export async function publish(input: {
   worktree: string
   remote: string
   branch: string
-  message: string | ((changes: Change[]) => Promise<string>)
+  message: string | Describe
   author: { name: string; email: string }
   env?: Record<string, string>
 }): Promise<{ sha?: string; skipped: string[] }> {
@@ -337,7 +389,7 @@ export async function publish(input: {
     await must(["read-tree", "--empty"])
     const files = await Promise.all(
       (await scan(""))
-        .filter((file) => !Env.isSecretFile(file) && path.posix.basename(file) !== BRIDGE)
+        .filter((file) => !Env.isSecretFile(file) && path.posix.basename(file) !== BRIDGE && !leftover(file))
         .map(async (file) => ({
           file,
           size: (await lstat(path.join(input.worktree, file)).catch(() => undefined))?.size,
@@ -415,8 +467,8 @@ export async function publish(input: {
 }
 
 const LABEL = {
-  ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용" },
-  en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda" },
+  ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용", first: "짓다에서 처음 올린 내용" },
+  en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda", first: "First push from Jitda" },
 } as const
 
 export type Turn = { request: string; reply: string; locale: "ko" | "en" | "ar"; model?: { providerID: string; id: string } }
@@ -427,6 +479,10 @@ export function compose(subject: string, changes: Change[], locale: "ko" | "en" 
   if (changes.length > MAX_FILES) lines.push(`- … +${changes.length - MAX_FILES}`)
   const clipped = subject.length > MAX_SUBJECT ? subject.slice(0, MAX_SUBJECT - 1) + "…" : subject
   return [clipped, ...(lines.length ? ["", ...lines] : [])].join("\n")
+}
+
+export function first(locale: "ko" | "en" | "ar" = "ko"): Describe {
+  return async (changes) => compose(LABEL[locale === "ko" ? "ko" : "en"].first, changes, locale)
 }
 
 type Message = {
@@ -474,7 +530,10 @@ export async function start(ctx: Context) {
   const directory = ctx.location.directory
   const registration = await ctx.rpc.register(Rpc, {
     status: async () => json(await status(directory)),
-    createRepo: async (input) => json(await create(directory, input as { name: string }).catch(failure)),
+    createRepo: async (input) => {
+      const { name, locale } = input as { name: string; locale?: unknown }
+      return json(await create(directory, { name, message: first(Locale.parse(locale)) }).catch(failure))
+    },
   })
 
   const describe = async (turn: Turn, changes: Change[]) => {

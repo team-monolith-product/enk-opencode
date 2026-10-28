@@ -19,6 +19,7 @@ export type GitHubStatus = {
   linkedBy?: string
   repo?: GitHubRepo
   push?: { sha: string; time: number; by?: string }
+  firstPush?: { attempts: number; code: string; reason: string }
 }
 
 // createRepo 는 실패를 { error: { code } } 로 돌려준다(RPC 출력이 JSON 이어야 해서).
@@ -34,6 +35,8 @@ export function githubCode(err: unknown) {
 }
 
 const NAME = /^[A-Za-z0-9._-]{1,100}$/
+
+const promptLocale = (value?: string | null) => (value === "ko" || value === "en" || value === "ar" ? value : undefined)
 
 const ERRORS = {
   disabled: "github.error.disabled",
@@ -115,15 +118,32 @@ export function DialogGitHub() {
 
   const create = async () => {
     if (spectator) return
+    const locale = promptLocale(jitda.locale() ?? language.locale())
     const status = await run(() =>
-      jitda.rpc.github.createRepo({ name: state.name.trim() }, jitda.options()).then((out) => {
-        const result = out as GitHubStatus | { error: { code: string } }
-        if ("error" in result) throw new GitHubError(result.error.code)
-        return result
-      }),
+      jitda.rpc.github
+        .createRepo({ name: state.name.trim(), ...(locale ? { locale } : {}) }, jitda.options())
+        .then((out) => {
+          const result = out as GitHubStatus | { error: { code: string } }
+          if ("error" in result) throw new GitHubError(result.error.code)
+          return result
+        }),
     )
-    if (status) setState("status", status)
+    if (!status) return
+    setState("status", status)
+    const first = status.firstPush
+    if (first) showToast({ title: t("github.firstPush.failed", { count: first.attempts }) })
   }
+
+  // 사유가 코드 그대로면(메시지 없는 실패) 코드 문구만 보여 준다.
+  const firstFailure = createMemo(() => {
+    const first = state.status?.firstPush
+    if (!first) return
+    const code = first.code in ERRORS ? t(ERRORS[first.code as keyof typeof ERRORS]) : undefined
+    return {
+      attempts: first.attempts,
+      reason: [code, first.reason === first.code ? undefined : first.reason].filter(Boolean).join(" · "),
+    }
+  })
 
   const view = createMemo(() => {
     if (state.failed) return "failed"
@@ -232,6 +252,21 @@ export function DialogGitHub() {
                   </Show>
                   <span class="text-12-regular text-text-weak">{pushed()}</span>
                 </div>
+                <Show when={firstFailure()}>
+                  {(failure) => (
+                    <div class="github-panel flex flex-col gap-1">
+                      <span class="text-12-medium text-text-diff-remove-base">
+                        {t("github.firstPush.failed", { count: failure().attempts })}
+                      </span>
+                      <Show when={failure().reason}>
+                        <span class="text-12-regular text-text-weak break-all">
+                          {t("github.firstPush.reason", { reason: failure().reason })}
+                        </span>
+                      </Show>
+                      <span class="text-12-regular text-text-weak">{t("github.firstPush.retry")}</span>
+                    </div>
+                  )}
+                </Show>
               </Show>
             </Match>
           </Branch>

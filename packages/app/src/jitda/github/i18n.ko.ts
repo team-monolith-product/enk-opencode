@@ -3,7 +3,7 @@ import type { dict as en } from "./i18n.en"
 export const dict: Partial<Record<keyof typeof en, string>> = {
   "github.title": "GitHub에 올리기",
   "github.description.unlinked": "GitHub 계정을 연결하면 이 프로젝트를 저장소에 올릴 수 있어요.",
-  "github.description.choose": "프로젝트를 올릴 저장소 이름을 정해 주세요.",
+  "github.description.choose": "프로젝트를 올릴 저장소 이름을 정해 주세요. 저장소를 만들면 바로 한 번 올라가요.",
   "github.description.linked": "AI와 대화가 한 번 끝날 때마다 바뀐 내용이 이 저장소에 자동으로 올라가요.",
   "github.intro.team":
     "팀에서는 한 명만 짓다에서 GitHub를 연결해요. 연결한 사람의 계정에 저장소가 만들어지고, 올리기는 팀원 누구나 할 수 있어요.",
@@ -27,6 +27,9 @@ export const dict: Partial<Record<keyof typeof en, string>> = {
   "github.error.missing": "저장소를 찾을 수 없어요",
   "github.error.empty": "올릴 파일이 없어요",
   "github.error.remote": "GitHub에 연결하지 못했어요. 잠시 후 다시 시도해 주세요",
+  "github.firstPush.failed": "저장소는 만들었지만 처음 올리기에 실패했어요 ({{count}}번 시도)",
+  "github.firstPush.reason": "사유: {{reason}}",
+  "github.firstPush.retry": "다음 대화가 끝나면 다시 올라가요.",
   "github.error.disabled": "이 작업 공간에서는 GitHub를 쓸 수 없어요",
   "github.readonly": "관전 중에는 GitHub 설정을 바꿀 수 없어요.",
 }

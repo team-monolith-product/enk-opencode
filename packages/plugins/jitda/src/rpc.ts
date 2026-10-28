@@ -168,7 +168,7 @@ export const Github = {
     createRepo: {
       input: {
         type: "object",
-        properties: { name: { type: "string" } },
+        properties: { name: { type: "string" }, locale: { type: "string", enum: ["ko", "en", "ar"] } },
         required: ["name"],
         additionalProperties: false,
       },

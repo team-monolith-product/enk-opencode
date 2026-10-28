@@ -25,6 +25,7 @@ it.live(
       const initialized = yield* Effect.promise(() => fetch(url, { method: "POST", headers: server.headers }))
       expect(initialized.status).toBe(204)
       expect(yield* Effect.promise(() => $`git -C ${tmp.path} rev-parse --is-inside-work-tree`.text())).toBe("true\n")
+      expect(yield* Effect.promise(() => Bun.file(path.join(tmp.path, ".gitignore")).text())).toBe(".playwright-mcp/\n")
       url.pathname = "/api/location"
       const location = yield* Effect.promise(() => fetch(url, { headers: server.headers }))
       expect(location.status).toBe(200)

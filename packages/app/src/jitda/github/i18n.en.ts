@@ -1,7 +1,8 @@
 export const dict = {
   "github.title": "Push to GitHub",
   "github.description.unlinked": "Link a GitHub account to push this project to a repository.",
-  "github.description.choose": "Name the repository to push this project to.",
+  "github.description.choose":
+    "Name the repository to push this project to. It is pushed once right after the repository is created.",
   "github.description.linked":
     "Each time a conversation with the AI finishes, changes are pushed to this repository automatically.",
   "github.intro.team":
@@ -26,6 +27,9 @@ export const dict = {
   "github.error.missing": "Couldn't find the repository",
   "github.error.empty": "There are no files to push",
   "github.error.remote": "Couldn't reach GitHub. Try again in a moment",
+  "github.firstPush.failed": "The repository was created, but the first push failed ({{count}} attempts)",
+  "github.firstPush.reason": "Reason: {{reason}}",
+  "github.firstPush.retry": "It will be pushed again when the next conversation finishes.",
   "github.error.disabled": "GitHub isn't available in this workspace",
   "github.readonly": "Spectators can't change GitHub settings.",
 }

@@ -11,6 +11,7 @@
     "./dev-server": "./src/dev-server.ts",
     "./env": "./src/env.ts",
     "./assets": "./src/assets.ts",
+    "./github": "./src/github.ts",
     "./doc": "./src/doc/index.ts",
     "./rpc": "./src/rpc.ts",
     "./serve-targets": "./src/serve-targets.ts"
