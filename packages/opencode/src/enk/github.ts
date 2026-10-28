@@ -72,11 +72,20 @@ export namespace GitHub {
     return err instanceof Failure ? { ...errorData(err), code: err.code, response: err.response } : errorData(err)
   }
 
-  export function alert(message: string, err: unknown, extra?: Record<string, unknown>) {
+  function lean(err: unknown) {
     const error = dump(err)
-    log.error(message, { ...extra, error })
-    const key = err instanceof Failure ? `${message}:${err.code}:${err.response?.status ?? ""}` : message
-    SentryReporter.captureOnce(key, err, { ...extra, error })
+    return err instanceof Failure ? { ...error, response: undefined } : error
+  }
+
+  function identity(message: string, err: unknown) {
+    if (err instanceof Failure) return `${message}:${err.code}:${err.response?.status ?? ""}`
+    if (err instanceof Error) return `${message}:${err.name}:${err.message.slice(0, 120)}`
+    return `${message}:${String(err).slice(0, 120)}`
+  }
+
+  export function alert(message: string, err: unknown, extra?: Record<string, unknown>) {
+    log.error(message, { ...extra, error: lean(err) })
+    SentryReporter.captureOnce(identity(message, err), err, { ...extra, error: dump(err) })
   }
 
   type Link = {
@@ -154,7 +163,7 @@ export namespace GitHub {
       return undefined
     })
     if (!res?.ok) {
-      if (res) log.warn("rails link rejected", { method: "GET", url: rails.url, ...(await reply(res)) })
+      if (res) log.warn("rails link rejected", { method: "GET", url: rails.url, response: await reply(res) })
       return
     }
     return (await res.json().catch(() => undefined)) as Link | undefined
@@ -174,12 +183,7 @@ export namespace GitHub {
     })
     if (!res?.ok) {
       if (res)
-        log.warn("rails report rejected", {
-          method: "PUT",
-          url: rails.url,
-          sent: body,
-          ...(await reply(res)),
-        })
+        log.warn("rails report rejected", { method: "PUT", url: rails.url, sent: body, response: await reply(res) })
       throw new Failure("remote", 502)
     }
   }
@@ -206,13 +210,15 @@ export namespace GitHub {
   }
 
   const secret = /^(set-cookie|cookie|authorization|proxy-authorization)$/i
+  const cap = 4000
 
   async function reply(res: globalThis.Response): Promise<Response> {
+    const text = await res.text().catch((err) => `<unreadable body: ${String(err)}>`)
     return {
       status: res.status,
       statusText: res.statusText,
       headers: Object.fromEntries([...res.headers].filter(([name]) => !secret.test(name))),
-      body: await res.text().catch((err) => `<unreadable body: ${String(err)}>`),
+      body: text.length > cap ? `${text.slice(0, cap)}…(+${text.length - cap} chars)` : text,
     }
   }
 
@@ -242,7 +248,7 @@ export namespace GitHub {
       .then(() => JSON.parse(response.body))
       .catch(() => undefined)) as { message?: string; errors?: { message?: string }[] } | undefined
     const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
-    log.warn("api rejected", { method, url, sent: body, ms: Date.now() - started, ...response })
+    log.warn("api rejected", { method, url, sent: body, ms: Date.now() - started, response })
     if (res.status === 401) {
       await report({ revoked: true }).catch(() => undefined)
       throw new Failure("revoked", 409, message, response)
@@ -277,7 +283,7 @@ export namespace GitHub {
         (err) => (err instanceof Failure ? err : new Failure("remote", 502, String(err))),
       )
       if (!failure) return
-      log.warn("first push failed", { attempt, error: dump(failure) })
+      log.warn("first push failed", { attempt, error: lean(failure) })
       if (!transient.includes(failure.code) || attempt >= attempts || Date.now() - started > budget) {
         if (notify.includes(failure.code)) alert("first push gave up", failure, { attempt })
         failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })

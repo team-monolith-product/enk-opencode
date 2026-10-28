@@ -633,6 +633,41 @@ describe("GitHubRoutes", () => {
 })
 
 describe("GitHub failure reporting", () => {
+  test("a rejected GitHub call keeps the raw response without secret headers", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      enabled: true,
+      connected: true,
+      login: "octocat",
+      token: "gho_1",
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const original = globalThis.fetch
+    const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
+      new URL(input instanceof Request ? input.url : String(input)).host === "api.github.com"
+        ? Promise.resolve(
+            new Response(`<html>\nnot found\n${"x".repeat(5000)}</html>`, {
+              status: 404,
+              headers: { "x-github-request-id": "abc", "set-cookie": "s=1" },
+            }),
+          )
+        : original(input, init)) as typeof fetch)
+
+    try {
+      const failure = await GitHub.push(tmp.path, { message: "m" }).catch((err) => err)
+
+      expect(failure).toBeInstanceOf(GitHub.Failure)
+      expect(failure.code).toBe("missing")
+      expect(failure.response.status).toBe(404)
+      expect(failure.response.headers["x-github-request-id"]).toBe("abc")
+      expect(failure.response.headers["set-cookie"]).toBeUndefined()
+      expect(failure.response.body.startsWith("<html>\nnot found")).toBe(true)
+      expect(failure.response.body.length).toBeLessThan(4100)
+    } finally {
+      github.mockRestore()
+    }
+  })
+
   test("only actionable codes are reported", () => {
     expect(GitHub.notify).toEqual(["forbidden", "revoked", "missing", "remote"])
     expect(GitHub.notify).not.toContain("empty")
