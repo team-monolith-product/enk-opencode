@@ -3,6 +3,7 @@ import { describeRoute, validator } from "hono-openapi"
 import { failures, ok } from "../enk-responses"
 import z from "zod"
 import { GitHub } from "../../enk/github"
+import { Locale } from "../../enk/locale"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
 
@@ -20,6 +21,13 @@ const Status = z
     linkedBy: z.string().optional(),
     repo: Repo.optional(),
     push: z.object({ sha: z.string(), time: z.number(), by: z.string().optional() }).optional(),
+    firstPush: z
+      .object({
+        attempts: z.number(),
+        code: z.string(),
+        reason: z.string(),
+      })
+      .optional(),
   })
   .meta({ ref: "GitHubStatus" })
 const RepoName = z
@@ -50,7 +58,7 @@ export const GitHubRoutes = lazy(() =>
         operationId: "github.repo.create",
         responses: { ...ok("Link status", Status), ...failures(409, 422, 502) },
       }),
-      validator("json", z.object({ name: RepoName })),
+      validator("json", z.object({ name: RepoName, locale: Locale.Schema.optional() })),
       async (c) => c.json(await GitHub.create(Instance.directory, c.req.valid("json"))),
     ),
 )

@@ -1,4 +1,4 @@
-import { lstat, mkdir, writeFile } from "fs/promises"
+import { lstat, mkdir, readFile, writeFile } from "fs/promises"
 import path from "path"
 import { Global } from "../global"
 import { EnvFile } from "../util/env-file"
@@ -15,6 +15,9 @@ export namespace WorkspaceRepo {
   export const HEAD = "refs/heads/main"
   const limit = 100 * 1024 * 1024
   const chunk = 200
+  /** 에이전트가 작업 폴더에 남기는 부산물 폴더. 학생 .gitignore 의 ! 패턴이 info/exclude 보다 앞서므로 경로로도 거른다. */
+  export const ignored = [".playwright-mcp/"]
+  const leftovers = ignored.map((item) => item.replace(/\/$/, ""))
   const exclude = [
     ".env",
     ".env.*",
@@ -25,10 +28,21 @@ export namespace WorkspaceRepo {
     ".venv/",
     "__pycache__/",
     ".opencode/",
+    ...ignored,
     ".DS_Store",
     "__preview-bridge.js",
     ".nfs*",
   ]
+
+  /** 에이전트가 남기는 부산물 폴더를 학생 작업 폴더의 .gitignore 에 적어 둔다. 이미 있으면 건드리지 않는다. */
+  export async function ignore(dir: string) {
+    const file = path.join(dir, ".gitignore")
+    const text = await readFile(file, "utf8").catch(() => "")
+    const lines = new Set(text.split(/\r?\n/).map((line) => line.trim().replace(/\/$/, "")))
+    const missing = ignored.filter((item) => !lines.has(item.replace(/\/$/, "")))
+    if (missing.length === 0) return
+    await writeFile(file, text + (text && !text.endsWith("\n") ? "\n" : "") + missing.join("\n") + "\n")
+  }
 
   export type Change = { status: "A" | "M" | "D"; file: string }
   export type Staged = { tree: string; empty: boolean; skipped: string[] }
@@ -118,7 +132,7 @@ export namespace WorkspaceRepo {
     await ready(repo)
     const sized = await Promise.all(
       (await scan(repo))
-        .filter((file) => !EnvFile.isSecretFile(file))
+        .filter((file) => !EnvFile.isSecretFile(file) && !file.split("/").some((part) => leftovers.includes(part)))
         .map(async (file) => ({ file, size: (await lstat(path.join(repo.dir, file)).catch(() => undefined))?.size })),
     )
     const keep = sized.filter((item) => item.size !== undefined && item.size <= limit).map((item) => item.file)

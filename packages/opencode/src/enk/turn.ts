@@ -14,9 +14,12 @@ export namespace TurnSummary {
   const MAX_FILES = 30
   const MAX_SUBJECT = 72
 
-  const LABEL: Record<Locale.Value, Record<WorkspaceRepo.Change["status"], string> & { fallback: string }> = {
-    ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용" },
-    en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda" },
+  const LABEL: Record<
+    Locale.Value,
+    Record<WorkspaceRepo.Change["status"], string> & { fallback: string; first: string }
+  > = {
+    ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용", first: "짓다에서 처음 올린 내용" },
+    en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda", first: "First push from Jitda" },
   }
 
   export type Turn = { user: MessageV2.User; request: string; reply: string }
@@ -52,6 +55,11 @@ export namespace TurnSummary {
       return undefined
     })
     return compose(title || fallback(turn), changes, turn.user.locale)
+  }
+
+  /** 저장소를 만들자마자 올리는 첫 커밋의 제목. */
+  export function first(locale?: Locale.Value) {
+    return LABEL[locale ?? Locale.DEFAULT].first
   }
 
   export function compose(subject: string, changes: WorkspaceRepo.Change[], locale?: Locale.Value) {

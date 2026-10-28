@@ -1,7 +1,9 @@
 import { writeFile } from "fs/promises"
 import path from "path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { Log } from "../util/log"
 import { EnkFailure } from "./failure"
+import { History } from "./history"
 import { Rails } from "./rails"
 import { ServeTargets } from "./serve-targets"
 import type { Locale } from "./locale"
@@ -15,10 +17,16 @@ export namespace GitHub {
   const agent = "jitda-opencode"
   const route = "/api/v1/opencode/github"
   const bridge = "__preview-bridge.js"
+  const attempts = 3
+  const backoff = 500
+  const budget = 60_000
+  const detail = 300
+  const transient: Code[] = ["remote", "missing"]
   const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
 
   export type Repo = { owner: string; name: string; url: string; private?: boolean }
   export type Push = { sha: string; time: number; by?: string }
+  export type FirstPush = { attempts: number; code: Code; reason: string }
   export type Status = {
     enabled: boolean
     connectUrl?: string
@@ -26,6 +34,7 @@ export namespace GitHub {
     linkedBy?: string
     repo?: Repo
     push?: Push
+    firstPush?: FirstPush
   }
   export type Result = { sha?: string }
   export type Code =
@@ -60,6 +69,8 @@ export namespace GitHub {
   }
 
   export class Failure extends EnkFailure<Code> {}
+
+  const failed = new Map<string, FirstPush>()
 
   async function link(): Promise<Link | undefined> {
     const rails = Rails.endpoint(route)
@@ -101,6 +112,7 @@ export namespace GitHub {
       linkedBy: hit.connected ? hit.linked_by : undefined,
       repo: hit.repo,
       push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
+      firstPush: failed.get(dir),
     }
   }
 
@@ -140,13 +152,40 @@ export namespace GitHub {
     private: remote.private,
   })
 
-  export async function create(dir: string, input: { name: string }) {
+  export async function create(dir: string, input: { name: string; locale?: Locale.Value }) {
     const hit = await linked()
     const repo = shape(
       await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
     )
     await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
+    await firstPush(dir, { ...hit, repo }, input.locale)
     return status(dir)
+  }
+
+  /**
+   * 저장소를 만들자마자 지금 작업 폴더를 한 번 올린다. 마지막 기록 뒤에 바뀐 파일이 있으면 먼저 기록에 남긴다.
+   * 끝내 실패해도 저장소 생성은 성공으로 두고, 사유를 상태에 남겨 다음 대화가 끝날 때 다시 올린다.
+   */
+  async function firstPush(dir: string, hit: Link, locale?: Locale.Value) {
+    const subject = TurnSummary.first(locale)
+    await WorkspaceRepo.ignore(dir).catch((err) => log.warn("gitignore skipped", { error: String(err) }))
+    await History.commit(dir, { message: subject }).catch((err) =>
+      log.warn("first snapshot failed", { error: err instanceof Error ? err.message : String(err) }),
+    )
+    const started = Date.now()
+    for (let attempt = 1; ; attempt++) {
+      const failure = await push(dir, { locale, subject }, hit).then(
+        () => undefined,
+        (err) => (err instanceof Failure ? err : new Failure("remote", 502, String(err))),
+      )
+      if (!failure) return
+      log.warn("first push failed", { attempt, code: failure.code, error: failure.message })
+      if (!transient.includes(failure.code) || attempt >= attempts || Date.now() - started > budget) {
+        failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
+        return
+      }
+      await sleep(backoff * attempt)
+    }
   }
 
   function auth(token: string) {
@@ -167,8 +206,8 @@ export namespace GitHub {
     await push(dir, { locale })
   }
 
-  export async function push(dir: string, input: { locale?: Locale.Value }) {
-    const hit = await linked()
+  export async function push(dir: string, input: { locale?: Locale.Value; subject?: string }, known?: Link) {
+    const hit = known ?? (await linked())
     if (!hit.repo) throw new Failure("norepo", 409)
     const remote = await request<Remote>(
       hit.token!,
@@ -181,12 +220,14 @@ export namespace GitHub {
       remote: `${web}/${hit.repo.owner}/${hit.repo.name}.git`,
       branch: remote.default_branch || "main",
       locale: input.locale,
+      subject: input.subject,
       author: {
         name: hit.login || "Jitda",
         email: `${hit.github_user_id ? `${hit.github_user_id}+` : ""}${hit.login}@users.noreply.github.com`,
       },
       env: auth(hit.token!),
     })
+    failed.delete(dir)
     if (result.sha) {
       await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
       log.info("pushed", { sha: result.sha })
@@ -233,6 +274,7 @@ export namespace GitHub {
     remote: string
     branch: string
     locale?: Locale.Value
+    subject?: string
     author: { name: string; email: string }
     env?: Record<string, string>
   }): Promise<Result> {
@@ -250,7 +292,7 @@ export namespace GitHub {
       const head = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
       if (!head) throw new Failure("empty", 422)
       const tree = await publishable(repo, `${head}^{tree}`)
-      const subject = (await repo.must(["log", "-1", "--format=%s", head])).trim()
+      const subject = input.subject ?? (await repo.must(["log", "-1", "--format=%s", head])).trim()
       const attempt = async (retry: boolean): Promise<Result> => {
         const heads = await repo.must(["ls-remote", input.remote, ref], { env: input.env })
         const found = heads.split("\n").some((line) => line.endsWith(`\t${ref}`))

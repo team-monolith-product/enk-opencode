@@ -1,5 +1,15 @@
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
-import { createEffect, createMemo, createSignal, For, type JSX, onCleanup, onMount, Show, type Accessor } from "solid-js"
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  type JSX,
+  onCleanup,
+  onMount,
+  Show,
+  type Accessor,
+} from "solid-js"
 import { useClientEnv } from "@/context/client-env"
 import { useLanguage } from "@/context/language"
 import { createPage } from "@/components/blocksuite/blocksuite-doc"
@@ -42,9 +52,6 @@ type Props = {
   spectator?: boolean
   approve: () => void
   cancel: () => void
-  // Requester-only: send now without the members who left mid-vote (their rows show 나감). Offered
-  // when the departed are the sole holdouts — a departure itself never sends.
-  exclude?: () => void
   close: () => void
   // Fired when the local countdown passes the deadline (+grace) without a server terminal cast — the
   // parent synthesizes an "expired" state so a finished vote never lingers on screen. Optional so a
@@ -92,18 +99,6 @@ const approveLabel = copyKey(
     stop: "docSubmit.approve.stop",
     clear: "docSubmit.approve.clear",
     rollback: "docSubmit.approve.rollback",
-  } as const,
-  "doc",
-)
-
-const excludeLabel = copyKey(
-  {
-    doc: "docSubmit.exclude.doc",
-    "question-dismiss": "docSubmit.exclude.questionDismiss",
-    "question-back": "docSubmit.exclude.questionBack",
-    stop: "docSubmit.exclude.stop",
-    clear: "docSubmit.exclude.clear",
-    rollback: "docSubmit.exclude.rollback",
   } as const,
   "doc",
 )
@@ -168,49 +163,129 @@ function hideAnswers(kind: DocSubmitKind | undefined) {
 // ── inline glyphs (design-system Icon ports — app icon set lacks send/clock/user/warn/refresh) ──
 const ICON = {
   send: (s = 14) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <line x1="22" y1="2" x2="11" y2="13" />
       <polygon points="22 2 15 22 11 13 2 9 22 2" />
     </svg>
   ),
   clock: (s = 14) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <circle cx="12" cy="12" r="10" />
       <polyline points="12 6 12 12 16 14" />
     </svg>
   ),
   user: (s = 14) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
     </svg>
   ),
   check: (s = 14) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <polyline points="20 6 9 17 4 12" />
     </svg>
   ),
   x: (s = 14) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <line x1="18" y1="6" x2="6" y2="18" />
       <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   ),
   warn: (s = 14) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
       <line x1="12" y1="9" x2="12" y2="13" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
   ),
   refresh: (s = 14) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <polyline points="23 4 23 10 17 10" />
       <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
     </svg>
   ),
   arrowRight: (s = 14) => (
-    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width={s}
+      height={s}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <line x1="5" y1="12" x2="19" y2="12" />
       <polyline points="12 5 19 12 12 19" />
     </svg>
@@ -218,7 +293,14 @@ const ICON = {
 }
 
 // ── avatar (initials circle + agree check pop) ─────────────────────────────
-function ConsentAvatar(props: { name: string; color: string; size?: number; dashed?: boolean; check?: boolean; on?: boolean }) {
+function ConsentAvatar(props: {
+  name: string
+  color: string
+  size?: number
+  dashed?: boolean
+  check?: boolean
+  on?: boolean
+}) {
   const size = () => props.size ?? 30
   return (
     <span class="ds-avatar" style={{ width: `${size()}px`, height: `${size()}px` }}>
@@ -329,7 +411,9 @@ function PreviewCard(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boo
               <Show when={!props.dismiss}>
                 <Show
                   when={item.answers.length > 0}
-                  fallback={<div class="ds-preview-a ds-preview-a--empty">{language.t("docSubmit.preview.noAnswer")}</div>}
+                  fallback={
+                    <div class="ds-preview-a ds-preview-a--empty">{language.t("docSubmit.preview.noAnswer")}</div>
+                  }
                 >
                   <div class="ds-preview-answers">
                     <For each={item.answers}>{(answer) => <span class="ds-preview-a">{answer}</span>}</For>
@@ -360,7 +444,12 @@ function RollbackCard(props: { target: NonNullable<DocSubmitState["rollback"]> }
 
 // The snapshot region: doc viewer for prompt sends, question preview for question votes, the target
 // version for a rollback vote, nothing for a bare "stop" vote.
-function SnapshotArea(props: { kind?: DocSubmitKind; state: DocSubmitState; preview?: () => DocSubmitPreviewItem[]; sdk?: DocSubmitSdk }) {
+function SnapshotArea(props: {
+  kind?: DocSubmitKind
+  state: DocSubmitState
+  preview?: () => DocSubmitPreviewItem[]
+  sdk?: DocSubmitSdk
+}) {
   return (
     <Show
       when={props.kind !== "stop" && props.kind !== "clear" && props.kind !== "rollback"}
@@ -403,10 +492,7 @@ function VotingBody(props: {
 }) {
   const requester = () => props.state.actors.find((item) => item.actorID === props.state.actorID)
   const nonReq = createMemo(() => props.state.actors.filter((item) => item.actorID !== props.state.actorID))
-  // 나감 members don't count toward "N명이 더 동의하면" — they can't answer; whether to proceed
-  // without them is the requester's call (exclude action in the waiting view).
   const remaining = createMemo(() => nonReq().filter((item) => item.status === "pending"))
-  const departed = createMemo(() => nonReq().filter((item) => item.status === "left"))
   const onlyMe = () => {
     const left = remaining()
     return left.length === 1 && left[0]?.actorID === props.actorID
@@ -450,22 +536,11 @@ function VotingBody(props: {
           <Show
             when={remaining().length > 0}
             fallback={
-              <Show
-                when={departed().length > 0}
-                fallback={
-                  <span>
-                    <strong class="ds-ok">{language.t("docSubmit.status.allAgreed")}</strong>{" · "}
-                    {language.t("docSubmit.status.soon", { verb: proceed() })}
-                  </span>
-                }
-              >
-                <span>
-                  {emphasize(
-                    language.t("docSubmit.status.departed"),
-                    language.t("docSubmit.count.people", { count: departed().length }),
-                  )}
-                </span>
-              </Show>
+              <span>
+                <strong class="ds-ok">{language.t("docSubmit.status.allAgreed")}</strong>
+                {" · "}
+                {language.t("docSubmit.status.soon", { verb: proceed() })}
+              </span>
             }
           >
             <Show
@@ -531,10 +606,9 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
     if (props.actor.actorID === props.requesterID) out += language.t("docSubmit.actor.requester")
     return out
   }
-  const gone = () => props.actor.status === "left"
   return (
-    <div class="ds-status-row" classList={{ "jt-consent-row-flash": flash(), "ds-status-row--gone": gone() }}>
-      <ConsentAvatar name={props.actor.name} color={props.actor.color} size={28} on={ok()} check={ok()} dashed={gone()} />
+    <div class="ds-status-row" classList={{ "jt-consent-row-flash": flash() }}>
+      <ConsentAvatar name={props.actor.name} color={props.actor.color} size={28} on={ok()} check={ok()} />
       <span class="ds-status-row__name" classList={{ "ds-status-row__name--ok": ok() }}>
         {props.actor.name}
         {suffix()}
@@ -542,18 +616,9 @@ function StatusRow(props: { actor: DocSubmitActor; me: string; requesterID: stri
       <Show
         when={ok()}
         fallback={
-          <Show
-            when={gone()}
-            fallback={
-              <span class="ds-status-row__wait">
-                {language.t("docSubmit.actor.waiting")} <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
-              </span>
-            }
-          >
-            <span class="ds-status-row__wait">
-              {ICON.user(12)} {language.t("docSubmit.actor.left")}
-            </span>
-          </Show>
+          <span class="ds-status-row__wait">
+            {language.t("docSubmit.actor.waiting")} <span class="jt-spin ds-spin">{ICON.refresh(12)}</span>
+          </span>
         }
       >
         <span class="jt-pill jt-pill-started ds-status-row__pill">{language.t("docSubmit.actor.agreed")}</span>
@@ -568,19 +633,10 @@ function WaitingBody(props: {
   actorID: string
   sec: number
   cancel: () => void
-  exclude?: () => void
   spectator?: boolean
 }) {
   const language = useLanguage()
   const allOk = createMemo(() => props.state.actors.every((item) => item.status === "approved"))
-  // The departed are the sole holdouts: the requester (and only the requester) may proceed without
-  // them — a departure by itself never sends.
-  const excludable = createMemo(
-    () =>
-      props.state.actorID === props.actorID &&
-      props.state.actors.some((item) => item.status === "left") &&
-      !props.state.actors.some((item) => item.status === "pending"),
-  )
   const sub = () => language.t(hintText(props.kind))
   // A readonly spectator sees the SAME waiting/status view an already-approved participant sees — same
   // copy and layout. The only difference: it cannot cancel, so the "동의 취소" button is hidden.
@@ -589,15 +645,10 @@ function WaitingBody(props: {
       <SessionPreviewMascot size={52} />
       <div class="ds-waiting-head">
         <h2 class="ds-headline ds-headline--center">
-          {excludable()
-            ? language.t("docSubmit.waiting.leftOnly")
-            : allOk()
-              ? language.t("docSubmit.waiting.allAgreed")
-              : language.t("docSubmit.waiting.pending")}
+          {allOk() ? language.t("docSubmit.waiting.allAgreed") : language.t("docSubmit.waiting.pending")}
         </h2>
         <p class="ds-waiting-sub">
-          {excludable() ? language.t("docSubmit.waiting.excludable") : sub()} ·{" "}
-          <span class="ds-nowrap">{language.t("docSubmit.countdown.autoReject", { sec: props.sec })}</span>
+          {sub()} · <span class="ds-nowrap">{language.t("docSubmit.countdown.autoReject", { sec: props.sec })}</span>
         </p>
       </div>
       <div class="jt-snap-scroll ds-status-list">
@@ -610,12 +661,6 @@ function WaitingBody(props: {
           <button type="button" class="jt-btn jt-btn-secondary" onClick={props.cancel}>
             {language.t("docSubmit.action.cancel")} <span class="ds-kbd">Esc</span>
           </button>
-          <Show when={excludable() && props.exclude}>
-            <button type="button" class="jt-btn jt-btn-critical ds-btn-approve" onClick={props.exclude}>
-              {ICON.send(14)}
-              {language.t(excludeLabel(props.kind))}
-            </button>
-          </Show>
         </div>
       </Show>
     </div>
@@ -628,11 +673,8 @@ type Translate = ReturnType<typeof useLanguage>["t"]
 function failInfo(state: DocSubmitState, t: Translate): { title: string; sub: string; icon: JSX.Element } {
   const timeoutSec = Math.round(state.timeoutMs / 1000)
   if (state.targetKind === "rollback") {
-    const icon = state.status === "left" ? ICON.user(22) : state.status === "expired" ? ICON.clock(22) : ICON.x(22)
+    const icon = state.status === "expired" ? ICON.clock(22) : ICON.x(22)
     return { title: t("docSubmit.failed.rollback.title"), sub: t("docSubmit.failed.rollback.sub"), icon }
-  }
-  if (state.status === "left") {
-    return { title: t("docSubmit.failed.left.title"), sub: t("docSubmit.failed.left.sub"), icon: ICON.user(22) }
   }
   if (state.status === "expired") {
     return {
@@ -689,7 +731,6 @@ function ConsentFrame(props: {
   spectator?: boolean
   approve: () => void
   cancel: () => void
-  exclude?: () => void
   onExpire?: () => void
 }) {
   const remaining = useCountdown(() => props.state.expiresAt, props.onExpire)
@@ -738,7 +779,6 @@ function ConsentFrame(props: {
             actorID={props.actorID}
             sec={sec()}
             cancel={props.cancel}
-            exclude={props.exclude}
             spectator={props.spectator}
           />
         </Show>
@@ -755,7 +795,7 @@ export function DialogDocSubmit(props: Props) {
   const approved = () => me()?.status === "approved"
   const failed = () => {
     const value = state()?.status
-    return value === "cancelled" || value === "expired" || value === "left"
+    return value === "cancelled" || value === "expired"
   }
 
   // Keyboard: Enter = approve (voting only), Esc = reject/cancel. Captured so the shared dialog
@@ -793,10 +833,7 @@ export function DialogDocSubmit(props: Props) {
       <div data-slot="doc-submit-backdrop" />
       <Show when={state()}>
         {(current) => (
-          <Show
-            when={!failed()}
-            fallback={<FailureCard state={current()} close={props.close} />}
-          >
+          <Show when={!failed()} fallback={<FailureCard state={current()} close={props.close} />}>
             <ConsentFrame
               view={props.spectator || (pending() && approved()) ? "waiting" : "voting"}
               state={current()}
@@ -807,7 +844,6 @@ export function DialogDocSubmit(props: Props) {
               spectator={props.spectator}
               approve={props.approve}
               cancel={props.cancel}
-              exclude={props.exclude}
               onExpire={props.onExpire}
             />
           </Show>

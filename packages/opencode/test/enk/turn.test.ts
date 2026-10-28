@@ -40,6 +40,17 @@ describe("TurnSummary.compose", () => {
   })
 })
 
+describe("TurnSummary.first", () => {
+  test("names the first commit in the viewer locale", () => {
+    const changes = [{ status: "A" as const, file: "index.html" }]
+
+    expect(TurnSummary.compose(TurnSummary.first("en"), changes, "en")).toBe(
+      "First push from Jitda\n\n- Add: index.html",
+    )
+    expect(TurnSummary.compose(TurnSummary.first(), changes)).toBe("짓다에서 처음 올린 내용\n\n- 추가: index.html")
+  })
+})
+
 describe("TurnSummary.latest", () => {
   test("reads the last request and the final reply of the turn", () => {
     const turn = TurnSummary.latest([

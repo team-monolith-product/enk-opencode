@@ -1937,6 +1937,11 @@ export type GitHubStatus = {
     time: number
     by?: string
   }
+  firstPush?: {
+    attempts: number
+    code: string
+    reason: string
+  }
 }
 
 export type EnkFailure = {
@@ -2049,6 +2054,14 @@ export type McpResource = {
   description?: string
   mimeType?: string
   client: string
+}
+
+export type InitialPlanDelivery = {
+  state: "delivered" | "already_delivered" | "not_finalized" | "pending_elsewhere" | "failed"
+}
+
+export type InitialPlanDeliveryError = {
+  error: string
 }
 
 export type TextPartInput = {
@@ -3377,6 +3390,7 @@ export type GithubStatusResponse = GithubStatusResponses[keyof GithubStatusRespo
 export type GithubRepoCreateData = {
   body?: {
     name: string
+    locale?: PromptLocale
   }
   path?: never
   query?: {
@@ -3825,6 +3839,38 @@ export type ProjectSummaryGenerateResponses = {
 }
 
 export type ProjectSummaryGenerateResponse = ProjectSummaryGenerateResponses[keyof ProjectSummaryGenerateResponses]
+
+export type EnkInitialPlanDeliverData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/enk/initial-plan/deliver"
+}
+
+export type EnkInitialPlanDeliverErrors = {
+  /**
+   * Delivery failed
+   */
+  502: InitialPlanDeliveryError
+  /**
+   * Rails is not configured
+   */
+  503: InitialPlanDeliveryError
+}
+
+export type EnkInitialPlanDeliverError = EnkInitialPlanDeliverErrors[keyof EnkInitialPlanDeliverErrors]
+
+export type EnkInitialPlanDeliverResponses = {
+  /**
+   * Delivery state
+   */
+  200: InitialPlanDelivery
+}
+
+export type EnkInitialPlanDeliverResponse = EnkInitialPlanDeliverResponses[keyof EnkInitialPlanDeliverResponses]
 
 export type SessionListData = {
   body?: never
@@ -5125,7 +5171,7 @@ export type SessionPromptDocRollbackResponse =
 export type SessionPromptDocSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel" | "exclude"
+    action: "approve" | "cancel"
   }
   path: {
     sessionID: string
@@ -5252,7 +5298,7 @@ export type SessionQuestionSubmitResponse = SessionQuestionSubmitResponses[keyof
 export type SessionQuestionSubmitRespondData = {
   body?: {
     actorID: string
-    action: "approve" | "cancel" | "exclude"
+    action: "approve" | "cancel"
   }
   path: {
     sessionID: string

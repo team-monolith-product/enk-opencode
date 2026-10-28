@@ -6,9 +6,7 @@ export type DocSubmitActor = {
   actorID: string
   name: string
   color: string
-  // "left" = dropped out mid-vote (shown as 나감). Blocks auto-send; the requester decides via the
-  // "exclude" respond action whether to send without them. Flips back to "pending" on reconnect.
-  status: "pending" | "approved" | "left"
+  status: "pending" | "approved"
 }
 
 export type DocSubmitState = {
@@ -24,7 +22,7 @@ export type DocSubmitState = {
   questionAction?: "send" | "dismiss" | "back"
   rollback?: DocRollbackTarget
   actorID: string
-  status: "pending" | "sent" | "cancelled" | "expired" | "left"
+  status: "pending" | "sent" | "cancelled" | "expired"
   actors: DocSubmitActor[]
   cancelledBy?: DocSubmitActor
   timeoutMs: number
@@ -32,7 +30,7 @@ export type DocSubmitState = {
 }
 
 export type DocSubmitEvent = {
-  type: "created" | "updated" | "sent" | "cancelled" | "expired" | "left"
+  type: "created" | "updated" | "sent" | "cancelled" | "expired"
   state: DocSubmitState
 }
 
@@ -56,7 +54,7 @@ type RespondInput = {
   sessionID: string
   submitID: string
   actorID: string
-  action: "approve" | "cancel" | "exclude"
+  action: "approve" | "cancel"
 }
 
 type SocketInput = {
@@ -310,8 +308,7 @@ const state = (value: unknown): DocSubmitState | undefined => {
     item.status !== "pending" &&
     item.status !== "sent" &&
     item.status !== "cancelled" &&
-    item.status !== "expired" &&
-    item.status !== "left"
+    item.status !== "expired"
   )
     return
   if (!Array.isArray(item.actors)) return
@@ -328,8 +325,7 @@ const parse = (data: string) => {
       type !== "updated" &&
       type !== "sent" &&
       type !== "cancelled" &&
-      type !== "expired" &&
-      type !== "left"
+      type !== "expired"
     )
       return
     const next = state((value as { state?: unknown }).state)
