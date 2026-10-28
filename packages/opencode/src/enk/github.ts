@@ -3,6 +3,7 @@ import path from "path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { Global } from "../global"
 import { EnvFile } from "../util/env-file"
+import { errorData } from "../util/error"
 import { git } from "../util/git"
 import { Hash } from "../util/hash"
 import { Log } from "../util/log"
@@ -84,11 +85,19 @@ export namespace GitHub {
     permissions?: { push?: boolean }
   }
 
+  export type Response = {
+    status: number
+    statusText: string
+    headers: Record<string, string>
+    body: string
+  }
+
   export class Failure extends Error {
     constructor(
       readonly code: Code,
       readonly status: 404 | 409 | 422 | 502,
       message?: string,
+      readonly response?: Response,
     ) {
       super(message || code)
       this.name = "GitHubFailure"
@@ -127,11 +136,11 @@ export namespace GitHub {
       headers: { Authorization: `token ${rails.token}` },
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
-      log.warn("rails link failed", { method: "GET", url: rails.url, error: String(err) })
+      log.warn("rails link failed", { method: "GET", url: rails.url, error: errorData(err) })
       return undefined
     })
     if (!res?.ok) {
-      if (res) log.warn("rails link rejected", { method: "GET", url: rails.url, status: res.status })
+      if (res) log.warn("rails link rejected", { method: "GET", url: rails.url, ...(await snapshot(res)) })
       return
     }
     return (await res.json().catch(() => undefined)) as Link | undefined
@@ -146,11 +155,17 @@ export namespace GitHub {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
-      log.warn("rails report failed", { method: "PUT", url: rails.url, error: String(err) })
+      log.warn("rails report failed", { method: "PUT", url: rails.url, requestBody: body, error: errorData(err) })
       return undefined
     })
     if (!res?.ok) {
-      if (res) log.warn("rails report rejected", { method: "PUT", url: rails.url, status: res.status })
+      if (res)
+        log.warn("rails report rejected", {
+          method: "PUT",
+          url: rails.url,
+          requestBody: body,
+          ...(await snapshot(res)),
+        })
       throw new Failure("remote", 502)
     }
   }
@@ -176,6 +191,15 @@ export namespace GitHub {
     }
   }
 
+  async function snapshot(res: globalThis.Response): Promise<Response> {
+    return {
+      status: res.status,
+      statusText: res.statusText,
+      headers: Object.fromEntries(res.headers),
+      body: await res.text().catch((err) => `<unreadable body: ${String(err)}>`),
+    }
+  }
+
   async function request<T>(token: string, method: string, url: string, body?: unknown): Promise<T> {
     const started = Date.now()
     const res = await fetch(api + url, {
@@ -190,35 +214,31 @@ export namespace GitHub {
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
-      log.warn("api failed", { method, url, ms: Date.now() - started, error: String(err) })
+      log.warn("api failed", { method, url, requestBody: body, ms: Date.now() - started, error: errorData(err) })
       throw new Failure("remote", 502, String(err))
     })
     if (res.ok) {
       log.info("api", { method, url, status: res.status, ms: Date.now() - started })
       return (await res.json()) as T
     }
-    const detail = (await res.json().catch(() => undefined)) as
-      | { message?: string; errors?: { message?: string }[] }
-      | undefined
+    const response = await snapshot(res)
+    const raw = response.body
+    const detail = (() => {
+      try {
+        return JSON.parse(raw) as { message?: string; errors?: { message?: string }[] }
+      } catch {
+        return undefined
+      }
+    })()
     const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
-    log.warn("api rejected", {
-      method,
-      url,
-      status: res.status,
-      ms: Date.now() - started,
-      message,
-      docs: (detail as { documentation_url?: string } | undefined)?.documentation_url,
-      scopes: res.headers.get("x-oauth-scopes") ?? undefined,
-      accepted: res.headers.get("x-accepted-oauth-scopes") ?? undefined,
-      requestId: res.headers.get("x-github-request-id") ?? undefined,
-    })
+    log.warn("api rejected", { method, url, requestBody: body, ms: Date.now() - started, ...response })
     if (res.status === 401) {
       await report({ revoked: true }).catch(() => undefined)
-      throw new Failure("revoked", 409, message)
+      throw new Failure("revoked", 409, message, response)
     }
-    if (res.status === 404) throw new Failure("missing", 404, message)
-    if (res.status === 422) throw new Failure("exists", 422, message)
-    throw new Failure("remote", 502, message)
+    if (res.status === 404) throw new Failure("missing", 404, message, response)
+    if (res.status === 422) throw new Failure("exists", 422, message, response)
+    throw new Failure("remote", 502, message, response)
   }
 
   const shape = (remote: Remote): Repo => ({
@@ -246,7 +266,13 @@ export namespace GitHub {
         (err) => (err instanceof Failure ? err : new Failure("remote", 502, String(err))),
       )
       if (!failure) return
-      log.warn("first push failed", { attempt, code: failure.code, error: failure.message })
+      log.warn("first push failed", {
+        attempt,
+        code: failure.code,
+        status: failure.status,
+        error: errorData(failure),
+        response: failure.response,
+      })
       if (!transient.includes(failure.code) || attempt >= attempts || Date.now() - started > budget) {
         failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
         return

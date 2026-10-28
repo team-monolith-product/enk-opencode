@@ -7,6 +7,7 @@ import { LLM } from "@/session/llm"
 import type { MessageV2 } from "@/session/message-v2"
 import type { SessionID } from "@/session/schema"
 import { SessionStatus } from "@/session/status"
+import { errorData } from "@/util/error"
 import { Log } from "@/util/log"
 import { GitHub } from "./github"
 import { Locale } from "./locale"
@@ -29,13 +30,14 @@ export namespace GitHubSync {
       await sync(dir, evt.properties.sessionID).catch((err) => {
         if (err instanceof GitHub.Failure) {
           return log.warn("skipped", {
+            sessionID: evt.properties.sessionID,
             code: err.code,
             status: err.status,
-            message: err.message,
-            sessionID: evt.properties.sessionID,
+            error: errorData(err),
+            response: err.response,
           })
         }
-        log.warn("failed", { error: err instanceof Error ? err.message : String(err) })
+        log.warn("failed", { sessionID: evt.properties.sessionID, error: errorData(err) })
       })
     })
   }
