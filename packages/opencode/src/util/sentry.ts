@@ -41,6 +41,20 @@ export namespace SentryReporter {
     SentryBun.captureException(error, context ? { extra: context } : undefined)
   }
 
+  const seen = new Map<string, number>()
+
+  export function due(key: string, ttl = 10 * 60_000, now = Date.now()) {
+    const last = seen.get(key)
+    if (last !== undefined && now - last < ttl) return false
+    seen.set(key, now)
+    return true
+  }
+
+  export function captureOnce(key: string, error: unknown, context?: Record<string, unknown>) {
+    if (!enabled || !due(key)) return
+    captureException(error, context)
+  }
+
   export function isEnabled() {
     return enabled
   }

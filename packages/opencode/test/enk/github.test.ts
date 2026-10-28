@@ -631,3 +631,19 @@ describe("GitHubRoutes", () => {
     expect(await res.json()).toEqual({ enabled: false })
   })
 })
+
+describe("GitHub failure reporting", () => {
+  test("only actionable codes are reported", () => {
+    expect(GitHub.notify).toEqual(["forbidden", "revoked", "missing", "remote"])
+    expect(GitHub.notify).not.toContain("empty")
+    expect(GitHub.notify).not.toContain("unlinked")
+    expect(GitHub.notify).not.toContain("norepo")
+  })
+
+  test("dump keeps the code and the raw response", () => {
+    const response = { status: 404, statusText: "Not Found", headers: { "x-github-request-id": "1" }, body: "{}" }
+    const dumped = GitHub.dump(new GitHub.Failure("missing", 404, "Not Found", response))
+
+    expect(dumped).toMatchObject({ code: "missing", message: "Not Found", response })
+  })
+})

@@ -27,8 +27,8 @@ export namespace GitHubSync {
     const dir = Instance.directory
     Bus.subscribe(SessionStatus.Event.Idle, async (evt) => {
       await sync(dir, evt.properties.sessionID).catch((err) => {
-        if (err instanceof GitHub.Failure && !GitHub.alerting.includes(err.code)) {
-          return log.info("skipped", { sessionID: evt.properties.sessionID, error: GitHub.dump(err) })
+        if (err instanceof GitHub.Failure && !GitHub.notify.includes(err.code)) {
+          return log.info("skipped", { sessionID: evt.properties.sessionID, reason: err.message })
         }
         GitHub.alert("sync failed", err, { sessionID: evt.properties.sessionID })
       })
