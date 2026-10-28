@@ -52,6 +52,10 @@ export namespace SentryReporter {
     return true
   }
 
+  export function tracked() {
+    return seen.size
+  }
+
   export function captureOnce(key: string, error: unknown, context?: Record<string, unknown>) {
     if (!enabled || !due(key)) return
     captureException(error, context)
