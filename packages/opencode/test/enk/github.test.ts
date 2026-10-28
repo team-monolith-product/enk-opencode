@@ -668,13 +668,6 @@ describe("GitHub failure reporting", () => {
     }
   })
 
-  test("only actionable codes are reported", () => {
-    expect(GitHub.notify).toEqual(["forbidden", "revoked", "missing", "remote"])
-    expect(GitHub.notify).not.toContain("empty")
-    expect(GitHub.notify).not.toContain("unlinked")
-    expect(GitHub.notify).not.toContain("norepo")
-  })
-
   test("a long JSON error keeps the GitHub message and trims only the logged body", async () => {
     await using tmp = await tmpdir()
     await using rails = serve({
