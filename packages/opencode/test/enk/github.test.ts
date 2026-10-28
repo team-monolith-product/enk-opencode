@@ -675,6 +675,55 @@ describe("GitHub failure reporting", () => {
     expect(GitHub.notify).not.toContain("norepo")
   })
 
+  test("a long JSON error keeps the GitHub message and trims only the logged body", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      enabled: true,
+      connected: true,
+      login: "octocat",
+      token: "gho_1",
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const original = globalThis.fetch
+    const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
+      new URL(input instanceof Request ? input.url : String(input)).host === "api.github.com"
+        ? Promise.resolve(
+            Response.json(
+              { message: "Not Found", pad: "x".repeat(6000) },
+              { status: 404, headers: { authorization: "Bearer leaked" } },
+            ),
+          )
+        : original(input, init)) as typeof fetch)
+
+    try {
+      const failure = await GitHub.push(tmp.path, { message: "m" }).catch((err) => err)
+
+      expect(failure.message).toBe("Not Found")
+      expect(failure.response.body.length).toBeLessThan(4100)
+      expect(failure.response.headers["authorization"]).toBeUndefined()
+      expect(failure.response.request).toBe("GET /repos/octocat/jitda-app")
+    } finally {
+      github.mockRestore()
+    }
+  })
+
+  test("identity separates failures by site and ignores volatile parts", () => {
+    const at = (request: string) =>
+      new GitHub.Failure("missing", 404, "Not Found", {
+        status: 404,
+        statusText: "Not Found",
+        headers: {},
+        body: "",
+        request,
+      })
+
+    expect(GitHub.identity("x", at("GET /repos/a/b"))).not.toBe(GitHub.identity("x", at("POST /user/repos")))
+    expect(GitHub.identity("x", new Error("ENOENT /tmp/abc123/file 42"))).toBe(
+      GitHub.identity("x", new Error("ENOENT /tmp/zzz999/file 7")),
+    )
+    expect(GitHub.identity("x", new TypeError("a"))).not.toBe(GitHub.identity("x", new Error("a")))
+  })
+
   test("dump keeps the code and the raw response", () => {
     const response = { status: 404, statusText: "Not Found", headers: { "x-github-request-id": "1" }, body: "{}" }
     const dumped = GitHub.dump(new GitHub.Failure("missing", 404, "Not Found", response))

@@ -69,7 +69,8 @@ export namespace GitHub {
   export const notify: Code[] = ["forbidden", "revoked", "missing", "remote"]
 
   export function dump(err: unknown) {
-    return err instanceof Failure ? { ...errorData(err), code: err.code, response: err.response } : errorData(err)
+    const { formatted: _, ...error } = errorData(err) as ReturnType<typeof errorData> & { formatted?: string }
+    return err instanceof Failure ? { ...error, code: err.code, response: err.response } : error
   }
 
   function lean(err: unknown) {
@@ -77,10 +78,17 @@ export namespace GitHub {
     return err instanceof Failure ? { ...error, response: undefined } : error
   }
 
-  function identity(message: string, err: unknown) {
-    if (err instanceof Failure) return `${message}:${err.code}:${err.response?.status ?? ""}`
-    if (err instanceof Error) return `${message}:${err.name}:${err.message.slice(0, 120)}`
-    return `${message}:${String(err).slice(0, 120)}`
+  const volatile = /\/[^\s"']+|\d+/g
+
+  export function identity(message: string, err: unknown) {
+    if (err instanceof Failure) {
+      const site = err.response
+        ? `${err.response.status}:${err.response.request ?? ""}`
+        : err.message.replace(volatile, "#").slice(0, 80)
+      return `${message}:${err.code}:${site}`
+    }
+    const text = err instanceof Error ? `${err.name}:${err.message}` : String(err)
+    return `${message}:${text.replace(volatile, "#").slice(0, 120)}`
   }
 
   export function alert(message: string, err: unknown, extra?: Record<string, unknown>) {
@@ -113,6 +121,7 @@ export namespace GitHub {
     statusText: string
     headers: Record<string, string>
     body: string
+    request?: string
   }
 
   export class Failure extends Error {
@@ -159,11 +168,14 @@ export namespace GitHub {
       headers: { Authorization: `token ${rails.token}` },
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
-      log.warn("rails link failed", { method: "GET", url: rails.url, error: errorData(err) })
+      if (!quiet("rails link failed"))
+        log.warn("rails link failed", { method: "GET", url: rails.url, error: errorData(err) })
       return undefined
     })
     if (!res?.ok) {
-      if (res) log.warn("rails link rejected", { method: "GET", url: rails.url, response: await reply(res) })
+      if (res && !quiet(`rails link rejected:${res.status}`)) {
+        log.warn("rails link rejected", { method: "GET", url: rails.url, response: cut(res, await text(res), 500) })
+      }
       return
     }
     return (await res.json().catch(() => undefined)) as Link | undefined
@@ -178,12 +190,20 @@ export namespace GitHub {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
-      log.warn("rails report failed", { method: "PUT", url: rails.url, sent: body, error: errorData(err) })
+      if (!quiet("rails report failed")) {
+        log.warn("rails report failed", { method: "PUT", url: rails.url, sent: body, error: errorData(err) })
+      }
       return undefined
     })
     if (!res?.ok) {
-      if (res)
-        log.warn("rails report rejected", { method: "PUT", url: rails.url, sent: body, response: await reply(res) })
+      if (res && !quiet(`rails report rejected:${res.status}`)) {
+        log.warn("rails report rejected", {
+          method: "PUT",
+          url: rails.url,
+          sent: body,
+          response: cut(res, await text(res), 500),
+        })
+      }
       throw new Failure("remote", 502)
     }
   }
@@ -210,16 +230,23 @@ export namespace GitHub {
   }
 
   const secret = /^(set-cookie|cookie|authorization|proxy-authorization)$/i
-  const cap = 4000
 
-  async function reply(res: globalThis.Response): Promise<Response> {
-    const text = await res.text().catch((err) => `<unreadable body: ${String(err)}>`)
+  async function text(res: globalThis.Response) {
+    return res.text().catch((err) => `<unreadable body: ${String(err)}>`)
+  }
+
+  function cut(res: globalThis.Response, raw: string, cap = 4000, request?: string): Response {
     return {
       status: res.status,
       statusText: res.statusText,
       headers: Object.fromEntries([...res.headers].filter(([name]) => !secret.test(name))),
-      body: text.length > cap ? `${text.slice(0, cap)}…(+${text.length - cap} chars)` : text,
+      body: raw.length > cap ? `${raw.slice(0, cap)}…(+${raw.length - cap} chars)` : raw,
+      request,
     }
+  }
+
+  function quiet(key: string) {
+    return !SentryReporter.due(`log:${key}`, 5 * 60_000)
   }
 
   async function request<T>(token: string, method: string, url: string, body?: unknown): Promise<T> {
@@ -243,9 +270,10 @@ export namespace GitHub {
       log.info("api", { method, url, status: res.status, ms: Date.now() - started })
       return (await res.json()) as T
     }
-    const response = await reply(res)
+    const raw = await text(res)
+    const response = cut(res, raw, 4000, `${method} ${url}`)
     const detail = (await Promise.resolve()
-      .then(() => JSON.parse(response.body))
+      .then(() => JSON.parse(raw))
       .catch(() => undefined)) as { message?: string; errors?: { message?: string }[] } | undefined
     const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
     log.warn("api rejected", { method, url, sent: body, ms: Date.now() - started, response })
