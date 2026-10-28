@@ -126,8 +126,14 @@ export namespace GitHub {
     const res = await fetch(rails.url, {
       headers: { Authorization: `token ${rails.token}` },
       signal: AbortSignal.timeout(15_000),
-    }).catch(() => undefined)
-    if (!res?.ok) return
+    }).catch((err) => {
+      log.warn("rails link failed", { method: "GET", url: rails.url, error: String(err) })
+      return undefined
+    })
+    if (!res?.ok) {
+      if (res) log.warn("rails link rejected", { method: "GET", url: rails.url, status: res.status })
+      return
+    }
     return (await res.json().catch(() => undefined)) as Link | undefined
   }
 
@@ -139,8 +145,14 @@ export namespace GitHub {
       headers: { Authorization: `token ${rails.token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
-    }).catch(() => undefined)
-    if (!res?.ok) throw new Failure("remote", 502)
+    }).catch((err) => {
+      log.warn("rails report failed", { method: "PUT", url: rails.url, error: String(err) })
+      return undefined
+    })
+    if (!res?.ok) {
+      if (res) log.warn("rails report rejected", { method: "PUT", url: rails.url, status: res.status })
+      throw new Failure("remote", 502)
+    }
   }
 
   async function linked() {
@@ -165,6 +177,7 @@ export namespace GitHub {
   }
 
   async function request<T>(token: string, method: string, url: string, body?: unknown): Promise<T> {
+    const started = Date.now()
     const res = await fetch(api + url, {
       method,
       headers: {
@@ -177,13 +190,28 @@ export namespace GitHub {
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
+      log.warn("api failed", { method, url, ms: Date.now() - started, error: String(err) })
       throw new Failure("remote", 502, String(err))
     })
-    if (res.ok) return (await res.json()) as T
+    if (res.ok) {
+      log.info("api", { method, url, status: res.status, ms: Date.now() - started })
+      return (await res.json()) as T
+    }
     const detail = (await res.json().catch(() => undefined)) as
       | { message?: string; errors?: { message?: string }[] }
       | undefined
     const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
+    log.warn("api rejected", {
+      method,
+      url,
+      status: res.status,
+      ms: Date.now() - started,
+      message,
+      docs: (detail as { documentation_url?: string } | undefined)?.documentation_url,
+      scopes: res.headers.get("x-oauth-scopes") ?? undefined,
+      accepted: res.headers.get("x-accepted-oauth-scopes") ?? undefined,
+      requestId: res.headers.get("x-github-request-id") ?? undefined,
+    })
     if (res.status === 401) {
       await report({ revoked: true }).catch(() => undefined)
       throw new Failure("revoked", 409, message)
