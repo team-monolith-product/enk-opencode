@@ -7,6 +7,7 @@ import { errorData } from "../util/error"
 import { git } from "../util/git"
 import { Hash } from "../util/hash"
 import { Log } from "../util/log"
+import { SentryReporter } from "../util/sentry"
 import { ServeTargets } from "./serve-targets"
 
 export namespace GitHub {
@@ -64,6 +65,18 @@ export namespace GitHub {
     | "missing"
     | "empty"
     | "remote"
+
+  export const alerting: Code[] = ["forbidden", "revoked", "missing", "remote"]
+
+  export function dump(err: unknown) {
+    return err instanceof Failure ? { ...errorData(err), code: err.code, response: err.response } : errorData(err)
+  }
+
+  export function alert(message: string, err: unknown, extra?: Record<string, unknown>) {
+    const error = dump(err)
+    log.error(message, { ...extra, error })
+    SentryReporter.captureException(err, { ...extra, error })
+  }
 
   type Link = {
     enabled: boolean
@@ -266,14 +279,9 @@ export namespace GitHub {
         (err) => (err instanceof Failure ? err : new Failure("remote", 502, String(err))),
       )
       if (!failure) return
-      log.warn("first push failed", {
-        attempt,
-        code: failure.code,
-        status: failure.status,
-        error: errorData(failure),
-        response: failure.response,
-      })
+      log.warn("first push failed", { attempt, error: dump(failure) })
       if (!transient.includes(failure.code) || attempt >= attempts || Date.now() - started > budget) {
+        if (alerting.includes(failure.code)) alert("first push gave up", failure, { attempt })
         failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
         return
       }
