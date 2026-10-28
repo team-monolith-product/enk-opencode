@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
 import path from "path"
 import { rm } from "fs/promises"
 import { Bus } from "../../src/bus"
@@ -107,6 +107,48 @@ describe("rollback consent vote", () => {
         subs.forEach((unsub) => unsub())
       },
     })
+  })
+
+  test("a rollback the rest agreed on still runs when the leaver's grace ends outside any request", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    const failed: unknown[] = []
+    let drop!: () => void
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session, docID, alice, first } = await team(tmp.path)
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
+        const close = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => {} },
+        })
+        Bus.subscribe(HistorySync.Event.Failed, (event) => void failed.push(event.properties))
+
+        const state = Doc.rollbackSubmitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          sha: first.sha,
+          target: { subject: "처음", time: 0 },
+        })
+        expect(state.status).toBe("pending")
+        drop = close
+      },
+    })
+
+    try {
+      drop()
+      setSystemTime(Date.now() + 10_100)
+      Doc.leaveSweep()
+      await until(async () => (await read(tmp.path)) === "v1")
+      expect(failed).toEqual([])
+    } finally {
+      setSystemTime()
+    }
   })
 
   test("waits until everyone agrees", async () => {

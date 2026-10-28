@@ -11,6 +11,8 @@ import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
 import { archiveSession } from "@/session/archive"
 import { HistorySync } from "@/enk/history-sync"
+import { Instance } from "@/project/instance"
+import { Log } from "@/util/log"
 import { Database, NotFoundError } from "@/storage/db"
 import { fn } from "@/util/fn"
 import { Color } from "@/util/color"
@@ -767,7 +769,24 @@ export namespace Doc {
     promptReady({ sessionID: row.session_id, docID: next.docID, init: true })
   }
 
+  function bound() {
+    try {
+      return !!Instance.current
+    } catch {
+      return false
+    }
+  }
+
+  // 나간 사람의 유예 타이머처럼 요청 밖에서 합의가 끝나면 Instance 컨텍스트가 없어, 투표 결과를 실행하는
+  // SessionPrompt·Bus 가 "No context found for instance" 로 실패한다. 이때는 세션의 폴더로 컨텍스트를 만든다.
   function send(row: SubmitRow) {
+    if (bound()) return dispatch(row)
+    void Session.get(row.session_id)
+      .then((session) => Instance.provide({ directory: session.directory, fn: () => dispatch(row) }))
+      .catch((err) => Log.Default.error("vote send", { err }))
+  }
+
+  function dispatch(row: SubmitRow) {
     if (row.target_kind === "rollback") {
       // 되돌리기는 실패를 history.failed 로 직접 알리므로 여기서 다시 오류를 띄우지 않는다.
       const { sha } = RollbackTarget.parse(JSON.parse(row.prompt))
