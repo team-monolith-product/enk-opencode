@@ -24,19 +24,23 @@ afterEach(async () => {
   delete process.env["GIT_CONFIG_GLOBAL"]
 })
 
+const fetchOriginal = globalThis.fetch
+
 /** 팀 pod 가 이야기하는 hackathon-rails 역할. 실제 HTTP 를 그대로 태운다. */
 function serve(link: Record<string, unknown>) {
   const reports: unknown[] = []
+  const reads = { count: 0 }
   const server = Bun.serve({
     port: 0,
     fetch: async (req) => {
       if (req.method === "PUT") reports.push(await req.json())
+      else reads.count++
       return Response.json(link)
     },
   })
   process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
   process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
-  return { server, reports, [Symbol.asyncDispose]: () => server.stop(true) }
+  return { server, reports, reads, [Symbol.asyncDispose]: () => server.stop(true) }
 }
 
 async function workspace(root: string) {
@@ -628,6 +632,41 @@ describe("GitHub.create", () => {
 
     expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
     expect(status.firstPush).toMatchObject({ attempts: 1, code: "forbidden" })
+  })
+})
+
+describe("GitHub.sync", () => {
+  test("does nothing for a team that has not linked a repository", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({ enabled: true, connected: false })
+
+    await GitHub.sync(tmp.path)
+
+    expect(rails.reads.count).toBe(1)
+    expect(rails.reports).toEqual([])
+  })
+
+  test("asks the hackathon backend for the link only once per turn", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      enabled: true,
+      connected: true,
+      login: "octocat",
+      token: "gho_1",
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const spy = spyOn(globalThis, "fetch").mockImplementation(((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (url.host === "api.github.com") return Promise.resolve(Response.json({ message: "down" }, { status: 500 }))
+      return fetchOriginal(input, init)
+    }) as typeof fetch)
+
+    try {
+      await expect(GitHub.sync(tmp.path)).rejects.toMatchObject({ code: "remote" })
+      expect(rails.reads.count).toBe(1)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

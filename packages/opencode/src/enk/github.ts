@@ -206,9 +206,10 @@ export namespace GitHub {
 
   /** 연결한 팀이면 버전 기록의 최신 커밋을 저장소에 올린다. 연결하지 않은 팀에는 아무것도 하지 않는다. */
   export async function sync(dir: string, locale?: Locale.Value) {
-    const current = await status(dir)
-    if (!current.login || !current.repo) return
-    await push(dir, { locale })
+    if (!ServeTargets.isProject(dir)) return
+    const hit = await link()
+    if (!hit?.enabled || !hit.connected || !hit.token || !hit.repo) return
+    await push(dir, { locale }, hit)
   }
 
   export async function push(dir: string, input: { locale?: Locale.Value; subject?: string }, known?: Link) {
