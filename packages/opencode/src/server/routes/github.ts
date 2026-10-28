@@ -89,5 +89,22 @@ export const GitHubRoutes = lazy(() =>
           const { name, locale } = c.req.valid("json")
           return GitHub.create(Instance.directory, { name, message: GitHubSync.first(locale) })
         }),
+    )
+    .post(
+      "/push",
+      describeRoute({
+        summary: "Push to GitHub now",
+        description:
+          "Push the project's current files to the bound repository without waiting for a conversation to end.",
+        operationId: "github.push",
+        responses: { ...ok("Link status", Status), ...failures(404, 409, 422, 502) },
+      }),
+      validator("json", z.object({ locale: Locale.Schema.optional() })),
+      (c) =>
+        handle(c, async () => {
+          const { locale } = c.req.valid("json")
+          await GitHub.push(Instance.directory, { message: GitHubSync.manual(locale) })
+          return GitHub.status(Instance.directory)
+        }),
     ),
 )
