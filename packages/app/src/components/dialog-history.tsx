@@ -156,6 +156,12 @@ export function DialogHistory(props: { sessionID: string }) {
                             <Match when={Array.isArray(state.changes[entry.sha])}>
                               <HistoryFiles
                                 list={(state.changes[entry.sha] as HistoryChange[]).filter(visible)}
+                                hiddenOnly={
+                                  (state.changes[entry.sha] as HistoryChange[]).length > 0 &&
+                                  (state.changes[entry.sha] as HistoryChange[]).every((change) => !visible(change))
+                                    ? language.t("history.changes.hidden")
+                                    : undefined
+                                }
                                 label={label}
                                 total={(count) => language.t("history.changes", { count })}
                               />
@@ -195,12 +201,13 @@ const visible = (change: HistoryChange) => !change.file.split("/").some((part) =
 
 function HistoryFiles(props: {
   list: HistoryChange[]
+  hiddenOnly: string | undefined
   label: (status: HistoryChange["status"]) => string
   total: (count: number) => string
 }) {
   return (
     <span class="history-files">
-      <span>{props.total(props.list.length)}</span>
+      <span>{props.hiddenOnly ?? props.total(props.list.length)}</span>
       <For each={props.list.slice(0, MAX_FILES)}>
         {(change) => (
           <span class="history-file">

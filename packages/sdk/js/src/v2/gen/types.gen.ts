@@ -1962,7 +1962,7 @@ export type HistoryStatus = {
 }
 
 export type HistoryChange = {
-  status: "A" | "M" | "D"
+  status: "A" | "M" | "D" | "L"
   file: string
 }
 

@@ -78,6 +78,21 @@ describe("History.commit", () => {
     expect(await files(work, saved!.sha)).toEqual(["index.html"])
   })
 
+  test("shows a file that grew past 100MB as too large instead of deleted", async () => {
+    await using tmp = await tmpdir()
+    const work = await workspace(tmp.path)
+    await put(work, { "index.html": "a", "media/intro.mp4": "small" })
+    await History.commit(work, { message: "작은 영상" })
+    await truncate(path.join(work, "media/intro.mp4"), 101 * 1024 * 1024)
+    await rm(path.join(work, "index.html"))
+    const saved = await History.commit(work, { message: "큰 영상" })
+
+    expect(await History.changes(work, saved!.sha)).toEqual([
+      { status: "D", file: "index.html" },
+      { status: "L", file: "media/intro.mp4" },
+    ])
+  })
+
   test("does not save a first version with nothing in it", async () => {
     await using tmp = await tmpdir()
     const work = await workspace(tmp.path)

@@ -11,10 +11,8 @@ const Sha = z.string().regex(/^[0-9a-f]{40}$/)
 const Entry = z
   .object({ sha: z.string(), time: z.number(), subject: z.string(), revert: z.string().optional() })
   .meta({ ref: "HistoryEntry" })
-const Change = z.object({ status: z.enum(["A", "M", "D"]), file: z.string() }).meta({ ref: "HistoryChange" })
-const Status = z
-  .object({ enabled: z.boolean(), entries: Entry.array() })
-  .meta({ ref: "HistoryStatus" })
+const Change = z.object({ status: z.enum(["A", "M", "D", "L"]), file: z.string() }).meta({ ref: "HistoryChange" })
+const Status = z.object({ enabled: z.boolean(), entries: Entry.array() }).meta({ ref: "HistoryStatus" })
 
 export const HistoryRoutes = lazy(() =>
   new Hono()

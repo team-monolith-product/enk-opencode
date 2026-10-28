@@ -17,9 +17,17 @@ export namespace History {
     GIT_COMMITTER_NAME: "Jitda",
     GIT_COMMITTER_EMAIL: "jitda@localhost",
   }
-  const Trailer = { message: "Jitda-Message", revert: "Jitda-Revert-Of", after: "Jitda-After" } as const
+  const Trailer = {
+    message: "Jitda-Message",
+    revert: "Jitda-Revert-Of",
+    after: "Jitda-After",
+    skipped: "Jitda-Skipped",
+  } as const
+  const SKIPPED_MAX = 50
 
   export type Change = WorkspaceRepo.Change
+  /** 기록에 담지 못한 큰 파일은 지워진 것처럼 보이므로 "L" 로 따로 알린다. */
+  export type Listed = { status: Change["status"] | "L"; file: string }
   export type Entry = { sha: string; time: number; subject: string; revert?: string }
   export type Saved = { sha: string; message: string; changes: Change[]; skipped: string[] }
   export type Restored = { sha: string; target: Entry; changes: Change[] }
@@ -61,7 +69,11 @@ export namespace History {
     if (parent && staged.tree === (await WorkspaceRepo.rev(repo, `${parent}^{tree}`))) return
     const changes = await WorkspaceRepo.diff(repo, parent ? `${parent}^{tree}` : undefined, staged.tree)
     const message = typeof input.message === "string" ? input.message : await input.message(changes)
-    const sha = await commitIndex(repo, message + trailers({ [Trailer.message]: input.turn }))
+    const skipped = staged.skipped.length ? JSON.stringify(staged.skipped.slice(0, SKIPPED_MAX)) : undefined
+    const sha = await commitIndex(
+      repo,
+      message + trailers({ [Trailer.message]: input.turn, [Trailer.skipped]: skipped }),
+    )
     return { sha, message, changes, skipped: staged.skipped }
   }
 
@@ -122,12 +134,26 @@ export namespace History {
   }
 
   /** 그 시점에 무엇이 바뀌었는지(직전 기록과 비교). */
+  function skippedFiles(raw: string): string[] {
+    try {
+      const list: unknown = raw.trim() ? JSON.parse(raw.trim()) : []
+      return Array.isArray(list) ? list.filter((item): item is string => typeof item === "string") : []
+    } catch {
+      return []
+    }
+  }
+
   export async function changes(dir: string, sha: string) {
     if (!ServeTargets.isProject(dir)) throw new Failure("disabled", 404)
     const repo = WorkspaceRepo.open(dir)
     if (!(await reachable(repo, sha))) throw new Failure("missing", 404)
     const parent = await WorkspaceRepo.rev(repo, `${sha}^`)
-    return WorkspaceRepo.diff(repo, parent && `${parent}^{tree}`, `${sha}^{tree}`)
+    const changes = await WorkspaceRepo.diff(repo, parent && `${parent}^{tree}`, `${sha}^{tree}`)
+    const raw = await repo.must(["log", "-1", `--format=%(trailers:key=${Trailer.skipped},valueonly,separator=)`, sha])
+    const skipped = new Set<string>(skippedFiles(raw))
+    return changes.map(
+      (change): Listed => (change.status === "D" && skipped.has(change.file) ? { ...change, status: "L" } : change),
+    )
   }
 
   const reverts = new Map<string, Revert | null>()
