@@ -276,7 +276,13 @@ export namespace GitHub {
       .then(() => JSON.parse(raw))
       .catch(() => undefined)) as { message?: string; errors?: { message?: string }[] } | undefined
     const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
-    log.warn("api rejected", { method, url, sent: body, ms: Date.now() - started, response })
+    log.warn("api rejected", {
+      method,
+      url,
+      sent: body,
+      ms: Date.now() - started,
+      response: { ...response, request: undefined },
+    })
     if (res.status === 401) {
       await report({ revoked: true }).catch(() => undefined)
       throw new Failure("revoked", 409, message, response)
