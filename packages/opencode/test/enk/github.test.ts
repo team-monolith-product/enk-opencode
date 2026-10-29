@@ -717,6 +717,20 @@ describe("GitHub failure reporting", () => {
     expect(GitHub.identity("x", new TypeError("a"))).not.toBe(GitHub.identity("x", new Error("a")))
   })
 
+  test("scope groups one failure kind across repositories and keeps kinds apart", () => {
+    const failure = (code: GitHub.Code, status: 404 | 409 | 422 | 502, request: string) =>
+      new GitHub.Failure(code, status, "x", { status, statusText: "", headers: {}, body: "", request })
+
+    const first = GitHub.scope("request failed", failure("missing", 404, "GET /repos/alice/one"))
+    const other = GitHub.scope("request failed", failure("missing", 404, "GET /repos/bob/two"))
+    const revoked = GitHub.scope("request failed", failure("revoked", 409, "GET /repos/alice/one"))
+
+    expect(first?.fingerprint).toEqual(other?.fingerprint)
+    expect(first?.fingerprint).not.toEqual(revoked?.fingerprint)
+    expect(first?.tags).toEqual({ "github.code": "missing", "github.status": "404" })
+    expect(GitHub.scope("request failed", new Error("boom"))).toBeUndefined()
+  })
+
   test("dump keeps the code and the raw response", () => {
     const response = { status: 404, statusText: "Not Found", headers: { "x-github-request-id": "1" }, body: "{}" }
     const dumped = GitHub.dump(new GitHub.Failure("missing", 404, "Not Found", response))
