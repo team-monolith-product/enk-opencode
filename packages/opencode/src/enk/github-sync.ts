@@ -16,9 +16,26 @@ export namespace GitHubSync {
   const MAX_FILES = 30
   const MAX_SUBJECT = 72
 
-  const LABEL: Record<Locale.Value, Record<GitHub.Change["status"], string> & { fallback: string; first: string }> = {
-    ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용", first: "짓다에서 처음 올린 내용" },
-    en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda", first: "First push from Jitda" },
+  const LABEL: Record<
+    Locale.Value,
+    Record<GitHub.Change["status"], string> & { fallback: string; first: string; manual: string }
+  > = {
+    ko: {
+      A: "추가",
+      M: "수정",
+      D: "삭제",
+      fallback: "짓다에서 작업한 내용",
+      first: "짓다에서 처음 올린 내용",
+      manual: "짓다에서 직접 올린 내용",
+    },
+    en: {
+      A: "Add",
+      M: "Update",
+      D: "Delete",
+      fallback: "Update from Jitda",
+      first: "First push from Jitda",
+      manual: "Manual push from Jitda",
+    },
   }
 
   export type Turn = { user: MessageV2.User; request: string; reply: string }
@@ -77,6 +94,10 @@ export namespace GitHubSync {
 
   export function first(locale?: Locale.Value): GitHub.Describe {
     return async (changes) => compose(LABEL[locale ?? Locale.DEFAULT].first, changes, locale)
+  }
+
+  export function manual(locale?: Locale.Value): GitHub.Describe {
+    return async (changes) => compose(LABEL[locale ?? Locale.DEFAULT].manual, changes, locale)
   }
 
   export function compose(subject: string, changes: GitHub.Change[], locale?: Locale.Value) {

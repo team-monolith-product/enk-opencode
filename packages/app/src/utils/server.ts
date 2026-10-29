@@ -155,6 +155,15 @@ export function getGitHubStatus(opts: GitHubOpts): Promise<GitHubStatus> {
     .then((res) => res.data as GitHubStatus)
 }
 
+export function pushGitHub(
+  opts: GitHubOpts,
+  input: { locale?: PromptLocale },
+): Promise<GitHubStatus & { pushed: boolean }> {
+  return devServerClient(opts)
+    .post({ url: "/github/push", body: input })
+    .then((res) => res.data as GitHubStatus & { pushed: boolean })
+}
+
 export function createGitHubRepo(
   opts: GitHubOpts,
   input: { name: string; locale?: PromptLocale },

@@ -14,7 +14,7 @@ import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { promptLocale } from "@/utils/prompt-locale"
 import { getRelativeTime } from "@/utils/time"
-import { createGitHubRepo, getGitHubStatus, githubCode, type GitHubStatus } from "@/utils/server"
+import { createGitHubRepo, getGitHubStatus, githubCode, pushGitHub, type GitHubStatus } from "@/utils/server"
 
 const NAME = /^[A-Za-z0-9._-]{1,100}$/
 
@@ -113,6 +113,17 @@ export function DialogGitHub() {
     setState("status", status)
     const first = status.firstPush
     if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
+  }
+
+  const push = async () => {
+    const o = opts()
+    if (!o || spectator) return
+    const result = await run(() => pushGitHub(o, { locale: promptLocale(language.locale()) }))
+    if (!result) return void refetch()
+    const { pushed, ...status } = result
+    if (status.enabled) setState("status", status)
+    else void refetch()
+    showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
   }
 
   const firstFailure = createMemo(() => {
@@ -265,6 +276,18 @@ export function DialogGitHub() {
                 onClick={connect}
               >
                 {language.t("github.connect")}
+              </Button>
+            </Match>
+            <Match when={view() === "push"}>
+              <Button
+                type="button"
+                size="normal"
+                variant="primary"
+                icon="github"
+                disabled={spectator || state.busy}
+                onClick={() => void push()}
+              >
+                {language.t("github.push.now")}
               </Button>
             </Match>
             <Match when={view() === "choose"}>
