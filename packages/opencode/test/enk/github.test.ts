@@ -631,3 +631,110 @@ describe("GitHubRoutes", () => {
     expect(await res.json()).toEqual({ enabled: false })
   })
 })
+
+describe("GitHub failure reporting", () => {
+  test("a rejected GitHub call keeps the raw response without secret headers", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      enabled: true,
+      connected: true,
+      login: "octocat",
+      token: "gho_1",
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const original = globalThis.fetch
+    const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
+      new URL(input instanceof Request ? input.url : String(input)).host === "api.github.com"
+        ? Promise.resolve(
+            new Response(`<html>\nnot found\n${"x".repeat(5000)}</html>`, {
+              status: 404,
+              headers: { "x-github-request-id": "abc", "set-cookie": "s=1" },
+            }),
+          )
+        : original(input, init)) as typeof fetch)
+
+    try {
+      const failure = await GitHub.push(tmp.path, { message: "m" }).catch((err) => err)
+
+      expect(failure).toBeInstanceOf(GitHub.Failure)
+      expect(failure.code).toBe("missing")
+      expect(failure.response.status).toBe(404)
+      expect(failure.response.headers["x-github-request-id"]).toBe("abc")
+      expect(failure.response.headers["set-cookie"]).toBeUndefined()
+      expect(failure.response.body.startsWith("<html>\nnot found")).toBe(true)
+      expect(failure.response.body.length).toBeLessThan(4100)
+    } finally {
+      github.mockRestore()
+    }
+  })
+
+  test("a long JSON error keeps the GitHub message and trims only the logged body", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      enabled: true,
+      connected: true,
+      login: "octocat",
+      token: "gho_1",
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const original = globalThis.fetch
+    const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
+      new URL(input instanceof Request ? input.url : String(input)).host === "api.github.com"
+        ? Promise.resolve(
+            Response.json(
+              { message: "Not Found", pad: "x".repeat(6000) },
+              { status: 404, headers: { authorization: "Bearer leaked" } },
+            ),
+          )
+        : original(input, init)) as typeof fetch)
+
+    try {
+      const failure = await GitHub.push(tmp.path, { message: "m" }).catch((err) => err)
+
+      expect(failure.message).toBe("Not Found")
+      expect(failure.response.body.length).toBeLessThan(4100)
+      expect(failure.response.headers["authorization"]).toBeUndefined()
+      expect(failure.response.request).toBe("GET /repos/octocat/jitda-app")
+    } finally {
+      github.mockRestore()
+    }
+  })
+
+  test("identity separates failures by site and ignores volatile parts", () => {
+    const at = (request: string) =>
+      new GitHub.Failure("missing", 404, "Not Found", {
+        status: 404,
+        statusText: "Not Found",
+        headers: {},
+        body: "",
+        request,
+      })
+
+    expect(GitHub.identity("x", at("GET /repos/a/b"))).not.toBe(GitHub.identity("x", at("POST /user/repos")))
+    expect(GitHub.identity("x", new Error("ENOENT /tmp/abc123/file 42"))).toBe(
+      GitHub.identity("x", new Error("ENOENT /tmp/zzz999/file 7")),
+    )
+    expect(GitHub.identity("x", new TypeError("a"))).not.toBe(GitHub.identity("x", new Error("a")))
+  })
+
+  test("scope groups one failure kind across repositories and keeps kinds apart", () => {
+    const failure = (code: GitHub.Code, status: 404 | 409 | 422 | 502, request: string) =>
+      new GitHub.Failure(code, status, "x", { status, statusText: "", headers: {}, body: "", request })
+
+    const first = GitHub.scope("request failed", failure("missing", 404, "GET /repos/alice/one"))
+    const other = GitHub.scope("request failed", failure("missing", 404, "GET /repos/bob/two"))
+    const revoked = GitHub.scope("request failed", failure("revoked", 409, "GET /repos/alice/one"))
+
+    expect(first?.fingerprint).toEqual(other?.fingerprint)
+    expect(first?.fingerprint).not.toEqual(revoked?.fingerprint)
+    expect(first?.tags).toEqual({ "github.code": "missing", "github.status": "404" })
+    expect(GitHub.scope("request failed", new Error("boom"))).toBeUndefined()
+  })
+
+  test("dump keeps the code and the raw response", () => {
+    const response = { status: 404, statusText: "Not Found", headers: { "x-github-request-id": "1" }, body: "{}" }
+    const dumped = GitHub.dump(new GitHub.Failure("missing", 404, "Not Found", response))
+
+    expect(dumped).toMatchObject({ code: "missing", message: "Not Found", response })
+  })
+})

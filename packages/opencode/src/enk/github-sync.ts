@@ -26,11 +26,15 @@ export namespace GitHubSync {
   export function init() {
     const dir = Instance.directory
     Bus.subscribe(SessionStatus.Event.Idle, async (evt) => {
-      await sync(dir, evt.properties.sessionID).catch((err) => {
-        if (err instanceof GitHub.Failure) return log.info("skipped", { code: err.code })
-        log.warn("failed", { error: err instanceof Error ? err.message : String(err) })
-      })
+      await sync(dir, evt.properties.sessionID).catch((err) => failed(err, evt.properties.sessionID))
     })
+  }
+
+  export function failed(err: unknown, sessionID: SessionID) {
+    if (err instanceof GitHub.Failure && !GitHub.notify.includes(err.code)) {
+      return log.info("skipped", { sessionID, code: err.code, reason: err.message })
+    }
+    GitHub.alert("sync failed", err, { sessionID })
   }
 
   async function sync(dir: string, sessionID: SessionID) {
@@ -65,7 +69,7 @@ export namespace GitHubSync {
 
   export async function describe(turn: Turn, changes: GitHub.Change[]) {
     const title = await summarize(turn).catch((err) => {
-      log.warn("summary failed", { error: err instanceof Error ? err.message : String(err) })
+      log.error("summary failed", { error: err instanceof Error ? err.message : String(err) })
       return undefined
     })
     return compose(title || fallback(turn), changes, turn.user.locale)
