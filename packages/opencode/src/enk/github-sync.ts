@@ -86,7 +86,7 @@ export namespace GitHubSync {
 
   export async function describe(turn: Turn, changes: GitHub.Change[]) {
     const title = await summarize(turn).catch((err) => {
-      log.warn("summary failed", { error: err instanceof Error ? err.message : String(err) })
+      log.error("summary failed", { error: err instanceof Error ? err.message : String(err) })
       return undefined
     })
     return compose(title || fallback(turn), changes, turn.user.locale)
