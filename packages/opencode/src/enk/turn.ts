@@ -16,10 +16,24 @@ export namespace TurnSummary {
 
   const LABEL: Record<
     Locale.Value,
-    Record<WorkspaceRepo.Change["status"], string> & { fallback: string; first: string }
+    Record<WorkspaceRepo.Change["status"], string> & { fallback: string; first: string; manual: string }
   > = {
-    ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용", first: "짓다에서 처음 올린 내용" },
-    en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda", first: "First push from Jitda" },
+    ko: {
+      A: "추가",
+      M: "수정",
+      D: "삭제",
+      fallback: "짓다에서 작업한 내용",
+      first: "짓다에서 처음 올린 내용",
+      manual: "짓다에서 직접 올린 내용",
+    },
+    en: {
+      A: "Add",
+      M: "Update",
+      D: "Delete",
+      fallback: "Update from Jitda",
+      first: "First push from Jitda",
+      manual: "Manual push from Jitda",
+    },
   }
 
   export type Turn = { user: MessageV2.User; request: string; reply: string }
@@ -51,7 +65,7 @@ export namespace TurnSummary {
 
   export async function describe(turn: Turn, changes: WorkspaceRepo.Change[]) {
     const title = await summarize(turn).catch((err) => {
-      log.warn("summary failed", { error: err instanceof Error ? err.message : String(err) })
+      log.error("summary failed", { error: err instanceof Error ? err.message : String(err) })
       return undefined
     })
     return compose(title || fallback(turn), changes, turn.user.locale)
@@ -60,6 +74,11 @@ export namespace TurnSummary {
   /** 저장소를 만들자마자 올리는 첫 커밋의 제목. */
   export function first(locale?: Locale.Value) {
     return LABEL[locale ?? Locale.DEFAULT].first
+  }
+
+  /** 연결 화면에서 직접 올릴 때 커밋의 제목. */
+  export function manual(locale?: Locale.Value) {
+    return LABEL[locale ?? Locale.DEFAULT].manual
   }
 
   export function compose(subject: string, changes: WorkspaceRepo.Change[], locale?: Locale.Value) {

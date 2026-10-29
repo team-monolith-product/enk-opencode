@@ -84,13 +84,15 @@ export namespace HistorySync {
         message: (changes) => TurnSummary.describe(turn, changes),
         turn: turn.user.id,
       }).catch((err) => log.warn("save failed", { error: err instanceof Error ? err.message : String(err) }))
-      await GitHub.sync(dir, turn.user.locale).catch(skip)
+      await GitHub.sync(dir, turn.user.locale).catch((err) => failed(err, evt.properties.sessionID))
     })
   }
 
-  function skip(err: unknown) {
-    if (err instanceof GitHub.Failure) return log.info("github skipped", { code: err.code })
-    log.warn("github failed", { error: err instanceof Error ? err.message : String(err) })
+  export function failed(err: unknown, sessionID: SessionID) {
+    if (err instanceof GitHub.Failure && !GitHub.notify.includes(err.code)) {
+      return log.info("skipped", { sessionID, code: err.code, reason: err.message })
+    }
+    GitHub.alert("sync failed", err, { sessionID })
   }
 
   /** 투표를 열기 전과 되돌리기 직전에 같은 조건을 본다. 기록에 있는 버전인지는 git 저장소만 보고 판단한다. */
@@ -149,6 +151,6 @@ export namespace HistorySync {
       files: result.changes.length,
       deps: result.changes.some((change) => MANIFESTS.has(path.posix.basename(change.file))),
     })
-    void GitHub.sync(session.directory, locale).catch(skip)
+    void GitHub.sync(session.directory, locale).catch((err) => failed(err, input.sessionID))
   }
 }

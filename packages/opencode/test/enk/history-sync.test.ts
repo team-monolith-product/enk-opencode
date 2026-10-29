@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, setSystemTime, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, spyOn, test } from "bun:test"
 import path from "path"
 import { rm } from "fs/promises"
 import { Bus } from "../../src/bus"
 import { Doc } from "../../src/doc"
+import { GitHub } from "../../src/enk/github"
 import { History } from "../../src/enk/history"
 import { HistorySync } from "../../src/enk/history-sync"
 import { WorkspaceRepo } from "../../src/enk/workspace-repo"
@@ -10,8 +11,10 @@ import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Instance } from "../../src/project/instance"
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session"
+import type { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util/log"
+import { SentryReporter } from "../../src/util/sentry"
 import { tmpdir } from "../fixture/fixture"
 
 Log.init({ print: false })
@@ -345,5 +348,34 @@ describe("HistorySync.check", () => {
         })
       },
     })
+  })
+})
+
+describe("HistorySync.failed", () => {
+  const session = "ses_1" as SessionID
+
+  test("expected states are only noted, never sent to Sentry", () => {
+    const sent = spyOn(SentryReporter, "captureOnce").mockImplementation(() => {})
+    try {
+      for (const code of ["unlinked", "norepo", "empty", "exists"] as const) {
+        HistorySync.failed(new GitHub.Failure(code, 409), session)
+      }
+      expect(sent).not.toHaveBeenCalled()
+    } finally {
+      sent.mockRestore()
+    }
+  })
+
+  test("actionable failures and unexpected errors go to Sentry", () => {
+    const sent = spyOn(SentryReporter, "captureOnce").mockImplementation(() => {})
+    try {
+      for (const code of ["forbidden", "revoked", "missing", "remote"] as const) {
+        HistorySync.failed(new GitHub.Failure(code, 409), session)
+      }
+      HistorySync.failed(new Error("git exploded"), session)
+      expect(sent).toHaveBeenCalledTimes(5)
+    } finally {
+      sent.mockRestore()
+    }
   })
 })

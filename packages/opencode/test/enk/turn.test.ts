@@ -49,6 +49,15 @@ describe("TurnSummary.first", () => {
     )
     expect(TurnSummary.compose(TurnSummary.first(), changes)).toBe("짓다에서 처음 올린 내용\n\n- 추가: index.html")
   })
+
+  test("names a manual push in the viewer locale", () => {
+    const changes = [{ status: "M" as const, file: "index.html" }]
+
+    expect(TurnSummary.compose(TurnSummary.manual("en"), changes, "en")).toBe(
+      "Manual push from Jitda\n\n- Update: index.html",
+    )
+    expect(TurnSummary.compose(TurnSummary.manual(), changes)).toBe("짓다에서 직접 올린 내용\n\n- 수정: index.html")
+  })
 })
 
 describe("TurnSummary.latest", () => {
