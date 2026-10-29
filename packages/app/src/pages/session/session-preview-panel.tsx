@@ -3,7 +3,7 @@ import type { ErrorEntry } from "@/lib/preview-bridge-protocol"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
-import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
+import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { writeClipboard } from "@opencode-ai/ui/util/clipboard"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useSDK } from "@/context/sdk"
@@ -610,6 +610,8 @@ export function SessionBrowserChrome(props: {
   /** 에러 카드가 현재 열려 있는지(버튼 active 표시·aria-expanded 용). */
   errorOpen?: boolean
   onToggleError?: () => void
+  /** 사이드 채팅 진입 버튼. 운영 화면은 슬래시·팔레트가 꺼져 있어 눈에 보이는 버튼이 유일한 입구다. */
+  sideChat?: { active: boolean; onClick: () => void }
 }) {
   const layout = useLayout()
   const language = useLanguage()
@@ -740,6 +742,21 @@ export function SessionBrowserChrome(props: {
             aria-controls="file-tree-panel"
           />
         </TooltipKeybind>
+        <Show when={props.sideChat}>
+          {(side) => (
+            <Tooltip value={language.t("sideChat.open")} placement="bottom">
+              <IconButton
+                icon="speech-bubble"
+                variant="ghost"
+                size="small"
+                classList={{ "bg-surface-base-active": side().active }}
+                onClick={() => side().onClick()}
+                aria-label={language.t("sideChat.open")}
+                aria-pressed={side().active}
+              />
+            </Tooltip>
+          )}
+        </Show>
         <div class="flex items-center shrink-0">
           {/* 뒤로/앞으로 — 자식 history 미러로 활성 판단, 클릭 시 자식 history 이동 */}
           <button
