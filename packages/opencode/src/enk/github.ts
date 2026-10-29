@@ -169,12 +169,12 @@ export namespace GitHub {
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
       if (!quiet("rails link failed"))
-        log.warn("rails link failed", { method: "GET", url: rails.url, error: errorData(err) })
+        log.error("rails link failed", { method: "GET", url: rails.url, error: errorData(err) })
       return undefined
     })
     if (!res?.ok) {
       if (res && !quiet(`rails link rejected:${res.status}`)) {
-        log.warn("rails link rejected", { method: "GET", url: rails.url, response: cut(res, await text(res), 500) })
+        log.error("rails link rejected", { method: "GET", url: rails.url, response: cut(res, await text(res), 500) })
       }
       return
     }
@@ -191,13 +191,13 @@ export namespace GitHub {
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
       if (!quiet("rails report failed")) {
-        log.warn("rails report failed", { method: "PUT", url: rails.url, sent: body, error: errorData(err) })
+        log.error("rails report failed", { method: "PUT", url: rails.url, sent: body, error: errorData(err) })
       }
       return undefined
     })
     if (!res?.ok) {
       if (res && !quiet(`rails report rejected:${res.status}`)) {
-        log.warn("rails report rejected", {
+        log.error("rails report rejected", {
           method: "PUT",
           url: rails.url,
           sent: body,
@@ -263,7 +263,7 @@ export namespace GitHub {
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
-      log.warn("api failed", { method, url, sent: body, ms: Date.now() - started, error: errorData(err) })
+      log.error("api failed", { method, url, sent: body, ms: Date.now() - started, error: errorData(err) })
       throw new Failure("remote", 502, String(err))
     })
     if (res.ok) {
@@ -276,7 +276,7 @@ export namespace GitHub {
       .then(() => JSON.parse(raw))
       .catch(() => undefined)) as { message?: string; errors?: { message?: string }[] } | undefined
     const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
-    log.warn("api rejected", {
+    log.error("api rejected", {
       method,
       url,
       sent: body,
@@ -317,7 +317,7 @@ export namespace GitHub {
         (err) => (err instanceof Failure ? err : new Failure("remote", 502, String(err))),
       )
       if (!failure) return
-      log.warn("first push failed", { attempt, error: lean(failure) })
+      log.error("first push failed", { attempt, error: lean(failure) })
       if (!transient.includes(failure.code) || attempt >= attempts || Date.now() - started > budget) {
         if (notify.includes(failure.code)) alert("first push gave up", failure, { attempt })
         failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
@@ -359,7 +359,7 @@ export namespace GitHub {
     if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
     const gitdir = path.join(Global.Path.data, "github", Hash.fast(dir))
     const result = await serial(gitdir, async () => {
-      await ignore(dir).catch((err) => log.warn("gitignore skipped", { error: String(err) }))
+      await ignore(dir).catch((err) => log.error("gitignore skipped", { error: String(err) }))
       return publish({
         gitdir,
         worktree: dir,
