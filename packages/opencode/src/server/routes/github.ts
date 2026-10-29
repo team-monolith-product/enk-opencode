@@ -30,6 +30,7 @@ const Status = z
       .optional(),
   })
   .meta({ ref: "GitHubStatus" })
+const Pushed = Status.extend({ pushed: z.boolean() }).meta({ ref: "GitHubPushed" })
 const Failure = z.object({ code: z.string(), message: z.string() }).meta({ ref: "GitHubError" })
 const RepoName = z
   .string()
@@ -97,14 +98,14 @@ export const GitHubRoutes = lazy(() =>
         description:
           "Push the project's current files to the bound repository without waiting for a conversation to end.",
         operationId: "github.push",
-        responses: { ...ok("Link status", Status), ...failures(404, 409, 422, 502) },
+        responses: { ...ok("Link status and whether a commit was pushed", Pushed), ...failures(404, 409, 422, 502) },
       }),
       validator("json", z.object({ locale: Locale.Schema.optional() })),
       (c) =>
         handle(c, async () => {
           const { locale } = c.req.valid("json")
-          await GitHub.push(Instance.directory, { message: GitHubSync.manual(locale) })
-          return GitHub.status(Instance.directory)
+          const result = await GitHub.push(Instance.directory, { message: GitHubSync.manual(locale) })
+          return { ...(await GitHub.status(Instance.directory)), pushed: !!result.sha }
         }),
     ),
 )

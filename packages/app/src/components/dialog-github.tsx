@@ -118,13 +118,11 @@ export function DialogGitHub() {
   const push = async () => {
     const o = opts()
     if (!o || spectator) return
-    const before = state.status?.push?.sha
-    const status = await run(() => pushGitHub(o, { locale: promptLocale(language.locale()) }))
-    if (!status) return
+    const result = await run(() => pushGitHub(o, { locale: promptLocale(language.locale()) }))
+    if (!result) return
+    const { pushed, ...status } = result
     setState("status", status)
-    showToast({
-      title: language.t(status.push?.sha && status.push.sha !== before ? "github.push.done" : "github.push.nothing"),
-    })
+    showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
   }
 
   const firstFailure = createMemo(() => {
