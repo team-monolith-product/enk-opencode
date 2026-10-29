@@ -41,6 +41,26 @@ export namespace SentryReporter {
     SentryBun.captureException(error, context ? { extra: context } : undefined)
   }
 
+  const seen = new Map<string, number>()
+  const limit = 200
+
+  export function due(key: string, ttl = 10 * 60_000, now = Date.now()) {
+    const until = seen.get(key)
+    if (until !== undefined && now < until) return false
+    seen.set(key, now + ttl)
+    if (seen.size > limit) seen.forEach((expiry, name) => expiry <= now && seen.delete(name))
+    return true
+  }
+
+  export function tracked() {
+    return seen.size
+  }
+
+  export function captureOnce(key: string, error: unknown, context?: Record<string, unknown>) {
+    if (!enabled || !due(key)) return
+    captureException(error, context)
+  }
+
   export function isEnabled() {
     return enabled
   }
