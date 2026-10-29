@@ -1,8 +1,9 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { ServerProcess } from "@opencode/server/process"
-import { afterAll, afterEach, describe, expect, test } from "bun:test"
-import { Effect } from "effect"
-import { HttpServer } from "effect/http"
+import { Sentry } from "@opencode/plugin-jitda/sentry"
+import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test"
+import { Cause, Effect } from "effect"
+import { HttpServer, HttpServerError, HttpServerRequest } from "effect/http"
 import { BootEnv } from "../src/boot-env"
 import { JitdaHub } from "../src/services/jitda-hub"
 import { WebUi } from "../src/services/web-ui"
@@ -182,4 +183,34 @@ describe("jitda hub", () => {
       hubUser.name = "team-1"
     }),
   )
+})
+
+describe("JitdaHub.capture", () => {
+  const request = HttpServerRequest.fromWeb(new Request("http://localhost/api/session?x=1", { method: "POST" }))
+
+  test("unknown failures that become 500 go to Sentry with the path and method", async () => {
+    const sent = spyOn(Sentry, "captureException").mockImplementation(() => {})
+    try {
+      const error = new Error("boom")
+      await Effect.runPromise(JitdaHub.capture(request, Cause.die(error)))
+
+      expect(sent).toHaveBeenCalledTimes(1)
+      expect(sent.mock.calls[0]).toEqual([error, { path: "/api/session", method: "POST" }])
+    } finally {
+      sent.mockRestore()
+    }
+  })
+
+  test("intended 4xx failures and dropped connections stay out of Sentry", async () => {
+    const sent = spyOn(Sentry, "captureException").mockImplementation(() => {})
+    try {
+      const missing = new HttpServerError.HttpServerError({ reason: new HttpServerError.RouteNotFound({ request }) })
+      await Effect.runPromise(JitdaHub.capture(request, Cause.fail(missing)))
+      await Effect.runPromise(JitdaHub.capture(request, Cause.interrupt()))
+
+      expect(sent).not.toHaveBeenCalled()
+    } finally {
+      sent.mockRestore()
+    }
+  })
 })

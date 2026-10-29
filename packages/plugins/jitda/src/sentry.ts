@@ -11,6 +11,11 @@ export function init(env: NodeJS.ProcessEnv = process.env) {
   if (!env.JUPYTERHUB_API_URL) return
   const disabled = env.OPENCODE_SENTRY_DISABLED?.toLowerCase()
   if (disabled === "1" || disabled === "true") return
+  // CLI 가 먼저 켰으면 같은 프로세스의 클라이언트를 같이 쓴다. 두 번 켜면 프로세스 핸들러가 겹친다.
+  if (SentryBun.getClient()) {
+    enabled = true
+    return
+  }
 
   SentryBun.init({
     dsn: DSN,
@@ -32,6 +37,11 @@ export type Scope = { tags?: Record<string, string>; fingerprint?: string[] }
 export function captureException(error: unknown, context?: Record<string, unknown>, scope?: Scope) {
   if (!enabled) return
   SentryBun.captureException(error, context || scope ? { extra: context, ...scope } : undefined)
+}
+
+export async function flush(timeout = 2000) {
+  if (!enabled) return
+  await SentryBun.flush(timeout).catch(() => undefined)
 }
 
 const seen = new Map<string, number>()

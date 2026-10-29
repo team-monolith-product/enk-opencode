@@ -18,7 +18,10 @@ import { Npm } from "@opencode/util/npm"
 import { EffectFlock } from "@opencode/util/effect-flock"
 import { Heap } from "./heap"
 import { CpuProfile } from "./cpu-profile"
+import { Sentry } from "@opencode/plugin-jitda/sentry"
 
+// V1 처럼 허브 파드에서만 켠다. boot-env 가 시크릿을 되돌린 뒤라야 JUPYTERHUB_* 가 보인다.
+Sentry.init()
 ensurePluginRuntime()
 
 if (process.env.OPENCODE_SSH_ASKPASS_PORT) {
@@ -112,7 +115,17 @@ Effect.gen(function* () {
     Effect.logError("cli process failed", {
       cause,
       args: process.argv.slice(2),
-    }).pipe(Effect.andThen(Effect.failCause(cause))),
+    }).pipe(
+      Effect.andThen(
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : Effect.promise(() => {
+              Sentry.captureException(Cause.squash(cause), { kind: "fatal" })
+              return Sentry.flush()
+            }),
+      ),
+      Effect.andThen(Effect.failCause(cause)),
+    ),
   ),
   Effect.annotateLogs({ role: "cli" }),
   Effect.provide(Config.layer),

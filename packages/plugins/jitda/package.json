@@ -14,7 +14,8 @@
     "./github": "./src/github.ts",
     "./doc": "./src/doc/index.ts",
     "./rpc": "./src/rpc.ts",
-    "./serve-targets": "./src/serve-targets.ts"
+    "./serve-targets": "./src/serve-targets.ts",
+    "./sentry": "./src/sentry.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

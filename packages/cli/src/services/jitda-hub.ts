@@ -1,6 +1,7 @@
 import type { ServerProcess } from "@opencode/server/process"
-import { Effect } from "effect"
-import { Headers, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { Sentry } from "@opencode/plugin-jitda/sentry"
+import { Cause, Effect } from "effect"
+import { Headers, HttpServerError, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { randomUUID } from "node:crypto"
 import { JitdaAssets } from "./jitda-assets"
 import { JitdaDoc } from "./jitda-doc"
@@ -169,6 +170,20 @@ function tracked(request: HttpServerRequest.HttpServerRequest, response: HttpSer
   return !(response.headers["content-type"] ?? "").startsWith("text/event-stream")
 }
 
+// 서버가 500 으로 바꿀 실패만 Sentry 로 보낸다. 404·검증 실패 같은 의도된 4xx 와 연결 끊김은 뺀다.
+export function capture(request: HttpServerRequest.HttpServerRequest, cause: Cause.Cause<unknown>) {
+  if (Cause.hasInterruptsOnly(cause)) return Effect.void
+  return HttpServerError.causeResponse(cause).pipe(
+    Effect.map(([response]) => {
+      if (response.status < 500) return
+      Sentry.captureException(Cause.squash(cause), {
+        path: new URL(request.url, "http://localhost").pathname,
+        method: request.method,
+      })
+    }),
+  )
+}
+
 export function wrap(inner: ServerProcess.Transform, password: string): ServerProcess.Transform {
   const basic = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`
   return (app) => {
@@ -200,7 +215,10 @@ export function wrap(inner: ServerProcess.Transform, password: string): ServerPr
         if (!url.pathname.endsWith("/event")) touch()
         return yield* JitdaDoc.handle(request, basic)
       }
-      const response = yield* served.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request))
+      const response = yield* served.pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+        Effect.tapCause((cause) => capture(request, cause)),
+      )
       if (tracked(request, response)) touch()
       return response
     })
