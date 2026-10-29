@@ -1,6 +1,7 @@
 import z from "zod"
 import { Log } from "@/util/log"
 import { Locale } from "./locale"
+import { Rails } from "./rails"
 
 // 팀당 주·월 AI 비용 한도(달러)는 rails 가 센다(hackathons.weekly_cost_limit / monthly_cost_limit). 모델을 부르기 전에
 // 남은 양을 묻고, 바닥나면 턴을 시작하지 않는다. rails 에 닿지 못하면 막지 않는다 — 한도는 비용 가드지만 채팅은
@@ -25,13 +26,6 @@ export namespace CostQuota {
 
   let cache: { quota: Quota; at: number } | undefined
 
-  function backend() {
-    const url = process.env["ENK_HACKATHON_RAILS_URL"]
-    const token = process.env["ENK_AI_USAGE_TOKEN"]
-    if (!url || !token) return
-    return { url: url.replace(/\/+$/, "") + route, token }
-  }
-
   export function reset() {
     cache = undefined
   }
@@ -39,7 +33,7 @@ export namespace CostQuota {
   // 지금 적용되는 한도. rails 설정이 없는 로컬은 undefined(제한 없음). 팀 토큰이 아니면 rails 가 403 을 주므로
   // 창 없는 quota 로 본다. 막을지는 호출자가 `exhausted` 로 읽는다.
   export async function check(now = Date.now()): Promise<Quota | undefined> {
-    const rails = backend()
+    const rails = Rails.endpoint(route)
     if (!rails) return
     if (!cache || now - cache.at >= CACHE_TTL_MS) {
       cache = { quota: (await fetchQuota(rails)) ?? cache?.quota ?? NONE, at: now }
@@ -47,9 +41,9 @@ export namespace CostQuota {
     return cache.quota
   }
 
-  async function fetchQuota(rails: { url: string; token: string }): Promise<Quota | undefined> {
+  async function fetchQuota(rails: Rails.Endpoint): Promise<Quota | undefined> {
     const res = await fetch(rails.url, {
-      headers: { Authorization: `token ${rails.token}` },
+      headers: rails.headers,
       signal: AbortSignal.timeout(TIMEOUT_MS),
     }).catch((err) => {
       log.warn("cost quota unreachable, allowing", { err: String(err) })
