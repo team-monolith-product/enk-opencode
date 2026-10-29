@@ -50,6 +50,13 @@ describe("GitHubSync.first", () => {
     expect(await GitHubSync.first("en")(changes)).toBe("First push from Jitda\n\n- Add: index.html")
     expect(await GitHubSync.first()(changes)).toBe("짓다에서 처음 올린 내용\n\n- 추가: index.html")
   })
+
+  test("names a manual push in the viewer locale", async () => {
+    const changes: GitHub.Change[] = [{ status: "M", file: "index.html" }]
+
+    expect(await GitHubSync.manual("en")(changes)).toBe("Manual push from Jitda\n\n- Update: index.html")
+    expect(await GitHubSync.manual()(changes)).toBe("짓다에서 직접 올린 내용\n\n- 수정: index.html")
+  })
 })
 
 describe("GitHubSync.failed", () => {
