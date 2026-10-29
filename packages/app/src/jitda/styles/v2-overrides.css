@@ -1,0 +1,9 @@
+/* V2 기본 스타일 중 V1 짓다 규칙보다 특이도가 높은 것을 짓다 화면에서만 되돌린다. 속성 반복은 특이도를 맞추려는 것이다. */
+@layer components {
+  :root[data-theme="jitda"][data-color-scheme] body [data-component="codle-session"] [data-component="user-message"] [data-slot="user-message-text"][data-slot="user-message-text"] {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}

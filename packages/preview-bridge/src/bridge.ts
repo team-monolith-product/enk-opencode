@@ -21,7 +21,7 @@ import {
   type ParentMethods,
   type PickedElement,
   type ScrollTarget,
-} from "../../app/src/lib/preview-bridge-protocol"
+} from "../../app/src/jitda/side-panel/preview-bridge-protocol"
 
 // ── 부모(앱) penpal 연결 + 자동 재연결 ──────────────────────────────────────
 //

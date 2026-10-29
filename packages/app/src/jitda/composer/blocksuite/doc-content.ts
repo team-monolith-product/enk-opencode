@@ -1,0 +1,477 @@
+import type { BlockModel, Doc } from "@blocksuite/store"
+import type { DocApi } from "../doc-submit"
+import { formatCommentNote, formatFolderReferenceNote, formatReferenceNote } from "../util/comment-note"
+import type { FileSelection } from "../util/file-types"
+import { textBytes, textMime } from "../prompt/files"
+import { docFetch } from "./opencode-doc-source"
+import { lineRefSegments, lineRefSegmentsLabel } from "./line-reference-url"
+
+export type DocExportAsset = {
+  id: string
+  mime: string
+  filename: string
+  /** 문서 서버에 저장된 자산 주소(`/doc/{docID}/asset/{assetID}`). */
+  url: string
+  /** V2 프롬프트 첨부는 data:/file: URI 만 받는다 — 자산 바이트를 data URL 로 싣는다. */
+  uri: string
+}
+
+/**
+ * A block whose asset the server could not hand back — an upload that was abandoned mid-transfer,
+ * most often. The export cannot carry the file, so without this the prompt goes out as a dangling
+ * `attachment://` link with no file part: the attachment silently disappears from what the model
+ * sees. Reported so the caller can refuse to send instead.
+ */
+export type DocMissingAsset = {
+  id: string
+  blockId: string
+  name: string
+}
+
+export type DocExport = {
+  text: string
+  assets: DocExportAsset[]
+  missing: DocMissingAsset[]
+}
+
+type Collected = {
+  assets: DocExportAsset[]
+  missing: DocMissingAsset[]
+}
+
+type Inline = {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  strike?: boolean
+  code?: boolean
+}
+
+type ExportOpts = {
+  docID: string
+  api: DocApi
+}
+
+type TextLike = {
+  toDelta?: () => unknown
+  toString?: () => string
+}
+
+const noise = new Set([
+  "id",
+  "flavour",
+  "children",
+  "version",
+  "xywh",
+  "index",
+  "lockedBySelf",
+  "rotate",
+  "scale",
+  "style",
+])
+
+type TextOp = {
+  insert?: unknown
+  attributes?: Record<string, unknown>
+}
+
+function esc(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/\*/g, "\\*").replace(/_/g, "\\_").replace(/`/g, "\\`")
+}
+
+function label(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]")
+}
+
+// CommonMark 코드 스팬은 안쪽 백슬래시를 이스케이프로 보지 않는다. 안쪽 가장 긴 백틱보다 하나 긴 울타리로 감싼다.
+export function codeSpan(text: string) {
+  const longest = Math.max(0, ...Array.from(text.matchAll(/`+/g), (match) => match[0].length))
+  const fence = "`".repeat(longest + 1)
+  const pad = text.startsWith("`") || text.endsWith("`") ? " " : ""
+  return `${fence}${pad}${text}${pad}${fence}`
+}
+
+function inline(model: BlockModel) {
+  return parts(model)
+    .map((op) => {
+      const code = op.code ? codeSpan(op.text) : esc(op.text)
+      const bold = op.bold ? `**${code}**` : code
+      const italic = op.italic ? `*${bold}*` : bold
+      return op.strike ? `~~${italic}~~` : italic
+    })
+    .join("")
+}
+
+function parts(model: BlockModel): Inline[] {
+  const text = model.text
+  if (!text) return []
+  return text
+    .toDelta()
+    .map((op: TextOp) => {
+      if (typeof op.insert !== "string") return
+      const attrs = op.attributes ?? {}
+      return {
+        text: op.insert,
+        bold: Boolean(attrs.bold),
+        italic: Boolean(attrs.italic),
+        strike: Boolean(attrs.strike),
+        code: Boolean(attrs.code),
+      } satisfies Inline
+    })
+    .filter((op) => !!op)
+}
+
+function prop(model: BlockModel, key: string) {
+  return (model as unknown as Record<string, unknown>)[key]
+}
+
+function str(model: BlockModel, key: string) {
+  const value = prop(model, key)
+  return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+function num(model: BlockModel, key: string) {
+  const value = prop(model, key)
+  return typeof value === "number" ? value : undefined
+}
+
+function lineSelection(start: number, end: number): FileSelection {
+  return {
+    startLine: Math.min(start, end),
+    endLine: Math.max(start, end),
+    startChar: 0,
+    endChar: 0,
+  }
+}
+
+function source(model: BlockModel) {
+  const value = prop(model, "sourceId")
+  return typeof value === "string" && value ? value : undefined
+}
+
+function caption(model: BlockModel) {
+  const value = prop(model, "caption")
+  return typeof value === "string" ? value.trim() : ""
+}
+
+function raw(model: BlockModel) {
+  return model.text?.toString?.() ?? ""
+}
+
+function title(model: BlockModel, name: string) {
+  return str(model, "title") ?? (caption(model) || undefined) ?? str(model, "name") ?? name
+}
+
+function detail(name: string, value?: string | number | null) {
+  if (value === undefined || value === null || value === "") return
+  return `- ${name}: ${value}`
+}
+
+function textlike(value: unknown): value is TextLike {
+  if (typeof value !== "object" || value === null) return false
+  if (Array.isArray(value)) return false
+  const next = value as TextLike
+  return (
+    typeof next.toDelta === "function" ||
+    (typeof next.toString === "function" && next.toString !== Object.prototype.toString)
+  )
+}
+
+function json(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null) return value
+  if (typeof value !== "object") return value
+  if (textlike(value)) return value.toString?.() ?? value.toDelta?.()
+  if (seen.has(value)) return "[Circular]"
+  seen.add(value)
+  if (Array.isArray(value)) return value.map((item) => json(item, seen))
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, val]) => [key, json(val, seen)]),
+  )
+}
+
+function props(model: BlockModel) {
+  return Object.fromEntries(
+    model.keys
+      .filter((key) => !noise.has(key))
+      .map((key) => [key, json(prop(model, key))])
+      .filter(([, value]) => value !== undefined && value !== "" && value !== null),
+  )
+}
+
+function fence(type: string, value: string) {
+  return ["```" + type, value.replace(/```/g, "\\`\\`\\`"), "```"].join("\n")
+}
+
+async function asset(opts: ExportOpts, id: string) {
+  const res = await docFetch(opts.api, `/${opts.docID}/asset/${encodeURIComponent(id)}`, { cache: "no-store" }).catch(
+    () => undefined,
+  )
+  if (!res?.ok) return
+  const blob = await res.blob()
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  const mime = media(bytes, blob.type || res.headers.get("content-type") || "application/octet-stream")
+  return {
+    mime,
+    url: `/doc/${opts.docID}/asset/${encodeURIComponent(id)}`,
+    uri: `data:${mime};base64,${b64(bytes)}`,
+  }
+}
+
+function b64(bytes: Uint8Array) {
+  let binary = ""
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
+function media(bytes: Uint8Array, mime: string) {
+  const text = String.fromCharCode(...bytes.subarray(0, 16))
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg"
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png"
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return "image/gif"
+  if (text.startsWith("RIFF") && text.slice(8, 12) === "WEBP") return "image/webp"
+  if (text.startsWith("%PDF")) return "application/pdf"
+  if (mime.startsWith("image/") || mime === "application/pdf") return "application/octet-stream"
+  // The asset route whitelists image/pdf mimes and serves everything else as
+  // application/octet-stream, so a text attachment's original mime is gone by the
+  // time it comes back. Sniff the bytes and normalize every text-like asset to
+  // text/plain — the same mime the composer attachment path sends — so the server
+  // inlines its content for the model.
+  if (textMime(mime) || textBytes(bytes.subarray(0, 4096))) return "text/plain"
+  return mime
+}
+
+function exportable(mime: string) {
+  return mime.startsWith("image/") || mime === "application/pdf" || mime === "text/plain"
+}
+
+function embed(model: BlockModel, name: string) {
+  return [fence("json", JSON.stringify({ type: name, ...props(model) }, null, 2))]
+}
+
+function unknown(model: BlockModel) {
+  const data = props(model)
+  if (Object.keys(data).length === 0) return []
+  return [`BlockSuite ${model.flavour}`, fence("json", JSON.stringify(data, null, 2))]
+}
+
+function plain(model: BlockModel): string[] {
+  const children = () => model.children.flatMap(plain)
+  if (model.flavour === "affine:page" || model.flavour === "affine:note" || model.flavour === "affine:surface") {
+    return children()
+  }
+  if (model.flavour === "affine:paragraph" || model.flavour === "affine:list" || model.flavour === "affine:code") {
+    return [raw(model).trim(), ...children()].filter(Boolean)
+  }
+  if (model.flavour === "opencode:file-reference") {
+    return [str(model, "name") ?? str(model, "path") ?? str(model, "url") ?? "File", ...children()]
+  }
+  if (model.flavour === "opencode:line-reference") {
+    const path = str(model, "path") ?? ""
+    const start = num(model, "start")
+    const end = num(model, "end")
+    const range =
+      start !== undefined && end !== undefined
+        ? lineRefSegmentsLabel(
+            lineRefSegments({
+              start,
+              end,
+              side: str(model, "side"),
+              endSide: str(model, "endSide"),
+              additionStart: num(model, "additionStart"),
+              additionEnd: num(model, "additionEnd"),
+              deletionStart: num(model, "deletionStart"),
+              deletionEnd: num(model, "deletionEnd"),
+            }),
+          )
+        : str(model, "label")
+    const comment = str(model, "comment")
+    const preview = str(model, "preview")
+    const head = [str(model, "name") ?? path, range, preview, comment].filter((line): line is string => !!line)
+    return [...head, ...children()]
+  }
+  if (model.flavour === "affine:image") return [caption(model) || source(model) || "Image", ...children()]
+  if (model.flavour === "affine:attachment") return [str(model, "name") ?? source(model) ?? "Attachment", ...children()]
+  if (model.flavour === "affine:divider") return ["---", ...children()]
+  if (model.flavour === "affine:latex") return [str(model, "latex") ?? "", ...children()].filter(Boolean)
+  if (model.flavour.startsWith("affine:embed-") || model.flavour === "affine:bookmark") {
+    return [title(model, model.flavour.replace("affine:", "")), str(model, "url") ?? "", ...children()].filter(Boolean)
+  }
+  return [...Object.values(props(model)).map((value) => String(value)), ...children()].filter(Boolean)
+}
+
+async function block(model: BlockModel, opts: ExportOpts, out: Collected, depth = 0): Promise<string[]> {
+  const next = model.flavour === "affine:list" ? depth + 1 : depth
+  const children = async () => (await Promise.all(model.children.map((child) => block(child, opts, out, next)))).flat()
+
+  if (model.flavour === "affine:page" || model.flavour === "affine:note" || model.flavour === "affine:surface") {
+    return children()
+  }
+
+  if (model.flavour === "affine:paragraph") {
+    const text = inline(model).trim()
+    const type = (model as { type?: unknown }).type
+    const body =
+      type === "quote"
+        ? `> ${text}`
+        : typeof type === "string" && /^h[1-6]$/.test(type)
+          ? `${"#".repeat(Number(type[1]))} ${text}`
+          : text
+    const nested = await children()
+    return [body, ...nested].filter(Boolean)
+  }
+
+  if (model.flavour === "affine:list") {
+    const type = (model as { type?: unknown }).type
+    const checked = (model as { checked?: unknown }).checked === true
+    const order = (model as { order?: unknown }).order
+    const prefix =
+      type === "todo"
+        ? `- [${checked ? "x" : " "}] `
+        : type === "numbered"
+          ? `${typeof order === "number" && order > 0 ? order : 1}. `
+          : "- "
+    const nested = await children()
+    const pad = "  ".repeat(depth)
+    return [`${pad}${prefix}${inline(model).trim()}`, ...nested]
+  }
+
+  if (model.flavour === "affine:code") {
+    const lang = str(model, "language") ?? ""
+    const text = raw(model)
+    const head = caption(model) ? [`Code: ${caption(model)}`] : []
+    const nested = await children()
+    return [...head, fence(lang, text), ...nested].filter(Boolean)
+  }
+
+  if (model.flavour === "affine:divider") {
+    const nested = await children()
+    return ["---", ...nested]
+  }
+
+  if (model.flavour === "opencode:file-reference") {
+    const path = str(model, "path") ?? str(model, "url") ?? ""
+    const name = str(model, "name") ?? path ?? "File"
+    const url = str(model, "url")
+    const nested = await children()
+    const dir = str(model, "nodeType") === "directory"
+    const note = dir ? formatFolderReferenceNote(path) : formatReferenceNote({ path })
+    const link = url ? `[${label(name)}](${url})` : label(name)
+    return [note, link, ...nested].filter(Boolean)
+  }
+
+  if (model.flavour === "opencode:line-reference") {
+    const path = str(model, "path") ?? ""
+    const name = str(model, "name") ?? path
+    const url = str(model, "url") ?? path
+    const start = num(model, "start")
+    const end = num(model, "end")
+    const comment = str(model, "comment")
+    const nested = await children()
+    const selection = start !== undefined && end !== undefined ? lineSelection(start, end) : undefined
+    const note = comment ? formatCommentNote({ path, selection, comment }) : formatReferenceNote({ path, selection })
+    const rangeLabel =
+      start !== undefined && end !== undefined
+        ? lineRefSegmentsLabel(
+            lineRefSegments({
+              start,
+              end,
+              side: str(model, "side"),
+              endSide: str(model, "endSide"),
+              additionStart: num(model, "additionStart"),
+              additionEnd: num(model, "additionEnd"),
+              deletionStart: num(model, "deletionStart"),
+              deletionEnd: num(model, "deletionEnd"),
+            }),
+          )
+        : str(model, "label")
+    const link = rangeLabel ? `[${label(name)} ${rangeLabel}](${url})` : `[${label(name)}](${url})`
+    return [note, link, ...nested].filter(Boolean)
+  }
+
+  if (model.flavour === "affine:latex") {
+    const text = str(model, "latex")
+    const nested = await children()
+    return [text ? `$$\n${text}\n$$` : "", ...nested].filter(Boolean)
+  }
+
+  if (model.flavour === "affine:image") {
+    const id = source(model)
+    const nested = await children()
+    if (!id) return nested
+    const name = caption(model) || id
+    const found = await asset(opts, id)
+    if (!found) {
+      out.missing.push({ id, blockId: model.id, name })
+      return [`![${name}](attachment://${encodeURIComponent(id)})`, ...nested]
+    }
+    if (exportable(found.mime)) out.assets.push({ id, mime: found.mime, filename: id, url: found.url, uri: found.uri })
+    return [`![${name}](attachment://${encodeURIComponent(id)})`, ...nested]
+  }
+
+  if (model.flavour === "affine:attachment") {
+    const id = source(model)
+    const name = str(model, "name") ?? id ?? "attachment"
+    const meta = [detail("Type", str(model, "type")), detail("Size", num(model, "size"))].filter(
+      (line): line is string => !!line,
+    )
+    const nested = await children()
+    if (!id) return [`[${label(name)}]`, ...meta, ...nested]
+    const found = await asset(opts, id)
+    // `!found` is a 404 (or a failed read), not a filtered mime — an asset that IS stored but is not
+    // exportable still reaches the model as the link below, so it is not missing.
+    if (!found) out.missing.push({ id, blockId: model.id, name })
+    else if (exportable(found.mime))
+      out.assets.push({ id, mime: found.mime, filename: name, url: found.url, uri: found.uri })
+    // The chat view hides an exported file part's standalone chip only when the markdown
+    // references it by the part's filename. Images export filename=id so they key the link
+    // by id; attachments must keep their real filename (the server names the on-disk copy
+    // after it), so the link is keyed by name instead — otherwise the doc bubble and the
+    // chip would both show the same attachment.
+    return [`[${label(name)}](attachment://${encodeURIComponent(name)})`, ...meta, ...nested]
+  }
+
+  if (model.flavour.startsWith("affine:embed-") || model.flavour === "affine:bookmark") {
+    const name = model.flavour.replace("affine:", "").replace(/^embed-/, "")
+    const nested = await children()
+    return [...embed(model, name), ...nested]
+  }
+
+  const nested = await children()
+  return [...unknown(model), ...nested]
+}
+
+export async function docMarkdown(doc: Doc, opts: ExportOpts): Promise<DocExport> {
+  const out: Collected = { assets: [], missing: [] }
+  const lines = doc.root ? await block(doc.root, opts, out) : []
+  return {
+    text: lines.join("\n\n").trim(),
+    assets: out.assets,
+    missing: out.missing,
+  }
+}
+
+export function docPlain(doc: Doc) {
+  const lines = doc.root ? plain(doc.root) : []
+  return lines.join("\n").trim()
+}
+
+export function ensureEditable(doc: Doc) {
+  if (doc.getBlockByFlavour("affine:paragraph").length > 0) return
+  doc.withoutTransact(() => {
+    const notes = doc.getBlockByFlavour("affine:note")
+    if (notes[0]) {
+      doc.addBlock("affine:paragraph", {}, notes[0].id)
+      return
+    }
+    const pages = doc.getBlockByFlavour("affine:page")
+    if (!pages[0]) return
+    const noteId = doc.addBlock("affine:note", {}, pages[0].id)
+    doc.addBlock("affine:paragraph", {}, noteId)
+  })
+}
+
+export function baseline(doc: Doc) {
+  ensureEditable(doc)
+  if (!doc.canUndo) return
+  doc.resetHistory()
+}

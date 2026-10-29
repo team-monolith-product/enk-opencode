@@ -1,0 +1,433 @@
+import { useLanguage } from "@/runtime/i18n/language"
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
+import { Portal } from "solid-js/web"
+import { Icon } from "@/jitda/env/ui/icon"
+import { writeClipboard } from "@/jitda/env/ui/clipboard"
+import type { DevServerState } from "./dev-server"
+import { SessionPreviewMascot } from "./preview-mascot"
+
+const round = Math.round
+
+// 보조 안내 문구(hint)와 "또는 AI에게 요청" 라벨이 정확히 같은 폰트·크기·색을 쓰도록 공유한다.
+const HINT_TEXT_STYLE = { "font-size": "11.5px", color: "var(--app-muted)" } as const
+
+// ── 곡괭이 포인터 기하 ──
+// 마스코트 곡괭이 SVG(viewBox 84x200, 머리 위·자루 아래)를 grip(손잡이) 기준으로 기울여,
+// 머리의 뾰족한 끝(TIP)이 마우스 지점에 오도록 배치한다. 스윙은 grip을 축으로 회전.
+const PICK_SCALE = 0.23
+const GRIP = { x: 42, y: 120 } // 자루 손잡이 지점(회전축)
+const TIP = { x: 8, y: 24 } // 곡괭이 머리 왼쪽 뾰족한 끝(바닥을 찍는 점)
+const TILT = 330 // 그리기 기울기(도) — grip 기준 회전으로 머리를 아래로(150 + 180)
+
+function rotPt(p: { x: number; y: number }, c: { x: number; y: number }, deg: number) {
+  const th = (deg * Math.PI) / 180
+  const dx = p.x - c.x
+  const dy = p.y - c.y
+  return { x: c.x + dx * Math.cos(th) - dy * Math.sin(th), y: c.y + dx * Math.sin(th) + dy * Math.cos(th) }
+}
+
+const TIP_A = rotPt(TIP, GRIP, TILT)
+const TIP_PX = { x: TIP_A.x * PICK_SCALE, y: TIP_A.y * PICK_SCALE }
+const GRIP_PX = { x: GRIP.x * PICK_SCALE, y: GRIP.y * PICK_SCALE }
+const SVG_W = 84 * PICK_SCALE
+const SVG_H = 200 * PICK_SCALE
+// 스윙 회전축(grip) — TIP 을 (0,0)에 고정했을 때의 grip 상대 위치
+const ORIGIN_X = GRIP_PX.x - TIP_PX.x
+const ORIGIN_Y = GRIP_PX.y - TIP_PX.y
+// TIP 을 컨테이너 (0,0)에 두기 위한 svg 평행이동
+const SVG_TX = -TIP_PX.x
+const SVG_TY = -TIP_PX.y
+// 곡괭이 전체를 크기 절반만큼 아래로 — 실제 마우스 포인트 위치에 맞춤
+const POINTER_DROP = round(SVG_H / 2)
+// 곡괭이 그림만 크기의 1/3 위로(이펙트 위치는 유지)
+const PICK_LIFT = round(SVG_H / 3)
+// 파임 자국 너비 — 흙 파임 이펙트만 자국 크기의 1/3 왼쪽으로
+const MARK_W = 26
+const DIG_SHIFT_X = round(MARK_W / 3)
+
+function PickaxeCursor(props: { striking: boolean }) {
+  return (
+    <span
+      class={props.striking ? "jt-pickaxe-strike" : undefined}
+      style={{ position: "absolute", left: "0", top: "0", "transform-origin": `${ORIGIN_X}px ${ORIGIN_Y}px` }}
+    >
+      <svg
+        width={SVG_W}
+        height={SVG_H}
+        viewBox="0 0 84 200"
+        style={{ display: "block", overflow: "visible", transform: `translate(${SVG_TX}px, ${SVG_TY}px)` }}
+      >
+        <g transform={`rotate(${TILT} ${GRIP.x} ${GRIP.y})`}>
+          <rect x="37.5" y="22" width="9" height="118" rx="4.5" fill="#9c6b3f" />
+          <rect x="38" y="22" width="3" height="118" rx="1.5" fill="#bd8753" />
+          <path d="M8 24 Q42 4 76 24" fill="none" stroke="#3f3934" stroke-width="12" stroke-linecap="round" />
+          <path d="M14 21 Q42 7 70 21" fill="none" stroke="#6f675f" stroke-width="3.5" stroke-linecap="round" />
+        </g>
+      </svg>
+    </span>
+  )
+}
+
+type DigEffect = { id: number; x: number; y: number }
+
+const RESET_MS = 600
+const STRIKE_MS = 360
+const EFFECT_MS = 500
+// 흙 파티클 배치 — 기존 마스코트 흙(jt-dig-dirt) 룩 재사용.
+const DIRT = [
+  { a: -54, d: 18, r: 4 },
+  { a: -8, d: 22, r: 5 },
+  { a: 36, d: 19, r: 3.5 },
+]
+
+function DigBurst(props: { x: number; y: number }) {
+  return (
+    <span style={{ position: "absolute", left: `${props.x}px`, top: `${props.y}px`, "z-index": "1" }}>
+      <span
+        class="jt-dig-mark"
+        style={{
+          position: "absolute",
+          left: "0",
+          top: "0",
+          width: "26px",
+          height: "11px",
+          "border-radius": "50%",
+          background: "#403b37",
+        }}
+      />
+      <For each={DIRT}>
+        {(c) => (
+          <span style={{ position: "absolute", left: "0", top: "0", transform: `rotate(${c.a}deg)` }}>
+            <span
+              class="jt-dirt-burst"
+              style={{
+                display: "block",
+                width: `${round(c.r * 2)}px`,
+                height: `${round(c.r * 2)}px`,
+                "margin-left": `${-round(c.r)}px`,
+                "margin-top": `${-round(c.r)}px`,
+                "border-radius": "50%",
+                background: "#8f8a84",
+                opacity: "0",
+                "--pop": `${c.d}px`,
+              }}
+            />
+          </span>
+        )}
+      </For>
+    </span>
+  )
+}
+
+// 로그 박스에 한 번에 보이는 줄 수(넘치면 스크롤). 대기 화면이 로그판이 되지 않을 만큼만.
+const LOG_VISIBLE_LINES = 8
+const LOG_LINE_HEIGHT = 17
+
+function CommandSpinner() {
+  return (
+    <span class="jt-spin-fast inline-flex shrink-0" style={{ color: "var(--app-muted)" }} aria-hidden="true">
+      <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+        <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="2.5" opacity="0.25" />
+        <path d="M17.5 10A7.5 7.5 0 0 0 10 2.5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+      </svg>
+    </span>
+  )
+}
+
+function PreviewLogs(props: { lines: string[]; cmd?: string; running?: boolean }) {
+  const language = useLanguage()
+  let box: HTMLDivElement | undefined
+  // 바닥 근처(한 줄 여유)에 있을 때만 자동 스크롤 — 위로 올려 읽는 중이면 방해하지 않는다.
+  let stick = true
+
+  const [copied, setCopied] = createSignal(false)
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
+  const copyLog = () => {
+    void writeClipboard([props.cmd, ...props.lines].filter(Boolean).join("\n"))
+    setCopied(true)
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => setCopied(false), 1500)
+  }
+  onCleanup(() => copyTimer && clearTimeout(copyTimer))
+
+  const onScroll = () => {
+    if (!box) return
+    stick = box.scrollHeight - box.scrollTop - box.clientHeight < LOG_LINE_HEIGHT * 1.5
+  }
+
+  createEffect(() => {
+    props.lines.length
+    if (!box || !stick) return
+    queueMicrotask(() => box && (box.scrollTop = box.scrollHeight))
+  })
+
+  return (
+    <div class="mt-1 flex w-full max-w-140 flex-col gap-1 text-left">
+      <div class="flex items-center gap-1.5">
+        <span class="inline-flex shrink-0 text-icon-weak-base">
+          <Icon name="terminal" size="small" />
+        </span>
+        {/* 커맨드는 남는 폭만큼만 쓰고(길면 말줄임), 스피너가 바로 그 끝에 붙는다. 남은 공간은
+            스페이서가 먹어 복사 버튼만 오른쪽 끝에 남는다. */}
+        <span class="min-w-0 truncate font-mono" style={HINT_TEXT_STYLE} title={props.cmd}>
+          {props.cmd ?? language.t("session.preview.logs.label")}
+        </span>
+        <Show when={props.running}>
+          <CommandSpinner />
+        </Show>
+        <span class="flex-1" />
+        <button
+          type="button"
+          onClick={copyLog}
+          aria-label={language.t("session.preview.logs.copy")}
+          classList={{ "text-icon-success-base": copied() }}
+          class="inline-flex size-6 shrink-0 items-center justify-center rounded text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+        >
+          <Icon name={copied() ? "check-small" : "copy"} size="small" />
+        </button>
+      </div>
+      {/* 세로 패딩을 두면 바닥까지 스크롤했을 때 맨 윗줄이 패딩만큼 잘려 보인다. 줄 높이의 배수로만
+          높이를 잡아 어느 위치에서나 줄이 딱 맞게 끊기도록 한다(터미널과 같은 룩). */}
+      <div
+        ref={(el) => (box = el)}
+        onScroll={onScroll}
+        class="w-full overflow-y-auto overflow-x-hidden rounded-md border border-border-weak-base bg-background-stronger px-2.5 font-mono text-left"
+        style={{
+          "max-height": `${LOG_VISIBLE_LINES * LOG_LINE_HEIGHT}px`,
+          "font-size": "11px",
+          "line-height": `${LOG_LINE_HEIGHT}px`,
+          color: "var(--app-muted)",
+        }}
+      >
+        <For each={props.lines}>{(line) => <div class="whitespace-pre-wrap break-words">{line}</div>}</For>
+      </div>
+    </div>
+  )
+}
+
+export function SessionPreviewFallback(props: {
+  state?: DevServerState
+  httpStatus?: number
+  loopbackOnly?: boolean
+  logs?: string[]
+  logCmd?: string
+  onRetry?: () => void
+  retrying?: boolean
+}) {
+  const language = useLanguage()
+
+  // 미리보기 상태 5분기 UI. ready 는 iframe 이 뜨므로 여기 안 옴 — 나머지 4개(+기본 starting)를 렌더.
+  const state = () => props.state ?? "starting"
+  // errored 의 하위 갈래: 루프백에만 바인드된 dev 서버(`--host 0.0.0.0` 누락). HTTP 오류가 아니라
+  // 바인딩 문제라 안내 문구도, 고치는 방법도 다르다.
+  const loopbackOnly = () => state() === "errored" && !!props.loopbackOnly
+  // 재시도가 의미 있는 상태에서만 버튼 노출: startable(뜰 수 있는데 안 뜸) · errored(실행됐지만 오류).
+  // starting(기동 중)·none(서버 자체 없음)에서는 재시도해도 소용없어 숨긴다.
+  // loopbackOnly 도 숨긴다 — 포트는 이미 LISTEN 중이라 재시작 요청이 already_running 으로 되돌아올
+  // 뿐이고, 실제 해결은 AI 가 커맨드에 --host 를 붙여 다시 띄우는 것뿐이다.
+  const showRetry = () => !loopbackOnly() && (state() === "startable" || state() === "errored")
+  // AI 요청 문구는 loopbackOnly 에서도 보여야 한다 — 여기서는 그게 유일한 해결 경로다.
+  const showAskAi = () => showRetry() || loopbackOnly()
+
+  const title = () => {
+    if (loopbackOnly()) return language.t("session.preview.loopbackOnly.title")
+    switch (state()) {
+      case "none":
+        return language.t("session.preview.none.title")
+      case "startable":
+        return language.t("session.preview.startable.title")
+      case "errored":
+        return language.t("session.preview.errored.title")
+      default:
+        return language.t("session.preview.generating.title")
+    }
+  }
+  const hint = () => {
+    if (loopbackOnly()) return language.t("session.preview.loopbackOnly.hint")
+    switch (state()) {
+      case "none":
+        return language.t("session.preview.none.hint")
+      case "startable":
+        return language.t("session.preview.startable.hint")
+      case "errored":
+        return language.t("session.preview.errored.hint", { status: String(props.httpStatus ?? "5xx") })
+      default:
+        return language.t("session.preview.generating.hint")
+    }
+  }
+
+  // startable·errored 에서 AI 에게 보낼 수정 요청 문장 — 칩 클릭 또는 복사 버튼으로 클립보드 복사.
+  const promptText = () => {
+    if (loopbackOnly()) return language.t("session.preview.loopbackOnly.prompt")
+    return state() === "errored"
+      ? language.t("session.preview.errored.prompt")
+      : language.t("session.preview.startable.prompt")
+  }
+
+  const [copied, setCopied] = createSignal(false)
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
+  const copyPrompt = () => {
+    void writeClipboard(promptText())
+    setCopied(true)
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => setCopied(false), 1500)
+  }
+  onCleanup(() => copyTimer && clearTimeout(copyTimer))
+
+  const [pickaxeMode, setPickaxeMode] = createSignal(false)
+  const [pointer, setPointer] = createSignal({ x: -200, y: -200 })
+  const [striking, setStriking] = createSignal(false)
+  const [effects, setEffects] = createSignal<DigEffect[]>([])
+
+  let clickCount = 0
+  let resetTimer: ReturnType<typeof setTimeout> | undefined
+  let strikeTimer: ReturnType<typeof setTimeout> | undefined
+  let effectId = 0
+  const effectTimers = new Set<ReturnType<typeof setTimeout>>()
+
+  // 마스코트 연속 3클릭으로 곡괭이 모드 토글
+  const onMascotClick = () => {
+    clickCount += 1
+    clearTimeout(resetTimer)
+    resetTimer = setTimeout(() => {
+      clickCount = 0
+    }, RESET_MS)
+    if (clickCount >= 3) {
+      clickCount = 0
+      clearTimeout(resetTimer)
+      setPickaxeMode((on) => !on)
+    }
+  }
+
+  const onGlobalMove = (e: MouseEvent) => {
+    setPointer({ x: e.clientX, y: e.clientY })
+  }
+
+  // 클릭 = 곡괭이질(스윙 재시작) + 클릭 지점(TIP) 파임/흙 이펙트
+  const onGlobalClick = (e: MouseEvent) => {
+    const x = e.clientX
+    const y = e.clientY
+    setPointer({ x, y })
+
+    setStriking(false)
+    requestAnimationFrame(() => setStriking(true))
+    clearTimeout(strikeTimer)
+    strikeTimer = setTimeout(() => setStriking(false), STRIKE_MS)
+
+    const id = ++effectId
+    setEffects((list) => [...list, { id, x: x - DIG_SHIFT_X + 3, y: y + POINTER_DROP + 3 }])
+    const timer = setTimeout(() => {
+      setEffects((list) => list.filter((fx) => fx.id !== id))
+      effectTimers.delete(timer)
+    }, EFFECT_MS)
+    effectTimers.add(timer)
+  }
+
+  const detach = () => {
+    document.documentElement.classList.remove("jt-pickaxe-global")
+    window.removeEventListener("mousemove", onGlobalMove)
+    window.removeEventListener("click", onGlobalClick)
+  }
+
+  // 모드 on/off 에 맞춰 전역 커서 숨김 + 전역 마우스 추적/클릭 부착
+  createEffect(() => {
+    if (pickaxeMode()) {
+      document.documentElement.classList.add("jt-pickaxe-global")
+      window.addEventListener("mousemove", onGlobalMove)
+      window.addEventListener("click", onGlobalClick)
+    } else {
+      detach()
+    }
+  })
+
+  onCleanup(() => {
+    detach()
+    clearTimeout(resetTimer)
+    clearTimeout(strikeTimer)
+    effectTimers.forEach((t) => clearTimeout(t))
+  })
+
+  return (
+    <div data-slot="preview-fallback" class="size-full min-h-0 flex items-center justify-center px-6 py-8 text-center">
+      <div role="status" class="flex w-full max-w-160 flex-col items-center gap-[14px]" aria-label={title()}>
+        {/* 마스코트 — 연속 3클릭 트리거 */}
+        <span onClick={onMascotClick} style={{ display: "inline-flex", cursor: "pointer" }}>
+          <SessionPreviewMascot size={84} />
+        </span>
+        <div class="flex flex-col items-center gap-[5px] min-w-0 break-words">
+          <span style={{ "font-size": "13.5px", "font-weight": "600", color: "var(--app-ink)" }}>{title()}</span>
+          <span style={HINT_TEXT_STYLE}>{hint()}</span>
+        </div>
+        {/* dev 서버가 뱉는 내용 — 기다리는 동안 진행 상황이 보이고, errored 면 원인이 바로 드러난다.
+            로그가 아직 없으면(none 이거나 방금 시작) 아무것도 그리지 않는다. */}
+        <Show when={(props.logs?.length ?? 0) > 0}>
+          {/* 스피너는 기동 중(starting)일 때만 — startable·errored 에서 돌면 뭔가 진행 중인 것처럼 보인다. */}
+          <PreviewLogs lines={props.logs!} cmd={props.logCmd} running={state() === "starting"} />
+        </Show>
+
+        {/* 수동 재시도 — startable·errored 에서만 노출(starting/none 은 소용없어 숨김).
+            연타는 상위 restart() 의 in-flight 잠금+쿨다운이 막는다. */}
+        <Show when={showRetry() && props.onRetry}>
+          <button
+            type="button"
+            disabled={props.retrying}
+            onClick={() => props.onRetry?.()}
+            class="mt-1 inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-12-medium text-text-base bg-surface-raised-base-hover enabled:hover:bg-surface-base-active disabled:opacity-50 disabled:cursor-default transition-colors"
+          >
+            <Icon name="refresh" size="small" classList={{ "animate-spin": props.retrying }} />
+            {language.t("session.preview.retry.button")}
+          </button>
+        </Show>
+
+        {/* 또는 AI 에게 수정 요청 — 문장 칩을 누르면 복사, 옆 버튼도 복사. */}
+        <Show when={showAskAi()}>
+          <div class="mt-1 flex w-full max-w-100 flex-col items-center gap-1">
+            {/* 재시도 버튼이 없는 갈래(loopbackOnly)에서는 "또는" 이 가리킬 앞 선택지가 없다. */}
+            <span style={HINT_TEXT_STYLE}>
+              {showRetry() ? language.t("session.preview.askAi.label") : language.t("session.preview.askAi.labelOnly")}
+            </span>
+            <div class="flex w-full items-stretch gap-1">
+              <button
+                type="button"
+                onClick={copyPrompt}
+                title={promptText()}
+                class="min-w-0 flex-1 truncate rounded-md border border-border-weak-base bg-background-stronger px-2.5 py-1.5 text-left text-12-regular text-text-base cursor-pointer hover:bg-surface-raised-base-hover transition-colors"
+              >
+                {promptText()}
+              </button>
+              <button
+                type="button"
+                onClick={copyPrompt}
+                aria-label={language.t("session.preview.askAi.copy")}
+                classList={{ "text-icon-success-base": copied() }}
+                class="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border-weak-base text-icon-base hover:bg-surface-raised-base-hover transition-colors"
+              >
+                <Icon name={copied() ? "check-small" : "copy"} size="small" />
+              </button>
+            </div>
+          </div>
+        </Show>
+      </div>
+
+      {/* 전체 화면 오버레이 — 곡괭이 포인터 + 클릭 지점 땅 파임 이펙트 */}
+      <Show when={pickaxeMode()}>
+        <Portal>
+          <div style={{ position: "fixed", inset: "0", "pointer-events": "none", "z-index": "2147483600" }}>
+            <For each={effects()}>{(fx) => <DigBurst x={fx.x} y={fx.y} />}</For>
+            <span
+              style={{
+                position: "fixed",
+                left: "0",
+                top: "0",
+                transform: `translate(${pointer().x}px, ${pointer().y + POINTER_DROP - PICK_LIFT}px)`,
+                "will-change": "transform",
+              }}
+            >
+              <PickaxeCursor striking={striking()} />
+            </span>
+          </div>
+        </Portal>
+      </Show>
+    </div>
+  )
+}

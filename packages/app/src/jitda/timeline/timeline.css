@@ -1,0 +1,233 @@
+/* V1 짓다 대화 화면(packages/ui/src/components 의 message-part·basic-tool·tool-status-title·tool-error-card·session-turn css).
+   운영 화면에서만 그리는 V1 카드라 codle-session 아래로 묶는다. */
+@layer components {
+  [data-component="codle-session"] [data-component="text-part"] [data-slot="text-part-copy-wrapper"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  [data-component="codle-session"] [data-slot="basic-tool-title-spinner"],
+  [data-component="codle-session"] [data-slot="tool-status-spinner"] {
+    width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: currentColor;
+
+    [data-component="spinner"] {
+      width: 14px;
+      height: 14px;
+    }
+  }
+
+  [data-component="codle-session"] [data-component="tool-status-title"] {
+    align-items: center;
+  }
+
+  [data-component="codle-session"] [data-kind="tool-error-card"] {
+    opacity: 0.5;
+
+    [data-component="tool-error-card-icon"] [data-slot="icon-svg"] {
+      color: var(--icon-base);
+    }
+
+    [data-slot="basic-tool-tool-title"] {
+      color: var(--text-base);
+      font-weight: var(--font-weight-regular);
+    }
+  }
+
+  [data-component="codle-session"] [data-component="context-tool-group-trigger"] {
+    width: 100%;
+    min-height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0px;
+    cursor: default;
+
+    [data-slot="context-tool-group-title"] {
+      flex-shrink: 1;
+      min-width: 0;
+    }
+
+    [data-slot="collapsible-arrow"] {
+      color: var(--icon-weaker);
+      cursor: pointer;
+    }
+  }
+
+  [data-component="codle-session"] [data-component="context-tool-group-list"] {
+    padding-top: 6px;
+    padding-right: 0;
+    padding-bottom: 4px;
+    padding-left: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    [data-slot="context-tool-group-item"] {
+      min-width: 0;
+      padding: 0;
+    }
+  }
+
+  [data-component="codle-session"] [data-component="bash-output"] {
+    width: 100%;
+    border: 1px solid var(--border-weak-base);
+    border-radius: 6px;
+    background: transparent;
+    position: relative;
+    overflow: hidden;
+
+    [data-slot="bash-copy"] {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+
+    &:hover [data-slot="bash-copy"],
+    &:focus-within [data-slot="bash-copy"] {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    [data-slot="bash-copy"] [data-component="icon-button"][data-variant="neutral"] {
+      box-shadow: none;
+      border: 1px solid var(--border-weak-base);
+    }
+
+    [data-slot="bash-copy"] [data-component="icon-button"][data-variant="neutral"] [data-slot="icon-svg"] {
+      color: var(--icon-base);
+    }
+
+    [data-slot="bash-scroll"] {
+      width: 100%;
+      overflow-y: auto;
+      overflow-x: hidden;
+      max-height: 240px;
+      scrollbar-width: none;
+
+      &::-webkit-scrollbar {
+        display: none;
+      }
+    }
+
+    [data-slot="bash-pre"] {
+      margin: 0;
+      padding: 12px;
+    }
+
+    [data-slot="bash-pre"] code {
+      font-family: var(--font-family-mono);
+      font-feature-settings: var(--font-family-mono--font-feature-settings);
+      font-size: 13px;
+      line-height: var(--line-height-large);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+  }
+
+  [data-component="codle-session"] :is([data-component="edit-trigger"], [data-component="write-trigger"]) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+
+    [data-slot="message-part-title-area"] {
+      flex-grow: 1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    [data-slot="message-part-title"] {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      font-family: var(--font-family-sans);
+      font-size: 14px;
+      font-style: normal;
+      font-weight: var(--font-weight-medium);
+      line-height: var(--line-height-large);
+      letter-spacing: var(--letter-spacing-normal);
+      color: var(--text-base);
+    }
+
+    [data-slot="message-part-title-spinner"] {
+      width: 16px;
+      height: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      color: currentColor;
+
+      [data-component="spinner"] {
+        width: 16px;
+        height: 16px;
+      }
+    }
+
+    [data-slot="message-part-title-text"] {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+      text-transform: capitalize;
+      color: var(--text-strong);
+    }
+
+    [data-slot="message-part-title-filename"] {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: var(--font-weight-regular);
+    }
+
+    [data-slot="message-part-path"] {
+      display: flex;
+      flex-grow: 1;
+      min-width: 0;
+      font-weight: var(--font-weight-regular);
+    }
+
+    [data-slot="message-part-directory"] {
+      color: var(--text-weak);
+      text-overflow: ellipsis;
+      overflow: hidden;
+      white-space: nowrap;
+      direction: rtl;
+      text-align: left;
+    }
+
+    [data-slot="message-part-actions"] {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-shrink: 0;
+    }
+  }
+
+  [data-component="codle-session"] :is([data-component="edit-tool"], [data-component="write-tool"]) {
+    > [data-component="collapsible"] > [data-slot="collapsible-trigger"][aria-expanded="true"] {
+      height: calc(32px + var(--tool-content-gap));
+      background-color: var(--background-stronger);
+    }
+  }
+
+  [data-component="codle-session"] [data-slot="session-turn-thinking"] {
+    padding-top: 12px;
+  }
+}

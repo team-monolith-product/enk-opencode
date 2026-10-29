@@ -1,10 +1,6 @@
 {
   "permission": "allow",
-  "plugin": [
-    "./preview-bridge-plugin.js",
-    // 이미지/PDF 첨부 메시지를 비전 미지원 모델(deepseek 등) 대신 지정 모델로 라우팅.
-    ["./image-model-router-plugin.js", { "model": "minimax/MiniMax-M3", "variant": "adaptive" }],
-  ],
+  "warming": true,
   "provider": {
     "anthropic": {
       "options": {
@@ -65,17 +61,19 @@
     },
   },
   "agent": {
-    // 최상위 "permission": "allow" 가 내장 plan 의 편집 금지를 덮는다(last-match-wins). 최초 기획을 받은 Plan 이
-    // Build 전에 제품을 바꾸지 못하도록 다시 막는다.
+    // 최상위 "permission": "allow" 가 모든 에이전트 규칙 뒤에 붙어 내장 plan 의 편집 금지를 덮는다(last-match-wins).
+    // 최초 기획을 받은 Plan 이 Build 전에 제품을 바꾸지 못하도록 에이전트 규칙으로 다시 막는다.
     "plan": {
       "permission": {
         "edit": {
           "*": "deny",
           ".opencode/plans/*.md": "allow",
+          // 내장 plan 이 계획 파일을 쓰라고 안내하는 곳이다.
+          "~/.opencode/plan/*": "allow",
         },
-        "bash": "deny",
+        "shell": "deny",
         // explore 도 최상위 "allow" 를 물려받아 편집할 수 있으므로 서브에이전트를 아예 막는다.
-        "task": "deny",
+        "subagent": "deny",
         "generate_image": "deny",
         "ensure_dev_server": "deny",
         "env_request": "deny",
@@ -84,6 +82,4 @@
       },
     },
   },
-  "ensureSession": true,
-  "ensureOneSession": true,
 }
