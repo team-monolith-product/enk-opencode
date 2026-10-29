@@ -27,16 +27,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && git config --system core.excludesFile /etc/opencode/.gitignore
 
-ARG PLAYWRIGHT_MCP_VERSION=0.0.70
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
-# @playwright/mcp 가 실제 사용하는 playwright 버전으로 브라우저를 설치해야 한다.
-# npx playwright install 은 최신 playwright 를 받아 다른 chromium 리비전을 깔아
-# 런타임에 MCP 가 찾는 리비전과 어긋난다(브라우저 실행파일 없음).
-RUN npm install -g @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} \
-    && PW_VER=$(node -p "require('$(npm root -g)/@playwright/mcp/package.json').dependencies.playwright") \
-    && npm install -g "playwright@${PW_VER}" \
-    && playwright install --with-deps chromium \
-    && rm -rf /tmp/*
+ARG AGENT_BROWSER_VERSION=0.39.4
+# 에이전트용 브라우저 도구(agent-browser). 0.x 라 자주 바뀌므로 버전을 고정한다.
+# agent-browser install 은 $HOME/.agent-browser/browsers/chrome-<버전> 에 Chrome for Testing 을 받는다.
+# 빌드는 root 라 그대로 두면 /root 아래에 깔려 런타임 사용자(jovyan)가 못 찾는다. HOME 을 /opt 로 돌려
+# 설치하고, 버전이 바뀌어도 경로가 같도록 실행파일을 고정 경로로 링크해 넘긴다.
+# --with-deps 가 apt 로 시스템 라이브러리를 깔 수 있도록 목록을 먼저 받아 둔다(위 단계에서 지웠다).
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/agent-browser/chrome
+RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION} \
+    && apt-get update \
+    && HOME=/opt/agent-browser agent-browser install --with-deps \
+    && CHROME=$(find /opt/agent-browser/.agent-browser/browsers -type f -name chrome -perm -u+x | head -n 1) \
+    && test -n "${CHROME}" \
+    && ln -s "${CHROME}" "${AGENT_BROWSER_EXECUTABLE_PATH}" \
+    && chmod -R a+rX /opt/agent-browser \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
@@ -49,8 +54,7 @@ ENV OPENCODE_CONFIG_DIR=/etc/opencode HOME="/home/${NB_USER}" OPENCODE_SANDBOX=a
 WORKDIR /home/${NB_USER}/project
 
 # 런타임 UID가 빌드 시와 다를 수 있으므로 모두에게 권한을 부여한다.
-RUN chmod -R 777 ${HOME} \
-    && chmod -R 777 ${PLAYWRIGHT_BROWSERS_PATH}
+RUN chmod -R 777 ${HOME}
 
 COPY --from=build /app/packages/opencode/dist/opencode-linux-x64/bin/opencode /usr/local/bin/opencode
 COPY docker/entrypoint.sh /usr/local/bin/opencode-entrypoint.sh

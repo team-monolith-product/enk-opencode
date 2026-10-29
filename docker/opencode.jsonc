@@ -1,5 +1,17 @@
 {
-  "permission": "allow",
+  "permission": {
+    "*": "allow",
+    // 브라우저 MCP 의 debug 묶음(콘솔·에러 조회 때문에 켠다)에 딸려 오는 도구 중, 학생 앱 디버깅과 무관하고
+    // 도구 자체를 바꾸거나(설치·업그레이드·플러그인) 외부로 나가는(chat·dashboard·stream·connect) 것들은 끈다.
+    // "*" 보다 뒤에 있어야 이긴다(last-match-wins).
+    "browser_agent_browser_install": "deny",
+    "browser_agent_browser_upgrade": "deny",
+    "browser_agent_browser_chat": "deny",
+    "browser_agent_browser_connect": "deny",
+    "browser_agent_browser_plugin_*": "deny",
+    "browser_agent_browser_dashboard_*": "deny",
+    "browser_agent_browser_stream_*": "deny",
+  },
   "plugin": [
     "./preview-bridge-plugin.js",
     // 이미지/PDF 첨부 메시지를 비전 미지원 모델(deepseek 등) 대신 지정 모델로 라우팅.
@@ -58,14 +70,21 @@
     },
   },
   "mcp": {
-    "playwright": {
+    // 도구 이름은 "browser_" + agent-browser 도구 이름(agent_browser_open 등)이 된다.
+    // core: 이동·스냅샷·클릭·입력·스크린샷·eval, network: 요청 조회, debug: 콘솔·에러 조회.
+    "browser": {
       "type": "local",
-      "command": ["playwright-mcp", "--headless", "--browser", "chromium"],
+      "command": ["agent-browser", "mcp", "--tools", "core,network,debug"],
+      "environment": {
+        // 컨테이너 안에서는 Chrome 자체 sandbox 가 서지 않는다(agent-browser 도 컨테이너엔 필요하다고 안내).
+        // --args 는 MCP 도구 인자로는 못 바꾸고 환경으로만 정해지므로 에이전트가 뒤집을 수 없다.
+        "AGENT_BROWSER_ARGS": "--no-sandbox",
+      },
       "enabled": true,
     },
   },
   "agent": {
-    // 최상위 "permission": "allow" 가 내장 plan 의 편집 금지를 덮는다(last-match-wins). 최초 기획을 받은 Plan 이
+    // 최상위 "permission" 의 "*": "allow" 가 내장 plan 의 편집 금지를 덮는다(last-match-wins). 최초 기획을 받은 Plan 이
     // Build 전에 제품을 바꾸지 못하도록 다시 막는다.
     "plan": {
       "permission": {
@@ -80,7 +99,7 @@
         "ensure_dev_server": "deny",
         "env_request": "deny",
         // 미리보기 앱을 직접 조작하는 브라우저 도구도 막는다.
-        "playwright_*": "deny",
+        "browser_*": "deny",
       },
     },
   },

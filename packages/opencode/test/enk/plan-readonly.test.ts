@@ -57,8 +57,8 @@ describe("plan agent in the pod config", () => {
           "ensure_dev_server",
           "env_request",
           "task",
-          "playwright_browser_click",
-          "playwright_browser_navigate",
+          "browser_agent_browser_click",
+          "browser_agent_browser_open",
           "read",
         ]
         const disabled = Permission.disabled(tools, plan.permission)
@@ -68,8 +68,8 @@ describe("plan agent in the pod config", () => {
           "ensure_dev_server",
           "env_request",
           "task",
-          "playwright_browser_click",
-          "playwright_browser_navigate",
+          "browser_agent_browser_click",
+          "browser_agent_browser_open",
         ])
           expect(disabled.has(tool)).toBe(true)
         expect(disabled.has("read")).toBe(false)
@@ -85,6 +85,41 @@ describe("plan agent in the pod config", () => {
         const build = await Agent.get("build")
         expect(Permission.evaluate("edit", "src/App.tsx", build.permission).action).toBe("allow")
         expect(Permission.evaluate("bash", "npm run dev", build.permission).action).toBe("allow")
+      },
+    })
+  })
+
+  test("build keeps the debugging browser tools but not the ones that change or leave the pod", async () => {
+    await using tmp = await podPermissions()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const build = await Agent.get("build")
+        const kept = [
+          "browser_agent_browser_open",
+          "browser_agent_browser_snapshot",
+          "browser_agent_browser_click",
+          "browser_agent_browser_console",
+          "browser_agent_browser_errors",
+          "browser_agent_browser_network_requests",
+          "browser_agent_browser_screenshot",
+        ]
+        const blocked = [
+          "browser_agent_browser_install",
+          "browser_agent_browser_upgrade",
+          "browser_agent_browser_chat",
+          "browser_agent_browser_connect",
+          "browser_agent_browser_plugin_add",
+          "browser_agent_browser_plugin_run",
+          "browser_agent_browser_dashboard_start",
+          "browser_agent_browser_stream_enable",
+        ]
+        const disabled = Permission.disabled([...kept, ...blocked], build.permission)
+        for (const tool of kept) expect(disabled.has(tool)).toBe(false)
+        for (const tool of blocked) expect(disabled.has(tool)).toBe(true)
+        // 최상위를 문자열에서 객체로 바꿨어도 나머지는 예전처럼 다 허용
+        expect(Permission.evaluate("edit", "src/App.tsx", build.permission).action).toBe("allow")
+        expect(Permission.evaluate("webfetch", "*", build.permission).action).toBe("allow")
       },
     })
   })

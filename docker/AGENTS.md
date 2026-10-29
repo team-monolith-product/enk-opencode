@@ -244,7 +244,7 @@ echo "https://$JUPYTERHUB_USER.$OPENCODE_SERVE_DOMAIN/"
 
 ## 브라우저 디버깅
 
-사용자가 앱이 동작하지 않는다고 보고하면, Playwright MCP 도구로 직접 확인하세요.
+사용자가 앱이 동작하지 않는다고 보고하면, 브라우저 도구(`browser_agent_browser_*`)로 직접 확인하세요.
 
 ### 워크플로
 
@@ -252,19 +252,22 @@ echo "https://$JUPYTERHUB_USER.$OPENCODE_SERVE_DOMAIN/"
 ```bash
 echo "http://localhost:3000"
 ```
-2. `browser_navigate`로 페이지에 접속합니다.
-3. `browser_console_messages`로 콘솔 에러를 확인합니다.
-4. `browser_network_requests`로 실패한 네트워크 요청을 확인합니다.
-5. 필요하면 `browser_take_screenshot`으로 시각적 상태를 확인합니다.
+2. `browser_agent_browser_open`으로 페이지에 접속합니다.
+3. `browser_agent_browser_errors`로 페이지 에러(잡히지 않은 예외)를, `browser_agent_browser_console`로 콘솔 로그를 확인합니다. 접속한 뒤에 쌓인 것만 보이므로, 첫 로딩의 에러를 놓쳤다면 `browser_agent_browser_reload` 후 다시 봅니다.
+4. `browser_agent_browser_network_requests`로 실패한 네트워크 요청을 확인합니다. 한 요청의 자세한 내용은 `browser_agent_browser_network_request`로 봅니다.
+5. 필요하면 `browser_agent_browser_screenshot`으로 화면을 확인합니다.
 6. 원인을 파악하고 코드를 수정합니다.
 
 ### 사용 가능한 도구
 
-- `browser_navigate` - URL로 이동
-- `browser_console_messages` - 콘솔 로그/에러 조회
-- `browser_network_requests` - 네트워크 요청/응답 조회
-- `browser_take_screenshot` - 페이지 스크린샷 캡처
-- `browser_evaluate` - JavaScript 실행
-- `browser_snapshot` - 페이지 구조(접근성 트리) 조회
-- `browser_click` - 페이지 요소 클릭
-- `browser_fill_form` - 폼 입력
+- `browser_agent_browser_open` - URL로 이동
+- `browser_agent_browser_errors` - 페이지 에러 조회
+- `browser_agent_browser_console` - 콘솔 로그 조회
+- `browser_agent_browser_network_requests` - 네트워크 요청/응답 목록 조회
+- `browser_agent_browser_screenshot` - 페이지 스크린샷 캡처
+- `browser_agent_browser_eval` - JavaScript 실행
+- `browser_agent_browser_snapshot` - 페이지 구조(접근성 트리) 조회. 요소마다 `@e1` 같은 ref가 붙습니다.
+- `browser_agent_browser_click` - 요소 클릭(`@e1` ref 또는 CSS 선택자)
+- `browser_agent_browser_fill` - 입력칸 채우기
+
+클릭·입력 전에는 `browser_agent_browser_snapshot`으로 최신 ref를 받으세요. 페이지가 바뀌면 이전 ref는 맞지 않습니다.
