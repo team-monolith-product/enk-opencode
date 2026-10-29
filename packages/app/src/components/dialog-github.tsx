@@ -121,7 +121,8 @@ export function DialogGitHub() {
     const result = await run(() => pushGitHub(o, { locale: promptLocale(language.locale()) }))
     if (!result) return void refetch()
     const { pushed, ...status } = result
-    setState("status", status)
+    if (status.enabled) setState("status", status)
+    else void refetch()
     showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
   }
 
