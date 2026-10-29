@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test"
-import type { GitHub } from "../../src/enk/github"
+import { describe, expect, spyOn, test } from "bun:test"
+import { GitHub } from "../../src/enk/github"
 import { GitHubSync } from "../../src/enk/github-sync"
 import type { MessageV2 } from "../../src/session/message-v2"
+import type { SessionID } from "../../src/session/schema"
+import { SentryReporter } from "../../src/util/sentry"
 
 const user = (id: string, text: string, synthetic = false) =>
   ({
@@ -47,6 +49,35 @@ describe("GitHubSync.first", () => {
 
     expect(await GitHubSync.first("en")(changes)).toBe("First push from Jitda\n\n- Add: index.html")
     expect(await GitHubSync.first()(changes)).toBe("짓다에서 처음 올린 내용\n\n- 추가: index.html")
+  })
+})
+
+describe("GitHubSync.failed", () => {
+  const session = "ses_1" as SessionID
+
+  test("expected states are only noted, never sent to Sentry", () => {
+    const sent = spyOn(SentryReporter, "captureOnce").mockImplementation(() => {})
+    try {
+      for (const code of ["unlinked", "norepo", "empty", "exists"] as const) {
+        GitHubSync.failed(new GitHub.Failure(code, 409), session)
+      }
+      expect(sent).not.toHaveBeenCalled()
+    } finally {
+      sent.mockRestore()
+    }
+  })
+
+  test("actionable failures and unexpected errors go to Sentry", () => {
+    const sent = spyOn(SentryReporter, "captureOnce").mockImplementation(() => {})
+    try {
+      for (const code of ["forbidden", "revoked", "missing", "remote"] as const) {
+        GitHubSync.failed(new GitHub.Failure(code, 409), session)
+      }
+      GitHubSync.failed(new Error("git exploded"), session)
+      expect(sent).toHaveBeenCalledTimes(5)
+    } finally {
+      sent.mockRestore()
+    }
   })
 })
 
