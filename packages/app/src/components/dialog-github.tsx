@@ -119,7 +119,7 @@ export function DialogGitHub() {
     const o = opts()
     if (!o || spectator) return
     const result = await run(() => pushGitHub(o, { locale: promptLocale(language.locale()) }))
-    if (!result) return
+    if (!result) return void refetch()
     const { pushed, ...status } = result
     setState("status", status)
     showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
