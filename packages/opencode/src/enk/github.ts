@@ -91,9 +91,20 @@ export namespace GitHub {
     return `${message}:${text.replace(volatile, "#").slice(0, 120)}`
   }
 
+  const repoPath = /^(\w+ \/repos\/)[^/\s]+\/[^/\s?]+/
+
+  export function scope(message: string, err: unknown): SentryReporter.Scope | undefined {
+    if (!(err instanceof Failure)) return
+    const call = err.response?.request?.replace(repoPath, "$1:owner/:name") ?? ""
+    return {
+      tags: { "github.code": err.code, ...(err.response ? { "github.status": String(err.response.status) } : {}) },
+      fingerprint: [message, err.code, String(err.response?.status ?? ""), call],
+    }
+  }
+
   export function alert(message: string, err: unknown, extra?: Record<string, unknown>) {
     log.error(message, { ...extra, error: lean(err) })
-    SentryReporter.captureOnce(identity(message, err), err, { ...extra, error: dump(err) })
+    SentryReporter.captureOnce(identity(message, err), err, { ...extra, error: dump(err) }, scope(message, err))
   }
 
   type Link = {
