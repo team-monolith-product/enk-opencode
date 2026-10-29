@@ -25,6 +25,7 @@ const ERRORS = {
   exists: "github.error.exists",
   forbidden: "github.error.forbidden",
   revoked: "github.error.revoked",
+  app: "github.error.app",
   missing: "github.error.missing",
   empty: "github.error.empty",
   remote: "github.error.remote",
@@ -200,7 +201,17 @@ export function DialogGitHub() {
                 </div>
               </div>
 
-              <Show when={view() === "choose"}>
+              <Show when={view() === "choose" && state.status?.app}>
+                <div class="github-panel flex flex-col gap-1.5">
+                  <span class="text-13-medium text-text-strong">{language.t("github.repo.select.title")}</span>
+                  <span class="text-12-regular text-text-weak">{language.t("github.repo.select.hint")}</span>
+                </div>
+                <Show when={state.waiting}>
+                  <span class="github-hint">{language.t("github.waiting")}</span>
+                </Show>
+              </Show>
+
+              <Show when={view() === "choose" && !state.status?.app}>
                 <TextField
                   class="font-mono"
                   label={language.t("github.repo.name.label")}
@@ -265,6 +276,18 @@ export function DialogGitHub() {
                 onClick={connect}
               >
                 {language.t("github.connect")}
+              </Button>
+            </Match>
+            <Match when={view() === "choose" && state.status?.app}>
+              <Button
+                type="button"
+                size="normal"
+                variant="primary"
+                icon="github"
+                disabled={spectator || !state.status?.connectUrl}
+                onClick={connect}
+              >
+                {language.t("github.repo.select")}
               </Button>
             </Match>
             <Match when={view() === "choose"}>

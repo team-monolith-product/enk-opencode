@@ -139,6 +139,7 @@ export type GitHubStatus = {
   connectUrl?: string
   login?: string
   linkedBy?: string
+  app?: boolean
   repo?: GitHubRepo
   push?: { sha: string; time: number; by?: string }
   firstPush?: { attempts: number; code: string; reason: string }
