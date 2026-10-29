@@ -9,11 +9,13 @@ import { Locale } from "./src/locale"
 import { PreviewBridge } from "./src/preview-bridge"
 import { ProjectSummary } from "./src/project-summary"
 import { Protect } from "./src/protect"
+import { Sentry } from "./src/sentry"
 import { Session } from "./src/session"
 
 export default Plugin.define({
   id: "jitda",
   async setup(ctx) {
+    Sentry.init()
     const usage = AiUsage.reporter()
     const cleanups = [
       AiUsage.start(ctx, usage),

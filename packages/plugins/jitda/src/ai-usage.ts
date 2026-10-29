@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode/plugin"
+import { Sentry } from "./sentry"
 
 // enk-hackathon-rails ai_usages/do_many 로 턴마다 start, 모델 스텝마다 step(토큰·비용), 턴이 끝나면 final 을 보낸다.
 // 비용과 토큰은 step 기록에만 싣고 rails 가 합산한다. 전송은 직렬 큐 하나로만 하므로 세션 진행을 막지 않는다.
@@ -137,16 +138,19 @@ export function createReporter(options: {
         body,
       }).catch((error: unknown) => {
         log("post error", { error: String(error), attempt, count: records.length })
+        Sentry.captureException(error, { attempt, count: records.length })
         return undefined
       })
       if (res?.ok) return
       if (res && res.status >= 400 && res.status < 500 && res.status !== 429) {
         log("rejected", { status: res.status, count: records.length })
+        Sentry.captureException(new Error("ai usage rejected"), { status: res.status, count: records.length })
         return
       }
       if (attempt < MAX_ATTEMPTS) await delay(1000 * 2 ** (attempt - 1))
     }
     log("dropped after retries", { count: records.length })
+    Sentry.captureException(new Error("ai usage dropped after retries"), { count: records.length })
   }
 
   async function drain() {
@@ -163,7 +167,10 @@ export function createReporter(options: {
       if (sent.has(key)) return
       if (pending.length >= MAX_PENDING) {
         dropped++
-        if (dropped % 100 === 1) log("queue full, dropping", { dropped, max: MAX_PENDING })
+        if (dropped % 100 === 1) {
+          log("queue full, dropping", { dropped, max: MAX_PENDING })
+          Sentry.captureException(new Error("ai usage queue full"), { dropped, max: MAX_PENDING })
+        }
         return
       }
       remember(sent, key, MAX_SENT_KEYS)

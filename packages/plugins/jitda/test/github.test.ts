@@ -4,6 +4,7 @@ import path from "node:path"
 import os from "node:os"
 import { mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises"
 import { GitHub } from "../src/github"
+import { Sentry } from "../src/sentry"
 
 async function tmpdir() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "jitda-github-"))
@@ -600,6 +601,40 @@ describe("GitHub.create", () => {
     expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
     expect(status.firstPush).toMatchObject({ attempts: 1, code: "forbidden" })
   })
+
+  describe("GitHub.pushNow", () => {
+    test("pushes right away with a manual message and says whether a commit went up", async () => {
+      await using tmp = await tmpdir()
+      await using rails = serve(link)
+      const origin = await hub(tmp.path)
+      const work = path.join(tmp.path, "work")
+      await put(work, { "index.html": "a" })
+      using _github = mockGitHub(() =>
+        Response.json({ ...remote, default_branch: "main", permissions: { push: true } }),
+      )
+
+      const first = await GitHub.pushNow(work, "en")
+      const again = await GitHub.pushNow(work, "en")
+
+      expect(first).toMatchObject({ enabled: true, login: "octocat", pushed: true })
+      expect(again.pushed).toBe(false)
+      expect(await origin.subjects()).toEqual(["Manual push from Jitda"])
+      expect(rails.reports).toHaveLength(1)
+    })
+
+    test("is refused outside the main project directory without touching GitHub", async () => {
+      await using tmp = await tmpdir()
+      await using _rails = serve(link)
+      process.env["ENK_PROJECT_DIRECTORY"] = path.join(tmp.path, "project-directory")
+      using github = mockGitHub(() => Response.json(remote))
+
+      await expect(GitHub.pushNow(path.join(tmp.path, "tutorial-directory"))).rejects.toMatchObject({
+        code: "disabled",
+        status: 409,
+      })
+      expect(github.calls).toEqual([])
+    })
+  })
 })
 
 describe("GitHub.push", () => {
@@ -635,6 +670,13 @@ describe("GitHub sync message", () => {
     expect(await GitHub.first()(changes)).toBe("짓다에서 처음 올린 내용\n\n- 추가: index.html")
   })
 
+  test("names a manual push in the viewer locale", async () => {
+    const changes: GitHub.Change[] = [{ status: "M", file: "index.html" }]
+
+    expect(await GitHub.manual("en")(changes)).toBe("Manual push from Jitda\n\n- Update: index.html")
+    expect(await GitHub.manual()(changes)).toBe("짓다에서 직접 올린 내용\n\n- 수정: index.html")
+  })
+
   test("keeps the subject short and the file list bounded", () => {
     const text = GitHub.compose(
       "가".repeat(100),
@@ -659,5 +701,129 @@ describe("GitHub sync message", () => {
       ]),
     ).toEqual({ request: "버튼 색 바꿔줘", reply: "바꿨어요", locale: "en", model })
     expect(GitHub.latest([{ type: "assistant", content: [] }])).toBeUndefined()
+  })
+})
+
+describe("GitHub.failed", () => {
+  test("expected states are only noted, never sent to Sentry", () => {
+    const sent = spyOn(Sentry, "captureOnce").mockImplementation(() => {})
+    try {
+      for (const code of ["unlinked", "norepo", "empty", "exists"] as const) {
+        GitHub.failed(new GitHub.Failure(code, 409), "ses_1")
+      }
+      expect(sent).not.toHaveBeenCalled()
+    } finally {
+      sent.mockRestore()
+    }
+  })
+
+  test("actionable failures and unexpected errors go to Sentry", () => {
+    const sent = spyOn(Sentry, "captureOnce").mockImplementation(() => {})
+    try {
+      for (const code of ["forbidden", "revoked", "missing", "remote"] as const) {
+        GitHub.failed(new GitHub.Failure(code, 409), "ses_1")
+      }
+      GitHub.failed(new Error("git exploded"), "ses_1")
+      expect(sent).toHaveBeenCalledTimes(5)
+    } finally {
+      sent.mockRestore()
+    }
+  })
+})
+
+describe("GitHub failure reporting", () => {
+  const link = {
+    enabled: true,
+    connected: true,
+    login: "octocat",
+    token: "gho_1",
+    repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+  }
+
+  function mockGitHub(read: () => Response) {
+    const original = globalThis.fetch
+    const spy = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
+      new URL(input instanceof Request ? input.url : String(input)).host === "api.github.com"
+        ? Promise.resolve(read())
+        : original(input, init)) as typeof fetch)
+    return { [Symbol.dispose]: () => spy.mockRestore() }
+  }
+
+  test("a rejected GitHub call keeps the raw response without secret headers", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    using _github = mockGitHub(
+      () =>
+        new Response(`<html>\nnot found\n${"x".repeat(5000)}</html>`, {
+          status: 404,
+          headers: { "x-github-request-id": "abc", "set-cookie": "s=1" },
+        }),
+    )
+
+    const failure = await GitHub.push(tmp.path, { message: "m" }).catch((error) => error)
+
+    expect(failure).toBeInstanceOf(GitHub.Failure)
+    expect(failure.code).toBe("missing")
+    expect(failure.response.status).toBe(404)
+    expect(failure.response.headers["x-github-request-id"]).toBe("abc")
+    expect(failure.response.headers["set-cookie"]).toBeUndefined()
+    expect(failure.response.body.startsWith("<html>\nnot found")).toBe(true)
+    expect(failure.response.body.length).toBeLessThan(4100)
+  })
+
+  test("a long JSON error keeps the GitHub message and trims only the logged body", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    using _github = mockGitHub(() =>
+      Response.json(
+        { message: "Not Found", pad: "x".repeat(6000) },
+        { status: 404, headers: { authorization: "Bearer leaked" } },
+      ),
+    )
+
+    const failure = await GitHub.push(tmp.path, { message: "m" }).catch((error) => error)
+
+    expect(failure.message).toBe("Not Found")
+    expect(failure.response.body.length).toBeLessThan(4100)
+    expect(failure.response.headers["authorization"]).toBeUndefined()
+    expect(failure.response.request).toBe("GET /repos/octocat/jitda-app")
+  })
+
+  test("identity separates failures by site and ignores volatile parts", () => {
+    const at = (request: string) =>
+      new GitHub.Failure("missing", 404, "Not Found", {
+        status: 404,
+        statusText: "Not Found",
+        headers: {},
+        body: "",
+        request,
+      })
+
+    expect(GitHub.identity("x", at("GET /repos/a/b"))).not.toBe(GitHub.identity("x", at("POST /user/repos")))
+    expect(GitHub.identity("x", new Error("ENOENT /tmp/abc123/file 42"))).toBe(
+      GitHub.identity("x", new Error("ENOENT /tmp/zzz999/file 7")),
+    )
+    expect(GitHub.identity("x", new TypeError("a"))).not.toBe(GitHub.identity("x", new Error("a")))
+  })
+
+  test("scope groups one failure kind across repositories and keeps kinds apart", () => {
+    const failure = (code: GitHub.Code, status: 404 | 409 | 422 | 502, request: string) =>
+      new GitHub.Failure(code, status, "x", { status, statusText: "", headers: {}, body: "", request })
+
+    const first = GitHub.scope("request failed", failure("missing", 404, "GET /repos/alice/one"))
+    const other = GitHub.scope("request failed", failure("missing", 404, "GET /repos/bob/two"))
+    const revoked = GitHub.scope("request failed", failure("revoked", 409, "GET /repos/alice/one"))
+
+    expect(first?.fingerprint).toEqual(other?.fingerprint)
+    expect(first?.fingerprint).not.toEqual(revoked?.fingerprint)
+    expect(first?.tags).toEqual({ "github.code": "missing", "github.status": "404" })
+    expect(GitHub.scope("request failed", new Error("boom"))).toBeUndefined()
+  })
+
+  test("dump keeps the code and the raw response", () => {
+    const response = { status: 404, statusText: "Not Found", headers: { "x-github-request-id": "1" }, body: "{}" }
+    const dumped = GitHub.dump(new GitHub.Failure("missing", 404, "Not Found", response))
+
+    expect(dumped).toMatchObject({ code: "missing", message: "Not Found", response })
   })
 })

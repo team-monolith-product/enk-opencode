@@ -174,6 +174,14 @@ export const Github = {
       },
       output: { type: "object", additionalProperties: true },
     },
+    push: {
+      input: {
+        type: "object",
+        properties: { locale: { type: "string", enum: ["ko", "en", "ar"] } },
+        additionalProperties: false,
+      },
+      output: { type: "object", additionalProperties: true },
+    },
   },
   events: {},
 } as const

@@ -116,22 +116,40 @@ export function DialogGitHub() {
     return t("github.repo.name.hint")
   })
 
+  const unwrap = <T,>(out: unknown) => {
+    const result = out as T | { error: { code: string } }
+    if (typeof result === "object" && result !== null && "error" in result) throw new GitHubError(result.error.code)
+    return result as T
+  }
+
   const create = async () => {
     if (spectator) return
     const locale = promptLocale(jitda.locale() ?? language.locale())
     const status = await run(() =>
       jitda.rpc.github
         .createRepo({ name: state.name.trim(), ...(locale ? { locale } : {}) }, jitda.options())
-        .then((out) => {
-          const result = out as GitHubStatus | { error: { code: string } }
-          if ("error" in result) throw new GitHubError(result.error.code)
-          return result
-        }),
+        .then((out) => unwrap<GitHubStatus>(out)),
     )
     if (!status) return
     setState("status", status)
     const first = status.firstPush
     if (first) showToast({ title: t("github.firstPush.failed", { count: first.attempts }) })
+  }
+
+  // 올렸는지는 서버의 pushed 로 정한다. 응답이 비활성이면 덮어쓰지 않고 다시 불러온다.
+  const push = async () => {
+    if (spectator) return
+    const locale = promptLocale(jitda.locale() ?? language.locale())
+    const result = await run(() =>
+      jitda.rpc.github
+        .push(locale ? { locale } : {}, jitda.options())
+        .then((out) => unwrap<GitHubStatus & { pushed: boolean }>(out)),
+    )
+    if (!result) return void refetch()
+    const { pushed, ...status } = result
+    if (status.enabled) setState("status", status)
+    else void refetch()
+    showToast({ title: t(pushed ? "github.push.done" : "github.push.nothing") })
   }
 
   // 사유가 코드 그대로면(메시지 없는 실패) 코드 문구만 보여 준다.
@@ -292,6 +310,18 @@ export function DialogGitHub() {
                 onClick={connect}
               >
                 {t("github.connect")}
+              </Button>
+            </Match>
+            <Match when={view() === "push"}>
+              <Button
+                type="button"
+                size="normal"
+                variant="primary"
+                icon="github"
+                disabled={spectator || state.busy}
+                onClick={() => void push()}
+              >
+                {t("github.push.now")}
               </Button>
             </Match>
             <Match when={view() === "choose"}>

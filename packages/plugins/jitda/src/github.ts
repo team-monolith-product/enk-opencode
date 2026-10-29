@@ -8,6 +8,7 @@ import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { Env } from "./env"
 import { Locale } from "./locale"
+import { Sentry } from "./sentry"
 import { ServeTargets } from "./serve-targets"
 import * as Definitions from "./rpc"
 
@@ -69,6 +70,17 @@ export type Code =
   | "empty"
   | "remote"
 
+export type Response = {
+  status: number
+  statusText: string
+  headers: Record<string, string>
+  body: string
+  request?: string
+}
+
+// 사용자가 손쓸 수 없거나 운영에서 봐야 하는 실패만 Sentry 로 보낸다. 나머지는 정상 흐름이다.
+export const notify: Code[] = ["forbidden", "revoked", "missing", "remote"]
+
 type Link = {
   enabled: boolean
   connected: boolean
@@ -94,14 +106,92 @@ export class Failure extends Error {
     readonly code: Code,
     readonly status: 404 | 409 | 422 | 502,
     message?: string,
+    readonly response?: Response,
   ) {
     super(message || code)
     this.name = "GitHubFailure"
   }
 }
 
+function errorData(error: unknown) {
+  if (error instanceof Error)
+    return {
+      type: error.name,
+      message: error.message || error.name,
+      stack: error.stack,
+      cause: error.cause === undefined ? undefined : String(error.cause),
+    }
+  return { type: typeof error, message: String(error) }
+}
+
+export function dump(error: unknown) {
+  const data = errorData(error)
+  return error instanceof Failure ? { ...data, code: error.code, response: error.response } : data
+}
+
+function lean(error: unknown) {
+  const data = dump(error)
+  return error instanceof Failure ? { ...data, response: undefined } : data
+}
+
+const VOLATILE = /\/[^\s"']+|\d+/g
+
+export function identity(message: string, error: unknown) {
+  if (error instanceof Failure) {
+    const site = error.response
+      ? `${error.response.status}:${error.response.request ?? ""}`
+      : error.message.replace(VOLATILE, "#").slice(0, 80)
+    return `${message}:${error.code}:${site}`
+  }
+  const text = error instanceof Error ? `${error.name}:${error.message}` : String(error)
+  return `${message}:${text.replace(VOLATILE, "#").slice(0, 120)}`
+}
+
+const REPO_PATH = /^(\w+ \/repos\/)[^/\s]+\/[^/\s?]+/
+
+// 저장소가 달라도 같은 실패는 한 이슈로 묶는다.
+export function scope(message: string, error: unknown): Sentry.Scope | undefined {
+  if (!(error instanceof Failure)) return
+  const call = error.response?.request?.replace(REPO_PATH, "$1:owner/:name") ?? ""
+  return {
+    tags: { "github.code": error.code, ...(error.response ? { "github.status": String(error.response.status) } : {}) },
+    fingerprint: [message, error.code, String(error.response?.status ?? ""), call],
+  }
+}
+
+export function alert(message: string, error: unknown, extra?: Record<string, unknown>) {
+  console.error(`[jitda.github] ${message}`, { ...extra, error: lean(error) })
+  Sentry.captureOnce(identity(message, error), error, { ...extra, error: dump(error) }, scope(message, error))
+}
+
+export function failed(error: unknown, sessionID: string) {
+  if (error instanceof Failure && !notify.includes(error.code))
+    return console.info("[jitda.github] sync skipped", { sessionID, code: error.code, reason: error.message })
+  alert("sync failed", error, { sessionID })
+}
+
+const SECRET = /^(set-cookie|cookie|authorization|proxy-authorization|x-github-sso)$/i
+
+async function text(res: globalThis.Response) {
+  return res.text().catch((error) => `<unreadable body: ${String(error)}>`)
+}
+
+function cut(res: globalThis.Response, raw: string, cap = 4000, request?: string): Response {
+  return {
+    status: res.status,
+    statusText: res.statusText,
+    headers: Object.fromEntries([...res.headers].filter(([name]) => !SECRET.test(name))),
+    body: raw.length > cap ? `${raw.slice(0, cap)}…(+${raw.length - cap} chars)` : raw,
+    request,
+  }
+}
+
+function quiet(key: string) {
+  return !Sentry.due(`log:${key}`, 5 * 60_000)
+}
+
 const chains = new Map<string, Promise<unknown>>()
-const failed = new Map<string, FirstPush>()
+const stuck = new Map<string, FirstPush>()
 
 function serial<T>(key: string, fn: () => Promise<T>) {
   const run = (chains.get(key) ?? Promise.resolve()).catch(() => undefined).then(fn)
@@ -130,8 +220,20 @@ async function link() {
   const res = await fetch(rails.url, {
     headers: { Authorization: `token ${rails.token}` },
     signal: AbortSignal.timeout(15_000),
-  }).catch(() => undefined)
-  if (!res?.ok) return undefined
+  }).catch((error) => {
+    if (!quiet("rails link failed"))
+      console.error("[jitda.github] rails link failed", { method: "GET", url: rails.url, error: errorData(error) })
+    return undefined
+  })
+  if (!res?.ok) {
+    if (res && !quiet(`rails link rejected:${res.status}`))
+      console.error("[jitda.github] rails link rejected", {
+        method: "GET",
+        url: rails.url,
+        response: cut(res, await text(res), 500),
+      })
+    return undefined
+  }
   return (await res.json().catch(() => undefined)) as Link | undefined
 }
 
@@ -143,8 +245,26 @@ async function report(body: Record<string, string | boolean | null>) {
     headers: { Authorization: `token ${rails.token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(15_000),
-  }).catch(() => undefined)
-  if (!res?.ok) throw new Failure("remote", 502)
+  }).catch((error) => {
+    if (!quiet("rails report failed"))
+      console.error("[jitda.github] rails report failed", {
+        method: "PUT",
+        url: rails.url,
+        sent: body,
+        error: errorData(error),
+      })
+    return undefined
+  })
+  if (!res?.ok) {
+    if (res && !quiet(`rails report rejected:${res.status}`))
+      console.error("[jitda.github] rails report rejected", {
+        method: "PUT",
+        url: rails.url,
+        sent: body,
+        response: cut(res, await text(res), 500),
+      })
+    throw new Failure("remote", 502)
+  }
 }
 
 async function linked() {
@@ -164,11 +284,12 @@ export async function status(dir: string): Promise<Status> {
     linkedBy: hit.connected ? hit.linked_by : undefined,
     repo: hit.repo,
     push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
-    firstPush: failed.get(dir),
+    firstPush: stuck.get(dir),
   }
 }
 
 async function request<T>(token: string, method: string, url: string, body?: unknown): Promise<T> {
+  const started = Date.now()
   const res = await fetch(API + url, {
     method,
     headers: {
@@ -181,20 +302,39 @@ async function request<T>(token: string, method: string, url: string, body?: unk
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(15_000),
   }).catch((error) => {
+    console.error("[jitda.github] api failed", {
+      method,
+      url,
+      sent: body,
+      ms: Date.now() - started,
+      error: errorData(error),
+    })
     throw new Failure("remote", 502, String(error))
   })
-  if (res.ok) return (await res.json()) as T
-  const detail = (await res.json().catch(() => undefined)) as
-    | { message?: string; errors?: { message?: string }[] }
-    | undefined
+  if (res.ok) {
+    console.info("[jitda.github] api", { method, url, status: res.status, ms: Date.now() - started })
+    return (await res.json()) as T
+  }
+  const raw = await text(res)
+  const response = cut(res, raw, 4000, `${method} ${url}`)
+  const detail = (await Promise.resolve()
+    .then(() => JSON.parse(raw))
+    .catch(() => undefined)) as { message?: string; errors?: { message?: string }[] } | undefined
   const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
+  console.error("[jitda.github] api rejected", {
+    method,
+    url,
+    sent: body,
+    ms: Date.now() - started,
+    response: { ...response, request: undefined },
+  })
   if (res.status === 401) {
     await report({ revoked: true }).catch(() => undefined)
-    throw new Failure("revoked", 409, message)
+    throw new Failure("revoked", 409, message, response)
   }
-  if (res.status === 404) throw new Failure("missing", 404, message)
-  if (res.status === 422) throw new Failure("exists", 422, message)
-  throw new Failure("remote", 502, message)
+  if (res.status === 404) throw new Failure("missing", 404, message, response)
+  if (res.status === 422) throw new Failure("exists", 422, message, response)
+  throw new Failure("remote", 502, message, response)
 }
 
 const shape = (remote: Remote): Repo => ({
@@ -229,9 +369,10 @@ async function firstPush(dir: string, hit: Link, message: string | Describe) {
       (error) => (error instanceof Failure ? error : new Failure("remote", 502, String(error))),
     )
     if (!failure) return
-    console.warn("[jitda.github] first push failed", attempt, failure.code, failure.message)
+    console.error("[jitda.github] first push failed", { attempt, error: lean(failure) })
     if (!TRANSIENT.includes(failure.code) || attempt >= ATTEMPTS || Date.now() - started > BUDGET) {
-      failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, DETAIL) })
+      if (notify.includes(failure.code)) alert("first push gave up", failure, { attempt })
+      stuck.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, DETAIL) })
       return
     }
     await sleep(BACKOFF * attempt)
@@ -275,7 +416,7 @@ export async function push(dir: string, input: { message: string | Describe }, k
   const gitdir = path.join(dataDir(), "github", createHash("sha1").update(dir).digest("hex"))
   const repo = hit.repo
   const result = await serial(gitdir, async () => {
-    await ignore(dir).catch((error) => console.warn("[jitda.github] gitignore skipped", String(error)))
+    await ignore(dir).catch((error) => console.error("[jitda.github] gitignore skipped", String(error)))
     return publish({
       gitdir,
       worktree: dir,
@@ -289,7 +430,7 @@ export async function push(dir: string, input: { message: string | Describe }, k
       env: auth(hit.token!),
     })
   })
-  failed.delete(dir)
+  stuck.delete(dir)
   if (result.sha) await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
   return { ...result, url: result.sha ? `${repo.url}/commit/${result.sha}` : repo.url }
 }
@@ -467,8 +608,22 @@ export async function publish(input: {
 }
 
 const LABEL = {
-  ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용", first: "짓다에서 처음 올린 내용" },
-  en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda", first: "First push from Jitda" },
+  ko: {
+    A: "추가",
+    M: "수정",
+    D: "삭제",
+    fallback: "짓다에서 작업한 내용",
+    first: "짓다에서 처음 올린 내용",
+    manual: "짓다에서 직접 올린 내용",
+  },
+  en: {
+    A: "Add",
+    M: "Update",
+    D: "Delete",
+    fallback: "Update from Jitda",
+    first: "First push from Jitda",
+    manual: "Manual push from Jitda",
+  },
 } as const
 
 export type Turn = { request: string; reply: string; locale: "ko" | "en" | "ar"; model?: { providerID: string; id: string } }
@@ -483,6 +638,17 @@ export function compose(subject: string, changes: Change[], locale: "ko" | "en" 
 
 export function first(locale: "ko" | "en" | "ar" = "ko"): Describe {
   return async (changes) => compose(LABEL[locale === "ko" ? "ko" : "en"].first, changes, locale)
+}
+
+export function manual(locale: "ko" | "en" | "ar" = "ko"): Describe {
+  return async (changes) => compose(LABEL[locale === "ko" ? "ko" : "en"].manual, changes, locale)
+}
+
+// 대화가 끝나기를 기다리지 않고 지금 파일을 올린다. 본행사 폴더가 아니면 막는다.
+export async function pushNow(dir: string, locale?: "ko" | "en" | "ar") {
+  if (!(await status(dir)).enabled) throw new Failure("disabled", 409)
+  const result = await push(dir, { message: manual(locale) })
+  return { ...(await status(dir)), pushed: !!result.sha }
 }
 
 type Message = {
@@ -521,9 +687,10 @@ export const Rpc = Definitions.Github
 // RPC 출력은 JSON 이어야 해서 값이 없는 필드는 뺀다.
 const json = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 
-const failure = (error: unknown) => {
-  if (error instanceof Failure) return { error: { code: error.code, status: error.status, message: error.message } }
-  throw error
+const failure = (method: string) => (error: unknown) => {
+  if (!(error instanceof Failure)) throw error
+  if (notify.includes(error.code)) alert("request failed", error, { method })
+  return { error: { code: error.code, status: error.status, message: error.message } }
 }
 
 export async function start(ctx: Context) {
@@ -532,7 +699,11 @@ export async function start(ctx: Context) {
     status: async () => json(await status(directory)),
     createRepo: async (input) => {
       const { name, locale } = input as { name: string; locale?: unknown }
-      return json(await create(directory, { name, message: first(Locale.parse(locale)) }).catch(failure))
+      return json(await create(directory, { name, message: first(Locale.parse(locale)) }).catch(failure("createRepo")))
+    },
+    push: async (input) => {
+      const { locale } = input as { locale?: unknown }
+      return json(await pushNow(directory, Locale.parse(locale)).catch(failure("push")))
     },
   })
 
@@ -551,7 +722,10 @@ export async function start(ctx: Context) {
               .map((line) => line.trim())
               .find(Boolean),
           )
-          .catch(() => undefined)
+          .catch((error) => {
+            console.error("[jitda.github] summary failed", String(error))
+            return undefined
+          })
       : undefined
     const fallback = turn.request
       .split("\n")
@@ -584,9 +758,7 @@ export async function start(ctx: Context) {
             continue
           }
           if (value.type === "session.execution.succeeded" && sessions.has(sessionID))
-            void sync(sessionID).catch((error) => {
-              if (!(error instanceof Failure)) console.warn("[jitda.github] sync failed", String(error))
-            })
+            void sync(sessionID).catch((error) => failed(error, sessionID))
         }
       } catch {
         if (controller.signal.aborted) return
