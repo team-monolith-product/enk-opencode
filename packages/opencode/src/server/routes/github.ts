@@ -19,6 +19,7 @@ const Status = z
     connectUrl: z.string().optional(),
     login: z.string().optional(),
     linkedBy: z.string().optional(),
+    app: z.boolean().optional(),
     repo: Repo.optional(),
     push: z.object({ sha: z.string(), time: z.number(), by: z.string().optional() }).optional(),
     firstPush: z

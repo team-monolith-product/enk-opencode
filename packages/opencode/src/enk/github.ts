@@ -48,6 +48,7 @@ export namespace GitHub {
     connectUrl?: string
     login?: string
     linkedBy?: string
+    app?: boolean
     repo?: Repo
     push?: Push
     firstPush?: FirstPush
@@ -62,6 +63,7 @@ export namespace GitHub {
     | "exists"
     | "forbidden"
     | "revoked"
+    | "app"
     | "missing"
     | "empty"
     | "remote"
@@ -114,8 +116,9 @@ export namespace GitHub {
     login?: string
     github_user_id?: number
     linked_by?: string
+    app?: boolean
     token?: string
-    repo?: { owner: string; name: string; url: string }
+    repo?: { owner: string; name: string; url: string; private?: boolean }
     push?: { sha: string; at: number; by?: string }
   }
   type Remote = {
@@ -234,6 +237,7 @@ export namespace GitHub {
       connectUrl: hit.connect_url,
       login: hit.connected ? hit.login : undefined,
       linkedBy: hit.connected ? hit.linked_by : undefined,
+      app: hit.connected ? hit.app : undefined,
       repo: hit.repo,
       push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
       firstPush: failed.get(dir),
@@ -312,10 +316,16 @@ export namespace GitHub {
 
   export async function create(dir: string, input: { name: string; message?: string | Describe }) {
     const hit = await linked()
+    if (hit.app) throw new Failure("app", 422)
     const repo = shape(
       await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
     )
-    await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
+    await report({
+      repo_owner: repo.owner,
+      repo_name: repo.name,
+      repo_url: repo.url,
+      repo_private: repo.private ?? false,
+    })
     await firstPush(dir, { ...hit, repo }, input.message ?? "Initial commit from Jitda")
     return status(dir)
   }
