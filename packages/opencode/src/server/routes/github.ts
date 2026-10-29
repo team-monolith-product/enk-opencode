@@ -104,6 +104,8 @@ export const GitHubRoutes = lazy(() =>
       (c) =>
         handle(c, async () => {
           const { locale } = c.req.valid("json")
+          const before = await GitHub.status(Instance.directory)
+          if (!before.enabled) throw new GitHub.Failure("disabled", 409)
           const result = await GitHub.push(Instance.directory, { message: GitHubSync.manual(locale) })
           return { ...(await GitHub.status(Instance.directory)), pushed: !!result.sha }
         }),
