@@ -329,6 +329,13 @@ describe("GitHub.status", () => {
     expect(JSON.stringify(status)).not.toContain("gho_secret_token")
   })
 
+  test("tells the dialog the team linked through the GitHub App", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({ enabled: true, connected: true, app: true, login: "octocat", token: "ghs_1" })
+
+    expect(await GitHub.status(tmp.path)).toMatchObject({ enabled: true, app: true, login: "octocat" })
+  })
+
   test("stays off outside the main project directory", async () => {
     await using tmp = await tmpdir()
     await using rails = serve({ enabled: true, connected: true, login: "octocat" })
@@ -441,6 +448,21 @@ describe("GitHub.create", () => {
     expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
   })
 
+  test("a GitHub App link cannot create a repository", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({ ...link, app: true, repo: undefined })
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    using github = mockGitHub(() => Response.json(remote))
+
+    const failure = await GitHub.create(work, { name: "jitda-app" }).catch((err) => err)
+
+    expect(failure).toBeInstanceOf(GitHub.Failure)
+    expect(failure.code).toBe("app")
+    expect(github.calls).toEqual([])
+    expect(rails.reports).toEqual([])
+  })
+
   test("a transient failure is retried and the second attempt succeeds", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)
@@ -505,7 +527,12 @@ describe("GitHub.create", () => {
     expect(status.firstPush).toEqual({ attempts: 3, code: "remote", reason: "Server Error" })
     expect((await GitHub.status(tmp.path)).firstPush).toEqual(status.firstPush)
     expect(rails.reports).toEqual([
-      { repo_owner: "octocat", repo_name: "jitda-app", repo_url: "https://github.com/octocat/jitda-app" },
+      {
+        repo_owner: "octocat",
+        repo_name: "jitda-app",
+        repo_url: "https://github.com/octocat/jitda-app",
+        repo_private: false,
+      },
     ])
   })
 
