@@ -2244,6 +2244,11 @@ export type FileContent = {
   mimeType?: string
 }
 
+export type FileWritten = {
+  path: string
+  size: number
+}
+
 export type File = {
   path: string
   added: number
@@ -6036,6 +6041,46 @@ export type FileReadResponses = {
 }
 
 export type FileReadResponse = FileReadResponses[keyof FileReadResponses]
+
+export type FileWriteData = {
+  body: Blob | File
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    /**
+     * File path relative to the project directory
+     */
+    path: string
+    /**
+     * SHA-256 (hex) of the bytes the client edited. When given and the file no longer matches, nothing is written and the route answers 409.
+     */
+    expected?: string
+  }
+  url: "/file/content"
+}
+
+export type FileWriteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * The file changed since the client read it (see `expected`)
+   */
+  409: unknown
+}
+
+export type FileWriteError = FileWriteErrors[keyof FileWriteErrors]
+
+export type FileWriteResponses = {
+  /**
+   * Written file
+   */
+  200: FileWritten
+}
+
+export type FileWriteResponse = FileWriteResponses[keyof FileWriteResponses]
 
 export type FileStatusData = {
   body?: never
