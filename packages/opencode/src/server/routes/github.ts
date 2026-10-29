@@ -58,6 +58,8 @@ async function handle<T>(c: Context, fn: () => Promise<T> | T) {
       (data) => c.json(data as object),
       (err) => {
         if (!(err instanceof GitHub.Failure)) throw err
+        if (GitHub.notify.includes(err.code))
+          GitHub.alert("request failed", err, { method: c.req.method, path: c.req.path })
         return c.json({ code: err.code, message: err.message }, err.status)
       },
     )
