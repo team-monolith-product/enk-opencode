@@ -1,8 +1,8 @@
 import { Hono, type Context } from "hono"
-import { describeRoute, resolver, validator } from "hono-openapi"
+import { describeRoute, validator } from "hono-openapi"
+import { failures, ok } from "../enk-responses"
 import z from "zod"
 import { GitHub } from "../../enk/github"
-import { GitHubSync } from "../../enk/github-sync"
 import { Locale } from "../../enk/locale"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
@@ -31,7 +31,6 @@ const Status = z
   })
   .meta({ ref: "GitHubStatus" })
 const Pushed = Status.extend({ pushed: z.boolean() }).meta({ ref: "GitHubPushed" })
-const Failure = z.object({ code: z.string(), message: z.string() }).meta({ ref: "GitHubError" })
 const RepoName = z
   .string()
   .min(1)
@@ -39,30 +38,13 @@ const RepoName = z
   .regex(/^[A-Za-z0-9._-]+$/)
   .refine((name) => name !== "." && name !== "..")
 
-const failures = (...codes: number[]) =>
-  Object.fromEntries(
-    codes.map((code) => [
-      code,
-      { description: "GitHub error", content: { "application/json": { schema: resolver(Failure) } } },
-    ]),
-  )
-
-const ok = (description: string, schema: z.ZodType) => ({
-  200: { description, content: { "application/json": { schema: resolver(schema) } } },
-})
-
-async function handle<T>(c: Context, fn: () => Promise<T> | T) {
-  return Promise.resolve()
-    .then(fn)
-    .then(
-      (data) => c.json(data as object),
-      (err) => {
-        if (!(err instanceof GitHub.Failure)) throw err
-        if (GitHub.notify.includes(err.code))
-          GitHub.alert("request failed", err, { method: c.req.method, path: c.req.path })
-        return c.json({ code: err.code, message: err.message }, err.status)
-      },
-    )
+async function alerting<T>(c: Context, fn: () => Promise<T>) {
+  return fn().catch((err) => {
+    if (err instanceof GitHub.Failure && GitHub.notify.includes(err.code)) {
+      GitHub.alert("request failed", err, { method: c.req.method, path: c.req.path })
+    }
+    throw err
+  })
 }
 
 export const GitHubRoutes = lazy(() =>
@@ -76,7 +58,7 @@ export const GitHubRoutes = lazy(() =>
         operationId: "github.status",
         responses: ok("Link status", Status),
       }),
-      (c) => handle(c, () => GitHub.status(Instance.directory)),
+      async (c) => c.json(await GitHub.status(Instance.directory)),
     )
     .post(
       "/repo",
@@ -87,11 +69,7 @@ export const GitHubRoutes = lazy(() =>
         responses: { ...ok("Link status", Status), ...failures(409, 422, 502) },
       }),
       validator("json", z.object({ name: RepoName, locale: Locale.Schema.optional() })),
-      (c) =>
-        handle(c, () => {
-          const { name, locale } = c.req.valid("json")
-          return GitHub.create(Instance.directory, { name, message: GitHubSync.first(locale) })
-        }),
+      async (c) => c.json(await alerting(c, () => GitHub.create(Instance.directory, c.req.valid("json")))),
     )
     .post(
       "/push",
@@ -103,13 +81,6 @@ export const GitHubRoutes = lazy(() =>
         responses: { ...ok("Link status and whether a commit was pushed", Pushed), ...failures(404, 409, 422, 502) },
       }),
       validator("json", z.object({ locale: Locale.Schema.optional() })),
-      (c) =>
-        handle(c, async () => {
-          const { locale } = c.req.valid("json")
-          const before = await GitHub.status(Instance.directory)
-          if (!before.enabled) throw new GitHub.Failure("disabled", 409)
-          const result = await GitHub.push(Instance.directory, { message: GitHubSync.manual(locale) })
-          return { ...(await GitHub.status(Instance.directory)), pushed: !!result.sha }
-        }),
+      async (c) => c.json(await alerting(c, () => GitHub.manual(Instance.directory, c.req.valid("json").locale))),
     ),
 )
