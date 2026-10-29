@@ -36,9 +36,11 @@ export namespace SentryReporter {
     enabled = true
   }
 
-  export function captureException(error: unknown, context?: Record<string, unknown>) {
+  export type Scope = { tags?: Record<string, string>; fingerprint?: string[] }
+
+  export function captureException(error: unknown, context?: Record<string, unknown>, scope?: Scope) {
     if (!enabled) return
-    SentryBun.captureException(error, context ? { extra: context } : undefined)
+    SentryBun.captureException(error, context || scope ? { extra: context, ...scope } : undefined)
   }
 
   const seen = new Map<string, number>()
@@ -56,9 +58,9 @@ export namespace SentryReporter {
     return seen.size
   }
 
-  export function captureOnce(key: string, error: unknown, context?: Record<string, unknown>) {
+  export function captureOnce(key: string, error: unknown, context?: Record<string, unknown>, scope?: Scope) {
     if (!enabled || !due(key)) return
-    captureException(error, context)
+    captureException(error, context, scope)
   }
 
   export function isEnabled() {
