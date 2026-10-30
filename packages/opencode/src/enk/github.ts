@@ -146,6 +146,21 @@ export namespace GitHub {
     if (!res?.ok) throw new Failure("remote", 502)
   }
 
+  async function rails<T>(sub: string, init?: { method: string; body: unknown }): Promise<T> {
+    const target = backend()
+    if (!target) throw new Failure("disabled", 409)
+    const res = await fetch(target.url + sub, {
+      method: init?.method,
+      headers: { Authorization: `token ${target.token}`, "Content-Type": "application/json" },
+      body: init ? JSON.stringify(init.body) : undefined,
+      signal: AbortSignal.timeout(30_000),
+    }).catch(() => undefined)
+    if (res?.ok) return (await res.json()) as T
+    if (res?.status === 404) throw new Failure("missing", 404)
+    if (res?.status === 409) throw new Failure("unlinked", 409)
+    throw new Failure("remote", 502)
+  }
+
   async function linked() {
     const hit = await link()
     if (!hit?.connected || !hit.token) throw new Failure("unlinked", 409)
@@ -217,6 +232,24 @@ export namespace GitHub {
       repo_private: repo.private ?? false,
     })
     await firstPush(dir, { ...hit, repo }, input.message ?? "Initial commit from Jitda")
+    return status(dir)
+  }
+
+  export async function repositories(dir: string): Promise<Repo[]> {
+    if (!serves(dir)) throw new Failure("disabled", 409)
+    const list = await rails<{ repositories: Repo[] }>("/repositories")
+    return list.repositories.map((item) => ({
+      owner: item.owner,
+      name: item.name,
+      url: item.url,
+      private: item.private,
+    }))
+  }
+
+  export async function select(dir: string, input: { owner: string; name: string; message?: string | Describe }) {
+    if (!serves(dir)) throw new Failure("disabled", 409)
+    await rails("/repository", { method: "PUT", body: { repo_owner: input.owner, repo_name: input.name } })
+    await firstPush(dir, await linked(), input.message ?? "Initial commit from Jitda")
     return status(dir)
   }
 

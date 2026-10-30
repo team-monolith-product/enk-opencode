@@ -1960,6 +1960,44 @@
   font-weight: 600;
 }
 
+.github-dialog .github-repos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(40vh, 260px);
+  overflow-y: auto;
+}
+
+.github-dialog .github-repo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--env-line);
+  border-radius: 4px;
+  background: var(--env-surface);
+  color: var(--env-text-ink);
+  font-size: 13px;
+  text-align: left;
+}
+
+.github-dialog .github-repo[aria-checked="true"] {
+  border-color: var(--env-accent);
+  box-shadow: inset 0 0 0 1px var(--env-accent);
+}
+
+.github-dialog .github-repo:disabled {
+  opacity: 0.6;
+}
+
+.github-dialog .github-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--env-text-muted);
+}
+
 /* 세션 지우기 확인 모달 — 외부 연동 관리와 같은 해저드 셸. 묻는 말 하나뿐이라 폭만 좁힌다. */
 [data-component="dialog"]:has(.session-clear-dialog) [data-slot="dialog-container"] {
   width: min(440px, calc(100vw - 48px));

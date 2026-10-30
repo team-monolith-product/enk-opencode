@@ -4,7 +4,7 @@ import { Dialog } from "@opencode-ai/ui/dialog"
 import { Icon } from "@opencode-ai/ui/icon"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
-import { createMemo, Match, onCleanup, onMount, Show, Switch as Branch } from "solid-js"
+import { createEffect, createMemo, For, Match, onCleanup, onMount, Show, Switch as Branch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Link } from "@/components/link"
 import { useLanguage } from "@/context/language"
@@ -14,9 +14,18 @@ import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { promptLocale } from "@/utils/prompt-locale"
 import { getRelativeTime } from "@/utils/time"
-import { createGitHubRepo, getGitHubStatus, githubCode, type GitHubStatus } from "@/utils/server"
+import {
+  createGitHubRepo,
+  getGitHubRepositories,
+  getGitHubStatus,
+  githubCode,
+  selectGitHubRepo,
+  type GitHubRepo,
+  type GitHubStatus,
+} from "@/utils/server"
 
 const NAME = /^[A-Za-z0-9._-]{1,100}$/
+const NEW_REPOSITORY_URL = "https://github.com/new?name=jitda-project"
 
 const ERRORS = {
   disabled: "github.error.disabled",
@@ -51,7 +60,11 @@ export function DialogGitHub() {
     busy: boolean
     waiting: boolean
     name: string
-  }>({ failed: false, busy: false, waiting: false, name: "" })
+    repos?: GitHubRepo[]
+    reposFailed: boolean
+    reposLoading: boolean
+    picked?: string
+  }>({ failed: false, busy: false, waiting: false, name: "", reposFailed: false, reposLoading: false })
 
   const fail = (err: unknown) => {
     const code = githubCode(err)
@@ -69,8 +82,20 @@ export function DialogGitHub() {
   }
   onMount(() => void refetch())
 
+  const loadRepos = async () => {
+    const o = opts()
+    if (!o || state.reposLoading) return
+    setState({ reposLoading: true, reposFailed: false })
+    await getGitHubRepositories(o).then(
+      (repos) => setState({ repos, reposLoading: false }),
+      () => setState({ reposFailed: true, reposLoading: false }),
+    )
+  }
+
   const back = () => {
-    if (!state.waiting || document.visibilityState !== "visible") return
+    if (document.visibilityState !== "visible") return
+    if (view() === "choose" && state.status?.app) void loadRepos()
+    if (!state.waiting) return
     setState("waiting", false)
     void refetch()
   }
@@ -80,6 +105,11 @@ export function DialogGitHub() {
     window.removeEventListener("focus", back)
     document.removeEventListener("visibilitychange", back)
   })
+
+  const reloadRepos = () => {
+    setState("picked", undefined)
+    void loadRepos()
+  }
 
   const connect = () => {
     const url = state.status?.connectUrl
@@ -116,6 +146,19 @@ export function DialogGitHub() {
     if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
   }
 
+  const pick = async () => {
+    const o = opts()
+    const repo = state.repos?.find((item) => `${item.owner}/${item.name}` === state.picked)
+    if (!o || !repo || spectator) return
+    const status = await run(() =>
+      selectGitHubRepo(o, { owner: repo.owner, name: repo.name, locale: promptLocale(language.locale()) }),
+    )
+    if (!status) return
+    setState("status", status)
+    const first = status.firstPush
+    if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
+  }
+
   const firstFailure = createMemo(() => {
     const first = state.status?.firstPush
     if (!first) return
@@ -136,6 +179,10 @@ export function DialogGitHub() {
 
   const ready = createMemo(() => NAME.test(state.name.trim()))
 
+  createEffect(() => {
+    if (view() === "choose" && state.status?.app && !state.repos && !state.reposFailed) void loadRepos()
+  })
+
   const pushed = createMemo(() => {
     const last = state.status?.push
     if (!last) return language.t("github.push.never")
@@ -151,7 +198,9 @@ export function DialogGitHub() {
         view() === "push"
           ? "github.description.linked"
           : view() === "choose"
-            ? "github.description.choose"
+            ? state.status?.app
+              ? "github.description.select"
+              : "github.description.choose"
             : "github.description.unlinked",
       )}
       action={<span class="sr-only" />}
@@ -202,13 +251,56 @@ export function DialogGitHub() {
               </div>
 
               <Show when={view() === "choose" && state.status?.app}>
-                <div class="github-panel flex flex-col gap-1.5">
-                  <span class="text-13-medium text-text-strong">{language.t("github.repo.select.title")}</span>
-                  <span class="text-12-regular text-text-weak">{language.t("github.repo.select.hint")}</span>
+                <Branch>
+                  <Match when={state.reposFailed}>
+                    <div class="github-panel flex flex-col items-start gap-2">
+                      <span class="text-12-regular text-text-weak">{language.t("github.error.repos")}</span>
+                      <Button type="button" size="small" variant="secondary" icon="refresh" onClick={reloadRepos}>
+                        {language.t("envKeys.error.retry")}
+                      </Button>
+                    </div>
+                  </Match>
+                  <Match when={!state.repos}>
+                    <div class="github-panel text-12-regular text-text-weak">{language.t("common.loading")}</div>
+                  </Match>
+                  <Match when={state.repos?.length === 0}>
+                    <div class="github-panel text-12-regular text-text-weak">{language.t("github.repo.empty")}</div>
+                  </Match>
+                  <Match when={state.repos}>
+                    <span class="github-hint">{language.t("github.repo.select.hint")}</span>
+                    <div class="github-repos" role="radiogroup" aria-label={language.t("github.repo.select.title")}>
+                      <For each={state.repos}>
+                        {(repo) => {
+                          const key = `${repo.owner}/${repo.name}`
+                          return (
+                            <button
+                              type="button"
+                              role="radio"
+                              class="github-repo"
+                              aria-checked={state.picked === key}
+                              disabled={spectator || state.busy}
+                              onClick={() => setState("picked", key)}
+                            >
+                              <span class="truncate font-mono">{key}</span>
+                              <Show when={repo.private}>
+                                <span class="github-badge">{language.t("github.repo.private")}</span>
+                              </Show>
+                            </button>
+                          )
+                        }}
+                      </For>
+                    </div>
+                  </Match>
+                </Branch>
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <Link class="github-link text-12-regular" href={NEW_REPOSITORY_URL}>
+                    {language.t("github.repo.new")}
+                  </Link>
+                  <button type="button" class="github-link text-12-regular" onClick={reloadRepos}>
+                    {language.t("github.repo.reload")}
+                  </button>
                 </div>
-                <Show when={state.waiting}>
-                  <span class="github-hint">{language.t("github.waiting")}</span>
-                </Show>
+                <span class="github-hint">{language.t("github.repo.new.hint")}</span>
               </Show>
 
               <Show when={view() === "choose" && !state.status?.app}>
@@ -284,10 +376,10 @@ export function DialogGitHub() {
                 size="normal"
                 variant="primary"
                 icon="github"
-                disabled={spectator || !state.status?.connectUrl}
-                onClick={connect}
+                disabled={spectator || state.busy || !state.picked}
+                onClick={() => void pick()}
               >
-                {language.t("github.repo.select")}
+                {language.t("github.repo.push")}
               </Button>
             </Match>
             <Match when={view() === "choose"}>

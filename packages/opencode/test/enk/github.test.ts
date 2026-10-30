@@ -621,6 +621,57 @@ describe("GitHub.create", () => {
     expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
     expect(status.firstPush).toMatchObject({ attempts: 1, code: "forbidden" })
   })
+
+  test("lists the repositories the GitHub App was installed on", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve({
+      repositories: [
+        { owner: "octocat", name: "demo", url: "https://github.com/octocat/demo", private: true, pushable: true },
+        { owner: "octocat", name: "blog", url: "https://github.com/octocat/blog", private: false, pushable: true },
+      ],
+    })
+
+    const list = await GitHub.repositories(tmp.path)
+
+    expect(list).toEqual([
+      { owner: "octocat", name: "demo", url: "https://github.com/octocat/demo", private: true },
+      { owner: "octocat", name: "blog", url: "https://github.com/octocat/blog", private: false },
+    ])
+  })
+
+  test("listing without a link is refused", async () => {
+    await using tmp = await tmpdir()
+    const server = Bun.serve({ port: 0, fetch: () => Response.json({}, { status: 409 }) })
+    process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
+    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
+
+    const failure = await GitHub.repositories(tmp.path).catch((err) => err)
+    await server.stop(true)
+
+    expect(failure).toBeInstanceOf(GitHub.Failure)
+    expect(failure.code).toBe("unlinked")
+  })
+
+  test("choosing a repository binds it and pushes the workspace once", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>", ".env": "KEY=secret" })
+    using github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    const status = await GitHub.select(work, { owner: "octocat", name: "jitda-app" })
+
+    expect(rails.reports[0]).toEqual({ repo_owner: "octocat", repo_name: "jitda-app" })
+    expect(github.calls).toEqual(["GET /repos/octocat/jitda-app"])
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+    expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
+  })
 })
 
 describe("GitHub.push", () => {

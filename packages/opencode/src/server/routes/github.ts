@@ -31,6 +31,7 @@ const Status = z
       .optional(),
   })
   .meta({ ref: "GitHubStatus" })
+const Repositories = z.object({ repositories: z.array(Repo) }).meta({ ref: "GitHubRepositories" })
 const Failure = z.object({ code: z.string(), message: z.string() }).meta({ ref: "GitHubError" })
 const RepoName = z
   .string()
@@ -75,6 +76,31 @@ export const GitHubRoutes = lazy(() =>
         responses: ok("Link status", Status),
       }),
       (c) => handle(c, () => GitHub.status(Instance.directory)),
+    )
+    .get(
+      "/repositories",
+      describeRoute({
+        summary: "List installed GitHub repositories",
+        description: "Repositories the team picked when installing the GitHub App.",
+        operationId: "github.repositories",
+        responses: { ...ok("Repositories", Repositories), ...failures(404, 409, 502) },
+      }),
+      (c) => handle(c, async () => ({ repositories: await GitHub.repositories(Instance.directory) })),
+    )
+    .put(
+      "/repository",
+      describeRoute({
+        summary: "Choose GitHub repository",
+        description: "Bind one of the installed repositories to this project and push it once.",
+        operationId: "github.repo.select",
+        responses: { ...ok("Link status", Status), ...failures(404, 409, 502) },
+      }),
+      validator("json", z.object({ owner: z.string().min(1), name: RepoName, locale: Locale.Schema.optional() })),
+      (c) =>
+        handle(c, () => {
+          const { owner, name, locale } = c.req.valid("json")
+          return GitHub.select(Instance.directory, { owner, name, message: GitHubSync.first(locale) })
+        }),
     )
     .post(
       "/repo",

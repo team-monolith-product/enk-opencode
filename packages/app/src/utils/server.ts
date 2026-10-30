@@ -156,6 +156,21 @@ export function getGitHubStatus(opts: GitHubOpts): Promise<GitHubStatus> {
     .then((res) => res.data as GitHubStatus)
 }
 
+export function getGitHubRepositories(opts: GitHubOpts): Promise<GitHubRepo[]> {
+  return devServerClient(opts)
+    .get({ url: "/github/repositories" })
+    .then((res) => (res.data as { repositories: GitHubRepo[] }).repositories)
+}
+
+export function selectGitHubRepo(
+  opts: GitHubOpts,
+  input: { owner: string; name: string; locale?: PromptLocale },
+): Promise<GitHubStatus> {
+  return devServerClient(opts)
+    .put({ url: "/github/repository", body: input })
+    .then((res) => res.data as GitHubStatus)
+}
+
 export function createGitHubRepo(
   opts: GitHubOpts,
   input: { name: string; locale?: PromptLocale },
