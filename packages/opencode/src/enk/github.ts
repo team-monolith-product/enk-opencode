@@ -428,9 +428,12 @@ export namespace GitHub {
       })
     })
     failed.delete(dir)
+    const visibility = remote.private !== (hit.repo.private ?? false)
     if (result.sha) {
-      await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
+      await report({ pushed_sha: result.sha, pushed_by: null, repo_private: remote.private }).catch(() => undefined)
       log.info("pushed", { sha: result.sha })
+    } else if (visibility) {
+      await report({ repo_private: remote.private }).catch(() => undefined)
     }
     return { ...result, url: result.sha ? `${hit.repo.url}/commit/${result.sha}` : hit.repo.url }
   }

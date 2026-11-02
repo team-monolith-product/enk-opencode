@@ -691,6 +691,46 @@ describe("GitHub.create", () => {
     expect(await origin.files()).toEqual([".gitignore", "index.html"])
     expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
   })
+
+  test("a push reports the repository visibility GitHub has now", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app", private: false },
+    })
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    using _github = mockGitHub(() => Response.json({ ...remote, private: true, default_branch: "main" }))
+
+    await GitHub.select(work, { owner: "octocat", name: "jitda-app" })
+
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+    expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String), repo_private: true })
+  })
+
+  test("a push without changes still reports a visibility change", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app", private: false },
+    })
+    await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    let visible = false
+    using _github = mockGitHub(() => Response.json({ ...remote, private: visible, default_branch: "main" }))
+    await GitHub.push(work, { message: "first" })
+    rails.reports.length = 0
+    visible = true
+
+    const result = await GitHub.push(work, { message: "second" })
+
+    expect(result.sha).toBeUndefined()
+    expect(rails.reports).toEqual([{ repo_private: true }])
+  })
 })
 
 describe("GitHub.push", () => {
