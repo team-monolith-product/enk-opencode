@@ -538,6 +538,40 @@ describe("doc", () => {
     })
   })
 
+  test("submit is sent at once when team consent is turned off", async () => {
+    process.env["ENK_CONSENT_REQUIRED"] = "0"
+    try {
+      await using tmp = await tmpdir()
+      await Instance.provide({
+        directory: tmp.path,
+        init: InstanceBootstrap,
+        fn: async () => {
+          await Project.fromDirectory(tmp.path)
+          const session = await Session.create({})
+          const { docID } = Doc.prompt(session.id)
+          const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+          const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+
+          const stop = Doc.submitConnect({
+            sessionID: session.id,
+            docID,
+            actorID: bob.actorID,
+            peer: { send: () => undefined },
+          })
+
+          const state = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, prompt })
+
+          expect(state.status).toBe("sent")
+          expect(state.actors.map((actor) => actor.actorID)).toEqual([alice.actorID])
+
+          stop()
+        },
+      })
+    } finally {
+      delete process.env["ENK_CONSENT_REQUIRED"]
+    }
+  })
+
   test("observer receives casts but is never a target", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
