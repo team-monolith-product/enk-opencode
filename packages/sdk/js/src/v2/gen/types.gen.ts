@@ -314,6 +314,15 @@ export type EventEnvRequestResolved = {
   }
 }
 
+export type EventImageEditLock = {
+  type: "image.edit.lock"
+  properties: {
+    path: string
+    locked: boolean
+    sessionID?: string
+  }
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -1055,6 +1064,7 @@ export type Event =
   | EventTodoUpdated
   | EventEnvRequestAsked
   | EventEnvRequestResolved
+  | EventImageEditLock
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -6034,6 +6044,29 @@ export type FileWriteResponses = {
 }
 
 export type FileWriteResponse = FileWriteResponses[keyof FileWriteResponses]
+
+export type FileLockData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/lock"
+}
+
+export type FileLockResponses = {
+  /**
+   * Locked images
+   */
+  200: Array<{
+    path: string
+    sessionID: string
+    since: number
+  }>
+}
+
+export type FileLockResponse = FileLockResponses[keyof FileLockResponses]
 
 export type FileStatusData = {
   body?: never

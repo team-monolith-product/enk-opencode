@@ -11,11 +11,11 @@ import { Ripgrep } from "../../file/ripgrep"
 import { LSP } from "../../lsp"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
-import { EnvFile } from "../../util/env-file"
-import { Filesystem } from "../../util/filesystem"
 import { Bus } from "../../bus"
 import { FileWatcher } from "../../file/watcher"
 import { errors } from "../error"
+import { Writable } from "../../file/writable"
+import { PhotoCraft } from "../../enk/photocraft"
 
 const WrittenFile = z
   .object({
@@ -26,32 +26,6 @@ const WrittenFile = z
 
 /** Same cap as one uploaded file (Assets.MAX_FILE_BYTES); an edited image is never near it. */
 const MAX_WRITE_BYTES = 100 * 1024 * 1024
-
-/**
- * The file `requested` names, if the write route may replace it: an existing regular file whose
- * real location (symlinks followed) is inside the project, outside `.git`, and not a secret env file.
- * The client controls `requested`, so every one of those checks is needed — a lexical check alone
- * lets a symlink in the project point the write at any file the server can reach.
- */
-async function writableFile(requested: string) {
-  const full = path.resolve(Instance.directory, requested)
-  if (!Instance.containsPath(full)) return
-  if (EnvFile.isSecretFile(full)) return
-
-  const stat = await fs.stat(full).catch(() => undefined)
-  if (!stat?.isFile()) return
-
-  const real = await fs.realpath(full)
-  const roots = [Instance.directory, ...(Instance.worktree === "/" ? [] : [Instance.worktree])]
-  const realRoots = await Promise.all(roots.map((root) => fs.realpath(root).catch(() => root)))
-  const root = realRoots.find((item) => Filesystem.contains(item, real))
-  if (!root) return
-  const relative = path.relative(root, real)
-  if (relative.split(path.sep).includes(".git")) return
-  if (EnvFile.isSecretFile(real)) return
-
-  return { real, relative: path.relative(Instance.directory, full).split(path.sep).join("/"), mode: stat.mode & 0o777 }
-}
 
 const AssetEntry = z
   .object({
@@ -242,6 +216,25 @@ export const FileRoutes = lazy(() =>
         return c.json(content)
       },
     )
+    .get(
+      "/file/lock",
+      describeRoute({
+        summary: "List AI-locked images",
+        description: "Images the AI is editing with PhotoCraft right now. Their editor windows are view-only until the edit ends.",
+        operationId: "file.lock",
+        responses: {
+          200: {
+            description: "Locked images",
+            content: {
+              "application/json": {
+                schema: resolver(z.array(z.object({ path: z.string(), sessionID: z.string(), since: z.number() }))),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => c.json(PhotoCraft.Lock.list()),
+    )
     .put(
       "/file/content",
       describeRoute({
@@ -290,8 +283,13 @@ export const FileRoutes = lazy(() =>
       ),
       async (c) => {
         const query = c.req.valid("query")
-        const target = await writableFile(query.path)
+        const target = await Writable.file(query.path)
         if (!target) throw new HTTPException(400, { message: "Invalid file path" })
+
+        // AI 가 PhotoCraft 로 편집하는 동안에는 사람의 저장을 받지 않는다(끝나면 편집 창이 새 내용을 받는다).
+        if (PhotoCraft.Lock.isLocked(target.relative)) {
+          throw new HTTPException(409, { message: "Image is being edited by AI" })
+        }
 
         // 편집기를 연 뒤 에이전트·다른 사람이 같은 파일을 바꿨다면, 옛 사본에서 만든 결과로 덮어써
         // 그 변경을 지우지 않는다.

@@ -68,6 +68,7 @@ import type {
   FileAssetDeleteResponses,
   FileAssetListResponses,
   FileListResponses,
+  FileLockResponses,
   FilePartInput,
   FilePartSource,
   FileReadResponses,
@@ -4826,6 +4827,36 @@ export class File extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * List AI-locked images
+   *
+   * Images the AI is editing with PhotoCraft right now. Their editor windows are view-only until the edit ends.
+   */
+  public lock<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<FileLockResponses, unknown, ThrowOnError>({
+      url: "/file/lock",
+      ...options,
+      ...params,
     })
   }
 

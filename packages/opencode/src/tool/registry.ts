@@ -15,6 +15,8 @@ import { SkillTool } from "./skill"
 import { EnsureDevServerTool } from "./ensure-dev-server"
 import { EnvRequestTool } from "./env-request"
 import { GenerateImage, GenerateImageTool } from "./generate-image"
+import { ImageCommandsTool, ImageEditTool } from "./image-edit"
+import { PhotoCraft } from "../enk/photocraft"
 import type { Agent } from "../agent/agent"
 import { Tool } from "./tool"
 import { Config } from "../config/config"
@@ -138,6 +140,8 @@ export namespace ToolRegistry {
           ApplyPatchTool,
           EnsureDevServerTool,
           ...(GenerateImage.available() ? [GenerateImageTool] : []),
+          // photocraft-cli 가 있는 환경(서버 이미지, 로컬은 OPENCODE_PHOTOCRAFT_CLI)에서만 이미지 편집 도구를 연다.
+          ...(PhotoCraft.available() ? [ImageCommandsTool, ImageEditTool] : []),
           ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
           ...(cfg.experimental?.batch_tool === true ? [BatchTool] : []),
           ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
