@@ -630,7 +630,14 @@ function actorNames(sessionID: string, ids: string[], names?: Record<string, str
   })
 }
 
+// 허브는 해커톤이 팀 전원 동의를 끄면 ENK_CONSENT_REQUIRED=0 을 넣는다. 그때는 요청자 혼자로 바로 보낸다.
+function consentRequired() {
+  const value = process.env.ENK_CONSENT_REQUIRED?.toLowerCase()
+  return value !== "false" && value !== "0"
+}
+
 function targets(targetID: string, actorID: string) {
+  if (!consentRequired()) return [actorID]
   const result = new Set(Array.from(peers.get(targetID) ?? []).map((peer) => peer.actorID))
   result.add(actorID)
   return Array.from(result)

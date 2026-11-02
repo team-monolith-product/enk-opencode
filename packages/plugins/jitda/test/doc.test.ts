@@ -564,6 +564,24 @@ describe("Doc submit votes", () => {
     stop()
   })
 
+  test("submit is sent at once when team consent is turned off", () => {
+    process.env.ENK_CONSENT_REQUIRED = "0"
+    try {
+      const { docID } = Doc.prompt(SESSION)
+      const [alice, bob] = team("Alice", "Bob")
+      const stop = quiet(docID, bob!.actorID)
+
+      const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+
+      expect(state.status).toBe("sent")
+      expect(state.actors.map((actor) => actor.actorID)).toEqual([alice!.actorID])
+
+      stop()
+    } finally {
+      delete process.env.ENK_CONSENT_REQUIRED
+    }
+  })
+
   test("observer receives casts but is never a target", () => {
     const { docID } = Doc.prompt(SESSION)
     const [alice, bob] = team("Alice", "Bob")
