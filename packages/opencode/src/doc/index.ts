@@ -11,6 +11,7 @@ import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
 import { archiveSession } from "@/session/archive"
 import { Database, NotFoundError } from "@/storage/db"
+import { Flag } from "@/flag/flag"
 import { fn } from "@/util/fn"
 import { Color } from "@/util/color"
 import { NamedError } from "@opencode-ai/util/error"
@@ -966,6 +967,7 @@ export namespace Doc {
     // pending vote and leave() removes anyone who drops — so a stale/zombie peer captured here can
     // no longer block consensus: the heartbeat reaps it and leave() drops it from the vote. The
     // requester is always included, even if its own socket has not finished connecting yet.
+    if (!Flag.ENK_CONSENT_REQUIRED) return [actorID]
     const result = new Set(Array.from(peers.get(targetID) ?? []).map((peer) => peer.actorID))
     result.add(actorID)
     return Array.from(result)
