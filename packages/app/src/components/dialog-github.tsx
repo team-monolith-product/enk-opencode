@@ -19,6 +19,7 @@ import {
   getGitHubRepositories,
   getGitHubStatus,
   githubCode,
+  pushGitHub,
   selectGitHubRepo,
   type GitHubRepo,
   type GitHubStatus,
@@ -157,6 +158,17 @@ export function DialogGitHub() {
     setState("status", status)
     const first = status.firstPush
     if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
+  }
+
+  const push = async () => {
+    const o = opts()
+    if (!o || spectator) return
+    const result = await run(() => pushGitHub(o, { locale: promptLocale(language.locale()) }))
+    if (!result) return void refetch()
+    const { pushed, ...status } = result
+    if (status.enabled) setState("status", status)
+    else void refetch()
+    showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
   }
 
   const firstFailure = createMemo(() => {
@@ -380,6 +392,18 @@ export function DialogGitHub() {
                 onClick={() => void pick()}
               >
                 {language.t("github.repo.push")}
+              </Button>
+            </Match>
+            <Match when={view() === "push"}>
+              <Button
+                type="button"
+                size="normal"
+                variant="primary"
+                icon="github"
+                disabled={spectator || state.busy}
+                onClick={() => void push()}
+              >
+                {language.t("github.push.now")}
               </Button>
             </Match>
             <Match when={view() === "choose"}>
