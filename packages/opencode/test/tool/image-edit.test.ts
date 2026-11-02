@@ -8,6 +8,7 @@ import { FileRoutes } from "../../src/server/routes/file"
 import { Instance } from "../../src/project/instance"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { tmpdir } from "../fixture/fixture"
+import { Writable } from "../../src/file/writable"
 
 // 실제 photocraft-cli 가 있어야 하는 테스트는 그때만 돈다(로컬: OPENCODE_PHOTOCRAFT_CLI, 서버 이미지: PATH).
 const withCli = test.skipIf(!PhotoCraft.available())
@@ -160,7 +161,7 @@ describe("tool.image_edit", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const release = await PhotoCraft.Lock.acquire("a.png", "ses_other")
+        const release = await PhotoCraft.Lock.acquire((await Writable.file("a.png"))!, "ses_other")
         const tool = await ImageEditTool.init()
         await expect(
           tool.execute({ path: "a.png", steps: [{ command: "image.adjustments.invert" }] }, ctx),
@@ -212,9 +213,9 @@ describe("PhotoCraft.Lock", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const release = await PhotoCraft.Lock.acquire("a.png", "ses_a")
+        const release = await PhotoCraft.Lock.acquire((await Writable.file("a.png"))!, "ses_a")
         expect(release).toBeDefined()
-        expect(await PhotoCraft.Lock.acquire("a.png", "ses_b")).toBeUndefined()
+        expect(await PhotoCraft.Lock.acquire((await Writable.file("a.png"))!, "ses_b")).toBeUndefined()
 
         const listed = await FileRoutes().request("/file/lock")
         expect(await listed.json()).toMatchObject([{ path: "a.png", sessionID: "ses_a" }])
@@ -270,7 +271,7 @@ describe("PhotoCraft.Lock", () => {
         const first = slow()
         const pending = put(first.body)
         await Bun.sleep(20)
-        const release = await PhotoCraft.Lock.acquire("a.png", "ses_a")
+        const release = await PhotoCraft.Lock.acquire((await Writable.file("a.png"))!, "ses_a")
         first.finish()
         expect((await pending).status).toBe(409)
         expect(fs.readFileSync(file, "utf8")).toBe("old")
@@ -281,6 +282,32 @@ describe("PhotoCraft.Lock", () => {
         expect(statuses).toEqual([200, 409])
         expect(["one", "two"]).toContain(fs.readFileSync(file, "utf8"))
         expect(fs.readdirSync(tmp.path).filter((name) => name.endsWith(".tmp"))).toEqual([])
+      },
+    })
+  })
+
+  test("locks the file itself, so another name for it (a symlink) is locked too", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const file = path.join(tmp.path, "a.png")
+    fs.writeFileSync(file, "old")
+    fs.symlinkSync("a.png", path.join(tmp.path, "link.png"))
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const release = await PhotoCraft.Lock.acquire((await Writable.file("link.png"))!, "ses_a")
+        expect(release).toBeDefined()
+        expect(await PhotoCraft.Lock.acquire((await Writable.file("a.png"))!, "ses_b")).toBeUndefined()
+        expect(PhotoCraft.Lock.list()).toMatchObject([{ path: "link.png", sessionID: "ses_a" }])
+
+        const put = await FileRoutes().request(`/file/content?path=a.png`, {
+          method: "PUT",
+          headers: { "content-type": "application/octet-stream" },
+          body: "new",
+        })
+        expect(put.status).toBe(409)
+        expect(fs.readFileSync(file, "utf8")).toBe("old")
+        await release!()
       },
     })
   })

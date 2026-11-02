@@ -105,27 +105,32 @@ export namespace PhotoCraft {
       ),
     }
 
-    const held = Instance.state(() => new Map<string, { sessionID: string; since: number }>())
+    // 실제 경로(심볼릭 링크를 따라간 것)로 잠근다. 같은 파일을 다른 이름(링크)으로 열어도 같은 잠금이다.
+    const held = Instance.state(() => new Map<string, { path: string; sessionID: string; since: number }>())
 
     export function list() {
-      return [...held().entries()].map(([file, info]) => ({ path: file, ...info }))
+      return [...held().values()]
     }
 
-    export function isLocked(relative: string) {
-      return held().has(relative)
+    export function isLocked(real: string) {
+      return held().has(real)
     }
 
-    /** 잠그고, 해제 함수를 돌려준다. 이미 다른 편집이 잡고 있으면 undefined. */
-    export async function acquire(relative: string, sessionID: string) {
+    /**
+     * target.real 을 잠그고 해제 함수를 돌려준다. 이미 다른 편집이 잡고 있으면 undefined.
+     * target.relative 는 사람이 부른 이름으로, 목록·알림에만 쓴다.
+     */
+    export async function acquire(target: { real: string; relative: string }, sessionID: string) {
       const map = held()
-      if (map.has(relative)) return
-      map.set(relative, { sessionID, since: Date.now() })
+      if (map.has(target.real)) return
+      const relative = target.relative
+      map.set(target.real, { path: relative, sessionID, since: Date.now() })
       await Bus.publish(Event.Updated, { path: relative, locked: true, sessionID })
       let released = false
       return async () => {
         if (released) return
         released = true
-        map.delete(relative)
+        map.delete(target.real)
         await Bus.publish(Event.Updated, { path: relative, locked: false, sessionID })
       }
     }

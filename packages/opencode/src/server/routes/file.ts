@@ -288,7 +288,7 @@ export const FileRoutes = lazy(() =>
         if (!target) throw new HTTPException(400, { message: "Invalid file path" })
 
         // 업로드 전에 한 번 거절해 두면 AI 편집 중인 큰 파일을 헛되이 받지 않는다. 결정은 아래 교체 직전에 다시 한다.
-        if (PhotoCraft.Lock.isLocked(target.relative)) {
+        if (PhotoCraft.Lock.isLocked(target.real)) {
           throw new HTTPException(409, { message: "Image is being edited by AI" })
         }
 
@@ -329,7 +329,7 @@ export const FileRoutes = lazy(() =>
           // 다른 저장·AI 편집 잠금과 한 줄로 세운 뒤에 한다.
           await Writable.exclusive(target.real, async () => {
             // AI 가 PhotoCraft 로 편집하는 동안에는 사람의 저장을 받지 않는다(끝나면 편집 창이 새 내용을 받는다).
-            if (PhotoCraft.Lock.isLocked(target.relative)) {
+            if (PhotoCraft.Lock.isLocked(target.real)) {
               throw new HTTPException(409, { message: "Image is being edited by AI" })
             }
             // 편집기를 연 뒤 에이전트·다른 사람이 같은 파일을 바꿨다면, 옛 사본에서 만든 결과로 덮어써

@@ -73,7 +73,7 @@ export const ImageEditTool = Tool.define("image_edit", {
     })
 
     // 진행 중인 저장의 확인·교체가 끝난 뒤에 잠근다. 그래야 방금 저장된 내용을 열어 편집을 시작한다.
-    const release = await Writable.exclusive(target.real, () => PhotoCraft.Lock.acquire(relative, ctx.sessionID))
+    const release = await Writable.exclusive(target.real, () => PhotoCraft.Lock.acquire(target, ctx.sessionID))
     if (!release) throw new Error(`${relative} 은(는) 이미 다른 AI 편집이 진행 중입니다. 끝난 뒤 다시 시도하세요.`)
     const base = { path: relative, steps: params.steps.length }
     try {

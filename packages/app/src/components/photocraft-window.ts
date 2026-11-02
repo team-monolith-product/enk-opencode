@@ -597,6 +597,9 @@ function createSession(
       gone = true
       try {
         detach()
+        // 잠금을 풀어 줄 부모가 없으니 덮개를 걷어, 남은 창에서 평소처럼 편집하고 내려받게 한다.
+        locked = false
+        showCover(false)
         notify(t("file.imageEditor.parentGone"), "error", true)
       } catch {}
     },
