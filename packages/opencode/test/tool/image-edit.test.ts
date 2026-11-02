@@ -311,4 +311,36 @@ describe("PhotoCraft.Lock", () => {
       },
     })
   })
+
+  test("shares the lock with an instance opened at a subfolder of the same repository", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const sub = path.join(tmp.path, "sub")
+    fs.mkdirSync(sub)
+    const file = path.join(sub, "a.png")
+    fs.writeFileSync(file, "old")
+
+    const release = await Instance.provide({
+      directory: tmp.path,
+      fn: async () => PhotoCraft.Lock.acquire((await Writable.file("sub/a.png"))!, "ses_a"),
+    })
+    expect(release).toBeDefined()
+    try {
+      await Instance.provide({
+        directory: sub,
+        fn: async () => {
+          expect(PhotoCraft.Lock.list()).toMatchObject([{ path: "a.png", sessionID: "ses_a" }])
+          expect(await PhotoCraft.Lock.acquire((await Writable.file("a.png"))!, "ses_b")).toBeUndefined()
+          const put = await FileRoutes().request(`/file/content?path=a.png`, {
+            method: "PUT",
+            headers: { "content-type": "application/octet-stream" },
+            body: "new",
+          })
+          expect(put.status).toBe(409)
+          expect(fs.readFileSync(file, "utf8")).toBe("old")
+        },
+      })
+    } finally {
+      await Instance.provide({ directory: tmp.path, fn: () => release!() })
+    }
+  })
 })

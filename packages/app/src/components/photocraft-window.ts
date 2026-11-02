@@ -1,5 +1,6 @@
 import { fileExtension } from "@opencode-ai/ui/pierre/media"
 import { readPsdComposite } from "@/utils/psd-composite"
+import { sha256 } from "@/utils/sha256"
 
 // PhotoCraft(Rust/wasm 이미지 편집기) 웹 빌드는 public/photocraft 에 들어 있다. 앱 자산이 CDN 에서
 // 서빙돼도 이 페이지는 pod(same-origin)에서 열어야 부모가 자식 창 문서에 손을 댈 수 있으므로,
@@ -89,11 +90,6 @@ const reason = (error: unknown): string | undefined => {
 const CONFLICT = "File changed since it was opened"
 /** PUT /file/content 가 AI 편집 중이라 거절할 때의 응답 본문. */
 const LOCKED = "Image is being edited by AI"
-
-const sha256 = async (blob: Blob) => {
-  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
-}
 
 type Translate = (key: string, params?: Record<string, string>) => string
 type EditorWindow = Window & typeof globalThis

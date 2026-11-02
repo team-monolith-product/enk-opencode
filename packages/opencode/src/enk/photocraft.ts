@@ -3,6 +3,7 @@ import path from "path"
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import { Instance } from "@/project/instance"
+import { Filesystem } from "@/util/filesystem"
 
 /**
  * 헤드리스 PhotoCraft(`photocraft-cli serve`)로 이미지를 편집한다. AI 편집 도구(image_edit)가 쓴다.
@@ -105,15 +106,21 @@ export namespace PhotoCraft {
       ),
     }
 
-    // 실제 경로(심볼릭 링크를 따라간 것)로 잠근다. 같은 파일을 다른 이름(링크)으로 열어도 같은 잠금이다.
-    const held = Instance.state(() => new Map<string, { path: string; sessionID: string; since: number }>())
+    // 실제 경로(심볼릭 링크를 따라간 것)로 잠근다. 같은 파일을 다른 이름(링크)으로 열어도, 같은 저장소를
+    // 다른 폴더(루트·하위 폴더)로 연 다른 인스턴스에서 열어도 같은 잠금이어야 하므로 프로세스 전체가 하나를 쓴다.
+    const held = new Map<string, { full: string; sessionID: string; since: number }>()
 
+    /** 이 인스턴스에서 보이는 잠금. 경로는 이 인스턴스 폴더 기준이다. */
     export function list() {
-      return [...held().values()]
+      return [...held.values()].flatMap((lock) => {
+        if (!Filesystem.contains(Instance.directory, lock.full)) return []
+        const file = path.relative(Instance.directory, lock.full).split(path.sep).join("/")
+        return [{ path: file, sessionID: lock.sessionID, since: lock.since }]
+      })
     }
 
     export function isLocked(real: string) {
-      return held().has(real)
+      return held.has(real)
     }
 
     /**
@@ -121,16 +128,16 @@ export namespace PhotoCraft {
      * target.relative 는 사람이 부른 이름으로, 목록·알림에만 쓴다.
      */
     export async function acquire(target: { real: string; relative: string }, sessionID: string) {
-      const map = held()
-      if (map.has(target.real)) return
+      if (held.has(target.real)) return
       const relative = target.relative
-      map.set(target.real, { path: relative, sessionID, since: Date.now() })
+      const full = path.resolve(Instance.directory, relative)
+      held.set(target.real, { full, sessionID, since: Date.now() })
       await Bus.publish(Event.Updated, { path: relative, locked: true, sessionID })
       let released = false
       return async () => {
         if (released) return
         released = true
-        map.delete(target.real)
+        held.delete(target.real)
         await Bus.publish(Event.Updated, { path: relative, locked: false, sessionID })
       }
     }
