@@ -286,18 +286,9 @@ export const FileRoutes = lazy(() =>
         const target = await Writable.file(query.path)
         if (!target) throw new HTTPException(400, { message: "Invalid file path" })
 
-        // AI 가 PhotoCraft 로 편집하는 동안에는 사람의 저장을 받지 않는다(끝나면 편집 창이 새 내용을 받는다).
+        // 업로드 전에 한 번 거절해 두면 AI 편집 중인 큰 파일을 헛되이 받지 않는다. 결정은 아래 교체 직전에 다시 한다.
         if (PhotoCraft.Lock.isLocked(target.relative)) {
           throw new HTTPException(409, { message: "Image is being edited by AI" })
-        }
-
-        // 편집기를 연 뒤 에이전트·다른 사람이 같은 파일을 바꿨다면, 옛 사본에서 만든 결과로 덮어써
-        // 그 변경을 지우지 않는다.
-        if (query.expected) {
-          const current = createHash("sha256").update(await fs.readFile(target.real)).digest("hex")
-          if (current !== query.expected) {
-            throw new HTTPException(409, { message: "File changed since it was opened" })
-          }
         }
 
         // Content-Length is a hint only; the streaming loop below is what enforces the cap.
@@ -333,7 +324,23 @@ export const FileRoutes = lazy(() =>
           // open() 의 mode 에는 프로세스 umask 가 걸려(예: 0664 → 0644) 원본 권한이 바뀌므로 다시 맞춘다.
           await handle.chmod(target.mode)
           await handle.close()
-          await fs.rename(temp, target.real)
+          // 업로드가 느린 동안 AI 편집이나 다른 저장이 끝났을 수 있으므로, 확인과 교체를 같은 파일의
+          // 다른 저장·AI 편집 잠금과 한 줄로 세운 뒤에 한다.
+          await Writable.exclusive(target.real, async () => {
+            // AI 가 PhotoCraft 로 편집하는 동안에는 사람의 저장을 받지 않는다(끝나면 편집 창이 새 내용을 받는다).
+            if (PhotoCraft.Lock.isLocked(target.relative)) {
+              throw new HTTPException(409, { message: "Image is being edited by AI" })
+            }
+            // 편집기를 연 뒤 에이전트·다른 사람이 같은 파일을 바꿨다면, 옛 사본에서 만든 결과로 덮어써
+            // 그 변경을 지우지 않는다.
+            if (query.expected) {
+              const current = createHash("sha256").update(await fs.readFile(target.real)).digest("hex")
+              if (current !== query.expected) {
+                throw new HTTPException(409, { message: "File changed since it was opened" })
+              }
+            }
+            await fs.rename(temp, target.real)
+          })
         } catch (error) {
           await handle.close().catch(() => {})
           await fs.rm(temp, { force: true }).catch(() => {})

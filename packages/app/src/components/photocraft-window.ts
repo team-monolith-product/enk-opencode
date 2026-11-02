@@ -29,6 +29,8 @@ const sameFormat = (a: string, b: string) => !!ENCODABLE[a] && ENCODABLE[a] === 
 const READABLE = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tif", "tiff", "heic"])
 
 /** 이 파일을 PhotoCraft 편집기로 열 수 있는지. */
+const stem = (name: string) => name.replace(/\.[^./]*$/, "")
+
 export const canEditImage = (path: string) => READABLE.has(fileExtension(path))
 
 /**
@@ -316,7 +318,11 @@ function createSession(
       cover.append(label)
       doc.body.appendChild(cover)
     }
-    if (!on) cover?.remove()
+    // 참조를 버려야 다음 AI 편집 때 같은 문서에 덮개를 새로 붙인다(편집 중이라 다시 열지 않은 창).
+    if (!on) {
+      cover?.remove()
+      cover = undefined
+    }
   }
 
   // 새 버전이 있는데 사용자가 편집 중이라 바로 바꾸지 않았을 때 띄우는 배너(버튼이 있어 notice 와 따로 둔다).
@@ -479,7 +485,10 @@ function createSession(
     const proto = win.HTMLAnchorElement.prototype
     const click = proto.click
     proto.click = function (this: HTMLAnchorElement) {
-      const blob = this.download ? blobs.get(this.href) : undefined
+      // PhotoCraft 는 저장 파일 이름을 문서 이름에서 따온다(test.png → test.psd). 창에서 새로 만들거나 연
+      // 다른 문서는 이름이 달라, 그 저장은 원본을 덮지 않고 원래대로 내려받는다.
+      const ours = !!this.download && stem(this.download) === stem(file.name)
+      const blob = ours ? blobs.get(this.href) : undefined
       const saved = blob ? fileExtension(this.download) : ""
       const fallback = { blob: blob!, name: this.download }
       // 원본과 같은 형식으로 내보낸 것은 그 바이트 그대로 쓴다(내보내기 설정을 존중).

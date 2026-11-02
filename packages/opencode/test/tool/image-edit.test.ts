@@ -234,4 +234,54 @@ describe("PhotoCraft.Lock", () => {
       },
     })
   })
+
+  test("rechecks the lock and the expected hash after a slow upload, right before replacing", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const file = path.join(tmp.path, "a.png")
+    fs.writeFileSync(file, "old")
+    const hash = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex")
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        // 업로드가 끝나기 전에 AI 편집이 잠그면, 처음 확인을 통과했어도 교체하지 않는다.
+        const slow = () => {
+          let finish!: () => void
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("ne"))
+              finish = () => {
+                controller.enqueue(new TextEncoder().encode("w"))
+                controller.close()
+              }
+            },
+          })
+          return { body, finish: () => finish() }
+        }
+        const put = (body: BodyInit) =>
+          FileRoutes().request(`/file/content?path=a.png&expected=${hash("old")}`, {
+            method: "PUT",
+            headers: { "content-type": "application/octet-stream" },
+            body,
+            // @ts-expect-error Bun 은 스트림 본문에 duplex 가 필요하다
+            duplex: "half",
+          })
+
+        const first = slow()
+        const pending = put(first.body)
+        await Bun.sleep(20)
+        const release = await PhotoCraft.Lock.acquire("a.png", "ses_a")
+        first.finish()
+        expect((await pending).status).toBe(409)
+        expect(fs.readFileSync(file, "utf8")).toBe("old")
+        await release!()
+
+        // 같은 원본에서 시작한 두 저장은 하나만 들어가고 나머지는 409.
+        const statuses = await Promise.all([put("one"), put("two")]).then((r) => r.map((x) => x.status).sort())
+        expect(statuses).toEqual([200, 409])
+        expect(["one", "two"]).toContain(fs.readFileSync(file, "utf8"))
+        expect(fs.readdirSync(tmp.path).filter((name) => name.endsWith(".tmp"))).toEqual([])
+      },
+    })
+  })
 })
