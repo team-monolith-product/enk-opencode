@@ -220,7 +220,8 @@ export const FileRoutes = lazy(() =>
       "/file/lock",
       describeRoute({
         summary: "List AI-locked images",
-        description: "Images the AI is editing with PhotoCraft right now. Their editor windows are view-only until the edit ends.",
+        description:
+          "Images the AI is editing with PhotoCraft right now. Their editor windows are view-only until the edit ends.",
         operationId: "file.lock",
         responses: {
           200: {
@@ -334,7 +335,9 @@ export const FileRoutes = lazy(() =>
             // 편집기를 연 뒤 에이전트·다른 사람이 같은 파일을 바꿨다면, 옛 사본에서 만든 결과로 덮어써
             // 그 변경을 지우지 않는다.
             if (query.expected) {
-              const current = createHash("sha256").update(await fs.readFile(target.real)).digest("hex")
+              const current = createHash("sha256")
+                .update(await fs.readFile(target.real))
+                .digest("hex")
               if (current !== query.expected) {
                 throw new HTTPException(409, { message: "File changed since it was opened" })
               }
