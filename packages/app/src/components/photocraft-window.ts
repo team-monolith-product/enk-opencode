@@ -133,9 +133,24 @@ export function openPhotocraftWindow(input: {
   const onParentGone = () => session.parentGone()
   window.addEventListener("pagehide", onParentGone)
   const unwatch = input.watchLock((locked) => session.setLocked(locked))
+  // 잠금이 풀렸다는 알림은 놓칠 수 있다(연결이 끊긴 사이, 같은 저장소를 다른 폴더로 연 인스턴스가 잠근 경우
+  // 그 알림은 이 창의 폴더로 오지 않는다). 잠겨 있는 동안은 서버 목록을 몇 초마다 다시 보고, 없으면 푼다.
+  let tick = 0
+  let checking = false
+  const reconcile = () => {
+    if (!session.locked || checking || ++tick % 3) return
+    checking = true
+    void input
+      .isLocked()
+      .then((locked) => {
+        if (!locked) session.setLocked(false)
+      })
+      .catch(() => {})
+      .finally(() => (checking = false))
+  }
   // 창이 닫혔는지는 이벤트로 알 수 없어(닫힌 창의 unload 는 부모가 듣기 어렵다) 주기적으로 본다.
   const watch = setInterval(() => {
-    if (!win.closed) return
+    if (!win.closed) return reconcile()
     clearInterval(watch)
     window.removeEventListener("pagehide", onParentGone)
     unwatch()
@@ -575,6 +590,9 @@ function createSession(
 
   return {
     start: () => start(),
+    get locked() {
+      return locked
+    },
     setLocked(value: boolean) {
       if (gone || disposed || value === locked) return
       locked = value
