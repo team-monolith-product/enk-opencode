@@ -85,6 +85,8 @@ const reason = (error: unknown): string | undefined => {
 
 /** PUT /file/content 가 원본이 바뀌어 거절할 때의 응답 본문. */
 const CONFLICT = "File changed since it was opened"
+/** PUT /file/content 가 AI 편집 중이라 거절할 때의 응답 본문. */
+const LOCKED = "Image is being edited by AI"
 
 const sha256 = async (blob: Blob) => {
   const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())
@@ -110,6 +112,12 @@ export function openPhotocraftWindow(input: {
   /** expected: 편집을 시작한 원본 바이트의 SHA-256. 그 뒤 원본이 바뀌었으면 서버가 거절한다. */
   onSave: (image: Blob, expected: string) => Promise<void>
   onError: () => void
+  /** 서버에 있는 지금의 원본. AI 편집이 끝난 뒤 새 내용을 받거나, 덮어쓰기 전에 현재 해시를 구할 때 쓴다. */
+  readCurrent: () => Promise<File | undefined>
+  /** AI 가 이 파일을 잠그고 푸는 것을 듣는다(image.edit.lock). 구독 해제 함수를 돌려준다. */
+  watchLock: (listener: (locked: boolean) => void) => () => void
+  /** 창을 연 순간 이미 AI 가 편집 중인지. */
+  isLocked: () => Promise<boolean>
   t: Translate
 }) {
   const existing = opened.get(input.key)
@@ -126,28 +134,40 @@ export function openPhotocraftWindow(input: {
   const session = createSession(win, input)
   const onParentGone = () => session.parentGone()
   window.addEventListener("pagehide", onParentGone)
+  const unwatch = input.watchLock((locked) => session.setLocked(locked))
   // 창이 닫혔는지는 이벤트로 알 수 없어(닫힌 창의 unload 는 부모가 듣기 어렵다) 주기적으로 본다.
   const watch = setInterval(() => {
     if (!win.closed) return
     clearInterval(watch)
     window.removeEventListener("pagehide", onParentGone)
+    unwatch()
     if (opened.get(input.key) === win) opened.delete(input.key)
     session.dispose()
   }, 1000)
 
-  void session.start().catch(() => {
-    // Electron 의 file: 처럼 창 문서에 접근할 수 없으면 창 안에 알릴 수도 없다.
-    session.notify(input.t("file.imageEditor.failed"), "error", true)
-    input.onError()
-  })
+  void session
+    .start()
+    .then(async () => session.setLocked(await input.isLocked().catch(() => false)))
+    .catch(() => {
+      // Electron 의 file: 처럼 창 문서에 접근할 수 없으면 창 안에 알릴 수도 없다.
+      session.notify(input.t("file.imageEditor.failed"), "error", true)
+      input.onError()
+    })
   return true
 }
 
 function createSession(
   win: EditorWindow,
-  input: { file: File; onSave: (image: Blob, expected: string) => Promise<void>; t: Translate },
+  input: {
+    file: File
+    onSave: (image: Blob, expected: string) => Promise<void>
+    readCurrent: () => Promise<File | undefined>
+    t: Translate
+  },
 ) {
-  const { t, file } = input
+  const { t } = input
+  // AI 가 바꾼 새 내용을 다시 열면 바뀐다.
+  let file = input.file
   const original = fileExtension(file.name)
   const mime = ENCODABLE[original]
   let disposed = false
@@ -170,7 +190,8 @@ function createSession(
   let hide: ReturnType<typeof setTimeout> | undefined
   const notify = (text: string, variant: "default" | "success" | "error" = "default", sticky = false) => {
     const doc = win.document
-    if (!notice || !notice.isConnected) {
+    // 다시 읽은 뒤에는 옛 문서의 요소가 그 문서에선 여전히 연결돼 있으니, 지금 문서 것인지로 판단한다.
+    if (!notice || notice.ownerDocument !== doc) {
       notice = doc.createElement("div")
       notice.setAttribute("role", "status")
       Object.assign(notice.style, {
@@ -195,6 +216,178 @@ function createSession(
     hide = sticky ? undefined : setTimeout(() => notice && (notice.style.display = "none"), 4000)
   }
 
+  // 원본이 바뀐 뒤의 저장: 덮어쓰기 / 따로 내려받기 / 취소. 창 안의 버튼으로 묻는다(confirm 은 두 개뿐이고
+  // 떠 있는 동안 편집기가 멈춘다).
+  const ask = () =>
+    new Promise<"overwrite" | "download" | "cancel">((resolve) => {
+      const doc = win.document
+      const backdrop = doc.createElement("div")
+      Object.assign(backdrop.style, {
+        position: "fixed",
+        inset: "0",
+        background: "rgba(0,0,0,0.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: "30",
+        font: "13px/1.5 system-ui, sans-serif",
+      })
+      const box = doc.createElement("div")
+      box.setAttribute("role", "dialog")
+      Object.assign(box.style, {
+        background: "#2b2b2b",
+        color: "#f2f2f2",
+        padding: "18px 20px",
+        borderRadius: "10px",
+        maxWidth: "420px",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+      })
+      const title = doc.createElement("div")
+      title.textContent = t("file.imageEditor.conflictTitle")
+      Object.assign(title.style, { fontWeight: "600", fontSize: "14px", marginBottom: "6px" })
+      const body = doc.createElement("div")
+      body.textContent = t("file.imageEditor.conflictBody")
+      Object.assign(body.style, { color: "#c8c8c8", marginBottom: "14px" })
+      const row = doc.createElement("div")
+      Object.assign(row.style, { display: "flex", gap: "8px", justifyContent: "flex-end", flexWrap: "wrap" })
+      const done = (choice: "overwrite" | "download" | "cancel") => {
+        backdrop.remove()
+        resolve(choice)
+      }
+      const button = (label: string, choice: "overwrite" | "download" | "cancel", primary = false) => {
+        const b = doc.createElement("button")
+        b.textContent = label
+        Object.assign(b.style, {
+          padding: "6px 12px",
+          borderRadius: "6px",
+          border: primary ? "none" : "1px solid #555",
+          background: primary ? "#c0392b" : "transparent",
+          color: "#f2f2f2",
+          cursor: "pointer",
+          font: "inherit",
+        })
+        b.addEventListener("click", () => done(choice))
+        return b
+      }
+      row.append(
+        button(t("file.imageEditor.conflictCancel"), "cancel"),
+        button(t("file.imageEditor.conflictDownload"), "download"),
+        button(t("file.imageEditor.conflictOverwrite"), "overwrite", true),
+      )
+      box.append(title, body, row)
+      backdrop.append(box)
+      doc.body.appendChild(backdrop)
+    })
+
+  // AI 가 편집하는 동안: 창 전체를 덮어 마우스를 막고, 키 입력도 편집기에 닿기 전에 막는다(보기만).
+  let locked = false
+  let cover: HTMLDivElement | undefined
+  const blockKeys = (event: KeyboardEvent) => {
+    if (!locked) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+  }
+  const showCover = (on: boolean) => {
+    const doc = win.document
+    if (on && (!cover || cover.ownerDocument !== doc)) {
+      cover = doc.createElement("div")
+      cover.setAttribute("role", "status")
+      Object.assign(cover.style, {
+        position: "fixed",
+        inset: "0",
+        background: "rgba(0,0,0,0.35)",
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingTop: "56px",
+        cursor: "not-allowed",
+        zIndex: "20",
+        font: "13px/1.5 system-ui, sans-serif",
+      })
+      const label = doc.createElement("div")
+      label.textContent = t("file.imageEditor.locked")
+      Object.assign(label.style, {
+        background: "#3a3a3a",
+        color: "#f2f2f2",
+        padding: "8px 14px",
+        borderRadius: "999px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+      })
+      cover.append(label)
+      doc.body.appendChild(cover)
+    }
+    if (!on) cover?.remove()
+  }
+
+  // 새 버전이 있는데 사용자가 편집 중이라 바로 바꾸지 않았을 때 띄우는 배너(버튼이 있어 notice 와 따로 둔다).
+  let banner: HTMLDivElement | undefined
+  const showBanner = (onLoad: () => void) => {
+    const doc = win.document
+    banner?.remove()
+    banner = doc.createElement("div")
+    Object.assign(banner.style, {
+      position: "fixed",
+      left: "50%",
+      top: "48px",
+      transform: "translateX(-50%)",
+      background: "#3a3a3a",
+      color: "#f2f2f2",
+      padding: "8px 10px 8px 14px",
+      borderRadius: "8px",
+      display: "flex",
+      gap: "10px",
+      alignItems: "center",
+      boxShadow: "0 4px 16px rgba(0,0,0,0.35)",
+      zIndex: "15",
+      font: "13px/1.5 system-ui, sans-serif",
+    })
+    const text = doc.createElement("span")
+    text.textContent = t("file.imageEditor.remoteChanged")
+    const load = doc.createElement("button")
+    load.textContent = t("file.imageEditor.loadLatest")
+    const close = doc.createElement("button")
+    close.textContent = "×"
+    for (const b of [load, close])
+      Object.assign(b.style, {
+        border: "1px solid #555",
+        background: "transparent",
+        color: "#f2f2f2",
+        borderRadius: "6px",
+        padding: "2px 8px",
+        cursor: "pointer",
+        font: "inherit",
+      })
+    load.addEventListener("click", () => {
+      banner?.remove()
+      onLoad()
+    })
+    close.addEventListener("click", () => banner?.remove())
+    banner.append(text, load, close)
+    doc.body.appendChild(banner)
+  }
+
+  // AI 편집이 끝나 원본이 바뀌었다. 손대지 않은 창은 새 내용으로 다시 열고, 편집 중인 창은 그대로 둔 채 알린다
+  // (저장하면 덮어쓸지 묻는다).
+  const remoteChanged = async () => {
+    const latest = await input.readCurrent().catch(() => undefined)
+    if (!latest || gone || disposed) return
+    if ((await sha256(latest)) === (await expected)) return
+    if (!dirty()) return reload(latest)
+    showBanner(() => void reload(latest))
+  }
+
+  // 새 내용으로 편집기를 처음부터 다시 연다. PhotoCraft 는 문서를 바꿔 끼우는 API 가 없어 페이지를 다시 읽는다.
+  const reload = async (latest: File) => {
+    file = latest
+    expected = sha256(latest)
+    edits = savedAt = 0
+    detach()
+    const previous = win.document
+    win.location.reload()
+    await start(previous)
+    notify(t("file.imageEditor.reloaded"), "success")
+  }
+
   // 원본에 쓰지 못한 편집 결과를 PhotoCraft 원래 방식대로 내려받는다(창 고유 함수로, 가로채지 않게).
   let download: ((blob: Blob, name: string) => void) | undefined
 
@@ -206,24 +399,54 @@ function createSession(
   const save = (produce: () => Promise<Blob>, fallback: { blob: Blob; name: string }) => {
     const at = edits
     saving = saving.then(async () => {
-      try {
-        const image = await produce()
-        await input.onSave(image, await expected)
+      let image: Blob | undefined
+      const written = async (base: string) => {
+        await input.onSave(image!, base)
         // 다음 저장은 방금 쓴 내용 위에서 이어지는 편집이다.
-        expected = sha256(image)
+        expected = sha256(image!)
         if (gone || disposed) return
         savedAt = Math.max(savedAt, at)
         notify(t("file.imageEditor.saved", { name: file.name }), "success")
+      }
+      try {
+        image = await produce()
+        await written(await expected)
       } catch (error) {
         if (gone || disposed) return
+        const detail = reason(error)
+        // AI 가 편집 중이면 저장을 받지 않는다. 편집은 창에 그대로 있으니 끝난 뒤 다시 저장하면 된다.
+        if (detail === LOCKED) {
+          notify(t("file.imageEditor.saveLocked"), "error")
+          return
+        }
+        // 편집을 연 뒤 원본이 다른 곳(AI·다른 사람)에서 바뀌었다: 덮어쓸지 사람에게 묻는다.
+        if (detail === CONFLICT && image) {
+          const choice = await ask()
+          if (choice === "cancel") return
+          if (choice === "overwrite") {
+            try {
+              const current = await input.readCurrent()
+              await written(current ? await sha256(current) : await expected)
+              return
+            } catch (retry) {
+              if (gone || disposed) return
+              const again = reason(retry)
+              download?.(fallback.blob, fallback.name)
+              notify(
+                t("file.imageEditor.saveFailed", { name: fallback.name }) + (again ? ` — ${again}` : ""),
+                "error",
+                true,
+              )
+              return
+            }
+          }
+          download?.(fallback.blob, fallback.name)
+          notify(t("file.imageEditor.saveConflict", { name: fallback.name }), "default", true)
+          return
+        }
         download?.(fallback.blob, fallback.name)
         if (error instanceof LossyOverwrite) {
           notify(t("file.imageEditor.saveLossy", { name: fallback.name, detail: error.message }), "error", true)
-          return
-        }
-        const detail = reason(error)
-        if (detail === CONFLICT) {
-          notify(t("file.imageEditor.saveConflict", { name: fallback.name }), "error", true)
           return
         }
         notify(
@@ -287,13 +510,13 @@ function createSession(
 
   // PhotoCraft 는 파일을 넣는 API 가 없고 열기는 파일 선택창뿐이다. 대신 캔버스에 떨어뜨린 파일을
   // 문서로 여므로(eframe 드래그앤드롭), 앱이 뜬 뒤 그 이미지를 담은 drop 이벤트를 캔버스에 보낸다.
-  const start = async () => {
+  const start = async (previous?: Document) => {
     const started = Date.now()
     const wait = () => new Promise((resolve) => setTimeout(resolve, 100))
     const timedOut = () => Date.now() - started > READY_TIMEOUT_MS
     // 막 연 창은 about:blank 였다가 편집기 페이지로 바뀐다. 그 전에 단 리스너는 문서와 함께 사라지므로
     // 편집기 문서가 생길 때까지 기다린다.
-    while (!win.document.getElementById("photocraft_canvas")) {
+    while (win.document === previous || !win.document.getElementById("photocraft_canvas")) {
       if (disposed || gone) return
       if (timedOut()) throw new Error("PhotoCraft did not load")
       await wait()
@@ -308,11 +531,18 @@ function createSession(
     const canvas = win.document.getElementById("photocraft_canvas")!
     interceptDownloads()
 
-    const touch = () => edits++
+    const touch = () => {
+      if (!locked) edits++
+    }
     canvas.addEventListener("pointerdown", touch)
     win.addEventListener("keydown", touch, true)
     win.addEventListener("beforeunload", onBeforeUnload)
+    win.addEventListener("keydown", blockKeys, true)
+    win.addEventListener("keyup", blockKeys, true)
+    if (locked) showCover(true)
     restore.push(() => {
+      win.removeEventListener("keydown", blockKeys, true)
+      win.removeEventListener("keyup", blockKeys, true)
       canvas.removeEventListener("pointerdown", touch)
       win.removeEventListener("keydown", touch, true)
       win.removeEventListener("beforeunload", onBeforeUnload)
@@ -339,7 +569,15 @@ function createSession(
   }
 
   return {
-    start,
+    start: () => start(),
+    setLocked(value: boolean) {
+      if (gone || disposed || value === locked) return
+      locked = value
+      try {
+        showCover(value)
+      } catch {}
+      if (!value) void remoteChanged()
+    },
     notify: (text: string, variant: "default" | "success" | "error", sticky: boolean) => {
       try {
         notify(text, variant, sticky)

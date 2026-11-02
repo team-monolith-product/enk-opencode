@@ -425,14 +425,16 @@ export function FileTabContent(props: { tab: string }) {
     scrollSync.queueRestore()
   })
 
-  // 파일 탭의 이미지를 PhotoCraft 편집기로 넘길 File. 서버가 이미지를 base64 로 주므로 바이트로 되돌린다.
-  const imageFile = createMemo(() => {
-    const p = path()
-    const content = state()?.content
-    if (!p || mediaKindFromPath(p) !== "image" || !canEditImage(p)) return
+  // 서버가 이미지를 base64 로 주므로 바이트로 되돌려 PhotoCraft 편집기에 넘길 File 로 만든다.
+  const toImageFile = (p: string, content: { content?: string; encoding?: string; mimeType?: string } | undefined) => {
     if (content?.encoding !== "base64" || !content.content) return
     const bytes = Uint8Array.from(atob(content.content), (char) => char.charCodeAt(0))
     return new File([bytes], p.split("/").pop() ?? p, { type: content.mimeType ?? "" })
+  }
+  const imageFile = createMemo(() => {
+    const p = path()
+    if (!p || mediaKindFromPath(p) !== "image" || !canEditImage(p)) return
+    return toImageFile(p, state()?.content)
   })
 
   // 편집기에서 저장한 이미지로 원본을 덮어쓰고, 탭이 새 바이트를 보이게 다시 읽는다(파일 감시 이벤트를
@@ -466,6 +468,14 @@ export function FileTabContent(props: { tab: string }) {
                 file: image(),
                 onSave: (edited, expected) => saveImage(target, edited, expected),
                 onError: () => showToast({ variant: "error", title: language.t("file.imageEditor.failed") }),
+                readCurrent: () =>
+                  sdk.client.file.read({ path: target }).then((x) => toImageFile(target, x.data ?? undefined)),
+                // AI 가 이 이미지를 편집하는 동안(image_edit) 편집 창은 보기만 된다.
+                watchLock: (listener) =>
+                  sdk.event.on("image.edit.lock", (event) => {
+                    if (event.properties.path === target) listener(event.properties.locked)
+                  }),
+                isLocked: () => sdk.client.file.lock().then((x) => (x.data ?? []).some((lock) => lock.path === target)),
                 t: (key, params) => language.t(key as Parameters<typeof language.t>[0], params),
               })
               if (!opened) showToast({ variant: "error", title: language.t("file.imageEditor.popupBlocked") })
