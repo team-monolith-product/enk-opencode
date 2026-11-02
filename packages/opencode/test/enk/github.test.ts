@@ -672,6 +672,25 @@ describe("GitHub.create", () => {
     expect(await origin.files()).toEqual([".gitignore", "index.html"])
     expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
   })
+
+  test("a GitHub App link pushes even though the installation token reports no push permission", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: false } }))
+
+    const status = await GitHub.select(work, { owner: "octocat", name: "jitda-app" })
+
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+    expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
+  })
 })
 
 describe("GitHub.push", () => {

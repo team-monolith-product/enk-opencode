@@ -410,7 +410,7 @@ export namespace GitHub {
       "GET",
       `/repos/${encodeURIComponent(hit.repo.owner)}/${encodeURIComponent(hit.repo.name)}`,
     )
-    if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
+    if (!hit.app && remote.permissions?.push === false) throw new Failure("forbidden", 409)
     const gitdir = path.join(Global.Path.data, "github", Hash.fast(dir))
     const result = await serial(gitdir, async () => {
       await ignore(dir).catch((err) => log.error("gitignore skipped", { error: String(err) }))
