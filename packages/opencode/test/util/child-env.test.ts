@@ -36,7 +36,8 @@ describe("ChildEnv", () => {
     expect(env.LC_ALL).toBe("ko_KR.UTF-8")
     expect(env.JAVA_HOME).toBe("/usr/lib/jvm")
     expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe("/opt/playwright-browsers")
-    // 프로덕션 이미지의 브라우저 MCP(agent-browser)가 이 값 없이는 이미지에 깔린 Chrome 을 못 찾는다
+    // 에이전트 셸에서 도는 agent-browser 가 이 값 없이는 이미지에 깔린 Chrome 을 못 찾는다
+    // (--no-sandbox 를 넘기는 AGENT_BROWSER_ARGS 도 같은 접두사로 통과한다)
     expect(env.AGENT_BROWSER_EXECUTABLE_PATH).toBe("/opt/agent-browser/chrome")
     // 접두사로 통과해도 시크릿 이름은 지운다
     expect(env.AGENT_BROWSER_ENCRYPTION_KEY).toBeUndefined()

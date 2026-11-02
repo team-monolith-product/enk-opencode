@@ -28,12 +28,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && git config --system core.excludesFile /etc/opencode/.gitignore
 
 ARG AGENT_BROWSER_VERSION=0.39.4
-# 에이전트용 브라우저 도구(agent-browser). 0.x 라 자주 바뀌므로 버전을 고정한다.
+# 에이전트용 브라우저 도구(agent-browser). 에이전트는 MCP 가 아니라 bash 명령으로 쓴다 — MCP 로 붙이면
+# 도구 설명이 요청마다 약 17만 자 실린다. 0.x 라 자주 바뀌므로 버전을 고정한다.
 # agent-browser install 은 $HOME/.agent-browser/browsers/chrome-<버전> 에 Chrome for Testing 을 받는다.
 # 빌드는 root 라 그대로 두면 /root 아래에 깔려 런타임 사용자(jovyan)가 못 찾는다. HOME 을 /opt 로 돌려
 # 설치하고, 버전이 바뀌어도 경로가 같도록 실행파일을 고정 경로로 링크해 넘긴다.
 # --with-deps 가 apt 로 시스템 라이브러리를 깔 수 있도록 목록을 먼저 받아 둔다(위 단계에서 지웠다).
-ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/agent-browser/chrome
+#   AGENT_BROWSER_ARGS: 컨테이너 안에서는 Chrome 자체 sandbox 가 서지 않는다.
+#   AGENT_BROWSER_IDLE_TIMEOUT_MS: 에이전트가 close 를 빠뜨려도 5분 뒤 데몬과 Chrome 이 내려간다.
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/agent-browser/chrome \
+    AGENT_BROWSER_ARGS=--no-sandbox \
+    AGENT_BROWSER_IDLE_TIMEOUT_MS=300000
 RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION} \
     && apt-get update \
     && HOME=/opt/agent-browser agent-browser install --with-deps \
@@ -58,7 +63,8 @@ RUN chmod -R 777 ${HOME}
 
 COPY --from=build /app/packages/opencode/dist/opencode-linux-x64/bin/opencode /usr/local/bin/opencode
 COPY docker/entrypoint.sh /usr/local/bin/opencode-entrypoint.sh
-RUN chmod 755 /usr/local/bin/opencode-entrypoint.sh
+COPY docker/browser-check.sh /usr/local/bin/browser-check
+RUN chmod 755 /usr/local/bin/opencode-entrypoint.sh /usr/local/bin/browser-check
 COPY docker/AGENTS.md /etc/opencode/AGENTS.md
 COPY docker/.gitignore /etc/opencode/.gitignore
 COPY docker/opencode.jsonc /etc/opencode/opencode.jsonc
