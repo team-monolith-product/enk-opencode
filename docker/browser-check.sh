@@ -3,7 +3,7 @@
 #
 #   browser-check [-s] [URL] [대기ms]
 #     URL     기본 http://localhost:3000
-#     대기ms  접속 뒤 콘솔/에러가 쌓이길 기다리는 시간, 기본 1000
+#     대기ms  접속(load) 뒤 늦게 나는 콘솔/에러를 기다리는 시간, 기본 300
 #     -s      화면 구조(클릭·입력 가능한 요소와 ref)도 함께 출력
 #
 # 접속부터 조회까지 agent-browser batch 한 번으로 끝낸다. 에이전트 셸이 격리(bwrap --unshare-pid)
@@ -21,7 +21,7 @@ if [ "${1:-}" = "-s" ]; then
   shift
 fi
 url="${1:-http://localhost:3000}"
-wait_ms="${2:-1000}"
+wait_ms="${2:-300}"
 
 dir="${TMPDIR:-/tmp}/browser-check"
 mkdir -p "$dir"

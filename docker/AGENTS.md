@@ -262,7 +262,7 @@ browser-check http://localhost:3000
 옵션:
 
 - `browser-check -s http://localhost:3000` — 화면 구조(버튼·입력칸 등)도 함께 출력합니다.
-- `browser-check http://localhost:3000 3000` — 접속 뒤 3초 기다립니다(기본 1초). 늦게 나는 에러를 볼 때 씁니다.
+- `browser-check http://localhost:3000 3000` — 접속 뒤 3초 기다립니다(기본 0.3초). 늦게 나는 에러를 볼 때 씁니다.
 
 ### 클릭·입력이 필요할 때: `agent-browser batch`
 
