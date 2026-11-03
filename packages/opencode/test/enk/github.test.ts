@@ -707,7 +707,7 @@ describe("GitHub.create", () => {
     await GitHub.select(work, { owner: "octocat", name: "jitda-app" })
 
     expect(await origin.files()).toEqual([".gitignore", "index.html"])
-    expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String), repo_private: true })
+    expect(rails.reports).toContainEqual({ repo_private: true })
   })
 
   test("a push without changes still reports a visibility change", async () => {

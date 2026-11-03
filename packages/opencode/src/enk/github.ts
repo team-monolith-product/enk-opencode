@@ -411,6 +411,9 @@ export namespace GitHub {
       `/repos/${encodeURIComponent(hit.repo.owner)}/${encodeURIComponent(hit.repo.name)}`,
     )
     if (!hit.app && remote.permissions?.push === false) throw new Failure("forbidden", 409)
+    if (remote.private !== (hit.repo.private ?? false)) {
+      await report({ repo_private: remote.private }).catch(() => undefined)
+    }
     const gitdir = path.join(Global.Path.data, "github", Hash.fast(dir))
     const result = await serial(gitdir, async () => {
       await ignore(dir).catch((err) => log.error("gitignore skipped", { error: String(err) }))
@@ -428,12 +431,9 @@ export namespace GitHub {
       })
     })
     failed.delete(dir)
-    const visibility = remote.private !== (hit.repo.private ?? false)
     if (result.sha) {
-      await report({ pushed_sha: result.sha, pushed_by: null, repo_private: remote.private }).catch(() => undefined)
+      await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
       log.info("pushed", { sha: result.sha })
-    } else if (visibility) {
-      await report({ repo_private: remote.private }).catch(() => undefined)
     }
     return { ...result, url: result.sha ? `${hit.repo.url}/commit/${result.sha}` : hit.repo.url }
   }
