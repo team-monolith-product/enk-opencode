@@ -12,6 +12,7 @@ import { readonlyViewer } from "@/context/parent-params"
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
+import { connectUrlFor } from "@/utils/connect-url"
 import { promptLocale } from "@/utils/prompt-locale"
 import { getRelativeTime } from "@/utils/time"
 import {
@@ -117,7 +118,7 @@ export function DialogGitHub() {
     const url = state.status?.connectUrl
     if (!url || spectator) return
     setState("waiting", true)
-    window.open(url, "_blank", "noopener")
+    window.open(connectUrlFor(url), "_blank", "noopener")
   }
 
   const run = async <T,>(fn: () => Promise<T>) => {
