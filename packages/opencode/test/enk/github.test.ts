@@ -734,6 +734,13 @@ describe("GitHub.create", () => {
 })
 
 describe("GitHub.push", () => {
+  test("a linked team whose token could not be issued fails as a remote error", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve({ enabled: true, connected: true, login: "octocat", app: true })
+
+    await expect(GitHub.push(tmp.path, { message: "x" })).rejects.toMatchObject({ code: "remote" })
+  })
+
   test("pushing without a link is refused", async () => {
     await using tmp = await tmpdir()
 

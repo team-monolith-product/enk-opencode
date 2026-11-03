@@ -239,7 +239,8 @@ export namespace GitHub {
 
   async function linked() {
     const hit = await link()
-    if (!hit?.connected || !hit.token) throw new Failure("unlinked", 409)
+    if (!hit?.connected) throw new Failure("unlinked", 409)
+    if (!hit.token) throw new Failure("remote", 502)
     return hit
   }
 
