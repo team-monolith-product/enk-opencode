@@ -33,7 +33,9 @@ ARG AGENT_BROWSER_VERSION=0.39.4
 # agent-browser install 은 $HOME/.agent-browser/browsers/chrome-<버전> 에 Chrome for Testing 을 받는다.
 # 빌드는 root 라 그대로 두면 /root 아래에 깔려 런타임 사용자(jovyan)가 못 찾는다. HOME 을 /opt 로 돌려
 # 설치하고, 버전이 바뀌어도 경로가 같도록 실행파일을 고정 경로로 링크해 넘긴다.
-# --with-deps 가 apt 로 시스템 라이브러리를 깔 수 있도록 목록을 먼저 받아 둔다(위 단계에서 지웠다).
+# Chrome 이 쓰는 시스템 라이브러리·글꼴은 직접 apt 로 깐다. `install --with-deps` 는 `sudo apt-get` 을
+# 불러서 sudo 가 없는 이 이미지에서는 실패한다. 목록은 0.39.4 의 --with-deps 가 요구하는 그대로다
+# (fonts-noto-cjk 는 한글 화면 스크린샷이 네모로 깨지지 않게 한다).
 #   AGENT_BROWSER_ARGS: 컨테이너 안에서는 Chrome 자체 sandbox 가 서지 않는다.
 #   AGENT_BROWSER_IDLE_TIMEOUT_MS: 에이전트가 close 를 빠뜨려도 5분 뒤 데몬과 Chrome 이 내려간다.
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/agent-browser/chrome \
@@ -41,7 +43,13 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/agent-browser/chrome \
     AGENT_BROWSER_IDLE_TIMEOUT_MS=300000
 RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION} \
     && apt-get update \
-    && HOME=/opt/agent-browser agent-browser install --with-deps \
+    && apt-get install -y --no-install-recommends \
+       fonts-freefont-ttf fonts-noto-cjk fonts-noto-color-emoji libasound2 libatk-bridge2.0-0 libatk1.0-0 \
+       libatspi2.0-0 libcairo-gobject2 libcairo2 libcups2 libdbus-1-3 libdrm2 libfontconfig1 libfreetype6 \
+       libgbm1 libgdk-pixbuf-2.0-0 libgtk-3-0 libnspr4 libnss3 libnss3-tools libpango-1.0-0 \
+       libpangocairo-1.0-0 libx11-6 libx11-xcb1 libxcb-shm0 libxcb1 libxcomposite1 libxcursor1 \
+       libxdamage1 libxext6 libxfixes3 libxi6 libxkbcommon0 libxrandr2 libxrender1 libxshmfence1 \
+    && HOME=/opt/agent-browser agent-browser install \
     && CHROME=$(find /opt/agent-browser/.agent-browser/browsers -type f -name chrome -perm -u+x | head -n 1) \
     && test -n "${CHROME}" \
     && ln -s "${CHROME}" "${AGENT_BROWSER_EXECUTABLE_PATH}" \

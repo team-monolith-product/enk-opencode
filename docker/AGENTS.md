@@ -264,23 +264,21 @@ browser-check http://localhost:3000
 - `browser-check -s http://localhost:3000` — 화면 구조(버튼·입력칸 등)도 함께 출력합니다.
 - `browser-check http://localhost:3000 3000` — 접속 뒤 3초 기다립니다(기본 0.3초). 늦게 나는 에러를 볼 때 씁니다.
 
-### 클릭·입력이 필요할 때: `agent-browser batch`
+### 클릭·입력이 필요할 때: `browser-check … -- 동작`
 
-버튼을 누른 뒤에 생기는 문제는 **접속부터 확인까지 한 번의 명령 안에서** 끝내세요. 명령이 끝나면 브라우저가 닫힐 수 있어서, 나눠서 부르면 앞의 상태(입력값, 콘솔 기록)가 사라집니다.
+버튼을 누른 뒤에 생기는 문제는 `--` 뒤에 동작을 적어 **접속부터 확인까지 한 번의 명령으로** 보세요. 명령이 끝나면 브라우저가 닫힐 수 있어서, 나눠서 부르면 앞의 상태(입력값, 콘솔 기록)가 사라집니다.
 
 ```bash
-agent-browser batch --json \
-  "open http://localhost:3000" \
+browser-check http://localhost:3000 -- \
   "find placeholder 이메일 fill test@example.com" \
   "find role button click --name '로그인'" \
-  "wait 1000" \
-  "errors" "console" "get url" \
-  "screenshot /tmp/after.png" \
-  "close"
+  "get url"
 ```
 
-- 요소는 `find role|text|label|placeholder <값> [click|fill <글자>]` 나 CSS 선택자(`click #submit`)로 고릅니다. 이름에 띄어쓰기가 있으면 작은따옴표로 감쌉니다.
-- `@e1` 같은 ref 는 그 ref 를 얻은 같은 batch 안에서만 맞습니다.
-- `errors` 는 반드시 `--json` 으로 보세요. 텍스트 출력에서는 잡힌 에러가 빈 줄로 보이는 버그가 있습니다.
-- 마지막에 `"close"` 를 넣어 브라우저를 닫습니다.
+접속 → 동작을 차례로 실행 → 0.3초 대기 → 에러·콘솔·실패한 요청·스크린샷 순서로 돌고, `## 동작` 에 각 동작의 결과(또는 실패 이유)가 나옵니다.
+
+- 요소는 `find role|text|label|placeholder <값> [click|fill <글자>]` 나 CSS 선택자(`click #submit`, `fill #email a@b.c`)로 고릅니다. 이름에 띄어쓰기가 있으면 작은따옴표로 감쌉니다.
+- 값을 읽으려면 `get text <선택자>`, `get url`, `get value <선택자>` 를 동작에 넣습니다.
+- 화면이 바뀌는 데 오래 걸리면 동작 사이에 `"wait 1000"` 을 넣습니다.
+- `agent-browser` 를 직접 부를 때 `errors` 의 텍스트 출력은 잡힌 에러가 빈 줄로 보이는 버그가 있습니다. 에러는 `browser-check` 로 보세요.
 - `agent-browser install`, `upgrade`, `plugin`, `chat` 등은 쓰지 않습니다(막혀 있습니다). 브라우저는 이미 설치돼 있습니다.
