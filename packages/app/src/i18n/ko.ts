@@ -132,6 +132,7 @@ export const dict = {
   "github.repo.push": "이 저장소에 올리기",
   "github.repo.new": "GitHub에서 새 저장소 만들기",
   "github.repo.reload": "목록 다시 불러오기",
+  "github.repo.installations": "GitHub 앱 설치 설정 열기",
   "github.repo.new.hint": "만든 뒤 목록을 다시 불러오세요. 설치할 때 \"선택한 저장소만\"을 골랐다면 GitHub 앱 설치 설정에서 새 저장소를 추가해야 보여요.",
   "github.repo.empty": "올릴 수 있는 저장소가 없어요. GitHub에서 저장소를 만든 뒤 목록을 다시 불러오세요.",
   "github.repo.private": "비공개",

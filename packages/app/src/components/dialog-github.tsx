@@ -27,6 +27,7 @@ import {
 
 const NAME = /^[A-Za-z0-9._-]{1,100}$/
 const NEW_REPOSITORY_URL = "https://github.com/new?name=jitda-project"
+const INSTALLATIONS_URL = "https://github.com/settings/installations"
 
 const ERRORS = {
   disabled: "github.error.disabled",
@@ -307,6 +308,9 @@ export function DialogGitHub() {
                 <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <Link class="github-link text-12-regular" href={NEW_REPOSITORY_URL}>
                     {language.t("github.repo.new")}
+                  </Link>
+                  <Link class="github-link text-12-regular" href={INSTALLATIONS_URL}>
+                    {language.t("github.repo.installations")}
                   </Link>
                   <button type="button" class="github-link text-12-regular" onClick={reloadRepos}>
                     {language.t("github.repo.reload")}

@@ -136,6 +136,7 @@ export const dict = {
   "github.repo.push": "Push to this repository",
   "github.repo.new": "Create a new repository on GitHub",
   "github.repo.reload": "Reload list",
+  "github.repo.installations": "Open the GitHub app installation settings",
   "github.repo.new.hint": "Reload the list after creating it. If you chose \"Only select repositories\" when installing, add the new repository in the GitHub app installation settings first.",
   "github.repo.empty": "No repository to push to. Create one on GitHub, then reload the list.",
   "github.repo.private": "Private",
