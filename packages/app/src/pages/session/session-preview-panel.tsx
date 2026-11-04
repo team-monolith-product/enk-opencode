@@ -788,6 +788,7 @@ export function SessionBrowserChrome(props: {
             onMouseDown={(e) => {
               if (!props.editablePath || previewBlocked()) return
               if (e.target === inputEl) return
+              if (e.target instanceof HTMLElement && e.target.dataset.component === "preview-host") return
               e.preventDefault()
               inputEl?.focus()
             }}
@@ -796,7 +797,11 @@ export function SessionBrowserChrome(props: {
               <Show when={props.host}>
                 {/* 호스트는 경로보다 우선(shrink-0)이지만 pill 을 넘어서면 말줄임 —
                     max-w-full 이 없으면 shrink-0 때문에 truncate 가 영영 발동하지 않는다. */}
-                <span class="shrink-0 max-w-full truncate" style={addressTextStyle}>
+                <span
+                  data-component="preview-host"
+                  class="shrink-0 max-w-full truncate select-text"
+                  style={addressTextStyle}
+                >
                   {props.host}
                 </span>
               </Show>

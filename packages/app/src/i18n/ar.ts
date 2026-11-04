@@ -849,4 +849,7 @@ export const dict = {
   "error.childStore.persistedProjectIconCreateFailed": "فشل إنشاء أيقونة المشروع الدائمة",
   "error.childStore.storeCreateFailed": "فشل إنشاء المخزن",
   "terminal.connectionLost.abnormalClose": "تم إغلاق WebSocket بشكل غير طبيعي: {{code}}",
+  "github.push.now": "ارفع الآن",
+  "github.push.done": "تم الرفع إلى GitHub",
+  "github.push.nothing": "لا توجد تغييرات جديدة للرفع",
 }

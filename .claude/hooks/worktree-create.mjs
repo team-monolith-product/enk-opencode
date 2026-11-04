@@ -242,7 +242,7 @@ function copyIgnoredDir(mainRepo, worktree, dirName, skipDirs = []) {
 /**
  * 메인 저장소의 `.claude` 로컬 설정을 워크트리로 복사한다.
  * `.claude/**` 는 (settings.json·hooks 를 빼고) gitignore 라 워크트리 체크아웃에
- * 따라오지 않으므로, CLAUDE.md 같은 로컬 설정을 직접 복사해야 한다.
+ * 따라오지 않으므로, CLAUDE.md·skills/ 같은 로컬 설정을 직접 복사해야 한다.
  * - `worktrees` 디렉터리는 다른 워크트리들이라 건너뛴다(순환/과다 복사 방지).
  * - 대상에 이미 있는 파일(tracked settings.json·hooks 등)은 건너뛴다.
  */

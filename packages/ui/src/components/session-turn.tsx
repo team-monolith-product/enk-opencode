@@ -1,3 +1,4 @@
+import { diffContents } from "../util/diff-contents"
 import { AssistantMessage, type FileDiff, Message as MessageType, Part as PartType } from "@opencode-ai/sdk/v2/client"
 import type { SessionStatus } from "@opencode-ai/sdk/v2"
 import { useData } from "../context"
@@ -269,14 +270,12 @@ export function SessionTurn(
       if (!msg) return emptyAssistant
 
       const messages = allMessages() ?? emptyMessages
-      const index = messageIndex()
-      if (index < 0) return emptyAssistant
+      if (messageIndex() < 0) return emptyAssistant
 
       const result: AssistantMessage[] = []
-      for (let i = index + 1; i < messages.length; i++) {
+      for (let i = 0; i < messages.length; i++) {
         const item = messages[i]
         if (!item) continue
-        if (item.role === "user") break
         if (item.role === "assistant" && item.parentID === msg.id) result.push(item as AssistantMessage)
       }
       return result
@@ -479,6 +478,7 @@ export function SessionTurn(
                           >
                             <For each={diffs()}>
                               {(diff) => {
+                                const contents = createMemo(() => diffContents(diff))
                                 const active = createMemo(() => expanded().includes(diff.file))
                                 const [visible, setVisible] = createSignal(false)
 
@@ -530,8 +530,8 @@ export function SessionTurn(
                                           <Dynamic
                                             component={fileComponent}
                                             mode="diff"
-                                            before={{ name: diff.file, contents: diff.before }}
-                                            after={{ name: diff.file, contents: diff.after }}
+                                            before={{ name: diff.file, contents: contents().before }}
+                                            after={{ name: diff.file, contents: contents().after }}
                                           />
                                         </div>
                                       </Show>

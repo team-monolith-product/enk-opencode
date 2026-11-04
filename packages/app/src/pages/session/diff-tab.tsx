@@ -7,6 +7,7 @@ import type { SessionReviewCommentActions } from "@opencode-ai/ui/session-review
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import type { FileDiff } from "@opencode-ai/sdk/v2"
+import { diffContents } from "@opencode-ai/ui/util/diff-contents"
 import { createEffect, createMemo, Match, on, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
@@ -31,8 +32,9 @@ function selectionSide(range: SelectedLineRange) {
 
 function selectionPreview(diff: FileDiff, range: SelectedLineRange) {
   const side = selectionSide(range)
-  const contents = side === "deletions" ? diff.before : diff.after
-  if (typeof contents !== "string" || contents.length === 0) return undefined
+  const text = diffContents(diff)
+  const contents = side === "deletions" ? text.before : text.after
+  if (contents.length === 0) return undefined
   return previewSelectedLines(contents, range)
 }
 
@@ -236,14 +238,9 @@ export function DiffTabContent(props: { tab: string }) {
       .catch(() => undefined)
   }
 
-  const beforeText = () => {
-    const diff = item()
-    return typeof diff?.before === "string" ? diff.before : ""
-  }
-  const afterText = () => {
-    const diff = item()
-    return typeof diff?.after === "string" ? diff.after : ""
-  }
+  const contents = createMemo(() => diffContents(item()))
+  const beforeText = () => contents().before
+  const afterText = () => contents().after
   const changedLines = () => (item()?.additions ?? 0) + (item()?.deletions ?? 0)
   const mediaKind = createMemo(() => {
     const p = path()
@@ -318,8 +315,8 @@ export function DiffTabContent(props: { tab: string }) {
                     media={{
                       mode: "auto",
                       path: path(),
-                      before: diff().before,
-                      after: diff().after,
+                      before: beforeText(),
+                      after: afterText(),
                       readFile,
                     }}
                     class="select-text"

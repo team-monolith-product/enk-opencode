@@ -51,7 +51,7 @@ let pending: Array<() => unknown> = []
 
 // ── 디버깅 로깅 ──
 // 브릿지 버전 — 부팅 시 콘솔에 남겨 배포된 번들을 식별한다. 브릿지 변경 시 올린다.
-const BRIDGE_VERSION = "1.0.0"
+const BRIDGE_VERSION = "1.1.0"
 // installConsoleForwarding 가 console.* 를 오버라이드해 부모로 포워딩하므로, 브릿지 내부 디버그 로깅은
 // 원본 console 을 캡처해 쓴다(안 그러면 console.debug → onConsole 전송 → 또 console.debug 로 무한 재귀).
 const rawConsole = {
@@ -229,23 +229,41 @@ function installConsoleForwarding() {
     const original = console[level]?.bind(console)
     console[level] = (...args: unknown[]) => {
       original?.(...args)
-      send("onConsole", { level, args: args.map(safeStringify), timestamp: Date.now() })
+      const timestamp = Date.now()
+      send("onConsole", { level, args: args.map(safeStringify), timestamp })
+      if (level !== "error") return
+      const error = args.find((arg): arg is Error => arg instanceof Error)
+      send("onError", { message: args.map(safeStringify).join(" "), stack: error?.stack, timestamp })
     }
   }
 }
 
 function installErrorForwarding() {
-  window.addEventListener("error", (e) => {
-    const entry: ErrorEntry = {
-      message: e.message,
-      stack: e.error?.stack,
-      source: e.filename,
-      line: e.lineno,
-      column: e.colno,
-      timestamp: Date.now(),
-    }
-    send("onError", entry)
-  })
+  window.addEventListener(
+    "error",
+    (e) => {
+      const target = e.target
+      if (target instanceof Element) {
+        const url = target.getAttribute("src") ?? target.getAttribute("href") ?? ""
+        send("onError", {
+          message: `Failed to load <${target.tagName.toLowerCase()}>: ${url}`,
+          source: (target as HTMLScriptElement).src || (target as HTMLLinkElement).href || url,
+          timestamp: Date.now(),
+        })
+        return
+      }
+      const entry: ErrorEntry = {
+        message: e.message,
+        stack: e.error?.stack,
+        source: e.filename,
+        line: e.lineno,
+        column: e.colno,
+        timestamp: Date.now(),
+      }
+      send("onError", entry)
+    },
+    true,
+  )
   window.addEventListener("unhandledrejection", (e) => {
     const reason = e.reason
     send("onError", {
@@ -325,6 +343,7 @@ function installLocationForwarding() {
 
 function safeStringify(value: unknown): string {
   if (typeof value === "string") return value
+  if (value instanceof Error) return `${value.name}: ${value.message}`
   try {
     return JSON.stringify(value)
   } catch {

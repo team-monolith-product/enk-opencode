@@ -14,7 +14,7 @@ const MAX_LOG = 200
 /**
  * 부모(앱)측 미리보기 브릿지 — iframe 안의 결과물(자식 브릿지)과 penpal 로 연결한다.
  *
- * - `attach(iframe)` 를 iframe ref 에 연결하면 매 `load` 마다 (재)연결한다(리로드/네비게이션 대응).
+ * - `attach(iframe)` 를 iframe ref 에 연결하면 `load` 마다 기존 연결이 살아있는지 ping 으로 확인하고, 응답이 없을 때만 재연결한다.
  * - penpal 이 핸드셰이크·오리진 검증(allowedOrigins)·요청/응답 상관을 처리하므로
  *   부모는 `child()` 핸들로 `child().reload()` 처럼 자식 메서드를 promise 로 호출하면 된다.
  * - 자식이 보내는 console/error/요소선택 이벤트는 시그널로 노출한다.
@@ -31,9 +31,12 @@ export function createPreviewBridge(opts: { origin: () => string | undefined }) 
   // penpal 핸드셰이크 timeout(미지정 시 실패해도 reject 안 됨) + 끊긴 동안 재연결 간격.
   const HANDSHAKE_TIMEOUT_MS = 5000
   const RECONNECT_INTERVAL_MS = 3000
+  const PING_INTERVAL_MS = 250
+  const PING_ATTEMPTS = 6
 
   let connection: Connection<ChildMethods> | undefined
   let retryTimer: ReturnType<typeof setTimeout> | undefined
+  let pingTimer: ReturnType<typeof setTimeout> | undefined
   let currentIframe: HTMLIFrameElement | undefined
 
   // 부모가 자식에 노출하는 메서드 — 자식이 이벤트 발생 시 호출.
@@ -97,11 +100,27 @@ export function createPreviewBridge(opts: { origin: () => string | undefined }) 
       currentIframe = undefined
       return teardown()
     }
-    const onLoad = () => linkConnection(iframe)
+    const onLoad = () => {
+      clearTimeout(pingTimer)
+      const current = connection
+      if (!current) return linkConnection(iframe)
+      let attempts = 0
+      const probe = () => {
+        if (connection !== current) return
+        if (attempts++ >= PING_ATTEMPTS) return linkConnection(iframe)
+        const timer = setTimeout(probe, PING_INTERVAL_MS)
+        pingTimer = timer
+        current.promise
+          .then((remote) => remote.ping())
+          .then(() => clearTimeout(timer), () => {})
+      }
+      probe()
+    }
     iframe.addEventListener("load", onLoad)
     // 이미 로드된 경우(캐시) 즉시 시도.
     if (iframe.contentWindow) linkConnection(iframe)
     onCleanup(() => {
+      clearTimeout(pingTimer)
       iframe.removeEventListener("load", onLoad)
       teardown()
     })

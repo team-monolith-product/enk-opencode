@@ -169,8 +169,7 @@ export namespace AiUsage {
     }
   }
 
-  function enqueue(record: Attributes) {
-    const key = idempotencyKey(record.message_id, record.step_index, record.phase)
+  function enqueue(record: Attributes, key = idempotencyKey(record.message_id, record.step_index, record.phase)) {
     if (sent.has(key)) return // already enqueued — dedupe retries / re-renders
     if (pending.length >= MAX_PENDING) {
       // Overflow: drop the record WITHOUT registering its key. Marking it "sent" here would
@@ -209,6 +208,44 @@ export namespace AiUsage {
     if (info.role !== "assistant") return
     if (!info.path?.cwd) return
     enqueue(buildStepAttributes(info, step))
+  }
+
+  export type ToolUsage = {
+    cwd: string
+    messageID: string
+    callID: string
+    modelID: string
+    tokens: { input: number; output: number }
+    cost: number
+    at?: number
+  }
+
+  // Tools that call a paid API outside the model loop (generate_image) bill under their own model_id.
+  // step_index -2 keeps them apart from model steps; the call id makes each tool call its own key.
+  export function buildToolAttributes(usage: ToolUsage): Attributes {
+    return {
+      mount_path: usage.cwd,
+      model_id: usage.modelID,
+      message_id: usage.messageID,
+      step_index: -2,
+      phase: "step",
+      tokens: usage.tokens.input + usage.tokens.output,
+      input: usage.tokens.input,
+      output: usage.tokens.output,
+      reasoning: 0,
+      cache_read: 0,
+      cache_write: 0,
+      cost: usage.cost,
+      used_at: new Date(usage.at ?? Date.now()).toISOString(),
+    }
+  }
+
+  export function reportTool(usage: ToolUsage) {
+    if (!enabled()) {
+      warnDisabledOnce()
+      return
+    }
+    enqueue(buildToolAttributes(usage), `${usage.messageID}:${usage.callID}:tool`)
   }
 
   /**

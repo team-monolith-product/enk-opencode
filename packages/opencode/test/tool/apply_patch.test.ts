@@ -5,6 +5,7 @@ import { ApplyPatchTool } from "../../src/tool/apply_patch"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
+import { diffContents } from "../../../ui/src/util/diff-contents"
 
 const baseCtx = {
   sessionID: SessionID.make("ses_test"),
@@ -28,8 +29,9 @@ type AskInput = {
       relativePath: string
       type: "add" | "update" | "delete" | "move"
       diff: string
-      before: string
-      after: string
+      patch?: string
+      before?: string
+      after?: string
       additions: number
       deletions: number
       movePath?: string
@@ -112,17 +114,49 @@ describe("tool.apply_patch freeform", () => {
         const addFile = permissionCall.metadata.files.find((f) => f.type === "add")
         expect(addFile).toBeDefined()
         expect(addFile!.relativePath).toBe("nested/new.txt")
-        expect(addFile!.after).toBe("created\n")
+        expect(diffContents(addFile!).after).toBe("created\n")
 
         const updateFile = permissionCall.metadata.files.find((f) => f.type === "update")
         expect(updateFile).toBeDefined()
-        expect(updateFile!.before).toContain("line2")
-        expect(updateFile!.after).toContain("changed")
+        expect(diffContents(updateFile!).before).toContain("line2")
+        expect(diffContents(updateFile!).after).toContain("changed")
 
         const added = await fs.readFile(path.join(fixture.path, "nested", "new.txt"), "utf-8")
         expect(added).toBe("created\n")
         expect(await fs.readFile(modifyPath, "utf-8")).toBe("line1\nchanged\n")
         await expect(fs.readFile(deletePath, "utf-8")).rejects.toThrow()
+      },
+    })
+  })
+
+  test("keeps indentation and shows pure moves through stored patches", async () => {
+    await using fixture = await tmpdir({ git: true })
+    const { ctx, calls } = makeCtx()
+
+    await Instance.provide({
+      directory: fixture.path,
+      fn: async () => {
+        await fs.writeFile(path.join(fixture.path, "plain.txt"), "plain\n", "utf-8")
+        await fs.writeFile(path.join(fixture.path, "same.txt"), "same\ncontent\n", "utf-8")
+        const patchText =
+          "*** Begin Patch\n*** Add File: indented.txt\n+    def a():\n+        return 1\n*** Add File: flat.txt\n+flat\n*** Delete File: plain.txt\n*** Update File: same.txt\n*** Move to: moved.txt\n@@\n same\n content\n*** End Patch"
+        await execute({ patchText }, ctx)
+
+        const files = calls[0].metadata.files
+        const indented = files.find((f) => f.relativePath === "indented.txt")!
+        expect(indented.patch).toBeDefined()
+        expect(diffContents(indented).after).toBe("    def a():\n        return 1\n")
+
+        const flat = files.find((f) => f.relativePath === "flat.txt")!
+        expect(flat.patch).toBeUndefined()
+        expect(diffContents(flat).after).toBe("flat\n")
+
+        const deleted = files.find((f) => f.type === "delete")!
+        expect(deleted.patch).toBeUndefined()
+        expect(diffContents(deleted).before).toBe("plain\n")
+
+        const moved = files.find((f) => f.type === "move")!
+        expect(diffContents(moved)).toEqual({ before: "same\ncontent\n", after: "same\ncontent\n" })
       },
     })
   })
@@ -151,8 +185,8 @@ describe("tool.apply_patch freeform", () => {
         expect(moveFile.type).toBe("move")
         expect(moveFile.relativePath).toBe("renamed/dir/name.txt")
         expect(moveFile.movePath).toBe(path.join(fixture.path, "renamed/dir/name.txt"))
-        expect(moveFile.before).toBe("old content\n")
-        expect(moveFile.after).toBe("new content\n")
+        expect(diffContents(moveFile).before).toBe("old content\n")
+        expect(diffContents(moveFile).after).toBe("new content\n")
       },
     })
   })

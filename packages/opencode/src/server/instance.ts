@@ -24,10 +24,12 @@ import { ConfigRoutes } from "./routes/config"
 import { EnvRoutes } from "./routes/env"
 import { EnvFileRoutes } from "./routes/env-file"
 import { EnvRequestRoutes } from "./routes/env-request"
+import { ImageQuotaRoutes } from "./routes/image-quota"
 import { DevServerRoutes } from "./routes/dev-server"
 import { GitHubRoutes } from "./routes/github"
 import { ExperimentalRoutes } from "./routes/experimental"
 import { ProjectSummaryRoutes } from "./routes/project-summary"
+import { InitialPlanRoutes } from "./routes/initial-plan"
 import { ProviderRoutes } from "./routes/provider"
 import { EventRoutes } from "./routes/event"
 import { DocRoutes } from "../doc/routes"
@@ -52,10 +54,12 @@ export const InstanceRoutes = (app?: Hono) =>
     .route("/env", EnvRoutes())
     .route("/env-file", EnvFileRoutes())
     .route("/env-request", EnvRequestRoutes())
+    .route("/image-quota", ImageQuotaRoutes())
     .route("/dev-server", DevServerRoutes())
     .route("/github", GitHubRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/project-summary", ProjectSummaryRoutes())
+    .route("/enk/initial-plan", InitialPlanRoutes())
     .route("/session", SessionRoutes().route("/", SessionDocRoutes()))
     .route("/doc", DocRoutes())
     .route("/permission", PermissionRoutes())

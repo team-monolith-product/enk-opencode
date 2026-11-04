@@ -1,6 +1,7 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { Cause, Duration, Effect, Layer, Schedule, Semaphore, ServiceMap, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { formatPatch, structuredPatch } from "diff"
 import path from "path"
 import z from "zod"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
@@ -22,8 +23,9 @@ export namespace Snapshot {
   export const FileDiff = z
     .object({
       file: z.string(),
-      before: z.string(),
-      after: z.string(),
+      patch: z.string().optional(),
+      before: z.string().optional(),
+      after: z.string().optional(),
       additions: z.number(),
       deletions: z.number(),
       status: z.enum(["added", "deleted", "modified"]).optional(),
@@ -32,6 +34,26 @@ export namespace Snapshot {
       ref: "FileDiff",
     })
   export type FileDiff = z.infer<typeof FileDiff>
+
+  export function unifiedPatch(file: string, before: string, after: string) {
+    const old = before.replace(/^\uFEFF/, "")
+    const next = after.replace(/^\uFEFF/, "")
+    if (old !== next || old === "") {
+      return formatPatch(structuredPatch(file, file, old, next, "", "", { context: Number.MAX_SAFE_INTEGER }))
+    }
+    const lines = old.split("\n")
+    const last = lines.pop()!
+    const body = lines.map((line) => " " + line)
+    if (last !== "") body.push(" " + last, "\\ No newline at end of file")
+    const count = lines.length + (last !== "" ? 1 : 0)
+    return formatPatch({
+      oldFileName: file,
+      newFileName: file,
+      oldHeader: "",
+      newHeader: "",
+      hunks: [{ oldStart: 1, oldLines: count, newStart: 1, newLines: count, lines: body }],
+    })
+  }
 
   const log = Log.create({ service: "snapshot" })
   const prune = "7.days"
@@ -391,8 +413,7 @@ export namespace Snapshot {
                   const deletions = binary ? 0 : parseInt(dels)
                   result.push({
                     file,
-                    before,
-                    after,
+                    patch: binary ? "" : unifiedPatch(file, before, after),
                     additions: Number.isFinite(additions) ? additions : 0,
                     deletions: Number.isFinite(deletions) ? deletions : 0,
                     status: status.get(file) ?? "modified",

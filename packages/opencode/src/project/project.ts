@@ -12,6 +12,7 @@ import { Effect, Layer, Path, Scope, ServiceMap, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { makeRuntime } from "@/effect/run-service"
+import { GitHub } from "@/enk/github"
 import { AppFileSystem } from "@/filesystem"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 
@@ -383,6 +384,7 @@ export namespace Project {
         if (result.code !== 0) {
           throw new Error(result.stderr.trim() || result.text.trim() || "Failed to initialize git repository")
         }
+        yield* Effect.tryPromise(() => GitHub.ignore(input.directory)).pipe(Effect.ignore)
         const { project } = yield* fromDirectory(input.directory)
         return project
       })

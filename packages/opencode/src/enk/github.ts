@@ -1,10 +1,13 @@
 import { mkdir, lstat, readFile, writeFile } from "fs/promises"
 import path from "path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { Global } from "../global"
 import { EnvFile } from "../util/env-file"
+import { errorData } from "../util/error"
 import { git } from "../util/git"
 import { Hash } from "../util/hash"
 import { Log } from "../util/log"
+import { SentryReporter } from "../util/sentry"
 import { ServeTargets } from "./serve-targets"
 
 export namespace GitHub {
@@ -15,7 +18,14 @@ export namespace GitHub {
   const route = "/api/v1/opencode/github"
   const limit = 100 * 1024 * 1024
   const bridge = "__preview-bridge.js"
+  const attempts = 3
+  const backoff = 500
+  const budget = 60_000
+  const detail = 300
+  const transient: Code[] = ["remote", "missing"]
   const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
+  const ignored = [".playwright-mcp/"]
+  const leftovers = ignored.map((item) => item.replace(/\/$/, ""))
   const exclude = [
     ".env",
     ".env.*",
@@ -26,18 +36,22 @@ export namespace GitHub {
     ".venv/",
     "__pycache__/",
     ".opencode/",
+    ...ignored,
     ".DS_Store",
   ]
 
   export type Repo = { owner: string; name: string; url: string; private?: boolean }
   export type Push = { sha: string; time: number; by?: string }
+  export type FirstPush = { attempts: number; code: Code; reason: string }
   export type Status = {
     enabled: boolean
     connectUrl?: string
     login?: string
     linkedBy?: string
+    app?: boolean
     repo?: Repo
     push?: Push
+    firstPush?: FirstPush
   }
   export type Result = { sha?: string; skipped: string[] }
   export type Change = { status: "A" | "M" | "D"; file: string }
@@ -49,9 +63,51 @@ export namespace GitHub {
     | "exists"
     | "forbidden"
     | "revoked"
+    | "app"
     | "missing"
     | "empty"
     | "remote"
+
+  export const notify: Code[] = ["forbidden", "revoked", "missing", "remote"]
+
+  export function dump(err: unknown) {
+    const { formatted: _, ...error } = errorData(err) as ReturnType<typeof errorData> & { formatted?: string }
+    return err instanceof Failure ? { ...error, code: err.code, response: err.response } : error
+  }
+
+  function lean(err: unknown) {
+    const error = dump(err)
+    return err instanceof Failure ? { ...error, response: undefined } : error
+  }
+
+  const volatile = /\/[^\s"']+|\d+/g
+
+  export function identity(message: string, err: unknown) {
+    if (err instanceof Failure) {
+      const site = err.response
+        ? `${err.response.status}:${err.response.request ?? ""}`
+        : err.message.replace(volatile, "#").slice(0, 80)
+      return `${message}:${err.code}:${site}`
+    }
+    const text = err instanceof Error ? `${err.name}:${err.message}` : String(err)
+    return `${message}:${text.replace(volatile, "#").slice(0, 120)}`
+  }
+
+  const repoPath = /^(\w+ \/repos\/)[^/\s]+\/[^/\s?]+/
+
+  export function scope(message: string, err: unknown): SentryReporter.Scope | undefined {
+    if (!(err instanceof Failure)) return
+    const call = err.response?.request?.replace(repoPath, "$1:owner/:name") ?? ""
+    return {
+      tags: { "github.code": err.code, ...(err.response ? { "github.status": String(err.response.status) } : {}) },
+      fingerprint: [message, err.code, String(err.response?.status ?? ""), call],
+    }
+  }
+
+  export function alert(message: string, err: unknown, extra?: Record<string, unknown>) {
+    log.error(message, { ...extra, error: lean(err) })
+    SentryReporter.captureOnce(identity(message, err), err, { ...extra, error: dump(err) }, scope(message, err))
+  }
 
   type Link = {
     enabled: boolean
@@ -60,8 +116,9 @@ export namespace GitHub {
     login?: string
     github_user_id?: number
     linked_by?: string
+    app?: boolean
     token?: string
-    repo?: { owner: string; name: string; url: string }
+    repo?: { owner: string; name: string; url: string; private?: boolean }
     push?: { sha: string; at: number; by?: string }
   }
   type Remote = {
@@ -73,11 +130,20 @@ export namespace GitHub {
     permissions?: { push?: boolean }
   }
 
+  export type Response = {
+    status: number
+    statusText: string
+    headers: Record<string, string>
+    body: string
+    request?: string
+  }
+
   export class Failure extends Error {
     constructor(
       readonly code: Code,
       readonly status: 404 | 409 | 422 | 502,
       message?: string,
+      readonly response?: Response,
     ) {
       super(message || code)
       this.name = "GitHubFailure"
@@ -85,6 +151,7 @@ export namespace GitHub {
   }
 
   const chains = new Map<string, Promise<unknown>>()
+  const failed = new Map<string, FirstPush>()
 
   function serial<T>(key: string, fn: () => Promise<T>) {
     const run = (chains.get(key) ?? Promise.resolve()).catch(() => undefined).then(fn)
@@ -114,8 +181,17 @@ export namespace GitHub {
     const res = await fetch(rails.url, {
       headers: { Authorization: `token ${rails.token}` },
       signal: AbortSignal.timeout(15_000),
-    }).catch(() => undefined)
-    if (!res?.ok) return
+    }).catch((err) => {
+      if (!quiet("rails link failed"))
+        log.error("rails link failed", { method: "GET", url: rails.url, error: errorData(err) })
+      return undefined
+    })
+    if (!res?.ok) {
+      if (res && !quiet(`rails link rejected:${res.status}`)) {
+        log.error("rails link rejected", { method: "GET", url: rails.url, response: cut(res, await text(res), 500) })
+      }
+      return
+    }
     return (await res.json().catch(() => undefined)) as Link | undefined
   }
 
@@ -127,13 +203,44 @@ export namespace GitHub {
       headers: { Authorization: `token ${rails.token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
+    }).catch((err) => {
+      if (!quiet("rails report failed")) {
+        log.error("rails report failed", { method: "PUT", url: rails.url, sent: body, error: errorData(err) })
+      }
+      return undefined
+    })
+    if (!res?.ok) {
+      if (res && !quiet(`rails report rejected:${res.status}`)) {
+        log.error("rails report rejected", {
+          method: "PUT",
+          url: rails.url,
+          sent: body,
+          response: cut(res, await text(res), 500),
+        })
+      }
+      throw new Failure("remote", 502)
+    }
+  }
+
+  async function rails<T>(sub: string, init?: { method: string; body: unknown }): Promise<T> {
+    const target = backend()
+    if (!target) throw new Failure("disabled", 409)
+    const res = await fetch(target.url + sub, {
+      method: init?.method,
+      headers: { Authorization: `token ${target.token}`, "Content-Type": "application/json" },
+      body: init ? JSON.stringify(init.body) : undefined,
+      signal: AbortSignal.timeout(30_000),
     }).catch(() => undefined)
-    if (!res?.ok) throw new Failure("remote", 502)
+    if (res?.ok) return (await res.json()) as T
+    if (res?.status === 404) throw new Failure("missing", 404)
+    if (res?.status === 409) throw new Failure("unlinked", 409)
+    throw new Failure("remote", 502)
   }
 
   async function linked() {
     const hit = await link()
-    if (!hit?.connected || !hit.token) throw new Failure("unlinked", 409)
+    if (!hit?.connected) throw new Failure("unlinked", 409)
+    if (!hit.token) throw new Failure("remote", 502)
     return hit
   }
 
@@ -146,12 +253,35 @@ export namespace GitHub {
       connectUrl: hit.connect_url,
       login: hit.connected ? hit.login : undefined,
       linkedBy: hit.connected ? hit.linked_by : undefined,
+      app: hit.connected ? hit.app : undefined,
       repo: hit.repo,
       push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
+      firstPush: failed.get(dir),
     }
   }
 
+  const secret = /^(set-cookie|cookie|authorization|proxy-authorization|x-github-sso)$/i
+
+  async function text(res: globalThis.Response) {
+    return res.text().catch((err) => `<unreadable body: ${String(err)}>`)
+  }
+
+  function cut(res: globalThis.Response, raw: string, cap = 4000, request?: string): Response {
+    return {
+      status: res.status,
+      statusText: res.statusText,
+      headers: Object.fromEntries([...res.headers].filter(([name]) => !secret.test(name))),
+      body: raw.length > cap ? `${raw.slice(0, cap)}…(+${raw.length - cap} chars)` : raw,
+      request,
+    }
+  }
+
+  function quiet(key: string) {
+    return !SentryReporter.due(`log:${key}`, 5 * 60_000)
+  }
+
   async function request<T>(token: string, method: string, url: string, body?: unknown): Promise<T> {
+    const started = Date.now()
     const res = await fetch(api + url, {
       method,
       headers: {
@@ -164,20 +294,33 @@ export namespace GitHub {
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(15_000),
     }).catch((err) => {
+      log.error("api failed", { method, url, sent: body, ms: Date.now() - started, error: errorData(err) })
       throw new Failure("remote", 502, String(err))
     })
-    if (res.ok) return (await res.json()) as T
-    const detail = (await res.json().catch(() => undefined)) as
-      | { message?: string; errors?: { message?: string }[] }
-      | undefined
+    if (res.ok) {
+      log.info("api", { method, url, status: res.status, ms: Date.now() - started })
+      return (await res.json()) as T
+    }
+    const raw = await text(res)
+    const response = cut(res, raw, 4000, `${method} ${url}`)
+    const detail = (await Promise.resolve()
+      .then(() => JSON.parse(raw))
+      .catch(() => undefined)) as { message?: string; errors?: { message?: string }[] } | undefined
     const message = detail?.errors?.[0]?.message || detail?.message || res.statusText
+    log.error("api rejected", {
+      method,
+      url,
+      sent: body,
+      ms: Date.now() - started,
+      response: { ...response, request: undefined },
+    })
     if (res.status === 401) {
       await report({ revoked: true }).catch(() => undefined)
-      throw new Failure("revoked", 409, message)
+      throw new Failure("revoked", 409, message, response)
     }
-    if (res.status === 404) throw new Failure("missing", 404, message)
-    if (res.status === 422) throw new Failure("exists", 422, message)
-    throw new Failure("remote", 502, message)
+    if (res.status === 404) throw new Failure("missing", 404, message, response)
+    if (res.status === 422) throw new Failure("exists", 422, message, response)
+    throw new Failure("remote", 502, message, response)
   }
 
   const shape = (remote: Remote): Repo => ({
@@ -187,13 +330,56 @@ export namespace GitHub {
     private: remote.private,
   })
 
-  export async function create(dir: string, input: { name: string }) {
+  export async function create(dir: string, input: { name: string; message?: string | Describe }) {
     const hit = await linked()
+    if (hit.app) throw new Failure("app", 422)
     const repo = shape(
       await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
     )
-    await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
+    await report({
+      repo_owner: repo.owner,
+      repo_name: repo.name,
+      repo_url: repo.url,
+      repo_private: repo.private ?? false,
+    })
+    await firstPush(dir, { ...hit, repo }, input.message ?? "Initial commit from Jitda")
     return status(dir)
+  }
+
+  export async function repositories(dir: string): Promise<Repo[]> {
+    if (!serves(dir)) throw new Failure("disabled", 409)
+    const list = await rails<{ repositories: Repo[] }>("/repositories")
+    return list.repositories.map((item) => ({
+      owner: item.owner,
+      name: item.name,
+      url: item.url,
+      private: item.private,
+    }))
+  }
+
+  export async function select(dir: string, input: { owner: string; name: string; message?: string | Describe }) {
+    if (!serves(dir)) throw new Failure("disabled", 409)
+    await rails("/repository", { method: "PUT", body: { repo_owner: input.owner, repo_name: input.name } })
+    await firstPush(dir, await linked(), input.message ?? "Initial commit from Jitda")
+    return status(dir)
+  }
+
+  async function firstPush(dir: string, hit: Link, message: string | Describe) {
+    const started = Date.now()
+    for (let attempt = 1; ; attempt++) {
+      const failure = await push(dir, { message }, hit).then(
+        () => undefined,
+        (err) => (err instanceof Failure ? err : new Failure("remote", 502, String(err))),
+      )
+      if (!failure) return
+      log.error("first push failed", { attempt, error: lean(failure) })
+      if (!transient.includes(failure.code) || attempt >= attempts || Date.now() - started > budget) {
+        if (notify.includes(failure.code)) alert("first push gave up", failure, { attempt })
+        failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
+        return
+      }
+      await sleep(backoff * attempt)
+    }
   }
 
   function auth(token: string) {
@@ -207,18 +393,32 @@ export namespace GitHub {
     }
   }
 
-  export async function push(dir: string, input: { message: string | Describe }) {
-    const hit = await linked()
+  /** 에이전트가 남기는 부산물 폴더를 학생 작업 폴더의 .gitignore 에 적어 둔다. 이미 있으면 건드리지 않는다. */
+  export async function ignore(dir: string) {
+    const file = path.join(dir, ".gitignore")
+    const text = await readFile(file, "utf8").catch(() => "")
+    const lines = new Set(text.split(/\r?\n/).map((line) => line.trim().replace(/\/$/, "")))
+    const missing = ignored.filter((item) => !lines.has(item.replace(/\/$/, "")))
+    if (missing.length === 0) return
+    await writeFile(file, text + (text && !text.endsWith("\n") ? "\n" : "") + missing.join("\n") + "\n")
+  }
+
+  export async function push(dir: string, input: { message: string | Describe }, known?: Link) {
+    const hit = known ?? (await linked())
     if (!hit.repo) throw new Failure("norepo", 409)
     const remote = await request<Remote>(
       hit.token!,
       "GET",
       `/repos/${encodeURIComponent(hit.repo.owner)}/${encodeURIComponent(hit.repo.name)}`,
     )
-    if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
+    if (!hit.app && remote.permissions?.push === false) throw new Failure("forbidden", 409)
+    if (remote.private !== (hit.repo.private ?? false)) {
+      await report({ repo_private: remote.private }).catch(() => undefined)
+    }
     const gitdir = path.join(Global.Path.data, "github", Hash.fast(dir))
-    const result = await serial(gitdir, () =>
-      publish({
+    const result = await serial(gitdir, async () => {
+      await ignore(dir).catch((err) => log.error("gitignore skipped", { error: String(err) }))
+      return publish({
         gitdir,
         worktree: dir,
         remote: `${web}/${hit.repo!.owner}/${hit.repo!.name}.git`,
@@ -229,13 +429,19 @@ export namespace GitHub {
           email: `${hit.github_user_id ? `${hit.github_user_id}+` : ""}${hit.login}@users.noreply.github.com`,
         },
         env: auth(hit.token!),
-      }),
-    )
+      })
+    })
+    failed.delete(dir)
     if (result.sha) {
       await report({ pushed_sha: result.sha, pushed_by: null }).catch(() => undefined)
       log.info("pushed", { sha: result.sha })
     }
     return { ...result, url: result.sha ? `${hit.repo.url}/commit/${result.sha}` : hit.repo.url }
+  }
+
+  /** 학생 .gitignore 의 부정 패턴(!)이 info/exclude 보다 앞서므로, 부산물 폴더는 경로로도 한 번 더 거른다. */
+  function leftover(file: string) {
+    return file.split("/").some((part) => leftovers.includes(part))
   }
 
   function strip(text: string) {
@@ -313,7 +519,7 @@ export namespace GitHub {
       await must(["read-tree", "--empty"])
       const files = await Promise.all(
         (await scan(""))
-          .filter((file) => !EnvFile.isSecretFile(file) && path.posix.basename(file) !== bridge)
+          .filter((file) => !EnvFile.isSecretFile(file) && path.posix.basename(file) !== bridge && !leftover(file))
           .map(async (file) => ({
             file,
             size: (await lstat(path.join(input.worktree, file)).catch(() => undefined))?.size,

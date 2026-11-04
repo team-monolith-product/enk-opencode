@@ -16,9 +16,26 @@ export namespace GitHubSync {
   const MAX_FILES = 30
   const MAX_SUBJECT = 72
 
-  const LABEL: Record<Locale.Value, Record<GitHub.Change["status"], string> & { fallback: string }> = {
-    ko: { A: "추가", M: "수정", D: "삭제", fallback: "짓다에서 작업한 내용" },
-    en: { A: "Add", M: "Update", D: "Delete", fallback: "Update from Jitda" },
+  const LABEL: Record<
+    Locale.Value,
+    Record<GitHub.Change["status"], string> & { fallback: string; first: string; manual: string }
+  > = {
+    ko: {
+      A: "추가",
+      M: "수정",
+      D: "삭제",
+      fallback: "짓다에서 작업한 내용",
+      first: "짓다에서 처음 올린 내용",
+      manual: "짓다에서 직접 올린 내용",
+    },
+    en: {
+      A: "Add",
+      M: "Update",
+      D: "Delete",
+      fallback: "Update from Jitda",
+      first: "First push from Jitda",
+      manual: "Manual push from Jitda",
+    },
   }
 
   export type Turn = { user: MessageV2.User; request: string; reply: string }
@@ -26,11 +43,15 @@ export namespace GitHubSync {
   export function init() {
     const dir = Instance.directory
     Bus.subscribe(SessionStatus.Event.Idle, async (evt) => {
-      await sync(dir, evt.properties.sessionID).catch((err) => {
-        if (err instanceof GitHub.Failure) return log.info("skipped", { code: err.code })
-        log.warn("failed", { error: err instanceof Error ? err.message : String(err) })
-      })
+      await sync(dir, evt.properties.sessionID).catch((err) => failed(err, evt.properties.sessionID))
     })
+  }
+
+  export function failed(err: unknown, sessionID: SessionID) {
+    if (err instanceof GitHub.Failure && !GitHub.notify.includes(err.code)) {
+      return log.info("skipped", { sessionID, code: err.code, reason: err.message })
+    }
+    GitHub.alert("sync failed", err, { sessionID })
   }
 
   async function sync(dir: string, sessionID: SessionID) {
@@ -65,10 +86,18 @@ export namespace GitHubSync {
 
   export async function describe(turn: Turn, changes: GitHub.Change[]) {
     const title = await summarize(turn).catch((err) => {
-      log.warn("summary failed", { error: err instanceof Error ? err.message : String(err) })
+      log.error("summary failed", { error: err instanceof Error ? err.message : String(err) })
       return undefined
     })
     return compose(title || fallback(turn), changes, turn.user.locale)
+  }
+
+  export function first(locale?: Locale.Value): GitHub.Describe {
+    return async (changes) => compose(LABEL[locale ?? Locale.DEFAULT].first, changes, locale)
+  }
+
+  export function manual(locale?: Locale.Value): GitHub.Describe {
+    return async (changes) => compose(LABEL[locale ?? Locale.DEFAULT].manual, changes, locale)
   }
 
   export function compose(subject: string, changes: GitHub.Change[], locale?: Locale.Value) {

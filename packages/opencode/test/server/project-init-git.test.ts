@@ -48,6 +48,7 @@ describe("project.initGit endpoint", () => {
         true,
       )
       expect(await Filesystem.exists(path.join(tmp.path, ".git", "opencode"))).toBe(false)
+      expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe(".playwright-mcp/\n")
 
       const current = await app.request("/project/current", {
         headers: {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, setSystemTime, spyOn, test } from "bun:test"
 import { $ } from "bun"
 import path from "path"
 import { mkdir, rm, truncate, writeFile } from "fs/promises"
@@ -17,6 +17,7 @@ afterEach(async () => {
   delete process.env["ENK_HACKATHON_RAILS_URL"]
   delete process.env["ENK_AI_USAGE_TOKEN"]
   delete process.env["ENK_PROJECT_DIRECTORY"]
+  delete process.env["GIT_CONFIG_GLOBAL"]
 })
 
 /** 팀 pod 가 이야기하는 hackathon-rails 역할. 실제 HTTP 를 그대로 태운다. */
@@ -65,6 +66,35 @@ async function put(root: string, files: Record<string, string>) {
   }
 }
 
+describe("GitHub.ignore", () => {
+  test("creates a .gitignore that lists the agent leftovers", async () => {
+    await using tmp = await tmpdir()
+
+    await GitHub.ignore(tmp.path)
+
+    expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe(".playwright-mcp/\n")
+  })
+
+  test("appends to an existing .gitignore without touching its lines", async () => {
+    await using tmp = await tmpdir()
+    await writeFile(path.join(tmp.path, ".gitignore"), "dist")
+
+    await GitHub.ignore(tmp.path)
+    await GitHub.ignore(tmp.path)
+
+    expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe("dist\n.playwright-mcp/\n")
+  })
+
+  test("leaves a .gitignore that already covers the folder alone", async () => {
+    await using tmp = await tmpdir()
+    await writeFile(path.join(tmp.path, ".gitignore"), ".playwright-mcp\n")
+
+    await GitHub.ignore(tmp.path)
+
+    expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe(".playwright-mcp\n")
+  })
+})
+
 describe("GitHub.publish", () => {
   test("first push leaves out secrets, dependencies and the opencode marker", async () => {
     await using tmp = await tmpdir()
@@ -87,6 +117,27 @@ describe("GitHub.publish", () => {
     expect((await $`git --git-dir=${ws.remote} log -1 --format=%an/%ae main`.quiet().text()).trim()).toBe(
       `${author.name}/${author.email}`,
     )
+  })
+
+  test("the folder the agent leaves behind stays out once the workspace .gitignore lists it", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "a", ".playwright-mcp/console.log": "log" })
+    await GitHub.ignore(ws.work)
+
+    await ws.publish("first")
+
+    expect(await ws.files()).toEqual([".gitignore", "index.html"])
+  })
+
+  test("the agent leftovers stay out even when the workspace .gitignore tries to bring them back", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "a", ".gitignore": "!.playwright-mcp/\n", ".playwright-mcp/page.yml": "page" })
+
+    await ws.publish("first")
+
+    expect(await ws.files()).toEqual([".gitignore", "index.html"])
   })
 
   test("an unchanged workspace pushes nothing", async () => {
@@ -278,6 +329,13 @@ describe("GitHub.status", () => {
     expect(JSON.stringify(status)).not.toContain("gho_secret_token")
   })
 
+  test("tells the dialog the team linked through the GitHub App", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({ enabled: true, connected: true, app: true, login: "octocat", token: "ghs_1" })
+
+    expect(await GitHub.status(tmp.path)).toMatchObject({ enabled: true, app: true, login: "octocat" })
+  })
+
   test("stays off outside the main project directory", async () => {
     await using tmp = await tmpdir()
     await using rails = serve({ enabled: true, connected: true, login: "octocat" })
@@ -324,7 +382,365 @@ describe("GitHub.status", () => {
   })
 })
 
+describe("GitHub.create", () => {
+  const link = {
+    enabled: true,
+    connected: true,
+    login: "octocat",
+    token: "gho_1",
+    repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+  }
+  const remote = {
+    name: "jitda-app",
+    owner: { login: "octocat" },
+    html_url: "https://github.com/octocat/jitda-app",
+    private: false,
+  }
+
+  async function hub(root: string) {
+    const bare = path.join(root, "hub", "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(root, "gitconfig")
+    await writeFile(config, `[url "file://${path.join(root, "hub")}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    return {
+      files: () =>
+        $`git --git-dir=${bare} ls-tree -r --name-only main`
+          .quiet()
+          .text()
+          .then((text) => text.split("\n").filter(Boolean)),
+      subjects: () =>
+        $`git --git-dir=${bare} log --format=%s main`
+          .quiet()
+          .text()
+          .then((text) => text.split("\n").filter(Boolean)),
+    }
+  }
+
+  function mockGitHub(read: () => Response) {
+    const original = globalThis.fetch
+    const calls: string[] = []
+    const spy = spyOn(globalThis, "fetch").mockImplementation(((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (url.host !== "api.github.com") return original(input, init)
+      calls.push(`${init?.method} ${url.pathname}`)
+      return Promise.resolve(init?.method === "POST" ? Response.json(remote, { status: 201 }) : read())
+    }) as typeof fetch)
+    return { calls, [Symbol.dispose]: () => spy.mockRestore() }
+  }
+
+  test("pushes the workspace to the new repository and clears the failure", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>", ".env": "KEY=secret" })
+    using github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    const status = await GitHub.create(work, { name: "jitda-app" })
+
+    expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+    expect(await origin.subjects()).toEqual(["Initial commit from Jitda"])
+    expect(rails.reports).toHaveLength(2)
+    expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
+  })
+
+  test("a GitHub App link cannot create a repository", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({ ...link, app: true, repo: undefined })
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    using github = mockGitHub(() => Response.json(remote))
+
+    const failure = await GitHub.create(work, { name: "jitda-app" }).catch((err) => err)
+
+    expect(failure).toBeInstanceOf(GitHub.Failure)
+    expect(failure.code).toBe("app")
+    expect(github.calls).toEqual([])
+    expect(rails.reports).toEqual([])
+  })
+
+  test("a transient failure is retried and the second attempt succeeds", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a" })
+    let reads = 0
+    using github = mockGitHub(() =>
+      ++reads === 1
+        ? Response.json({ message: "Bad Gateway" }, { status: 502 })
+        : Response.json({ ...remote, default_branch: "main", permissions: { push: true } }),
+    )
+
+    const status = await GitHub.create(work, { name: "jitda-app" })
+
+    expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(2)
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+  })
+
+  test("an empty workspace still gets its .gitignore pushed", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await mkdir(work, { recursive: true })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    const status = await GitHub.create(work, { name: "jitda-app" })
+
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual([".gitignore"])
+  })
+
+  test("a message builder names the first commit", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    await GitHub.create(work, { name: "jitda-app", message: async (changes) => `first: ${changes.length}` })
+
+    expect(await origin.subjects()).toEqual(["first: 2"])
+  })
+
+  test("retries the first push three times and keeps the failure reason", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve(link)
+    using github = mockGitHub(() => Response.json({ message: "Server Error" }, { status: 500 }))
+
+    const status = await GitHub.create(tmp.path, { name: "jitda-app" })
+
+    expect(status.repo?.name).toBe("jitda-app")
+    expect(github.calls).toEqual([
+      "POST /user/repos",
+      "GET /repos/octocat/jitda-app",
+      "GET /repos/octocat/jitda-app",
+      "GET /repos/octocat/jitda-app",
+    ])
+    expect(status.firstPush).toEqual({ attempts: 3, code: "remote", reason: "Server Error" })
+    expect((await GitHub.status(tmp.path)).firstPush).toEqual(status.firstPush)
+    expect(rails.reports).toEqual([
+      {
+        repo_owner: "octocat",
+        repo_name: "jitda-app",
+        repo_url: "https://github.com/octocat/jitda-app",
+        repo_private: false,
+      },
+    ])
+  })
+
+  test("a repository that GitHub has not made visible yet is retried", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a" })
+    let reads = 0
+    using github = mockGitHub(() =>
+      ++reads === 1
+        ? Response.json({ message: "Not Found" }, { status: 404 })
+        : Response.json({ ...remote, default_branch: "main", permissions: { push: true } }),
+    )
+
+    const status = await GitHub.create(work, { name: "jitda-app" })
+
+    expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(2)
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+  })
+
+  test("the first push lists the agent leftovers in the workspace .gitignore and keeps them out", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a", ".playwright-mcp/console.log": "log" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    await GitHub.create(work, { name: "jitda-app" })
+
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+    expect(await Bun.file(path.join(work, ".gitignore")).text()).toBe(".playwright-mcp/\n")
+  })
+
+  test("a later successful push clears the recorded first push failure", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a" })
+    let healthy = false
+    using _github = mockGitHub(() =>
+      healthy
+        ? Response.json({ ...remote, default_branch: "main", permissions: { push: true } })
+        : Response.json({ message: "Server Error" }, { status: 500 }),
+    )
+    const created = await GitHub.create(work, { name: "jitda-app" })
+    expect(created.firstPush).toMatchObject({ attempts: 3, code: "remote" })
+
+    healthy = true
+    await GitHub.push(work, { message: "later" })
+
+    expect((await GitHub.status(work)).firstPush).toBeUndefined()
+    expect(await origin.subjects()).toEqual(["later"])
+  })
+
+  test("stops retrying once the first push has used up its time budget", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const now = Date.now()
+    using github = mockGitHub(() => {
+      setSystemTime(now + 61_000)
+      return Response.json({ message: "Bad Gateway" }, { status: 502 })
+    })
+
+    try {
+      const status = await GitHub.create(tmp.path, { name: "jitda-app" })
+
+      expect(github.calls.filter((call) => call.startsWith("GET"))).toHaveLength(1)
+      expect(status.firstPush).toMatchObject({ attempts: 1, code: "remote" })
+    } finally {
+      setSystemTime()
+    }
+  })
+
+  test("a refusal that retrying cannot fix is reported after one attempt", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    using github = mockGitHub(() => Response.json({ ...remote, permissions: { push: false } }))
+
+    const status = await GitHub.create(tmp.path, { name: "jitda-app" })
+
+    expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
+    expect(status.firstPush).toMatchObject({ attempts: 1, code: "forbidden" })
+  })
+
+  test("lists the repositories the GitHub App was installed on", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve({
+      repositories: [
+        { owner: "octocat", name: "demo", url: "https://github.com/octocat/demo", private: true, pushable: true },
+        { owner: "octocat", name: "blog", url: "https://github.com/octocat/blog", private: false, pushable: true },
+      ],
+    })
+
+    const list = await GitHub.repositories(tmp.path)
+
+    expect(list).toEqual([
+      { owner: "octocat", name: "demo", url: "https://github.com/octocat/demo", private: true },
+      { owner: "octocat", name: "blog", url: "https://github.com/octocat/blog", private: false },
+    ])
+  })
+
+  test("listing without a link is refused", async () => {
+    await using tmp = await tmpdir()
+    const server = Bun.serve({ port: 0, fetch: () => Response.json({}, { status: 409 }) })
+    process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
+    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
+
+    const failure = await GitHub.repositories(tmp.path).catch((err) => err)
+    await server.stop(true)
+
+    expect(failure).toBeInstanceOf(GitHub.Failure)
+    expect(failure.code).toBe("unlinked")
+  })
+
+  test("choosing a repository binds it and pushes the workspace once", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>", ".env": "KEY=secret" })
+    using github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    const status = await GitHub.select(work, { owner: "octocat", name: "jitda-app" })
+
+    expect(rails.reports[0]).toEqual({ repo_owner: "octocat", repo_name: "jitda-app" })
+    expect(github.calls).toEqual(["GET /repos/octocat/jitda-app"])
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+    expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
+  })
+
+  test("a GitHub App link pushes even though the installation token reports no push permission", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: false } }))
+
+    const status = await GitHub.select(work, { owner: "octocat", name: "jitda-app" })
+
+    expect(status.firstPush).toBeUndefined()
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+    expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
+  })
+
+  test("a push reports the repository visibility GitHub has now", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app", private: false },
+    })
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    using _github = mockGitHub(() => Response.json({ ...remote, private: true, default_branch: "main" }))
+
+    await GitHub.select(work, { owner: "octocat", name: "jitda-app" })
+
+    expect(await origin.files()).toEqual([".gitignore", "index.html"])
+    expect(rails.reports).toContainEqual({ repo_private: true })
+  })
+
+  test("a push without changes still reports a visibility change", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app", private: false },
+    })
+    await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    let visible = false
+    using _github = mockGitHub(() => Response.json({ ...remote, private: visible, default_branch: "main" }))
+    await GitHub.push(work, { message: "first" })
+    rails.reports.length = 0
+    visible = true
+
+    const result = await GitHub.push(work, { message: "second" })
+
+    expect(result.sha).toBeUndefined()
+    expect(rails.reports).toEqual([{ repo_private: true }])
+  })
+})
+
 describe("GitHub.push", () => {
+  test("a linked team whose token could not be issued fails as a remote error", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve({ enabled: true, connected: true, login: "octocat", app: true })
+
+    await expect(GitHub.push(tmp.path, { message: "x" })).rejects.toMatchObject({ code: "remote" })
+  })
+
   test("pushing without a link is refused", async () => {
     await using tmp = await tmpdir()
 
@@ -357,5 +773,112 @@ describe("GitHubRoutes", () => {
     const res = await request(tmp.path, "GET", "/")
 
     expect(await res.json()).toEqual({ enabled: false })
+  })
+})
+
+describe("GitHub failure reporting", () => {
+  test("a rejected GitHub call keeps the raw response without secret headers", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      enabled: true,
+      connected: true,
+      login: "octocat",
+      token: "gho_1",
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const original = globalThis.fetch
+    const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
+      new URL(input instanceof Request ? input.url : String(input)).host === "api.github.com"
+        ? Promise.resolve(
+            new Response(`<html>\nnot found\n${"x".repeat(5000)}</html>`, {
+              status: 404,
+              headers: { "x-github-request-id": "abc", "set-cookie": "s=1" },
+            }),
+          )
+        : original(input, init)) as typeof fetch)
+
+    try {
+      const failure = await GitHub.push(tmp.path, { message: "m" }).catch((err) => err)
+
+      expect(failure).toBeInstanceOf(GitHub.Failure)
+      expect(failure.code).toBe("missing")
+      expect(failure.response.status).toBe(404)
+      expect(failure.response.headers["x-github-request-id"]).toBe("abc")
+      expect(failure.response.headers["set-cookie"]).toBeUndefined()
+      expect(failure.response.body.startsWith("<html>\nnot found")).toBe(true)
+      expect(failure.response.body.length).toBeLessThan(4100)
+    } finally {
+      github.mockRestore()
+    }
+  })
+
+  test("a long JSON error keeps the GitHub message and trims only the logged body", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      enabled: true,
+      connected: true,
+      login: "octocat",
+      token: "gho_1",
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const original = globalThis.fetch
+    const github = spyOn(globalThis, "fetch").mockImplementation(((input, init) =>
+      new URL(input instanceof Request ? input.url : String(input)).host === "api.github.com"
+        ? Promise.resolve(
+            Response.json(
+              { message: "Not Found", pad: "x".repeat(6000) },
+              { status: 404, headers: { authorization: "Bearer leaked" } },
+            ),
+          )
+        : original(input, init)) as typeof fetch)
+
+    try {
+      const failure = await GitHub.push(tmp.path, { message: "m" }).catch((err) => err)
+
+      expect(failure.message).toBe("Not Found")
+      expect(failure.response.body.length).toBeLessThan(4100)
+      expect(failure.response.headers["authorization"]).toBeUndefined()
+      expect(failure.response.request).toBe("GET /repos/octocat/jitda-app")
+    } finally {
+      github.mockRestore()
+    }
+  })
+
+  test("identity separates failures by site and ignores volatile parts", () => {
+    const at = (request: string) =>
+      new GitHub.Failure("missing", 404, "Not Found", {
+        status: 404,
+        statusText: "Not Found",
+        headers: {},
+        body: "",
+        request,
+      })
+
+    expect(GitHub.identity("x", at("GET /repos/a/b"))).not.toBe(GitHub.identity("x", at("POST /user/repos")))
+    expect(GitHub.identity("x", new Error("ENOENT /tmp/abc123/file 42"))).toBe(
+      GitHub.identity("x", new Error("ENOENT /tmp/zzz999/file 7")),
+    )
+    expect(GitHub.identity("x", new TypeError("a"))).not.toBe(GitHub.identity("x", new Error("a")))
+  })
+
+  test("scope groups one failure kind across repositories and keeps kinds apart", () => {
+    const failure = (code: GitHub.Code, status: 404 | 409 | 422 | 502, request: string) =>
+      new GitHub.Failure(code, status, "x", { status, statusText: "", headers: {}, body: "", request })
+
+    const first = GitHub.scope("request failed", failure("missing", 404, "GET /repos/alice/one"))
+    const other = GitHub.scope("request failed", failure("missing", 404, "GET /repos/bob/two"))
+    const revoked = GitHub.scope("request failed", failure("revoked", 409, "GET /repos/alice/one"))
+
+    expect(first?.fingerprint).toEqual(other?.fingerprint)
+    expect(first?.fingerprint).not.toEqual(revoked?.fingerprint)
+    expect(first?.tags).toEqual({ "github.code": "missing", "github.status": "404" })
+    expect(GitHub.scope("request failed", new Error("boom"))).toBeUndefined()
+  })
+
+  test("dump keeps the code and the raw response", () => {
+    const response = { status: 404, statusText: "Not Found", headers: { "x-github-request-id": "1" }, body: "{}" }
+    const dumped = GitHub.dump(new GitHub.Failure("missing", 404, "Not Found", response))
+
+    expect(dumped).toMatchObject({ code: "missing", message: "Not Found", response })
   })
 })

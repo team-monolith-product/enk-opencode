@@ -47,6 +47,19 @@ describe('copyClaudeFiles', () => {
     expect(has('wt/.claude/settings.local.json')).toBe(true)
   })
 
+  test('skills 를 하위 디렉터리까지 복사한다', () => {
+    write('main/.claude/skills/git/SKILL.md', 'git skill')
+    write('main/.claude/skills/solidjs/rules/a.md', 'rule')
+    write('main/.claude/skills/.DS_Store', 'junk')
+    mkdirSync(join(base, 'wt'), {recursive: true})
+
+    copyClaudeFiles(join(base, 'main'), join(base, 'wt'))
+
+    expect(read('wt/.claude/skills/git/SKILL.md')).toBe('git skill')
+    expect(read('wt/.claude/skills/solidjs/rules/a.md')).toBe('rule')
+    expect(has('wt/.claude/skills/.DS_Store')).toBe(false)
+  })
+
   test('대상에 이미 있는 파일은 덮어쓰지 않는다', () => {
     write('main/.claude/settings.json', 'main')
     write('wt/.claude/settings.json', 'tracked') // 이미 체크아웃된 tracked 파일

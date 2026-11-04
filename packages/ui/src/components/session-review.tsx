@@ -1,3 +1,4 @@
+import { diffContents } from "../util/diff-contents"
 import { Accordion } from "./accordion"
 import { Button } from "./button"
 import { DropdownMenu } from "./dropdown-menu"
@@ -172,8 +173,9 @@ export const SessionReview = (props: SessionReviewProps) => {
 
   const selectionPreview = (diff: FileDiff, range: SelectedLineRange) => {
     const side = selectionSide(range)
-    const contents = side === "deletions" ? diff.before : diff.after
-    if (typeof contents !== "string" || contents.length === 0) return undefined
+    const text = diffContents(diff)
+    const contents = side === "deletions" ? text.before : text.after
+    if (contents.length === 0) return undefined
 
     return previewSelectedLines(contents, range)
   }
@@ -294,8 +296,9 @@ export const SessionReview = (props: SessionReviewProps) => {
                     const comments = createMemo(() => (props.comments ?? []).filter((c) => c.file === file))
                     const commentedLines = createMemo(() => comments().map((c) => c.selection))
 
-                    const beforeText = () => (typeof item().before === "string" ? item().before : "")
-                    const afterText = () => (typeof item().after === "string" ? item().after : "")
+                    const contents = createMemo(() => diffContents(item()))
+                    const beforeText = () => contents().before
+                    const afterText = () => contents().after
                     const changedLines = () => item().additions + item().deletions
                     const mediaKind = createMemo(() => mediaKindFromPath(file))
 
@@ -509,17 +512,17 @@ export const SessionReview = (props: SessionReviewProps) => {
                                     commentedLines={commentedLines()}
                                     before={{
                                       name: file,
-                                      contents: typeof item().before === "string" ? item().before : "",
+                                      contents: beforeText(),
                                     }}
                                     after={{
                                       name: file,
-                                      contents: typeof item().after === "string" ? item().after : "",
+                                      contents: afterText(),
                                     }}
                                     media={{
                                       mode: "auto",
                                       path: file,
-                                      before: item().before,
-                                      after: item().after,
+                                      before: beforeText(),
+                                      after: afterText(),
                                       readFile: props.readFile,
                                     }}
                                   />

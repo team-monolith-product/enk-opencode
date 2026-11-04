@@ -28,6 +28,7 @@ import { ReadTool } from "../tool/read"
 import { FileTime } from "../file/time"
 import { Flag } from "../flag/flag"
 import { ModelPolicy } from "../enk/model-policy"
+import { CostQuota } from "../enk/cost-quota"
 import { ModelFallback } from "../enk/model-fallback"
 import { Locale } from "../enk/locale"
 import { SessionFallback } from "./fallback"
@@ -791,6 +792,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           time: { created: Date.now() },
           agent: lastUser.agent,
           model: lastUser.model,
+          imageGeneration: lastUser.imageGeneration,
         }
         yield* sessions.updateMessage(summaryUserMsg)
         yield* sessions.updatePart({
@@ -1111,6 +1113,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           sessionID: input.sessionID,
           time: { created: Date.now() },
           tools: input.tools,
+          imageGeneration: input.imageGeneration,
           agent: ag.name,
           model,
           system: input.system,
@@ -1588,6 +1591,34 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           throw new Error("Impossible")
         })
 
+      // 모델을 부르지 않고 턴을 닫는다. 안내는 모델 오류와 같은 자리(assistant 메시지의 error)에 보인다.
+      const refuseTurn = Effect.fn("SessionPrompt.refuseTurn")(function* (input: {
+        sessionID: SessionID
+        lastUser: MessageV2.User
+        message: string
+      }) {
+        const { sessionID, lastUser } = input
+        const error = new NamedError.Unknown({ message: input.message })
+        yield* sessions.updateMessage({
+          id: MessageID.ascending(),
+          parentID: lastUser.id,
+          role: "assistant",
+          mode: lastUser.agent,
+          agent: lastUser.agent,
+          variant: lastUser.variant,
+          path: { cwd: Instance.directory, root: Instance.worktree },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: lastUser.model.modelID,
+          providerID: lastUser.model.providerID,
+          time: { created: Date.now(), completed: Date.now() },
+          sessionID,
+          finish: "stop",
+          error: error.toObject(),
+        })
+        yield* bus.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+      })
+
       const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
         function* (sessionID: SessionID) {
           let structured: unknown | undefined
@@ -1629,6 +1660,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               lastAssistant.parentID === lastUser.id
             ) {
               log.info("exiting loop", { sessionID })
+              break
+            }
+
+            // 팀의 주·월 비용 한도(rails)가 바닥났으면 모델을 부르지 않는다. 제목 생성·압축보다 앞에 두어 한 번의
+            // 모델 호출도 새지 않게 한다. 스텝마다 묻되 캐시로 받으므로 긴 에이전트 턴도 한도에 닿은 스텝에서 멈춘다.
+            const quota = yield* Effect.promise(() => CostQuota.check())
+            if (quota?.exhausted) {
+              yield* refuseTurn({ sessionID, lastUser, message: CostQuota.message(quota, lastUser.locale) })
               break
             }
 
@@ -1678,7 +1717,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               lastFinished.summary !== true &&
               (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
             ) {
-              yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+              yield* compaction.create({
+                sessionID,
+                agent: lastUser.agent,
+                model: lastUser.model,
+                auto: true,
+                imageGeneration: lastUser.imageGeneration,
+              })
               continue
             }
 
@@ -1800,6 +1845,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     model: lastUser.model,
                     auto: true,
                     overflow: !handle.message.finish,
+                    imageGeneration: lastUser.imageGeneration,
                   })
                 }
                 return "continue" as const
@@ -1953,6 +1999,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           parts,
           variant: input.variant,
           locale: input.locale,
+          imageGeneration: input.imageGeneration,
         })
         yield* bus.publish(Command.Event.Executed, {
           name: input.command,
@@ -2026,6 +2073,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     format: MessageV2.Format.optional(),
     system: z.string().optional(),
     locale: Locale.Schema.optional(),
+    imageGeneration: z.boolean().optional(),
     variant: z.string().optional(),
     parts: z.array(
       z.discriminatedUnion("type", [
@@ -2120,6 +2168,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     command: z.string(),
     variant: z.string().optional(),
     locale: Locale.Schema.optional(),
+    imageGeneration: z.boolean().optional(),
     parts: z
       .array(
         z.discriminatedUnion("type", [

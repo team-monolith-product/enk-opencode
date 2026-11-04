@@ -35,6 +35,8 @@ import type {
   DocSyncPullResponses,
   DocSyncPushErrors,
   DocSyncPushResponses,
+  EnkInitialPlanDeliverErrors,
+  EnkInitialPlanDeliverResponses,
   EnvFileListResponses,
   EnvFileRemoveErrors,
   EnvFileRemoveResponses,
@@ -76,6 +78,9 @@ import type {
   FindSymbolsResponses,
   FindTextResponses,
   FormatterStatusResponses,
+  GithubRepoCreateErrors,
+  GithubRepoCreateResponses,
+  GithubStatusResponses,
   GlobalConfigGetResponses,
   GlobalConfigUpdateErrors,
   GlobalConfigUpdateResponses,
@@ -85,6 +90,9 @@ import type {
   GlobalSyncEventSubscribeResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
+  ImageQuotaGetResponses,
+  ImageQuotaToggleErrors,
+  ImageQuotaToggleResponses,
   InstanceDisposeResponses,
   LspStatusResponses,
   McpAddErrors,
@@ -1354,6 +1362,75 @@ export class EnvRequest extends HeyApiClient {
   }
 }
 
+export class ImageQuota extends HeyApiClient {
+  /**
+   * Image generation quota
+   *
+   * Whether image generation is available here, whether the team's toggle is on, and how many images the team has left.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ImageQuotaGetResponses, unknown, ThrowOnError>({
+      url: "/image-quota",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Set image generation toggle
+   *
+   * Turn the team's image generation toggle on or off. Every open screen of the workspace follows it.
+   */
+  public toggle<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      on?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "on" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<ImageQuotaToggleResponses, ImageQuotaToggleErrors, ThrowOnError>({
+      url: "/image-quota/toggle",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class DevServer extends HeyApiClient {
   /**
    * Preview dev server status
@@ -1443,6 +1520,82 @@ export class DevServer extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+}
+
+export class Repo extends HeyApiClient {
+  /**
+   * Create GitHub repository
+   *
+   * Create a public repository under the linked account and bind it to this project.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      name?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "name" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GithubRepoCreateResponses, GithubRepoCreateErrors, ThrowOnError>({
+      url: "/github/repo",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Github extends HeyApiClient {
+  /**
+   * GitHub link status
+   *
+   * The GitHub account the team linked in Jitda and the repository bound to it. Linking itself happens in the Jitda app, so this never returns an access token.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<GithubStatusResponses, unknown, ThrowOnError>({
+      url: "/github",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _repo?: Repo
+  get repo(): Repo {
+    return (this._repo ??= new Repo({ client: this.client }))
   }
 }
 
@@ -1910,6 +2063,49 @@ export class ProjectSummary extends HeyApiClient {
   }
 }
 
+export class InitialPlan extends HeyApiClient {
+  /**
+   * Deliver the initial plan
+   *
+   * Claim the team's finalized initial plan from hackathon-rails and hand it to the plan agent in the main project session. Idempotent.
+   */
+  public deliver<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      EnkInitialPlanDeliverResponses,
+      EnkInitialPlanDeliverErrors,
+      ThrowOnError
+    >({
+      url: "/enk/initial-plan/deliver",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Enk extends HeyApiClient {
+  private _initialPlan?: InitialPlan
+  get initialPlan(): InitialPlan {
+    return (this._initialPlan ??= new InitialPlan({ client: this.client }))
+  }
+}
+
 export class Submit extends HeyApiClient {
   /**
    * Respond to prompt doc submit approval
@@ -1923,7 +2119,7 @@ export class Submit extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel" | "exclude"
+      action?: "approve" | "cancel"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2125,6 +2321,7 @@ export class PromptDoc extends HeyApiClient {
         format?: OutputFormat
         system?: string
         locale?: PromptLocale
+        imageGeneration?: boolean
         variant?: string
         parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
       }
@@ -2291,7 +2488,7 @@ export class Submit2 extends HeyApiClient {
       directory?: string
       workspace?: string
       actorID?: string
-      action?: "approve" | "cancel" | "exclude"
+      action?: "approve" | "cancel"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3210,6 +3407,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       variant?: string
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
@@ -3231,6 +3429,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "format" },
             { in: "body", key: "system" },
             { in: "body", key: "locale" },
+            { in: "body", key: "imageGeneration" },
             { in: "body", key: "variant" },
             { in: "body", key: "parts" },
           ],
@@ -3344,6 +3543,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       variant?: string
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
@@ -3365,6 +3565,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "format" },
             { in: "body", key: "system" },
             { in: "body", key: "locale" },
+            { in: "body", key: "imageGeneration" },
             { in: "body", key: "variant" },
             { in: "body", key: "parts" },
           ],
@@ -3400,6 +3601,7 @@ export class Session2 extends HeyApiClient {
       command?: string
       variant?: string
       locale?: PromptLocale
+      imageGeneration?: boolean
       parts?: Array<{
         id?: string
         type: "file"
@@ -3427,6 +3629,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
             { in: "body", key: "locale" },
+            { in: "body", key: "imageGeneration" },
             { in: "body", key: "parts" },
           ],
         },
@@ -5662,9 +5865,19 @@ export class OpencodeClient extends HeyApiClient {
     return (this._envRequest ??= new EnvRequest({ client: this.client }))
   }
 
+  private _imageQuota?: ImageQuota
+  get imageQuota(): ImageQuota {
+    return (this._imageQuota ??= new ImageQuota({ client: this.client }))
+  }
+
   private _devServer?: DevServer
   get devServer(): DevServer {
     return (this._devServer ??= new DevServer({ client: this.client }))
+  }
+
+  private _github?: Github
+  get github(): Github {
+    return (this._github ??= new Github({ client: this.client }))
   }
 
   private _tool?: Tool
@@ -5685,6 +5898,11 @@ export class OpencodeClient extends HeyApiClient {
   private _projectSummary?: ProjectSummary
   get projectSummary(): ProjectSummary {
     return (this._projectSummary ??= new ProjectSummary({ client: this.client }))
+  }
+
+  private _enk?: Enk
+  get enk(): Enk {
+    return (this._enk ??= new Enk({ client: this.client }))
   }
 
   private _session?: Session2
