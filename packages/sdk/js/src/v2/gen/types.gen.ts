@@ -1904,6 +1904,7 @@ export type GitHubStatus = {
   connectUrl?: string
   login?: string
   linkedBy?: string
+  app?: boolean
   repo?: {
     owner: string
     name: string

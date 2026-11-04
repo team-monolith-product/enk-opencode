@@ -48,6 +48,7 @@ export namespace GitHub {
     connectUrl?: string
     login?: string
     linkedBy?: string
+    app?: boolean
     repo?: Repo
     push?: Push
     firstPush?: FirstPush
@@ -62,6 +63,7 @@ export namespace GitHub {
     | "exists"
     | "forbidden"
     | "revoked"
+    | "app"
     | "missing"
     | "empty"
     | "remote"
@@ -114,8 +116,9 @@ export namespace GitHub {
     login?: string
     github_user_id?: number
     linked_by?: string
+    app?: boolean
     token?: string
-    repo?: { owner: string; name: string; url: string }
+    repo?: { owner: string; name: string; url: string; private?: boolean }
     push?: { sha: string; at: number; by?: string }
   }
   type Remote = {
@@ -219,9 +222,25 @@ export namespace GitHub {
     }
   }
 
+  async function rails<T>(sub: string, init?: { method: string; body: unknown }): Promise<T> {
+    const target = backend()
+    if (!target) throw new Failure("disabled", 409)
+    const res = await fetch(target.url + sub, {
+      method: init?.method,
+      headers: { Authorization: `token ${target.token}`, "Content-Type": "application/json" },
+      body: init ? JSON.stringify(init.body) : undefined,
+      signal: AbortSignal.timeout(30_000),
+    }).catch(() => undefined)
+    if (res?.ok) return (await res.json()) as T
+    if (res?.status === 404) throw new Failure("missing", 404)
+    if (res?.status === 409) throw new Failure("unlinked", 409)
+    throw new Failure("remote", 502)
+  }
+
   async function linked() {
     const hit = await link()
-    if (!hit?.connected || !hit.token) throw new Failure("unlinked", 409)
+    if (!hit?.connected) throw new Failure("unlinked", 409)
+    if (!hit.token) throw new Failure("remote", 502)
     return hit
   }
 
@@ -234,6 +253,7 @@ export namespace GitHub {
       connectUrl: hit.connect_url,
       login: hit.connected ? hit.login : undefined,
       linkedBy: hit.connected ? hit.linked_by : undefined,
+      app: hit.connected ? hit.app : undefined,
       repo: hit.repo,
       push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
       firstPush: failed.get(dir),
@@ -312,11 +332,35 @@ export namespace GitHub {
 
   export async function create(dir: string, input: { name: string; message?: string | Describe }) {
     const hit = await linked()
+    if (hit.app) throw new Failure("app", 422)
     const repo = shape(
       await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
     )
-    await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
+    await report({
+      repo_owner: repo.owner,
+      repo_name: repo.name,
+      repo_url: repo.url,
+      repo_private: repo.private ?? false,
+    })
     await firstPush(dir, { ...hit, repo }, input.message ?? "Initial commit from Jitda")
+    return status(dir)
+  }
+
+  export async function repositories(dir: string): Promise<Repo[]> {
+    if (!serves(dir)) throw new Failure("disabled", 409)
+    const list = await rails<{ repositories: Repo[] }>("/repositories")
+    return list.repositories.map((item) => ({
+      owner: item.owner,
+      name: item.name,
+      url: item.url,
+      private: item.private,
+    }))
+  }
+
+  export async function select(dir: string, input: { owner: string; name: string; message?: string | Describe }) {
+    if (!serves(dir)) throw new Failure("disabled", 409)
+    await rails("/repository", { method: "PUT", body: { repo_owner: input.owner, repo_name: input.name } })
+    await firstPush(dir, await linked(), input.message ?? "Initial commit from Jitda")
     return status(dir)
   }
 
@@ -367,7 +411,10 @@ export namespace GitHub {
       "GET",
       `/repos/${encodeURIComponent(hit.repo.owner)}/${encodeURIComponent(hit.repo.name)}`,
     )
-    if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
+    if (!hit.app && remote.permissions?.push === false) throw new Failure("forbidden", 409)
+    if (remote.private !== (hit.repo.private ?? false)) {
+      await report({ repo_private: remote.private }).catch(() => undefined)
+    }
     const gitdir = path.join(Global.Path.data, "github", Hash.fast(dir))
     const result = await serial(gitdir, async () => {
       await ignore(dir).catch((err) => log.error("gitignore skipped", { error: String(err) }))

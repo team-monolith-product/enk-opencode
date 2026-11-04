@@ -15253,6 +15253,9 @@
           "linkedBy": {
             "type": "string"
           },
+          "app": {
+            "type": "boolean"
+          },
           "repo": {
             "type": "object",
             "properties": {
