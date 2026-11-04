@@ -241,7 +241,9 @@ export function csp(hash = "") {
   const frame = origins("'self'", preview, tutorial, `https://user.${domain}`)
   const connect = origins("'self'", "data:", "blob:", `https://*.${domain}`, SENTRY_INGEST)
   const script = origins("'self'", "'wasm-unsafe-eval'", hash ? `'sha256-${hash}'` : undefined)
-  return `frame-ancestors ${origins("'self'", domain)}; default-src 'self'; frame-src ${frame}; script-src ${script}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' data: blob:; worker-src 'self' blob:; connect-src ${connect}`
+  // 다른 브랜드 도메인(bana.build 등)이 페이지를 iframe 으로 임베드할 수 있도록 허브가 넘겨주는 오리진 목록.
+  const ancestors = (env("OPENCODE_EXTRA_FRAME_ANCESTORS") ?? "").split(/\s+/).filter(Boolean)
+  return `frame-ancestors ${origins("'self'", domain, ...ancestors)}; default-src 'self'; frame-src ${frame}; script-src ${script}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' data: blob:; worker-src 'self' blob:; connect-src ${connect}`
 }
 
 type Activity = { url: string; token: string; server: string; interval: number }

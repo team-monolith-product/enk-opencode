@@ -90,6 +90,16 @@ describe("jitda hub", () => {
     expect(value).toContain("script-src 'self' 'wasm-unsafe-eval' 'sha256-abc'")
   })
 
+  test("adds extra frame ancestors from the hub", () => {
+    process.env.OPENCODE_SERVE_DOMAIN = "jitda.test"
+    process.env.OPENCODE_EXTRA_FRAME_ANCESTORS = "https://bana.build  https://other.test"
+    try {
+      expect(JitdaHub.csp()).toContain("frame-ancestors 'self' jitda.test https://bana.build https://other.test;")
+    } finally {
+      delete process.env.OPENCODE_EXTRA_FRAME_ANCESTORS
+    }
+  })
+
   test("tracks busy sessions from status events", () => {
     const busy = new Set<string>()
     JitdaHub.observe(busy, { type: "session.status", data: { sessionID: "a", status: { type: "busy" } } })
