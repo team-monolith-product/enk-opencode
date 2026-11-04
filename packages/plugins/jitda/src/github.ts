@@ -54,6 +54,7 @@ export type Status = {
   connectUrl?: string
   login?: string
   linkedBy?: string
+  app?: boolean
   repo?: Repo
   push?: { sha: string; time: number; by?: string }
   firstPush?: FirstPush
@@ -66,6 +67,7 @@ export type Code =
   | "exists"
   | "forbidden"
   | "revoked"
+  | "app"
   | "missing"
   | "empty"
   | "remote"
@@ -88,6 +90,7 @@ type Link = {
   login?: string
   github_user_id?: number
   linked_by?: string
+  app?: boolean
   token?: string
   repo?: Repo
   push?: { sha: string; at: number; by?: string }
@@ -267,9 +270,33 @@ async function report(body: Record<string, string | boolean | null>) {
   }
 }
 
+async function rails<T>(sub: string, init?: { method: string; body: unknown }): Promise<T> {
+  const target = backend()
+  if (!target) throw new Failure("disabled", 409)
+  const method = init?.method ?? "GET"
+  const url = target.url + sub
+  const res = await fetch(url, {
+    method,
+    headers: { Authorization: `token ${target.token}`, "Content-Type": "application/json" },
+    body: init ? JSON.stringify(init.body) : undefined,
+    signal: AbortSignal.timeout(30_000),
+  }).catch((error) => {
+    if (!quiet(`rails call failed:${sub}`))
+      console.error("[jitda.github] rails call failed", { method, url, error: errorData(error) })
+    return undefined
+  })
+  if (res?.ok) return (await res.json()) as T
+  if (res && !quiet(`rails call rejected:${sub}:${res.status}`))
+    console.error("[jitda.github] rails call rejected", { method, url, response: cut(res, await text(res), 500) })
+  if (res?.status === 404) throw new Failure("missing", 404)
+  if (res?.status === 409) throw new Failure("unlinked", 409)
+  throw new Failure("remote", 502)
+}
+
 async function linked() {
   const hit = await link()
-  if (!hit?.connected || !hit.token) throw new Failure("unlinked", 409)
+  if (!hit?.connected) throw new Failure("unlinked", 409)
+  if (!hit.token) throw new Failure("remote", 502)
   return hit
 }
 
@@ -282,6 +309,7 @@ export async function status(dir: string): Promise<Status> {
     connectUrl: hit.connect_url,
     login: hit.connected ? hit.login : undefined,
     linkedBy: hit.connected ? hit.linked_by : undefined,
+    app: hit.connected ? hit.app : undefined,
     repo: hit.repo,
     push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
     firstPush: stuck.get(dir),
@@ -348,15 +376,43 @@ export const REPO_NAME = /^[A-Za-z0-9._-]{1,100}$/
 
 type Describe = (changes: Change[]) => Promise<string>
 
+function validName(name: string) {
+  return REPO_NAME.test(name) && name !== "." && name !== ".."
+}
+
 export async function create(dir: string, input: { name: string; message?: string | Describe }) {
-  if (!REPO_NAME.test(input.name) || input.name === "." || input.name === "..")
-    throw new Failure("exists", 422, "invalid name")
+  if (!validName(input.name)) throw new Failure("exists", 422, "invalid name")
   const hit = await linked()
+  if (hit.app) throw new Failure("app", 422)
   const repo = shape(
     await request<Remote>(hit.token!, "POST", "/user/repos", { name: input.name, private: false, auto_init: false }),
   )
-  await report({ repo_owner: repo.owner, repo_name: repo.name, repo_url: repo.url })
+  await report({
+    repo_owner: repo.owner,
+    repo_name: repo.name,
+    repo_url: repo.url,
+    repo_private: repo.private ?? false,
+  })
   await firstPush(dir, { ...hit, repo }, input.message ?? "Initial commit from Jitda")
+  return status(dir)
+}
+
+export async function repositories(dir: string): Promise<Repo[]> {
+  if (!serves(dir)) throw new Failure("disabled", 409)
+  const list = await rails<{ repositories: Repo[] }>("/repositories")
+  return list.repositories.map((item) => ({
+    owner: item.owner,
+    name: item.name,
+    url: item.url,
+    private: item.private,
+  }))
+}
+
+export async function select(dir: string, input: { owner: string; name: string; message?: string | Describe }) {
+  if (!serves(dir)) throw new Failure("disabled", 409)
+  if (!input.owner || !validName(input.name)) throw new Failure("exists", 422, "invalid name")
+  await rails("/repository", { method: "PUT", body: { repo_owner: input.owner, repo_name: input.name } })
+  await firstPush(dir, await linked(), input.message ?? "Initial commit from Jitda")
   return status(dir)
 }
 
@@ -412,7 +468,10 @@ export async function push(dir: string, input: { message: string | Describe }, k
     "GET",
     `/repos/${encodeURIComponent(hit.repo.owner)}/${encodeURIComponent(hit.repo.name)}`,
   )
-  if (remote.permissions?.push === false) throw new Failure("forbidden", 409)
+  if (!hit.app && remote.permissions?.push === false) throw new Failure("forbidden", 409)
+  if (remote.private !== (hit.repo.private ?? false)) {
+    await report({ repo_private: remote.private }).catch(() => undefined)
+  }
   const gitdir = path.join(dataDir(), "github", createHash("sha1").update(dir).digest("hex"))
   const repo = hit.repo
   const result = await serial(gitdir, async () => {
@@ -700,6 +759,18 @@ export async function start(ctx: Context) {
     createRepo: async (input) => {
       const { name, locale } = input as { name: string; locale?: unknown }
       return json(await create(directory, { name, message: first(Locale.parse(locale)) }).catch(failure("createRepo")))
+    },
+    repositories: async () =>
+      json(
+        await repositories(directory)
+          .then((list) => ({ repositories: list }))
+          .catch(failure("repositories")),
+      ),
+    selectRepo: async (input) => {
+      const { owner, name, locale } = input as { owner: string; name: string; locale?: unknown }
+      return json(
+        await select(directory, { owner, name, message: first(Locale.parse(locale)) }).catch(failure("selectRepo")),
+      )
     },
     push: async (input) => {
       const { locale } = input as { locale?: unknown }

@@ -174,6 +174,23 @@ export const Github = {
       },
       output: { type: "object", additionalProperties: true },
     },
+    repositories: {
+      input: { type: "object", additionalProperties: false },
+      output: { type: "object", additionalProperties: true },
+    },
+    selectRepo: {
+      input: {
+        type: "object",
+        properties: {
+          owner: { type: "string" },
+          name: { type: "string" },
+          locale: { type: "string", enum: ["ko", "en", "ar"] },
+        },
+        required: ["owner", "name"],
+        additionalProperties: false,
+      },
+      output: { type: "object", additionalProperties: true },
+    },
     push: {
       input: {
         type: "object",

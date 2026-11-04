@@ -3,6 +3,7 @@ export const dict = {
   "github.description.unlinked": "Link a GitHub account to push this project to a repository.",
   "github.description.choose":
     "Name the repository to push this project to. It is pushed once right after the repository is created.",
+  "github.description.select": "Choose the repository to push to. It is pushed once right after you choose.",
   "github.description.linked":
     "Each time a conversation with the AI finishes, changes are pushed to this repository automatically.",
   "github.intro.team":
@@ -15,6 +16,17 @@ export const dict = {
   "github.repo.name.hint": "Use English letters, numbers, - _ . only",
   "github.repo.public.hint": "Anyone on the internet can see it",
   "github.repo.create": "Create repository",
+  "github.repo.push": "Push to this repository",
+  "github.repo.new": "Create a new repository on GitHub",
+  "github.repo.reload": "Reload list",
+  "github.repo.installations": "Open the GitHub app installation settings",
+  "github.repo.new.hint":
+    'Reload the list after creating it. If you chose "Only select repositories" when installing, add the new repository in the GitHub app installation settings first.',
+  "github.repo.empty": "No repository to push to. Create one on GitHub, then reload the list.",
+  "github.repo.private": "Private",
+  "github.error.repos": "Couldn't load the repository list",
+  "github.repo.select.title": "Choose the repository to push to",
+  "github.repo.select.hint": "Only the repositories you selected when installing the GitHub app are shown.",
   "github.push.last": "Last pushed {{time}}",
   "github.push.lastBy": "Last pushed {{time}} by {{name}}",
   "github.push.never": "Not pushed yet",
@@ -27,6 +39,7 @@ export const dict = {
   "github.error.exists": "A repository with this name already exists",
   "github.error.forbidden": "You can't push to this repository",
   "github.error.revoked": "GitHub access was revoked. Link again in Jitda",
+  "github.error.app": "Create the repository on GitHub, then choose it in Jitda",
   "github.error.missing": "Couldn't find the repository",
   "github.error.empty": "There are no files to push",
   "github.error.remote": "Couldn't reach GitHub. Try again in a moment",
