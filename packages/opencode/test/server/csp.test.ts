@@ -12,6 +12,21 @@ describe("csp", () => {
   })
 })
 
+describe("frame-ancestors", () => {
+  test("includes extra ancestors from OPENCODE_EXTRA_FRAME_ANCESTORS", async () => {
+    const proc = Bun.spawn(
+      ["bun", "-e", `import { DEFAULT_CSP } from "./src/server/csp"; console.log(DEFAULT_CSP.split(";")[0])`],
+      {
+        cwd: new URL("../..", import.meta.url).pathname,
+        env: { ...process.env, OPENCODE_SERVE_DOMAIN: "jitda.io", OPENCODE_EXTRA_FRAME_ANCESTORS: "https://bana.build" },
+        stdout: "pipe",
+      },
+    )
+    const out = await new Response(proc.stdout).text()
+    expect(out.trim()).toBe("frame-ancestors 'self' jitda.io https://bana.build")
+  })
+})
+
 describe("themePreloadHash", () => {
   const inline = (body: string) => `<head><script id="oc-theme-preload-script">${body}</script></head>`
 
