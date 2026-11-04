@@ -19,6 +19,7 @@ const Status = z
     connectUrl: z.string().optional(),
     login: z.string().optional(),
     linkedBy: z.string().optional(),
+    app: z.boolean().optional(),
     repo: Repo.optional(),
     push: z.object({ sha: z.string(), time: z.number(), by: z.string().optional() }).optional(),
     firstPush: z
@@ -31,6 +32,7 @@ const Status = z
   })
   .meta({ ref: "GitHubStatus" })
 const Pushed = Status.extend({ pushed: z.boolean() }).meta({ ref: "GitHubPushed" })
+const Repositories = z.object({ repositories: z.array(Repo) }).meta({ ref: "GitHubRepositories" })
 const RepoName = z
   .string()
   .min(1)
@@ -59,6 +61,27 @@ export const GitHubRoutes = lazy(() =>
         responses: ok("Link status", Status),
       }),
       async (c) => c.json(await GitHub.status(Instance.directory)),
+    )
+    .get(
+      "/repositories",
+      describeRoute({
+        summary: "List installed GitHub repositories",
+        description: "Repositories the team picked when installing the GitHub App.",
+        operationId: "github.repositories",
+        responses: { ...ok("Repositories", Repositories), ...failures(404, 409, 502) },
+      }),
+      async (c) => c.json({ repositories: await alerting(c, () => GitHub.repositories(Instance.directory)) }),
+    )
+    .put(
+      "/repository",
+      describeRoute({
+        summary: "Choose GitHub repository",
+        description: "Bind one of the installed repositories to this project and push it once.",
+        operationId: "github.repo.select",
+        responses: { ...ok("Link status", Status), ...failures(404, 409, 502) },
+      }),
+      validator("json", z.object({ owner: z.string().min(1), name: RepoName, locale: Locale.Schema.optional() })),
+      async (c) => c.json(await alerting(c, () => GitHub.select(Instance.directory, c.req.valid("json")))),
     )
     .post(
       "/repo",
