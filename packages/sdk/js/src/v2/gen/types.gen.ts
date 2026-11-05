@@ -487,6 +487,26 @@ export type EventSessionError = {
   }
 }
 
+export type EventHistoryRestored = {
+  type: "history.restored"
+  properties: {
+    sessionID: string
+    sha: string
+    target: string
+    subject: string
+    files: number
+    deps: boolean
+  }
+}
+
+export type EventHistoryFailed = {
+  type: "history.failed"
+  properties: {
+    sessionID: string
+    code: "missing" | "busy" | "same" | "failed"
+  }
+}
+
 export type EventDocPromptRotated = {
   type: "doc.prompt.rotated"
   properties: {
@@ -1065,6 +1085,8 @@ export type Event =
   | EventCommandExecuted
   | EventSessionDiff
   | EventSessionError
+  | EventHistoryRestored
+  | EventHistoryFailed
   | EventDocPromptRotated
   | EventVcsBranchUpdated
   | EventWorkspaceReady
@@ -1923,9 +1945,26 @@ export type GitHubStatus = {
   }
 }
 
-export type GitHubError = {
+export type EnkFailure = {
   code: string
   message: string
+}
+
+export type HistoryEntry = {
+  sha: string
+  time: number
+  subject: string
+  revert?: string
+}
+
+export type HistoryStatus = {
+  enabled: boolean
+  entries: Array<HistoryEntry>
+}
+
+export type HistoryChange = {
+  status: "A" | "M" | "D" | "L"
+  file: string
 }
 
 export type ToolIds = Array<string>
@@ -2080,7 +2119,13 @@ export type SessionPromptDoc = {
   sessionID: string
 }
 
-export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear"
+export type DocSubmitTargetKind = "doc" | "question" | "stop" | "clear" | "rollback"
+
+export type DocRollbackTarget = {
+  sha: string
+  subject: string
+  time: number
+}
 
 export type DocSubmitStatus = "pending" | "sent" | "cancelled" | "expired" | "left"
 
@@ -2097,6 +2142,7 @@ export type DocSubmit = {
   targetKind: DocSubmitTargetKind
   targetID: string
   questionAction?: "send" | "dismiss" | "back"
+  rollback?: DocRollbackTarget
   actorID: string
   status: DocSubmitStatus
   actors: Array<DocSubmitActor>
@@ -3357,17 +3403,17 @@ export type GithubRepoCreateData = {
 
 export type GithubRepoCreateErrors = {
   /**
-   * GitHub error
+   * Expected failure
    */
-  409: GitHubError
+  409: EnkFailure
   /**
-   * GitHub error
+   * Expected failure
    */
-  422: GitHubError
+  422: EnkFailure
   /**
-   * GitHub error
+   * Expected failure
    */
-  502: GitHubError
+  502: EnkFailure
 }
 
 export type GithubRepoCreateError = GithubRepoCreateErrors[keyof GithubRepoCreateErrors]
@@ -3380,6 +3426,68 @@ export type GithubRepoCreateResponses = {
 }
 
 export type GithubRepoCreateResponse = GithubRepoCreateResponses[keyof GithubRepoCreateResponses]
+
+export type HistoryListData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/history"
+}
+
+export type HistoryListErrors = {
+  /**
+   * Expected failure
+   */
+  500: EnkFailure
+}
+
+export type HistoryListError = HistoryListErrors[keyof HistoryListErrors]
+
+export type HistoryListResponses = {
+  /**
+   * Version history
+   */
+  200: HistoryStatus
+}
+
+export type HistoryListResponse = HistoryListResponses[keyof HistoryListResponses]
+
+export type HistoryChangesData = {
+  body?: never
+  path: {
+    sha: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/history/{sha}"
+}
+
+export type HistoryChangesErrors = {
+  /**
+   * Expected failure
+   */
+  404: EnkFailure | NotFoundError
+  /**
+   * Expected failure
+   */
+  500: EnkFailure
+}
+
+export type HistoryChangesError = HistoryChangesErrors[keyof HistoryChangesErrors]
+
+export type HistoryChangesResponses = {
+  /**
+   * Changed files
+   */
+  200: Array<HistoryChange>
+}
+
+export type HistoryChangesResponse = HistoryChangesResponses[keyof HistoryChangesResponses]
 
 export type ToolIdsData = {
   body?: never
@@ -5008,6 +5116,58 @@ export type SessionPromptDocClearResponses = {
 }
 
 export type SessionPromptDocClearResponse = SessionPromptDocClearResponses[keyof SessionPromptDocClearResponses]
+
+export type SessionPromptDocRollbackData = {
+  body?: {
+    docID: string
+    actorID: string
+    actorIDs?: Array<string>
+    names?: {
+      [key: string]: string
+    }
+    timeoutMs?: number
+    sha: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/prompt-doc/rollback"
+}
+
+export type SessionPromptDocRollbackErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * Expected failure
+   */
+  404: EnkFailure | NotFoundError
+  /**
+   * Expected failure
+   */
+  409: EnkFailure
+  /**
+   * Expected failure
+   */
+  500: EnkFailure
+}
+
+export type SessionPromptDocRollbackError = SessionPromptDocRollbackErrors[keyof SessionPromptDocRollbackErrors]
+
+export type SessionPromptDocRollbackResponses = {
+  /**
+   * Submit approval state
+   */
+  200: DocSubmit
+}
+
+export type SessionPromptDocRollbackResponse =
+  SessionPromptDocRollbackResponses[keyof SessionPromptDocRollbackResponses]
 
 export type SessionPromptDocSubmitRespondData = {
   body?: {

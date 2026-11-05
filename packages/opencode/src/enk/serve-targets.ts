@@ -37,6 +37,15 @@ export namespace ServeTargets {
     return dir ? { kind: "project", dir: resolve(dir), port: PORTS.project } : undefined
   }
 
+  /**
+   * 결과물로 남는 본행사 작업 폴더인지. 기록·GitHub 올리기처럼 결과물에만 거는 기능의 기준이다. 스포너 env 가
+   * 없는 환경(로컬 등)에서는 어느 폴더든 본행사로 본다.
+   */
+  export function isProject(dir: string): boolean {
+    const target = project()
+    return !target || resolve(dir) === target.dir
+  }
+
   /** 튜토리얼 타깃. 본행사 디렉토리의 형제로 도출한다. */
   export function tutorial(): Target | undefined {
     const base = project()

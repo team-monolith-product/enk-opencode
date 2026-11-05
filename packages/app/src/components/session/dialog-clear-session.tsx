@@ -5,7 +5,7 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { useLanguage } from "@/context/language"
-import { SessionClearVote } from "@/utils/session-clear-vote"
+import { SessionVote } from "@/utils/session-vote"
 
 /**
  * "대화 초기화" 확인창.
@@ -29,7 +29,7 @@ export function DialogClearSession(props: { session: Session; clear: (session: S
     dialog.close()
     // 초기화는 되돌릴 수 없고, 같이 보던 사람들의 대화까지 사라진다. 함께 쓰는 중이면 전송·중지와
     // 같은 동의를 먼저 구하고, 합의가 서면 서버가 정리한다. 물어볼 상대가 없을 때만 바로 초기화한다.
-    if (await SessionClearVote.request(props.session.id)) return
+    if (await SessionVote.get(props.session.id)?.clear()) return
     void props.clear(props.session)
   }
 
