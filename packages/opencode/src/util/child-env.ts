@@ -193,8 +193,43 @@ export namespace ChildEnv {
   }
 
   /**
+   * 환경을 **교체하지 못하는** spawn 구현용. 통과한 값에 더해, 차단 대상 이름을 빈 문자열로
+   * 덮어쓰는 항목까지 담는다.
+   *
+   * `sanitize` 는 "이 목록이 자식 환경의 전부"라는 전제 위에 서 있다. node 의 `child_process.spawn`
+   * 은 그 목록을 `execve` 의 envp 로 그대로 쓰므로 전제가 맞지만, bun-pty 는 넘긴 쌍을 부모의
+   * exec 시점 C `environ` **위에 얹기만** 한다(`env_clear` 상당 동작이 없다). 그쪽에 `sanitize`
+   * 결과를 넘기면 allowlist 는 "추가"만 하고 "제거"는 못 해서, 통과하지 못한 이름이 자식 터미널에
+   * 그대로 남는다.
+   *
+   * 덧씌우기만 가능하다면 지우는 대신 **덮는다**. 이름은 남지만 값이 사라지므로 시크릿은 새지
+   * 않는다. `mask` 처럼 `undefined` 로 두면 안 된다 — 그런 구현은 값을 문자열로 이어 붙이느라
+   * `NAME=undefined` 라는 가짜 값이 실린다.
+   *
+   * 한계: `base`(기본값 `process.env`) 에 보이는 이름만 덮는다. exec 시점에는 있었는데 런타임에
+   * 지워진 이름은 여기 안 잡힌다. 지금 그런 이름은 boot/env.ts 가 지우는 `OPENCODE_BOOT_ENV`
+   * 하나뿐이고, 그 값은 이미 unlink 된 파일 경로다.
+   */
+  export function overlay(opts: Options = {}): Record<string, string> {
+    const base = opts.base ?? process.env
+    const allow = allowSet(opts.allow)
+    const out: Record<string, string> = {}
+    for (const [name, value] of Object.entries(base)) {
+      if (value === undefined) continue
+      out[name] = allowed(name, allow) ? value : ""
+    }
+    for (const [name, value] of Object.entries(opts.extend ?? {})) {
+      // unset 이 불가능한 경로라 `undefined` 는 빈 값이 최선이다. 호출부의 의도(지우기)에
+      // 가장 가까운 쪽으로 떨어뜨린다.
+      out[name] = value ?? ""
+    }
+    return out
+  }
+
+  /**
    * 차단 대상 이름을 `undefined` 로 매핑한 객체. `{ ...process.env, ...mask() }` 로 합치는 호출부용.
    * node 의 spawn 은 값이 undefined 인 항목을 환경에서 빼므로 sanitize 와 같은 결과가 된다.
+   * 환경을 덧씌우기만 하는 spawn(bun-pty) 에는 쓰면 안 된다 — `overlay` 를 쓴다.
    */
   export function mask(opts: Pick<Options, "allow" | "base"> = {}): Record<string, undefined> {
     const base = opts.base ?? process.env
