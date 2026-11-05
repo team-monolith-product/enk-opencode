@@ -30,6 +30,7 @@ export type SubmitState = {
   cancelledBy?: SubmitActorInfo
   timeoutMs: number
   expiresAt: number
+  serverNow?: number
 }
 
 export type SubmitEvent = { type: SubmitEventType; state: SubmitState }
@@ -450,6 +451,7 @@ function read(row: SubmitRow): SubmitState {
     ...(row.cancelled_by ? { cancelledBy: list.find((item) => item.actorID === row.cancelled_by) } : {}),
     timeoutMs: row.timeout_ms,
     expiresAt: row.expires_at,
+    serverNow: Date.now(),
   }
 }
 

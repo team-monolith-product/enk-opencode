@@ -565,6 +565,20 @@ describe("Doc submit votes", () => {
     stop()
   })
 
+  test("submit state carries the server clock so clients can correct their own", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob] = team("Alice", "Bob")
+    const stop = quiet(docID, bob!.actorID)
+    const before = Date.now()
+
+    const state = Doc.submitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, prompt })
+
+    expect(state.serverNow).toBeGreaterThanOrEqual(before)
+    expect(state.expiresAt - state.serverNow!).toBeLessThanOrEqual(state.timeoutMs)
+
+    stop()
+  })
+
   test("submit is sent at once when team consent is turned off", () => {
     process.env.ENK_CONSENT_REQUIRED = "0"
     try {
