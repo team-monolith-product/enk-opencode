@@ -1,7 +1,7 @@
 import type { SessionMessageAssistant, SessionMessageInfo } from "@opencode/client/promise"
 import { shellResultFailed } from "../message/current-tool-state"
 
-export const timelineCategories = ["shell", "edit", "thinking", "subagents", "notices", "tools"] as const
+export const timelineCategories = ["shell", "edit", "thinking", "subagents", "notices", "tools", "commentary"] as const
 
 export type TimelineCategory = (typeof timelineCategories)[number]
 
@@ -22,6 +22,7 @@ export type TimelineDetail = {
   separateFileTools?: boolean
   /** Drops failures the session recovers from on its own: file-tool errors and the retry banner. */
   hideMinorErrors?: boolean
+  commentary: { placement: TimelinePlacement }
 }
 
 export const timelinePresets = [
@@ -34,6 +35,7 @@ export const timelinePresets = [
       subagents: { placement: "separate" },
       notices: { placement: "separate" },
       tools: { placement: "separate" },
+      commentary: { placement: "separate" },
     },
   },
   {
@@ -45,6 +47,7 @@ export const timelinePresets = [
       subagents: { placement: "separate" },
       notices: { placement: "grouped" },
       tools: { placement: "grouped" },
+      commentary: { placement: "separate" },
     },
   },
   {
@@ -53,9 +56,10 @@ export const timelinePresets = [
       shell: { placement: "grouped", details: "collapsed" },
       edit: { placement: "grouped", details: "collapsed" },
       thinking: { placement: "grouped", details: "collapsed" },
-      subagents: { placement: "grouped" },
+      subagents: { placement: "separate" },
       notices: { placement: "grouped" },
       tools: { placement: "grouped" },
+      commentary: { placement: "separate" },
     },
   },
   {
@@ -64,9 +68,10 @@ export const timelinePresets = [
       shell: { placement: "hidden", details: "collapsed" },
       edit: { placement: "grouped", details: "collapsed" },
       thinking: { placement: "hidden", details: "collapsed" },
-      subagents: { placement: "grouped" },
+      subagents: { placement: "separate" },
       notices: { placement: "hidden" },
       tools: { placement: "hidden" },
+      commentary: { placement: "separate" },
     },
   },
   {
@@ -78,6 +83,7 @@ export const timelinePresets = [
       subagents: { placement: "hidden" },
       notices: { placement: "hidden" },
       tools: { placement: "hidden" },
+      commentary: { placement: "separate" },
     },
   },
 ] as const satisfies readonly { id: string; value: TimelineDetail }[]
@@ -110,6 +116,17 @@ export function timelineCategory(content: SessionMessageAssistant["content"][num
   if (["subagent", "task"].includes(content.name)) return "subagents"
 
   return "tools"
+}
+
+// Like the TUI, background work reports its outcome as its own row where it finished, never folded into a group.
+// A subagent's outcome follows the subagent setting, so it shows wherever its launch does.
+export function timelineNoticePlacement(message: SessionMessageInfo, detail: TimelineDetail): TimelinePlacement {
+  const source = message.type === "synthetic" ? message.metadata?.source : undefined
+  const placement = source === "subagent" ? detail.subagents.placement : detail.notices.placement
+
+  if (placement === "hidden") return timelineNoticeRequired(message) ? "separate" : "hidden"
+
+  return source === "subagent" || source === "shell" ? "separate" : placement
 }
 
 export function timelineNoticeRequired(message: SessionMessageInfo) {

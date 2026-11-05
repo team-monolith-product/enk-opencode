@@ -1,5 +1,4 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Component } from "solid-js"
-import { DockShellForm } from "@opencode/ui/dock-surface"
 import { useDialog } from "@opencode/ui/context/dialog"
 import { showToast } from "@opencode/ui/toast"
 import { encodeFilePath, getFilename } from "@opencode/util/path"
@@ -614,7 +613,8 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
           <div class="h-0.5 w-18 rounded-none bg-border-weaker-base transition-colors group-hover:bg-border-strong-base" />
         </div>
       </Show>
-      <DockShellForm
+      <form
+        data-dock-surface="shell"
         onSubmit={(event) => {
           event.preventDefault()
           void submit()
@@ -663,7 +663,7 @@ export const JitdaPromptInput: Component<JitdaPromptInputProps> = (props) => {
             autoExpand={{ enabled: autoExpand(), onToggle: toggleAutoExpand }}
           />
         </div>
-      </DockShellForm>
+      </form>
     </div>
   )
 }

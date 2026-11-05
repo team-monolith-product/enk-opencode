@@ -10,6 +10,7 @@ export const JITDA_TIMELINE: TimelineDetail = {
   subagents: { placement: "separate" },
   notices: { placement: "hidden" },
   tools: { placement: "separate" },
+  commentary: { placement: "separate" },
   contextTools: ["read", "glob", "grep", "list"],
   separateFileTools: true,
   hideMinorErrors: Flags.disableMinorErrors,

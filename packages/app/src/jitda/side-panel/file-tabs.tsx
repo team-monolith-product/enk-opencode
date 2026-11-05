@@ -10,7 +10,6 @@ import {
   Switch,
   type JSX,
 } from "solid-js"
-import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import type { FileSearchHandle } from "@opencode/session-ui/file"
 import { useFileComponent } from "@opencode/ui/context/file"
@@ -26,10 +25,12 @@ import { useComments } from "@/composer/comments"
 import { useComposerState } from "@/composer/persistence"
 import { useLanguage } from "@/runtime/i18n/language"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/workspaces/files/model"
-import type { FileContent } from "@opencode/gui-extensions/sdk"
-import { useExtensionHost } from "@/runtime/extension/host"
+import type { FileContent } from "@opencode/plugin/gui"
+import { usePluginHost } from "@/runtime/plugin/host"
 import { sidePanelController } from "./controller"
 import { FileViewer, pickFileViewer, viewerBytes } from "./file-viewer"
+import type { Component } from "solid-js"
+import type { JitdaFileViewerProps } from "@/jitda/pdf/renderer"
 
 export function FileCommentMenu(props: {
   moreLabel: string
@@ -211,7 +212,7 @@ export function FileTabContent(props: { tab: string; path: string; active: boole
   const file = useFile()
   const language = useLanguage()
   const fileComponent = useFileComponent()
-  const host = useExtensionHost()
+  const host = usePluginHost()
   const context = createLineContext()
   const comments = context.comments
 
@@ -246,35 +247,15 @@ export function FileTabContent(props: { tab: string; path: string; active: boole
   const fileComments = createMemo(() => comments.list(path()))
   const commentedLines = createMemo(() => fileComments().map((comment) => comment.selection))
 
-  const [note, setNote] = createStore({
-    openedComment: null as string | null,
-    commenting: null as SelectedLineRange | null,
-    selected: null as SelectedLineRange | null,
-  })
-
   const syncSelected = (range: SelectedLineRange | null) => {
     file.setSelectedLines(path(), range ? cloneSelectedLineRange(range) : null)
   }
-
-  const activeSelection = () => note.selected ?? selectedLines()
 
   const commentsUi = createLineCommentController({
     comments: fileComments,
     label: language.t("ui.lineComment.submit"),
     draftKey: () => path() ?? props.tab,
-    state: {
-      opened: () => note.openedComment,
-      setOpened: (id) => setNote("openedComment", id),
-      selected: () => note.selected,
-      setSelected: (range) => setNote("selected", range),
-      commenting: () => note.commenting,
-      setCommenting: (range) => setNote("commenting", range),
-      syncSelected,
-      hoverSelected: syncSelected,
-    },
-    getHoverSelectedRange: activeSelection,
-    cancelDraftOnCommentToggle: true,
-    clearSelectionOnSelectionEndNull: true,
+    onSyncSelected: syncSelected,
     onSubmit: ({ comment, selection }) => {
       context.add({
         file: path(),
@@ -315,7 +296,7 @@ export function FileTabContent(props: { tab: string; path: string; active: boole
     onCleanup(() => window.removeEventListener("keydown", onKeyDown, { capture: true }))
   })
 
-  createEffect(on(path, () => commentsUi.note.reset(), { defer: true }))
+  createEffect(on(path, () => commentsUi.reset(), { defer: true }))
 
   createEffect(() => {
     const focus = comments.focus()
@@ -325,7 +306,7 @@ export function FileTabContent(props: { tab: string; path: string; active: boole
     const target = fileComments().find((comment) => comment.id === focus.id)
     if (!target) return
 
-    commentsUi.note.openComment(target.id, target.selection, { cancelDraft: true })
+    commentsUi.focusComment(target.id, target.selection)
     requestAnimationFrame(() => comments.clearFocus())
   })
 
@@ -353,7 +334,7 @@ export function FileTabContent(props: { tab: string; path: string; active: boole
         }}
         enableLineSelection
         enableGutterUtility
-        selectedLines={activeSelection()}
+        selectedLines={commentsUi.selected() ?? selectedLines()}
         commentedLines={commentedLines()}
         onRendered={() => scrollSync.queueRestore()}
         annotations={commentsUi.annotations()}
@@ -426,11 +407,11 @@ function FileViewerStage(props: {
       <ErrorBoundary fallback={(_) => props.fallback()}>
         <div class="relative flex h-full min-h-0 flex-col">
           <Dynamic
-            component={props.viewer.View}
+            component={props.viewer.View as Component<JitdaFileViewerProps>}
             bytes={decoded().bytes}
             path={props.path}
             onDetails={() => {}}
-            onError={(reason) => setFailed({ reason })}
+            onError={(reason?: string) => setFailed({ reason })}
           />
         </div>
       </ErrorBoundary>

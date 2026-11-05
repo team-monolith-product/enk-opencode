@@ -19,6 +19,20 @@ import { EffectFlock } from "@opencode/util/effect-flock"
 import { Heap } from "./heap"
 import { CpuProfile } from "./cpu-profile"
 import { Sentry } from "@opencode/plugin-jitda/sentry"
+import { ShutdownDeadline } from "./shutdown-deadline"
+
+// Keep requests to the local service off any proxy. Bun reads lowercase `no_proxy` alone whenever it is set, so both
+// spellings get the same merged list.
+const noProxy = [
+  ...new Set(
+    [process.env.NO_PROXY, process.env.no_proxy, "127.0.0.1,localhost,::1"].flatMap((value) =>
+      (value ?? "").split(",").flatMap((entry) => entry.trim() || []),
+    ),
+  ),
+].join(",")
+
+process.env.NO_PROXY = noProxy
+process.env.no_proxy = noProxy
 
 // V1 처럼 허브 파드에서만 켠다. boot-env 가 시크릿을 되돌린 뒤라야 JUPYTERHUB_* 가 보인다.
 Sentry.init()
@@ -46,6 +60,7 @@ const Handlers = Runtime.handlers(Commands, {
   debug: {
     agents: () => import("./commands/handlers/debug/agents"),
     config: () => import("./commands/handlers/debug/config"),
+    "heap-dump": () => import("./commands/handlers/debug/heap-dump"),
     paths: () => import("./commands/handlers/debug/paths"),
   },
   mcp: {
@@ -88,6 +103,7 @@ const Handlers = Runtime.handlers(Commands, {
 Effect.gen(function* () {
   yield* Heap.listen
   yield* CpuProfile.listen
+  yield* ShutdownDeadline.install()
   const runFork = Effect.runForkWith(yield* Effect.context<never>())
   const uncaughtException = (cause: Error, origin: "uncaughtException" | "unhandledRejection") => {
     runFork(Effect.logError("uncaught exception", { cause, origin }))

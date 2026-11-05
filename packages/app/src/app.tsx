@@ -1,15 +1,18 @@
 import "@/index.css"
+import { VoiceProvider } from "@/voice/context"
+import { VoiceOverlay } from "@/voice/composer"
 import { DialogProvider } from "@opencode/ui/context/dialog"
 import { FileComponentProvider } from "@opencode/ui/context/file"
 import { Font } from "@opencode/ui/font"
 import { ThemeProvider } from "@opencode/ui/theme/context"
-import { MetaProvider } from "@solidjs/meta"
+import { MetaProvider, Title } from "@solidjs/meta"
 import { type BaseRouterProps, Router } from "@solidjs/router"
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query"
 import { type Component, createRenderEffect, ErrorBoundary, type JSX, type ParentProps } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import { CommandProvider } from "@/shell/commands/command"
 import { DesktopCommands } from "@/shell/commands/desktop"
+import { ProjectIconsProvider } from "@/shell/layout/project-icons"
 import { GlobalProvider } from "@/runtime/server/runtime"
 import { LanguageProvider, UiI18nBridge, type Locale } from "@/runtime/i18n/language"
 import { ServerConnection, ServersProvider } from "@/runtime/server/registry"
@@ -17,12 +20,12 @@ import { SettingsProvider } from "@/settings/model"
 import { TabsProvider } from "@/shell/tabs/tabs"
 import { ErrorPage } from "@/shell/errors/error"
 import { AppRoutes, File, preloadRoute } from "@/shell/routes/routes"
-import { ExtensionRoot } from "@/runtime/extension/root"
+import { PluginRoot } from "@/runtime/plugin/root"
 import { Flags } from "@/jitda/flags"
-import { registerTool } from "@opencode/session-ui/message-part"
+import { ToolRegistry } from "@opencode/session-ui/message-part"
 import { registerJitdaTools } from "@/jitda/generated-image/register"
 
-registerJitdaTools(registerTool)
+registerJitdaTools(ToolRegistry.register)
 
 export { preloadRoute }
 
@@ -59,12 +62,11 @@ export function AppBaseProviders(
 ) {
   return (
     <MetaProvider>
+      <Title>OpenCode</Title>
       <Font />
       <ThemeProvider
         pinned={Flags.productionLayout ? "jitda" : undefined}
-        onThemeApplied={(_, mode, scheme) => {
-          props.onThemeApplied?.(mode, scheme)
-        }}
+        onThemeApplied={(mode, scheme) => props.onThemeApplied?.(mode, scheme)}
       >
         <LanguageProvider locale={props.locale} onNativeTranslations={props.onNativeTranslations}>
           <UiI18nBridge>
@@ -77,9 +79,9 @@ export function AppBaseProviders(
             >
               <QueryProvider>
                 <DialogProvider>
-                  <ExtensionRoot>
+                  <PluginRoot>
                     <FileComponentProvider component={File}>{props.children}</FileComponentProvider>
-                  </ExtensionRoot>
+                  </PluginRoot>
                 </DialogProvider>
               </QueryProvider>
             </ErrorBoundary>
@@ -102,12 +104,17 @@ export function AppInterface(props: {
   const Root = (rootProps: ParentProps) => (
     <TabsProvider>
       <GlobalProvider>
-        <BodyTypography />
-        <CommandProvider>
-          <DesktopCommands />
-          {props.children}
-          {rootProps.children}
-        </CommandProvider>
+        <ProjectIconsProvider>
+          <BodyTypography />
+          <CommandProvider>
+            <DesktopCommands />
+            <VoiceProvider>
+              {props.children}
+              {rootProps.children}
+              <VoiceOverlay />
+            </VoiceProvider>
+          </CommandProvider>
+        </ProjectIconsProvider>
       </GlobalProvider>
     </TabsProvider>
   )

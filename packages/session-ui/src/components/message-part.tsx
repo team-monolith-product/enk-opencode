@@ -2,4 +2,4 @@ export { AssistantReasoningContent, AssistantTextContent, CurrentUserMessageDisp
 
 export { CurrentContextToolGroup, SessionShellMessage, ToolDisplay } from "../tools/tool-renderer"
 
-export { registerTool } from "../tools/tool-renderer"
+export { ToolRegistry } from "../tools/tool-renderer"

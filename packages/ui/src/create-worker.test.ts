@@ -10,10 +10,11 @@ const CONSTRUCT_RE = /\bnew\s+(?:Shared)?Worker\s*\(/
 describe("worker construction guard", () => {
   test("browser code constructs workers only via createWorker()", async () => {
     const offenders: string[] = []
-    for (const pkg of ["app", "session-ui", "ui", "gui-extensions"]) {
+    for (const pkg of ["app", "session-ui", "ui", "gui-plugins"]) {
       for await (const rel of new Bun.Glob("**/*.{ts,tsx}").scan({ cwd: join(PACKAGES, pkg, "src") })) {
         if (/\.test\.tsx?$/.test(rel) || `${pkg}/${rel}` === "ui/create-worker.ts") continue
-        if (CONSTRUCT_RE.test(readFileSync(join(PACKAGES, pkg, "src", rel), "utf8"))) offenders.push(`${pkg}/${rel}`)
+        const code = readFileSync(join(PACKAGES, pkg, "src", rel), "utf8").replace(/\/\*[\s\S]*?\*\//g, "")
+        if (CONSTRUCT_RE.test(code)) offenders.push(`${pkg}/${rel}`)
       }
     }
     expect(offenders).toEqual([])

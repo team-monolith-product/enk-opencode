@@ -35,8 +35,10 @@ const databaseLayer = (lock: Effect.Effect<Semaphore.Semaphore>) =>
     Service,
     Effect.gen(function* () {
       const db = yield* makeDatabase
+      // An injected Durable Object client may run under a non-workerd module condition in tests.
+      const durableObject = EffectDrizzleSqlite.managesTransactionsNatively(db.$client)
 
-      if (supportsTuningPragmas) {
+      if (supportsTuningPragmas && !durableObject) {
         // EFS 같은 네트워크 FS 에서는 -shm(공유메모리 wal-index)이 노드 경계를 못 넘는다. EXCLUSIVE 면 wal-index 를
         // 힙에 두어 단일 프로세스가 -shm 없이 WAL 을 쓴다. WAL 로 바꾸기 전에 걸어야 한다.
         if (process.env.OPENCODE_DB_EXCLUSIVE_LOCK) yield* db.run("PRAGMA locking_mode = EXCLUSIVE")
@@ -47,7 +49,7 @@ const databaseLayer = (lock: Effect.Effect<Semaphore.Semaphore>) =>
         yield* db.run("PRAGMA wal_checkpoint(PASSIVE)")
       }
       // Durable Object SQLite always enforces foreign keys and rejects the pragma.
-      if (supportsForeignKeyToggle) yield* db.run("PRAGMA foreign_keys = ON")
+      if (supportsForeignKeyToggle && !durableObject) yield* db.run("PRAGMA foreign_keys = ON")
       const semaphore = yield* lock
       yield* semaphore.withPermit(DatabaseMigration.apply(db))
 

@@ -52,20 +52,11 @@ export function DiffTabContent(props: {
   const fileComments = createMemo(() => comments.list(path()))
   const commentedLines = createMemo(() => fileComments().map((comment) => comment.selection))
 
-  const [note, setNote] = createStore({
-    openedComment: null as string | null,
-    commenting: null as SelectedLineRange | null,
-    selected: null as SelectedLineRange | null,
-    force: false,
-  })
+  const [note, setNote] = createStore({ force: false })
 
   const syncSelected = (range: SelectedLineRange | null) => {
     file.setSelectedLines(path(), range ? cloneSelectedLineRange(range) : null)
   }
-
-  const selectedLines = createMemo(
-    () => note.selected ?? (file.selectedLines(path()) as SelectedLineRange | undefined) ?? null,
-  )
 
   const buildPreview = (selection: SelectedLineRange) => {
     const diff = item()
@@ -77,19 +68,8 @@ export function DiffTabContent(props: {
     comments: fileComments,
     label: language.t("ui.lineComment.submit"),
     draftKey: () => path() ?? props.tab,
-    state: {
-      opened: () => note.openedComment,
-      setOpened: (id) => setNote("openedComment", id),
-      selected: () => note.selected,
-      setSelected: (range) => setNote("selected", range),
-      commenting: () => note.commenting,
-      setCommenting: (range) => setNote("commenting", range),
-      syncSelected,
-      hoverSelected: syncSelected,
-    },
-    getHoverSelectedRange: selectedLines,
+    onSyncSelected: syncSelected,
     getSide: selectionSide,
-    clearSelectionOnSelectionEndNull: false,
     onSubmit: ({ comment, selection }) => {
       if (!item()) return
       context.add({ file: path(), selection, comment, preview: buildPreview(selection), origin: "review" })
@@ -110,7 +90,7 @@ export function DiffTabContent(props: {
     ),
   })
 
-  createEffect(on(path, () => commentsUi.note.reset(), { defer: true }))
+  createEffect(on(path, () => commentsUi.reset(), { defer: true }))
 
   createEffect(() => {
     const focus = comments.focus()
@@ -120,7 +100,7 @@ export function DiffTabContent(props: {
     const target = fileComments().find((comment) => comment.id === focus.id)
     if (!target) return
 
-    commentsUi.note.openComment(target.id, target.selection, { cancelDraft: true })
+    commentsUi.focusComment(target.id, target.selection)
     requestAnimationFrame(() => comments.clearFocus())
   })
 
@@ -182,7 +162,7 @@ export function DiffTabContent(props: {
                     annotations={commentsUi.annotations()}
                     renderAnnotation={commentsUi.renderAnnotation}
                     renderGutterUtility={commentsUi.renderGutterUtility}
-                    selectedLines={selectedLines()}
+                    selectedLines={commentsUi.selected() ?? (file.selectedLines(path()) as SelectedLineRange | undefined) ?? null}
                     commentedLines={commentedLines()}
                     media={{
                       mode: "auto",

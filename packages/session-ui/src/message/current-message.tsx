@@ -12,6 +12,8 @@ import {
 import { currentToolError, currentToolInput, currentToolMetadata, currentToolOutput } from "./current-tool-state"
 import { useMessageHost } from "./host"
 import { parsePartialToolInput } from "./tool-input"
+import type { UserRun } from "../timeline/user-runs"
+import type { TurnSources } from "../sources/sources"
 
 export type { SessionUserActions, SessionUserAttachmentReference, SessionUserComment } from "../actions"
 
@@ -23,7 +25,7 @@ export { MessageHostProvider, useMessageHost, type MessageHost, type HostToolPro
 
 export { minorToolError } from "./minor-error"
 
-export { writeClipboard } from "./message-content"
+export { writeClipboard } from "../components/copy"
 
 export { countPartialStringLines, editPendingDiff, parsePartialToolInput } from "./tool-input"
 
@@ -44,7 +46,13 @@ export function SessionUserMessage(props: {
   voice?: boolean
   historicalAgent: string
   historicalModel: SessionMessageAssistant["model"]
+  /** The agent and model the previous prompt chose; a waiting steer names only what it changes. */
+  previousSelection?: { agent: string; model: SessionMessageAssistant["model"] }
   actions?: SessionUserActions
+  run?: UserRun
+  fold?: boolean
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
 }) {
   return (
     <CurrentUserMessageDisplay
@@ -56,7 +64,12 @@ export function SessionUserMessage(props: {
       voice={props.voice}
       agent={props.historicalAgent}
       model={props.historicalModel}
+      previousSelection={props.previousSelection}
       actions={props.actions}
+      run={props.run}
+      fold={props.fold}
+      expanded={props.expanded}
+      onExpandedChange={props.onExpandedChange}
     />
   )
 }
@@ -67,6 +80,9 @@ export function SessionAssistantContent(props: {
   contentID: string
   showAssistantCopyPartID?: string | null
   turnDurationMs?: number | null
+  turnTokensPerSecond?: number
+  sources?: TurnSources
+  onOpenSources?: () => void
   defaultOpen?: boolean
   reasoningDefaultOpen?: boolean
   toolOpen?: boolean
@@ -83,6 +99,9 @@ export function SessionAssistantContent(props: {
             message={props.message}
             showCopy={props.showAssistantCopyPartID === props.contentID}
             turnDurationMs={props.turnDurationMs}
+            turnTokensPerSecond={props.turnTokensPerSecond}
+            sources={props.sources}
+            onOpenSources={props.onOpenSources}
           />
         )}
       </Match>

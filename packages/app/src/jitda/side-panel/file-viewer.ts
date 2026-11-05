@@ -1,16 +1,8 @@
-import type { Component } from "solid-js"
-import { Registry, type FileContent } from "@opencode/gui-extensions/sdk"
+import type { FileContent } from "@opencode/plugin/gui"
+import { FileViewer } from "@opencode/plugin/gui/file"
 import { artifactKind, type ArtifactKind } from "@opencode/util/artifact"
-import type { FileViewerProps } from "@/jitda/pdf/renderer"
 
-// gui-extensions 의 file.viewer 레지스트리와 같은 id 다. Office·PDF 처럼 파일 탭이 직접 그리지 않는 종류를 확장 뷰어가 맡는다.
-export type FileViewer = {
-  readonly kinds: readonly ArtifactKind[]
-  problem?(bytes: Uint8Array): string | undefined
-  readonly View: Component<FileViewerProps>
-}
-
-export const FileViewer = Registry.define<FileViewer>("file.viewer")
+export { FileViewer }
 
 // 파일 탭이 코드 뷰와 미디어로 직접 보여 주는 종류다.
 const ownKinds = new Set<ArtifactKind>(["text", "image", "svg", "audio", "html", "markdown", "mermaid", "table"])

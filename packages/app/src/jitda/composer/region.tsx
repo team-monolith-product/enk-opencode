@@ -4,9 +4,11 @@ import { useSpring } from "@opencode/ui/motion-spring"
 import { useData } from "@/runtime/server/current"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useJitda } from "../context"
+import { createSessionBackground } from "@/session/requests/background"
 import { createSessionRequestModel } from "@/session/requests/model"
+import { useWorkspaceLocation } from "@/workspaces/location"
 import { SessionPermissionDock } from "@/session/requests/session-permission-dock"
-import { SessionRunningMenu } from "@/session/header/session-running-menu"
+import { SessionRunningMenu } from "./running-menu"
 import type { SessionQueueView } from "@/session/composer/queue"
 import { sessionTreeIDs } from "@/session/requests/session-request-tree"
 import type { SessionModel } from "@/session/model"
@@ -153,10 +155,24 @@ export function JitdaComposerRegion(props: {
   const jitda = useJitda()
   const language = useLanguage()
   const requests = createSessionRequestModel()
+  const location = useWorkspaceLocation()
   const env = createEnvRequests()
   const promptDoc = createPromptDocSession({ session: props.session })
 
   const sessionID = () => props.session.identity.sessionID()
+  // 서브에이전트 안에서는 실행 중 작업이 부모 세션의 것이다.
+  const runningOwner = () => {
+    const id = sessionID()
+
+    return id ? (data.session.get(id)?.parentID ?? id) : undefined
+  }
+  const running = createSessionBackground({
+    sessionID: runningOwner,
+    messages: data.session.message.list,
+    sessions: data.session.list,
+    status: data.session.status,
+    shells: () => data.shell.list({ directory: location().directory }),
+  })
   const responded = () => props.onResponseSubmit?.()
 
   const questionRequest = requests.questionRequest
@@ -365,9 +381,9 @@ export function JitdaComposerRegion(props: {
               <div data-component="jitda-running" class="pointer-events-auto flex justify-end empty:hidden">
                 <SessionRunningMenu
                   sessionID={sessionID()}
-                  owner={requests.background.running.sessionID()}
-                  blocking={requests.background.running.blocking()}
-                  tasks={requests.background.running.tasks()}
+                  owner={runningOwner()}
+                  blocking={running.blocking()}
+                  tasks={running.tasks()}
                 />
               </div>
               <JitdaQueuePanel queue={props.queue} />

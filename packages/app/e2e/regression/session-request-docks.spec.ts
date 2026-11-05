@@ -1,3 +1,4 @@
+import type { OpenCodeEvent } from "@opencode/client/promise"
 import { expect, test, type Page } from "@playwright/test"
 import { SERVER, sessionHref } from "../utils/app"
 import { installSseTransport } from "../utils/sse-transport"
@@ -207,6 +208,101 @@ test("shows a pending permission dock", async ({ page }) => {
   expect(replies).toEqual([{ sessionID, permissionID: "permission-request", body: { decision: "once" } }])
   await expect(permission).toHaveCount(0)
   await expect(page.locator('[data-component="composer"]')).toBeVisible()
+})
+
+test("names the MCP tool, the hook's message and the full input in the permission dock", async ({ page }) => {
+  const body = "x".repeat(3000)
+  await mockServer(page, {
+    sessionPermissions: {
+      [sessionID]: [
+        {
+          id: "permission-request",
+          sessionID,
+          action: "linear_save_comment",
+          resources: ["*"],
+          save: ["*"],
+          metadata: { input: { issueId: "ENG-1", labels: ["bug"], body } },
+          message: "Posts a comment on a Linear issue",
+        },
+      ],
+    },
+  })
+
+  await page.goto(sessionHref(sessionID))
+  await expectSessionTitle(page, title)
+
+  const permission = page.locator('[data-component="dock-prompt"][data-kind="permission"]')
+  const input = permission.locator('[data-slot="permission-input"]')
+  await expect(permission.getByText("linear_save_comment")).toBeVisible()
+  await expect(permission.getByText("Posts a comment on a Linear issue")).toBeVisible()
+  await expect(input.getByText("issueId: ENG-1")).toBeVisible()
+  await expect(input.getByText('labels: ["bug"]')).toBeVisible()
+  // The user approves these arguments, so a long one stays whole and scrolls inside the dock instead of being cut
+  await expect(input.getByText(`body: ${body}`, { exact: true })).toBeVisible()
+  await expect.poll(() => input.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+  // "Allow always" saves the wildcard, so its scope stays visible next to this call's input
+  await expect(permission.locator('[data-slot="permission-patterns"]').getByText("*", { exact: true })).toBeVisible()
+})
+
+test("loads a running subagent's question without polling idle subagents on every update", async ({ page }) => {
+  const runningID = "ses_request_running_subagent"
+  const idleIDs = Array.from({ length: 20 }, (_, index) => `ses_request_idle_${index}`)
+
+  const workspace = await mockWorkspace(page, {
+    name: "RequestDocks",
+    directory,
+    sessions: [
+      { id: sessionID, title },
+      { id: runningID, title: "Running subagent", parentID: sessionID },
+      ...idleIDs.map((id) => ({ id, title: id, parentID: sessionID })),
+    ],
+    seed: { tabs: [sessionID] },
+    // The mock reports a Session with a pending form as running.
+    forms: [
+      {
+        id: "frm_subagent_question",
+        sessionID: runningID,
+        title: "Questions",
+        metadata: { kind: "question" },
+        fields: [{ key: "q0", type: "string", title: "Direction", description: "Which way should the subagent go?" }],
+      },
+    ],
+  })
+
+  // Idle subagents whose worktrees were deleted; a failed read is retried on its next sync.
+  await page.route(/\/api\/session\/ses_request_idle_\d+\/form$/, (route) =>
+    route.fulfill({ status: 404, json: { message: "Location not found" } }),
+  )
+
+  const forms: string[] = []
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname
+
+    if (request.method() === "GET" && path.startsWith("/api/session/") && path.endsWith("/form")) forms.push(path)
+  })
+
+  await page.goto(sessionHref(sessionID))
+  await expectSessionTitle(page, title)
+  await expect(
+    page.locator('[data-component="dock-prompt"][data-kind="question"]').getByText("Which way should the subagent go?"),
+  ).toBeVisible()
+
+  // Every session update used to re-request the forms of the whole subagent tree.
+  await workspace.push(
+    [...idleIDs, sessionID].map(
+      (id, index) =>
+        // SAFETY: the fixture event matches the generated OpenCodeEvent shape for its type.
+        ({
+          id: `evt_request_rename_${index}`,
+          created: index + 2,
+          type: "session.renamed",
+          durable: { aggregateID: id, seq: 1, version: 1 },
+          data: { sessionID: id, title: id === sessionID ? "Renamed request docks" : `${id} renamed` },
+        }) as OpenCodeEvent,
+    ),
+  )
+  await expect(page.getByRole("heading", { name: "Renamed request docks", exact: true })).toBeVisible()
+  expect(forms.toSorted()).toEqual([`/api/session/${runningID}/form`, `/api/session/${sessionID}/form`].toSorted())
 })
 
 test("restores the draft caret before typing after a request dock closes", async ({ page }) => {
