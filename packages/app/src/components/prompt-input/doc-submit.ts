@@ -27,6 +27,7 @@ export type DocSubmitState = {
   cancelledBy?: DocSubmitActor
   timeoutMs: number
   expiresAt: number
+  serverNow?: number
 }
 
 export type DocSubmitEvent = {
@@ -229,6 +230,11 @@ export class SubmitRequestError extends Error {
   }
 }
 
+export const onLocalClock = (value: DocSubmitState): DocSubmitState => {
+  if (typeof value.serverNow !== "number") return value
+  return { ...value, expiresAt: Date.now() + (value.expiresAt - value.serverNow), serverNow: undefined }
+}
+
 const json = async (url: URL, body: unknown) => {
   const res = await fetch(url, {
     method: "POST",
@@ -236,7 +242,7 @@ const json = async (url: URL, body: unknown) => {
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new SubmitRequestError(res.status, await res.json().catch(() => undefined))
-  return (await res.json()) as DocSubmitState
+  return onLocalClock((await res.json()) as DocSubmitState)
 }
 
 export async function startSubmit(input: StartInput) {
@@ -312,7 +318,7 @@ const state = (value: unknown): DocSubmitState | undefined => {
   )
     return
   if (!Array.isArray(item.actors)) return
-  return value as DocSubmitState
+  return onLocalClock(value as DocSubmitState)
 }
 
 const parse = (data: string) => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { liveSocket } from "./doc-submit"
+import { liveSocket, onLocalClock, type DocSubmitState } from "./doc-submit"
 
 // The consent socket IS this client's membership in a vote, so the interesting cases are the ones
 // where the connection is gone but the browser has not noticed: on a real device that is a wifi
@@ -138,5 +138,29 @@ describe("liveSocket", () => {
     window.dispatchEvent(new Event("online"))
     await wait(120)
     expect(FakeSocket.instances.length).toBe(1)
+  })
+})
+
+describe("onLocalClock", () => {
+  const vote = (expiresAt: number, serverNow?: number) =>
+    ({ submitID: "sub_1", status: "pending", actors: [], timeoutMs: 30_000, expiresAt, serverNow }) as unknown as DocSubmitState
+
+  test("a client clock ahead of the server still gets the full window", () => {
+    const serverNow = Date.now() - 5 * 60_000
+    const next = onLocalClock(vote(serverNow + 30_000, serverNow))
+    const left = next.expiresAt - Date.now()
+    expect(left).toBeGreaterThan(29_000)
+    expect(left).toBeLessThanOrEqual(30_000)
+  })
+
+  test("a client clock behind the server does not stretch the window", () => {
+    const serverNow = Date.now() + 5 * 60_000
+    const next = onLocalClock(vote(serverNow + 30_000, serverNow))
+    expect(next.expiresAt - Date.now()).toBeLessThanOrEqual(30_000)
+  })
+
+  test("a state without serverNow is left as it is", () => {
+    const state = vote(123)
+    expect(onLocalClock(state)).toBe(state)
   })
 })
