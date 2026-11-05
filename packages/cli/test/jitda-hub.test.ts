@@ -90,6 +90,50 @@ describe("jitda hub", () => {
     expect(value).toContain("script-src 'self' 'wasm-unsafe-eval' 'sha256-abc'")
   })
 
+  test("keeps absolute CDN urls under a prefix", () => {
+    process.env.JUPYTERHUB_SERVICE_PREFIX = "/user/test/"
+    try {
+      const body = JitdaHub.html(
+        '<head><script src="https://cdn.test/_assets/index.js"></script><link rel="manifest" href="/site.webmanifest"></head>',
+      )
+      expect(body).toContain('src="https://cdn.test/_assets/index.js"')
+      expect(body).toContain('href="site.webmanifest"')
+      expect(body).toContain('<base href="/user/test/" />')
+    } finally {
+      delete process.env.JUPYTERHUB_SERVICE_PREFIX
+    }
+  })
+
+  test("allows the CDN asset origin where assets load from", () => {
+    process.env.OPENCODE_SERVE_DOMAIN = "jitda.test"
+    try {
+      const directives = Object.fromEntries(
+        JitdaHub.csp("abc", "https://cdn.test")!
+          .split("; ")
+          .map((directive) => [directive.split(" ")[0], directive]),
+      )
+      for (const name of ["script-src", "style-src", "img-src", "font-src", "media-src", "connect-src"])
+        expect(directives[name]).toContain("https://cdn.test")
+      expect(directives["script-src"]).toContain("'sha256-abc'")
+      expect(directives["script-src"]).toContain("'wasm-unsafe-eval'")
+      expect(directives["worker-src"]).toBe("worker-src 'self' blob:")
+      expect(directives["default-src"]).toBe("default-src 'self'")
+    } finally {
+      delete process.env.OPENCODE_SERVE_DOMAIN
+    }
+  })
+
+  test("leaves the CDN origin out of a pod-served build", () => {
+    process.env.OPENCODE_SERVE_DOMAIN = "jitda.test"
+    try {
+      expect(JitdaHub.ASSET_ORIGIN).toBe("")
+      expect(JitdaHub.csp("abc")).not.toContain("  ")
+      expect(JitdaHub.csp("abc")).toContain("script-src 'self' 'wasm-unsafe-eval' 'sha256-abc';")
+    } finally {
+      delete process.env.OPENCODE_SERVE_DOMAIN
+    }
+  })
+
   test("adds extra frame ancestors from the hub", () => {
     process.env.OPENCODE_SERVE_DOMAIN = "jitda.test"
     process.env.OPENCODE_EXTRA_FRAME_ANCESTORS = "https://bana.build  https://other.test"

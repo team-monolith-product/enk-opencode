@@ -2,6 +2,14 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator"
 
 GlobalRegistrator.register()
 
+// bun 은 Vite 의 `?worker&url` 을 모른다. 워커 본문을 실행하지 않도록 URL 문자열만 내보낸다.
+Bun.plugin({
+  name: "worker-url",
+  setup(build) {
+    build.onLoad({ filter: /\.worker\.ts\?worker&url$/ }, () => ({ contents: `export default ""`, loader: "js" }))
+  },
+})
+
 const originalGetContext = HTMLCanvasElement.prototype.getContext
 
 // @ts-expect-error - we're overriding with a simplified mock

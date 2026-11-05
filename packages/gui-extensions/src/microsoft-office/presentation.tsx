@@ -1,5 +1,6 @@
 import { onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
+import { createWorker } from "@opencode/ui/create-worker"
 import { Loader } from "@opencode/ui/loader"
 import { createKeyed, useExtension } from "../sdk"
 import { OfficePages, type PaintPage } from "./pages"
@@ -12,6 +13,7 @@ import {
   type VectorBitmap,
   type VectorRequest,
 } from "./slide-protocol"
+import PresentationWorkerUrl from "./presentation.worker.ts?worker&url"
 import { createWorkerClient, movableBuffer, SupersededError, WorkerClosedError } from "./worker-rpc"
 import type { FileViewerProps } from "../file/contract"
 
@@ -39,10 +41,7 @@ export default function OfficePresentation(props: FileViewerProps) {
       const controller = new AbortController()
       const status = { failed: false }
 
-      const worker = new Worker(new URL("./presentation.worker.ts", import.meta.url), {
-        type: "module",
-        name: "PowerPoint preview",
-      })
+      const worker = createWorker(PresentationWorkerUrl, { name: "PowerPoint preview" })
 
       const client = createWorkerClient<SlideMethods>(worker)
 

@@ -1,5 +1,6 @@
 import { createSignal, For, onCleanup, Show, type Accessor } from "solid-js"
 import { createStore } from "solid-js/store"
+import { createWorker } from "@opencode/ui/create-worker"
 import { Loader } from "@opencode/ui/loader"
 import { createKeyed, createLatest, useExtension } from "../sdk"
 import { OfficePages, type PaintPage, type ScrollToPage } from "./pages"
@@ -11,6 +12,7 @@ import {
   type WordPageSize,
   type WordSpan,
 } from "./word-protocol"
+import DocumentWorkerUrl from "./document.worker.ts?worker&url"
 import { createWorkerClient, movableBuffer } from "./worker-rpc"
 import type { FileViewerProps } from "../file/contract"
 
@@ -52,7 +54,7 @@ export default function OfficeDocument(props: FileViewerProps) {
     () => props.bytes,
     (bytes) => {
       const controller = new AbortController()
-      const worker = new Worker(new URL("./document.worker.ts", import.meta.url), { type: "module" })
+      const worker = createWorker(DocumentWorkerUrl)
       const client = createWorkerClient<WordMethods>(worker)
 
       const fail = () => {

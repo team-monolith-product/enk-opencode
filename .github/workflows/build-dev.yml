@@ -36,10 +36,10 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Upload assets to S3
         run: |
-          aws s3 sync ./asset-out/assets s3://enk-bucket-jitda-asset-dev/assets \
-            --cache-control "public,max-age=31536000,immutable"
+          aws s3 sync ./asset-out/_assets s3://enk-bucket-jitda-asset-dev/_assets \
+            --exclude "*.map" --cache-control "public,max-age=31536000,immutable"
           aws s3 sync ./asset-out s3://enk-bucket-jitda-asset-dev \
-            --exclude "assets/*" --cache-control "public,max-age=3600"
+            --exclude "_assets/*" --exclude "*.map" --cache-control "public,max-age=3600"
 
   build:
     needs: assets

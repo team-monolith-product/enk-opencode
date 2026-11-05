@@ -85,7 +85,8 @@ function isRouteNotFound(error: unknown) {
 function csp(hash = "") {
   const jitda = JitdaHub.csp(hash)
   if (jitda) return jitda
-  return `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; media-src 'self' data:; connect-src * data: blob:; worker-src 'self' blob:`
+  const asset = JitdaHub.ASSET_ORIGIN ? ` ${JitdaHub.ASSET_ORIGIN}` : ""
+  return `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${asset}${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'${asset}; img-src 'self' data: https: blob:${asset}; font-src 'self' data:${asset}; media-src 'self' data:${asset}; connect-src * data: blob:; worker-src 'self' blob:`
 }
 
 function cspForHtml(body: string) {

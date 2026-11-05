@@ -1,6 +1,7 @@
 import { createMemo, createSignal, createUniqueId, For, onCleanup, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
+import { createWorker } from "@opencode/ui/create-worker"
 import { Loader } from "@opencode/ui/loader"
 import { showToast } from "@opencode/ui/toast"
 import {
@@ -36,6 +37,7 @@ import {
   type Painted,
 } from "./sheet-paint"
 import type { SheetFrameRequest, SheetLayout, SheetMethods, SheetTab, SheetViewport } from "./sheet-protocol"
+import SpreadsheetWorkerUrl from "./spreadsheet.worker.ts?worker&url"
 import { createWorkerClient, movableBuffer, SupersededError, WorkerClosedError } from "./worker-rpc"
 
 /** The workbook worker's end in the window. */
@@ -89,7 +91,7 @@ export default function OfficeSpreadsheet(props: FileViewerProps) {
     () => props.bytes,
     (bytes) => {
       const controller = new AbortController()
-      const worker = new Worker(new URL("./spreadsheet.worker.ts", import.meta.url), { type: "module" })
+      const worker = createWorker(SpreadsheetWorkerUrl)
       const client = createWorkerClient<SheetMethods>(worker)
 
       const crash = () => {

@@ -23,6 +23,10 @@ const RETRY_MAX_WAIT = 15
 const RETRY_TIMEOUT = 60
 const SENTRY_INGEST = "https://o1200796.ingest.us.sentry.io"
 
+// 웹 자산을 서빙하는 CDN 오리진. 빌드 때 OPENCODE_ASSET_BASE 에서 뽑아 넣는다(script/build.ts).
+declare const OPENCODE_ASSET_ORIGIN: string
+export const ASSET_ORIGIN = typeof OPENCODE_ASSET_ORIGIN === "string" ? OPENCODE_ASSET_ORIGIN : ""
+
 type Session = { user: string; token: string; cachedAt: number }
 
 const sessions = new Map<string, Session>()
@@ -231,7 +235,7 @@ export function html(body: string) {
   return body.replace(/(href|src)="\//g, `$1="`).replace("<head>", `<head>\n    <base href="${base}/" />`)
 }
 
-export function csp(hash = "") {
+export function csp(hash = "", asset = ASSET_ORIGIN) {
   const domain = env("OPENCODE_SERVE_DOMAIN")
   if (!domain) return undefined
   const user = env("JUPYTERHUB_USER")
@@ -239,11 +243,11 @@ export function csp(hash = "") {
   const preview = user ? `https://${user}.${domain}` : undefined
   const tutorial = user ? `https://${user}-tutorial.${domain}` : undefined
   const frame = origins("'self'", preview, tutorial, `https://user.${domain}`)
-  const connect = origins("'self'", "data:", "blob:", `https://*.${domain}`, SENTRY_INGEST)
-  const script = origins("'self'", "'wasm-unsafe-eval'", hash ? `'sha256-${hash}'` : undefined)
+  const connect = origins("'self'", "data:", "blob:", `https://*.${domain}`, SENTRY_INGEST, asset)
+  const script = origins("'self'", "'wasm-unsafe-eval'", asset, hash ? `'sha256-${hash}'` : undefined)
   // 다른 브랜드 도메인(bana.build 등)이 페이지를 iframe 으로 임베드할 수 있도록 허브가 넘겨주는 오리진 목록.
   const ancestors = (env("OPENCODE_EXTRA_FRAME_ANCESTORS") ?? "").split(/\s+/).filter(Boolean)
-  return `frame-ancestors ${origins("'self'", domain, ...ancestors)}; default-src 'self'; frame-src ${frame}; script-src ${script}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' data: blob:; worker-src 'self' blob:; connect-src ${connect}`
+  return `frame-ancestors ${origins("'self'", domain, ...ancestors)}; default-src 'self'; frame-src ${frame}; script-src ${script}; style-src ${origins("'self'", "'unsafe-inline'", asset)}; img-src ${origins("'self'", "data:", "blob:", "https:", asset)}; font-src ${origins("'self'", "data:", asset)}; media-src ${origins("'self'", "data:", "blob:", asset)}; worker-src 'self' blob:; connect-src ${connect}`
 }
 
 type Activity = { url: string; token: string; server: string; interval: number }

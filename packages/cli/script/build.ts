@@ -68,6 +68,7 @@ if (!targets.length) throw new Error(`Unknown build target: ${requestedTarget}`)
 
 if (!skipInstall)
   await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]} @opencode-ai/pty@${pkg.dependencies["@opencode-ai/pty"]}`
+const assetOrigin = process.env.OPENCODE_ASSET_BASE ? new URL(process.env.OPENCODE_ASSET_BASE).origin : ""
 const appArchive = path.join(dir, ".cache", "bun-app-archive.bin")
 await Bun.write(appArchive, await buildAppArchive(Script.channel, { skipBuild: skipWebUi }))
 const appAssetsPlugin: BunPlugin = {
@@ -192,6 +193,7 @@ export default { path: file, version: ${JSON.stringify(opencodePty.version)}, sh
       OPENCODE_CLI_NAME: "'opencode'",
       OPENCODE_CHANNEL: `'${Script.channel}'`,
       OPENCODE_ARTIFACT: `'cli'`,
+      OPENCODE_ASSET_ORIGIN: JSON.stringify(assetOrigin),
       ...(highlights ? { OPENCODE_RELEASE_HIGHLIGHTS: JSON.stringify(highlights) } : {}),
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "undefined",
       // FFF_LIBC selects the fff native lib variant: "musl" or "gnu".

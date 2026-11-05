@@ -1,11 +1,12 @@
 import { WorkerPoolManager } from "@pierre/diffs/worker"
 import ShikiWorkerUrl from "@pierre/diffs/worker/worker.js?worker&url"
+import { createWorker } from "@opencode/ui/create-worker"
 import { registerOpenCodeTheme } from "@opencode/ui/context/marked-theme-register"
 
 registerOpenCodeTheme()
 
 export function workerFactory(): Worker {
-  return new Worker(ShikiWorkerUrl, { type: "module" })
+  return createWorker(ShikiWorkerUrl)
 }
 
 function createPool(lineDiffType: "none" | "word-line") {

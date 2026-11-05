@@ -13,12 +13,13 @@ export function buildWorkerBootstrap(href: string): string {
   ].join("\n")
 }
 
-export function createWorker(url: string): Worker {
+// 앱 코드의 워커는 모두 여기서 만든다(create-worker.test.ts 가드). URL 은 `?worker&url` 로 가져온다.
+export function createWorker(url: string, options?: Omit<WorkerOptions, "type">): Worker {
   const resolved = new URL(url, location.href)
   if (resolved.origin === location.origin) {
-    return new Worker(resolved.href, { type: "module" })
+    return new Worker(resolved.href, { ...options, type: "module" })
   }
 
   const blobUrl = URL.createObjectURL(new Blob([buildWorkerBootstrap(resolved.href)], { type: "text/javascript" }))
-  return new Worker(blobUrl, { type: "module" })
+  return new Worker(blobUrl, { ...options, type: "module" })
 }

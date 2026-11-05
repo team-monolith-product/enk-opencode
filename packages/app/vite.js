@@ -144,8 +144,20 @@ export default [
   {
     name: "opencode-desktop:theme-preload",
     transformIndexHtml: {
-      order: "pre",
+      // CDN 빌드에서는 Vite 가 src 를 CDN 절대 URL 로 바꾼다. 리터럴 경로로 찾으면 인라인화가 조용히 불발되므로
+      // 재작성이 끝난 post 단계에서 id 로 찾는다.
+      order: "post",
       handler: inlineThemePreload,
+    },
+  },
+  {
+    // manifest 는 CSP manifest-src(default-src 'self')에 걸리므로 CDN 빌드에서도 파드가 서빙하는 경로로 둔다.
+    name: "opencode-desktop:same-origin-manifest",
+    transformIndexHtml: {
+      order: "post",
+      handler(html) {
+        return html.replace(/(<link\b[^>]*\brel="manifest"[^>]*\bhref=")[^"]*(")/g, "$1/site.webmanifest$2")
+      },
     },
   },
   ...tailwind,
@@ -154,7 +166,7 @@ export default [
 
 export function inlineThemePreload(html) {
   return html.replace(
-    /<script id="oc-theme-preload-script" src="(?:\.\/|\/)oc-theme-preload\.js"><\/script>/,
-    `<script id="oc-theme-preload-script">${themeScript}</script>`,
+    /<script\b[^>]*\bid="oc-theme-preload-script"[^>]*><\/script>/,
+    () => `<script id="oc-theme-preload-script">${themeScript}</script>`,
   )
 }

@@ -25,9 +25,9 @@ import {
   Show,
   Switch,
 } from "solid-js"
+import { createWorker } from "@opencode/ui/create-worker"
 import { Spinner } from "@opencode/ui/spinner"
 import { useLanguage } from "@/runtime/i18n/language"
-import { createWorker } from "./create-worker"
 import { Button } from "./ui/button"
 import { DropdownMenu } from "./ui/dropdown-menu"
 import { Icon } from "./ui/icon"
