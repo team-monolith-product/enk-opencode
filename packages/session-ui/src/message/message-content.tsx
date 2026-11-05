@@ -354,9 +354,7 @@ export function CurrentUserMessageDisplay(props: {
     onCleanup(() => observer.disconnect())
   })
 
-  const attachments = createMemo(() =>
-    files().filter((file) => attached(file) && !referenced().has(file.name ?? "")),
-  )
+  const attachments = createMemo(() => files().filter((file) => attached(file) && !referenced().has(file.name ?? "")))
   const references = createMemo(() => props.references ?? [])
   const inlineFiles = createMemo(() => files().filter((file) => !!file.mention))
   const agents = createMemo(() => props.message.agents ?? [])
@@ -556,41 +554,41 @@ export function CurrentUserMessageDisplay(props: {
         />
       </Show>
       <Show when={!host.hideUserMeta}>
-      <Menu gutter={4} placement="bottom-end">
-        <Tooltip appearance="compact" value={i18n.t("ui.message.moreActions")} placement="top" gutter={4}>
-          <Menu.Trigger
-            as={IconButton}
-            icon={<Icon name="outline-dots" size="small" />}
-            size="small"
-            variant="ghost-muted"
-            onMouseDown={(event: MouseEvent) => event.preventDefault()}
-            onClick={(event: MouseEvent) => event.stopPropagation()}
-            aria-label={i18n.t("ui.message.moreActions")}
-          />
-        </Tooltip>
-        <Menu.Portal>
-          <Menu.Content>
-            <Menu.Group>
-              <Menu.GroupLabel>
-                <time dateTime={new Date(props.message.time.created).toISOString()}>{sent()}</time>
-              </Menu.GroupLabel>
-            </Menu.Group>
-            <Menu.Separator />
-            <Menu.Item disabled={actionView().disabled.fork} onSelect={() => request("fork")}>
-              {i18n.t("ui.message.forkMessage")}
-            </Menu.Item>
-            <Menu.Item disabled={!props.text} onSelect={() => void writeClipboard(props.text)}>
-              {i18n.t("ui.message.copyMessage")}
-            </Menu.Item>
-            {/* Like the iOS app, a Voice message also offers the full prompt the session received. */}
-            <Show when={props.voice}>
-              <Menu.Item onSelect={() => void writeClipboard(props.message.text)}>
-                {i18n.t("ui.message.copyFullMessage")}
+        <Menu gutter={4} placement="bottom-end">
+          <Tooltip appearance="compact" value={i18n.t("ui.message.moreActions")} placement="top" gutter={4}>
+            <Menu.Trigger
+              as={IconButton}
+              icon={<Icon name="outline-dots" size="small" />}
+              size="small"
+              variant="ghost-muted"
+              onMouseDown={(event: MouseEvent) => event.preventDefault()}
+              onClick={(event: MouseEvent) => event.stopPropagation()}
+              aria-label={i18n.t("ui.message.moreActions")}
+            />
+          </Tooltip>
+          <Menu.Portal>
+            <Menu.Content>
+              <Menu.Group>
+                <Menu.GroupLabel>
+                  <time dateTime={new Date(props.message.time.created).toISOString()}>{sent()}</time>
+                </Menu.GroupLabel>
+              </Menu.Group>
+              <Menu.Separator />
+              <Menu.Item disabled={actionView().disabled.fork} onSelect={() => request("fork")}>
+                {i18n.t("ui.message.forkMessage")}
               </Menu.Item>
-            </Show>
-          </Menu.Content>
-        </Menu.Portal>
-      </Menu>
+              <Menu.Item disabled={!props.text} onSelect={() => void writeClipboard(props.text)}>
+                {i18n.t("ui.message.copyMessage")}
+              </Menu.Item>
+              {/* Like the iOS app, a Voice message also offers the full prompt the session received. */}
+              <Show when={props.voice}>
+                <Menu.Item onSelect={() => void writeClipboard(props.message.text)}>
+                  {i18n.t("ui.message.copyFullMessage")}
+                </Menu.Item>
+              </Show>
+            </Menu.Content>
+          </Menu.Portal>
+        </Menu>
       </Show>
     </span>
   )

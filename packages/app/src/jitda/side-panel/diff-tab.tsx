@@ -162,7 +162,9 @@ export function DiffTabContent(props: {
                     annotations={commentsUi.annotations()}
                     renderAnnotation={commentsUi.renderAnnotation}
                     renderGutterUtility={commentsUi.renderGutterUtility}
-                    selectedLines={commentsUi.selected() ?? (file.selectedLines(path()) as SelectedLineRange | undefined) ?? null}
+                    selectedLines={
+                      commentsUi.selected() ?? (file.selectedLines(path()) as SelectedLineRange | undefined) ?? null
+                    }
                     commentedLines={commentedLines()}
                     media={{
                       mode: "auto",
