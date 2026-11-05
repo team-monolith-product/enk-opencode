@@ -41,6 +41,7 @@ const context = createSimpleContext({
       envFile: api.rpc(Definitions.EnvFile),
       env: api.rpc(Definitions.Env),
       github: api.rpc(Definitions.Github),
+      history: api.rpc(Definitions.History),
       projectSummary: api.rpc(Definitions.ProjectSummary),
     }
     const http = server.conn.type === "http" ? server.conn.http : undefined

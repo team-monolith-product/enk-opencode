@@ -35,6 +35,7 @@ function fakeHost(): Doc.Host {
     archive: record("archive"),
     revert: record("revert"),
     unrevert: record("unrevert"),
+    rollback: record("rollback"),
     emit: (event) => {
       emitted.push(event)
     },
@@ -1449,6 +1450,57 @@ describe("Doc stop, clear and question votes", () => {
     expect(called("revert").length).toBe(0)
     stopA()
     stopB()
+  })
+
+  test("rollback vote carries the version, runs on consensus and overlaps nothing", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice, bob] = team("Alice", "Bob")
+    const alicePeer = listen(docID, alice!.actorID)
+    const stopB = quiet(docID, bob!.actorID)
+    const target = { sha: "a".repeat(40), subject: "처음", time: 7 }
+    const rollback = () => Doc.rollbackSubmitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, target })
+
+    const stop = Doc.stopSubmitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID })
+    expect(rollback).toThrow(Doc.VoteConflictError)
+    Doc.submitRespond({ sessionID: SESSION, submitID: stop.submitID, actorID: bob!.actorID, action: "cancel" })
+
+    const state = rollback()
+    expect(state).toMatchObject({ status: "pending", targetKind: "rollback", rollback: target })
+    expect(alicePeer.events.at(-1)?.state.rollback).toEqual(target)
+    expect(() => Doc.stopSubmitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID })).toThrow(
+      Doc.VoteConflictError,
+    )
+    expect(() =>
+      Doc.revertSubmitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, messageID: "msg_1" }),
+    ).toThrow(Doc.VoteConflictError)
+    expect(() =>
+      Doc.rollbackSubmitCreate({
+        sessionID: SESSION,
+        docID,
+        actorID: bob!.actorID,
+        target: { ...target, sha: "b".repeat(40) },
+      }),
+    ).toThrow(Doc.VoteConflictError)
+    expect(rollback().submitID).toBe(state.submitID)
+    expect(called("rollback").length).toBe(0)
+
+    Doc.submitRespond({ sessionID: SESSION, submitID: state.submitID, actorID: bob!.actorID, action: "approve" })
+
+    expect(called("rollback")).toEqual([{ method: "rollback", args: [SESSION, target.sha] }])
+    expect(alicePeer.events.at(-1)?.type).toBe("sent")
+    alicePeer.stop()
+    stopB()
+  })
+
+  test("a lone rollback runs right away", () => {
+    const { docID } = Doc.prompt(SESSION)
+    const [alice] = team("Alice")
+    const target = { sha: "a".repeat(40), subject: "처음", time: 7 }
+
+    const state = Doc.rollbackSubmitCreate({ sessionID: SESSION, docID, actorID: alice!.actorID, target })
+
+    expect(state.status).toBe("sent")
+    expect(called("rollback")).toEqual([{ method: "rollback", args: [SESSION, target.sha] }])
   })
 
   test("a lone reverter skips the vote, and a revert without a target is rejected", () => {

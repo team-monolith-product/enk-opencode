@@ -33,14 +33,16 @@ export type DocSubmitState = {
   sessionID: string
   // 'doc' → targetID is the prompt doc id; 'question' → the question request id; 'stop' → the prompt
   // doc id whose in-flight AI response a consensus would cancel; 'clear' → the prompt doc id of the
-  // session a consensus would delete (archive); 'revert' → the prompt doc id of the session a
+  // session a consensus would delete (archive); 'rollback' → the prompt doc id of the session whose
+  // project files a consensus would roll back to `rollback`; 'revert' → the prompt doc id of the session a
   // consensus would rewind (or un-rewind).
-  targetKind: "doc" | "question" | "stop" | "clear" | "revert"
+  targetKind: "doc" | "question" | "stop" | "clear" | "revert" | "rollback"
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
   // For 'revert' votes: whether the vote rewinds to an earlier turn or cancels the staged rewind.
   revertAction?: "revert" | "redo"
+  rollback?: { sha: string; subject: string; time: number }
   actorID: string
   status: "pending" | "sent" | "cancelled" | "expired"
   actors: DocSubmitActor[]
@@ -233,13 +235,24 @@ export function liveSocket(input: {
   }
 }
 
+/** 투표 요청을 서버가 거절했을 때. `body` 는 서버 오류 본문 그대로다(짓다 실패는 `code`, 이름 있는 오류는 `name`). */
+export class SubmitRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: { code?: string; name?: string } | undefined,
+  ) {
+    super(`Submit request failed (${status})`)
+    this.name = "SubmitRequestError"
+  }
+}
+
 const json = async (input: { api: DocApi }, url: URL, body: unknown) => {
   const res = await (input.api.fetch ?? fetch)(url, {
     method: "POST",
     headers: { ...input.api.headers(), "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(await res.text())
+  if (!res.ok) throw new SubmitRequestError(res.status, await res.json().catch(() => undefined))
   return (await res.json()) as DocSubmitState
 }
 
@@ -284,6 +297,18 @@ export async function startClearSubmit(input: StopInput) {
   })
 }
 
+// Start a consent vote to roll the project files back to a saved version. With nobody else connected
+// the server rolls back right away and answers with a 'sent' state.
+export async function startRollbackSubmit(input: StopInput & { sha: string }) {
+  return json(input, path(input, `/session/${input.sessionID}/prompt-doc/rollback`), {
+    docID: input.docID,
+    actorID: input.actorID,
+    names: input.names,
+    sha: input.sha,
+    timeoutMs: input.timeoutMs,
+  })
+}
+
 type RevertInput = StopInput & { messageID?: string; redo?: boolean }
 
 // Start a consent vote to rewind the session to before messageID, or with redo to cancel the staged
@@ -309,12 +334,7 @@ const state = (value: unknown): DocSubmitState | undefined => {
   if (!value || typeof value !== "object") return
   const item = value as { status?: unknown; submitID?: unknown; actors?: unknown }
   if (typeof item.submitID !== "string") return
-  if (
-    item.status !== "pending" &&
-    item.status !== "sent" &&
-    item.status !== "cancelled" &&
-    item.status !== "expired"
-  )
+  if (item.status !== "pending" && item.status !== "sent" && item.status !== "cancelled" && item.status !== "expired")
     return
   if (!Array.isArray(item.actors)) return
   return value as DocSubmitState
@@ -325,13 +345,7 @@ const parse = (data: string) => {
     const value = JSON.parse(data) as unknown
     if (!value || typeof value !== "object") return
     const type = (value as { type?: unknown }).type
-    if (
-      type !== "created" &&
-      type !== "updated" &&
-      type !== "sent" &&
-      type !== "cancelled" &&
-      type !== "expired"
-    )
+    if (type !== "created" && type !== "updated" && type !== "sent" && type !== "cancelled" && type !== "expired")
       return
     const next = state((value as { state?: unknown }).state)
     if (!next) return

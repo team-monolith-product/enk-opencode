@@ -5,7 +5,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { define } from "@opencode/plugin/effect/plugin"
-import { GitHub } from "@opencode/plugin-jitda/github"
+import { WorkspaceRepo } from "@opencode/plugin-jitda/workspace-repo"
 import { Effect } from "effect"
 import { ChildProcess } from "effect/process"
 import { FileDiff } from "@opencode/schema/file-diff"
@@ -48,7 +48,7 @@ export const Plugin = define({
               ChildProcess.make(gitExecutable, ["init"], { cwd: input.worktree, stdin: "ignore" }),
             )
             if (result.exitCode !== 0) return yield* Effect.fail(new Error("Git initialization failed"))
-            yield* Effect.tryPromise(() => GitHub.ignore(input.worktree)).pipe(Effect.ignore)
+            yield* Effect.tryPromise(() => WorkspaceRepo.ignore(input.worktree)).pipe(Effect.ignore)
           }),
         info: () => adapter.info(),
         base: () => adapter.base(),

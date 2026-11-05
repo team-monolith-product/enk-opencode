@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { liveSocket } from "./doc-submit"
+import { liveSocket, startRollbackSubmit, SubmitRequestError, type DocApi } from "./doc-submit"
 
 // The consent socket IS this client's membership in a vote, so the interesting cases are the ones
 // where the connection is gone but the browser has not noticed: on a real device that is a wifi
@@ -138,5 +138,42 @@ describe("liveSocket", () => {
     window.dispatchEvent(new Event("online"))
     await wait(120)
     expect(FakeSocket.instances.length).toBe(1)
+  })
+})
+
+describe("startRollbackSubmit", () => {
+  const input = { sessionID: "ses_1", docID: "doc_1", actorID: "act_1", sha: "a".repeat(40) }
+  const api = (respond: (url: string, body: unknown) => Response): DocApi => ({
+    url: (path) => new URL(`http://test/api/jitda/doc${path}`),
+    socket: (path) => new URL(`ws://test/api/jitda/doc${path}`),
+    headers: () => ({}),
+    fetch: (async (url: URL, init: RequestInit) =>
+      respond(String(url), JSON.parse(String(init.body)))) as unknown as typeof fetch,
+  })
+
+  test("posts the version to the rollback route", async () => {
+    const seen: unknown[] = []
+    const state = await startRollbackSubmit({
+      ...input,
+      api: api((url, body) => {
+        seen.push(url, body)
+        return Response.json({ submitID: "sub_1" })
+      }),
+    })
+
+    expect(state.submitID).toBe("sub_1")
+    expect(seen[0]).toBe("http://test/api/jitda/doc/session/ses_1/prompt-doc/rollback")
+    expect(seen[1]).toMatchObject({ docID: "doc_1", actorID: "act_1", sha: input.sha })
+  })
+
+  test("keeps the reason the server refused for", async () => {
+    const error = await startRollbackSubmit({
+      ...input,
+      api: api(() => Response.json({ code: "busy", message: "busy" }, { status: 409 })),
+    }).catch((err) => err)
+
+    expect(error).toBeInstanceOf(SubmitRequestError)
+    expect(error.status).toBe(409)
+    expect(error.body.code).toBe("busy")
   })
 })

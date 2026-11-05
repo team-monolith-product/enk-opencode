@@ -1,0 +1,33 @@
+export const dict = {
+  "command.history": "History",
+  "command.history.description": "See saved versions and roll back to one",
+  "history.title": "Version history",
+  "history.description":
+    "Your files are saved every time a conversation with the AI ends. Pick a version to roll back to.",
+  "history.empty": "No saved versions yet. The first one is saved when a conversation with the AI ends.",
+  "history.current": "Now",
+  "history.reverted": "Rollback",
+  "history.undone": "Undone",
+  "history.changes": "Changed files: {{count}}",
+  "history.change.A": "Added",
+  "history.change.M": "Changed",
+  "history.change.D": "Deleted",
+  "history.change.L": "Too large",
+  "history.changes.hidden": "Only hidden files changed",
+  "history.restore": "Roll back to this version",
+  "history.note":
+    "Only the files go back to this version and the conversation stays. If teammates are here, everyone has to agree first.",
+  "history.readonly": "You can't roll back while spectating.",
+  "history.error.load": "Could not load the version history",
+  "history.error.changes": "Could not load the changed files. Tap again to retry",
+  "history.error.busy": "You can't roll back while the AI is answering. Try again when it's done",
+  "history.error.missing": "This version could not be found",
+  "history.error.same": "The files already match this version",
+  "history.error.staged": "A conversation revert is in progress. Undo it or send a message first, then try again",
+  "history.error.conflict": "Another consent request is in progress. Try again when it's done",
+  "history.error.unavailable": "Still connecting. Try again in a moment",
+  "history.error.failed": "Could not roll back. Try again in a moment",
+  "history.restored": 'Rolled back to "{{subject}}"',
+  "history.restored.deps":
+    'The package list changed too. If the preview looks off, ask the AI to "reinstall the packages".',
+} as const

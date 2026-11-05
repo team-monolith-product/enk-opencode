@@ -10,6 +10,7 @@ import {
   type Accessor,
 } from "solid-js"
 import { useLanguage } from "@/runtime/i18n/language"
+import { getRelativeTime } from "@/shell/time"
 import { Flags } from "../../flags"
 import { SessionPreviewMascot } from "../../side-panel/preview-mascot"
 import { createPage } from "../blocksuite/blocksuite-doc"
@@ -28,6 +29,7 @@ export type DocSubmitKind =
   | "stop"
   | "clear"
   | "revert"
+  | "rollback"
   | "redo"
 
 // For question votes: the question(s) and the answer(s) being agreed on, shown so everyone sees
@@ -72,6 +74,7 @@ const headline = copyKey(
     stop: "docSubmit.headline.stop",
     clear: "docSubmit.headline.clear",
     revert: "docSubmit.headline.revert",
+    rollback: "docSubmit.headline.rollback",
     redo: "docSubmit.headline.redo",
   } as const,
   "doc",
@@ -85,6 +88,7 @@ const requestVerb = copyKey(
     stop: "docSubmit.requestVerb.stop",
     clear: "docSubmit.requestVerb.clear",
     revert: "docSubmit.requestVerb.revert",
+    rollback: "docSubmit.requestVerb.rollback",
     redo: "docSubmit.requestVerb.redo",
   } as const,
   "doc",
@@ -98,6 +102,7 @@ const approveLabel = copyKey(
     stop: "docSubmit.approve.stop",
     clear: "docSubmit.approve.clear",
     revert: "docSubmit.approve.revert",
+    rollback: "docSubmit.approve.rollback",
     redo: "docSubmit.approve.redo",
   } as const,
   "doc",
@@ -112,6 +117,7 @@ const proceedVerb = copyKey(
     stop: "docSubmit.proceed.stop",
     clear: "docSubmit.proceed.clear",
     revert: "docSubmit.proceed.revert",
+    rollback: "docSubmit.proceed.rollback",
     redo: "docSubmit.proceed.redo",
   } as const,
   "doc",
@@ -125,6 +131,7 @@ const warnText = copyKey(
     stop: "docSubmit.warn.stop",
     clear: "docSubmit.warn.clear",
     revert: "docSubmit.warn.revert",
+    rollback: "docSubmit.warn.rollback",
     redo: "docSubmit.warn.redo",
   } as const,
   "doc",
@@ -138,6 +145,7 @@ const hintText = copyKey(
     stop: "docSubmit.hint.stop",
     clear: "docSubmit.hint.clear",
     revert: "docSubmit.hint.revert",
+    rollback: "docSubmit.hint.rollback",
     redo: "docSubmit.hint.redo",
   } as const,
   "doc",
@@ -429,8 +437,22 @@ function PreviewCard(props: { items: () => DocSubmitPreviewItem[]; dismiss?: boo
   )
 }
 
-// The snapshot region: doc viewer for prompt sends, question preview for question votes, nothing
-// for a bare "stop" vote (and clear/revert/redo).
+function RollbackCard(props: { target: NonNullable<DocSubmitState["rollback"]> }) {
+  const language = useLanguage()
+  return (
+    <div class="ds-preview">
+      <div class="ds-preview-item">
+        <div class="ds-preview-body">
+          <div class="ds-preview-q">{props.target.subject}</div>
+          <div class="ds-preview-meta">{getRelativeTime(new Date(props.target.time).toISOString(), language.t)}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The snapshot region: doc viewer for prompt sends, question preview for question votes, the target
+// version for a rollback vote, nothing for a bare "stop" vote (and clear/revert/redo).
 function SnapshotArea(props: {
   kind?: DocSubmitKind
   state: DocSubmitState
@@ -438,7 +460,18 @@ function SnapshotArea(props: {
   sdk?: DocSubmitSdk
 }) {
   return (
-    <Show when={props.kind === "doc" || props.kind?.startsWith("question")}>
+    <Show
+      when={props.kind === "doc" || props.kind?.startsWith("question")}
+      fallback={
+        <Show when={props.kind === "rollback" && props.state.rollback}>
+          {(target) => (
+            <div class="jt-snap-scroll ds-snap">
+              <RollbackCard target={target()} />
+            </div>
+          )}
+        </Show>
+      }
+    >
       <div class="jt-snap-scroll ds-snap">
         <Show
           when={props.kind === "doc" && props.sdk}
@@ -648,6 +681,10 @@ type Translate = ReturnType<typeof useLanguage>["t"]
 
 function failInfo(state: DocSubmitState, t: Translate): { title: string; sub: string; icon: JSX.Element } {
   const timeoutSec = Math.round(state.timeoutMs / 1000)
+  if (state.targetKind === "rollback") {
+    const icon = state.status === "expired" ? ICON.clock(22) : ICON.x(22)
+    return { title: t("docSubmit.failed.rollback.title"), sub: t("docSubmit.failed.rollback.sub"), icon }
+  }
   if (state.status === "expired") {
     return {
       title: t("docSubmit.failed.expired.title"),

@@ -1,7 +1,6 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import type { ErrorEntry } from "./preview-bridge-protocol"
 import { Menu } from "@opencode/ui/menu"
-import { useDialog } from "@opencode/ui/context/dialog"
 import { Icon } from "@/jitda/env/ui/icon"
 import { IconButton } from "@/jitda/env/ui/icon-button"
 import { TooltipKeybind } from "@/jitda/env/ui/tooltip"
@@ -12,6 +11,8 @@ import { useCommand } from "@/shell/commands/command"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useJitda } from "@/jitda/context"
 import { Flags } from "@/jitda/flags"
+import { createHistoryNotices } from "@/jitda/history/notices"
+import { ChromeActionButtons, ChromeActionItems, createChromeActions } from "./chrome-actions"
 import type { DevServerLogsResult, DevServerRestartResult, DevServerStatusResult } from "./dev-server"
 import { SessionPreviewFallback } from "./preview-fallback"
 import { createPreviewBridge, type PreviewBridge } from "./preview-bridge"
@@ -70,6 +71,12 @@ export function createSessionPreview() {
   const [reloadCount, setReloadCount] = createSignal(0)
 
   let recheck: () => void = () => {}
+
+  createHistoryNotices(() => {
+    setDirty(false)
+    setReloadCount((n) => n + 1)
+    recheck()
+  })
 
   createEffect(() => {
     if (previewOverride) {
@@ -534,43 +541,12 @@ export function SessionBrowserChrome(props: {
   fileTreeOpen: boolean
   onToggleFileTree: () => void
 }) {
-  const jitda = useJitda()
   const language = useLanguage()
   const command = useCommand()
-  const dialog = useDialog()
   const [copied, setCopied] = createSignal(false)
 
-  // 저장된 연결 수 > 0 일 때만 배지. 값 필요 줄은 세지 않는다.
-  const [envCount, setEnvCount] = createSignal(0)
-  const refreshEnvCount = () => {
-    void jitda.rpc.envFile
-      .list({}, jitda.options())
-      .then((value: unknown) => setEnvCount(((value as { keys?: string[] }).keys ?? []).length))
-      .catch(() => setEnvCount(0))
-  }
-  onMount(() => refreshEnvCount())
+  const actions = createChromeActions()
 
-  const openEnvKeys = () => {
-    refreshEnvCount()
-    // 배포 직후 구버전 페이지에서 새 청크 로드가 실패할 수 있다 — 조용히 죽지 말고 토스트로 알린다.
-    import("@/jitda/env/dialog-env-keys")
-      .then((x) => dialog.show(() => <x.DialogEnvKeys />, refreshEnvCount))
-      .catch(() => showToast({ title: language.t("common.requestFailed") }))
-  }
-
-  const [github, setGithub] = createSignal(false)
-  onMount(() => {
-    void jitda.rpc.github
-      .status({}, jitda.options())
-      .then((value: unknown) => setGithub(!!(value as { enabled?: boolean }).enabled))
-      .catch(() => setGithub(false))
-  })
-
-  const openGitHub = () => {
-    import("@/jitda/github/dialog-github")
-      .then((x) => dialog.show(() => <x.DialogGitHub />))
-      .catch(() => showToast({ title: language.t("common.requestFailed") }))
-  }
   let copyTimer: ReturnType<typeof setTimeout> | undefined
   onCleanup(() => copyTimer && clearTimeout(copyTimer))
 
@@ -781,43 +757,13 @@ export function SessionBrowserChrome(props: {
       {/* 우 그룹 — 시안 SafariChrome: 외부 연동 + (에러 시)오류 + 새 탭 + 주소 복사.
           380px 미만에서는 오류 버튼만 남기고 나머지를 ⋯ 메뉴로 접는다(오류는 중요도상 항상 밖에). */}
       <div class="flex shrink-0 items-center justify-end gap-1">
-        <button
-          type="button"
+        <ChromeActionButtons
+          actions={actions()}
           class={
             ghostBtn +
             " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap @max-[380px]/chrome:hidden"
           }
-          onClick={openEnvKeys}
-          aria-label={language.t("command.env.keys")}
-          title={language.t("command.env.keys.description")}
-        >
-          <Icon name="plug" size="small" />
-          {/* 라벨은 가장 넓은 요소 — 520px 미만에서 아이콘+배지만 남긴다(aria-label 로 이름은 유지). */}
-          <span class="@max-[520px]/chrome:hidden">{language.t("command.env.keys")}</span>
-          <Show when={envCount() > 0}>
-            <span
-              class="inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full bg-surface-success-strong text-white font-mono text-[9.5px] font-bold leading-none"
-              aria-label={language.t("command.env.keys.badge", { count: envCount() })}
-            >
-              {envCount()}
-            </span>
-          </Show>
-        </button>
-        <Show when={github()}>
-          <button
-            type="button"
-            class={
-              ghostBtn +
-              " !w-auto gap-1.5 px-2 text-11-medium text-text-strong whitespace-nowrap @max-[380px]/chrome:hidden"
-            }
-            onClick={openGitHub}
-            aria-label={language.t("command.github")}
-            title={language.t("command.github.description")}
-          >
-            <Icon name="github" size="small" />
-            <span class="@max-[520px]/chrome:hidden">{language.t("command.github")}</span>
-          </button>
-        </Show>
+        />
         <Show when={props.showErrorButton}>
           <button
             type="button"
@@ -865,13 +811,7 @@ export function SessionBrowserChrome(props: {
             />
             <Menu.Portal>
               <Menu.Content>
-                <Menu.Item onSelect={openEnvKeys}>
-                  {language.t("command.env.keys")}
-                  <Show when={envCount() > 0}> ({envCount()})</Show>
-                </Menu.Item>
-                <Show when={github()}>
-                  <Menu.Item onSelect={openGitHub}>{language.t("command.github")}</Menu.Item>
-                </Show>
+                <ChromeActionItems actions={actions()} />
                 <Menu.Item disabled={previewBlocked() || !props.url} onSelect={openInNewTab}>
                   {language.t("common.openInNewTab")}
                 </Menu.Item>

@@ -17,6 +17,13 @@ export function project(env: NodeJS.ProcessEnv = process.env): Target | undefine
   return dir ? { kind: "project", dir: resolve(dir), port: PORTS.project } : undefined
 }
 
+// 결과물로 남는 본행사 작업 폴더인지. 기록·GitHub 올리기처럼 결과물에만 거는 기능의 기준이다. 스포너 env 가 없는 환경(로컬 등)에서는
+// 어느 폴더든 본행사로 본다.
+export function isProject(dir: string, env: NodeJS.ProcessEnv = process.env) {
+  const target = project(env)
+  return !target || resolve(dir) === target.dir
+}
+
 export function tutorial(env: NodeJS.ProcessEnv = process.env): Target | undefined {
   const base = project(env)
   if (!base) return undefined

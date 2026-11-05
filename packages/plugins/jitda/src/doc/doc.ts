@@ -6,7 +6,7 @@ import { MSG_DOC, pack, unpack } from "./wire"
 // 협업 프롬프트 문서와 합의 투표. 규칙은 V1 src/doc/index.ts 와 같다.
 // 투표가 통과했을 때의 실제 동작(프롬프트 전송·중지·질문 응답·세션 보관)은 Host 가 V2 서버 API 로 한다.
 
-export type SubmitTargetKind = "doc" | "question" | "stop" | "clear" | "revert"
+export type SubmitTargetKind = "doc" | "question" | "stop" | "clear" | "revert" | "rollback"
 export type SubmitStatus = "pending" | "sent" | "cancelled" | "expired" | "left"
 // "left" 는 예전 규칙으로 저장된 행을 읽기 위해서만 남긴다. 지금은 나가면 모든 대기 투표에서 표와 함께 빠진다.
 export type SubmitActorStatus = "pending" | "approved" | "left"
@@ -22,6 +22,8 @@ export type SubmitState = {
   targetID: string
   questionAction?: "send" | "dismiss" | "back"
   revertAction?: "revert" | "redo"
+  // 되돌리기 합의가 가리키는 저장된 버전. 제목·시각은 참가자 모두에게 무엇에 동의하는지 보여 주려고 함께 둔다.
+  rollback?: RollbackTarget
   actorID: string
   status: SubmitStatus
   actors: SubmitActorInfo[]
@@ -41,6 +43,8 @@ export type QuestionPayload = {
 
 export type RevertPayload = { messageID: string } | { redo: true }
 
+export type RollbackTarget = { sha: string; subject: string; time: number }
+
 export type ActorInfo = { actorID: string; sessionID: string; userID?: string; name: string; color: string }
 
 export type Host = {
@@ -51,6 +55,7 @@ export type Host = {
   archive: (sessionID: string) => Promise<unknown>
   revert: (sessionID: string, messageID: string) => Promise<unknown>
   unrevert: (sessionID: string) => Promise<unknown>
+  rollback: (sessionID: string, sha: string) => Promise<unknown>
   emit: (event: { type: string; properties: Record<string, unknown> }) => void
 }
 
@@ -63,6 +68,7 @@ let host: Host = {
   archive: idle,
   revert: idle,
   unrevert: idle,
+  rollback: idle,
   emit: () => {},
 }
 
@@ -383,6 +389,14 @@ function revertPayload(text: string): RevertPayload | undefined {
   return
 }
 
+function rollbackTarget(text: string): RollbackTarget | undefined {
+  const value = parseJSON(text)
+  if (!value || typeof value !== "object") return
+  const target = value as Partial<RollbackTarget>
+  if (typeof target.sha !== "string" || typeof target.subject !== "string" || typeof target.time !== "number") return
+  return { sha: target.sha, subject: target.subject, time: target.time }
+}
+
 function submitRow(id: string) {
   return db().query<SubmitRow, [string]>("SELECT * FROM doc_submit WHERE id = ?").get(id) ?? undefined
 }
@@ -421,6 +435,7 @@ function read(row: SubmitRow): SubmitState {
     if (!payload) return undefined
     return "redo" in payload ? ("redo" as const) : ("revert" as const)
   })()
+  const rollback = row.target_kind === "rollback" ? rollbackTarget(row.prompt) : undefined
   return {
     submitID: row.id,
     sessionID: row.session_id,
@@ -428,6 +443,7 @@ function read(row: SubmitRow): SubmitState {
     targetID: row.target_id,
     ...(questionAction ? { questionAction } : {}),
     ...(revertAction ? { revertAction } : {}),
+    ...(rollback ? { rollback } : {}),
     actorID: row.actor_id,
     status: row.status as SubmitStatus,
     actors: list,
@@ -481,6 +497,13 @@ function send(row: SubmitRow) {
     if (!payload) return
     const run = "redo" in payload ? host.unrevert(row.session_id) : host.revert(row.session_id, payload.messageID)
     run.catch((err) => fail(row, err))
+    return
+  }
+  if (row.target_kind === "rollback") {
+    // 되돌리기는 실패를 jitda.history 의 failed 이벤트로 직접 알린다. 여기 걸리는 건 그 요청 자체가 실패했을 때뿐이다.
+    const target = rollbackTarget(row.prompt)
+    if (!target) return
+    host.rollback(row.session_id, target.sha).catch((err) => fail(row, err))
     return
   }
   if (row.target_kind === "stop") {
@@ -654,10 +677,12 @@ function create(input: {
   timeoutMs?: number
 }) {
   const found = active(input.sessionID, input.targetID, undefined, input.targetKind)
+  if (found?.rollback && found.rollback.sha !== rollbackTarget(input.promptBlob)?.sha)
+    throw new VoteConflictError("Another consent vote is in progress")
   if (found) return found
 
   const busy = pending(input.sessionID)
-  const exclusive = (kind: string) => kind === "clear" || kind === "revert"
+  const exclusive = (kind: string) => kind === "clear" || kind === "revert" || kind === "rollback"
   if (busy && (exclusive(input.targetKind) || exclusive(busy.target_kind)))
     throw new VoteConflictError("Another consent vote is in progress")
 
@@ -792,6 +817,21 @@ export function revertSubmitCreate(input: ControlSubmitCreateInput & { messageID
     actorID: input.actorID,
     names: input.names,
     promptBlob: JSON.stringify(payload),
+    timeoutMs: input.timeoutMs,
+  })
+}
+
+// 되돌리기 합의. 지우기와 같이 프롬프트 docID 를 대상으로 삼고, 합의가 서면 send 가 되돌린다. 제목·시각은 서버가 기록에서 찾아 붙인다.
+export function rollbackSubmitCreate(input: ControlSubmitCreateInput & { target: RollbackTarget }) {
+  get(input.docID)
+  return create({
+    sessionID: input.sessionID,
+    targetKind: "rollback",
+    targetID: input.docID,
+    docID: input.docID,
+    actorID: input.actorID,
+    names: input.names,
+    promptBlob: JSON.stringify(input.target),
     timeoutMs: input.timeoutMs,
   })
 }

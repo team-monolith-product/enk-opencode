@@ -1,0 +1,33 @@
+import type { dict as en } from "./i18n.en"
+
+export const dict: Partial<Record<keyof typeof en, string>> = {
+  "command.history": "버전 기록",
+  "command.history.description": "저장된 버전을 보고 원하는 시점으로 되돌리기",
+  "history.title": "버전 기록",
+  "history.description": "AI와 대화가 한 번 끝날 때마다 파일이 자동으로 저장돼요. 시점을 골라 되돌릴 수 있어요.",
+  "history.empty": "아직 저장된 버전이 없어요. AI와 대화가 끝나면 첫 버전이 저장돼요.",
+  "history.current": "지금",
+  "history.reverted": "되돌림",
+  "history.undone": "취소됨",
+  "history.changes": "바뀐 파일 {{count}}개",
+  "history.change.A": "추가",
+  "history.change.M": "수정",
+  "history.change.D": "삭제",
+  "history.change.L": "용량 초과",
+  "history.changes.hidden": "화면에 보이지 않는 파일만 바뀌었어요",
+  "history.restore": "이 버전으로 되돌리기",
+  "history.note": "대화는 그대로 남고 파일만 이 버전으로 돌아가요. 함께 있는 팀원이 있으면 모두 동의해야 되돌려져요.",
+  "history.readonly": "관전 중에는 되돌릴 수 없어요.",
+  "history.error.load": "버전 기록을 불러오지 못했어요",
+  "history.error.changes": "바뀐 파일을 불러오지 못했어요. 다시 눌러 주세요",
+  "history.error.busy": "AI가 답하는 중에는 되돌릴 수 없어요. 답이 끝난 뒤 다시 해 주세요",
+  "history.error.missing": "이 버전을 찾을 수 없어요",
+  "history.error.same": "이미 지금 파일과 같은 버전이에요",
+  "history.error.staged": "대화 되돌리기가 진행 중이에요. 취소하거나 메시지를 보낸 뒤 다시 해 주세요",
+  "history.error.conflict": "다른 동의 요청이 진행 중이에요. 끝난 뒤 다시 해 주세요",
+  "history.error.unavailable": "아직 연결 중이에요. 잠시 후 다시 해 주세요",
+  "history.error.failed": "되돌리지 못했어요. 잠시 후 다시 해 주세요",
+  "history.restored": '"{{subject}}" 버전으로 되돌렸어요',
+  "history.restored.deps":
+    '사용하는 패키지 목록도 바뀌었어요. 미리보기가 이상하면 AI에게 "패키지 다시 설치해 줘"라고 말해 주세요.',
+}

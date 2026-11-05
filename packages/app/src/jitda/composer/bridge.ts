@@ -19,6 +19,7 @@ let addLine: ((input: LineReferenceInput) => boolean) | undefined
 let openLine: ((input: LineRefInput) => boolean) | undefined
 let openFile: ((path: string, nodeType?: FileNodeType) => boolean) | undefined
 const [revert, setRevert] = createSignal<((messageID: string) => Promise<void>) | undefined>()
+const rollbacks = new Map<string, (sha: string) => Promise<boolean>>()
 
 export const promptDocBridge = {
   mode,
@@ -41,4 +42,12 @@ export const promptDocBridge = {
   openFileReference: (path: string, nodeType?: FileNodeType) => openFile?.(path, nodeType) ?? false,
   revert,
   setRevert: (next: ((messageID: string) => Promise<void>) | undefined) => setRevert(() => next),
+  // 버전 기록 창은 사이드 패널에서 열려 합의가 사는 세션 컨텍스트에 닿지 않는다. 열린 세션이 자기 요청 함수를 걸어 둔다.
+  setRollback: (sessionID: string, next: (sha: string) => Promise<boolean>) => {
+    rollbacks.set(sessionID, next)
+    return () => {
+      if (rollbacks.get(sessionID) === next) rollbacks.delete(sessionID)
+    }
+  },
+  rollback: (sessionID: string) => rollbacks.get(sessionID),
 }

@@ -21,6 +21,7 @@ import { sessionHref } from "@/shell/routes/session"
 import type { SessionModel } from "@/session/model"
 import { useJitda } from "../context"
 import { Flags } from "../flags"
+import { promptDocBridge } from "./bridge"
 import { createDocClient } from "./doc-client"
 import { subscribeDocEvents } from "./doc-events"
 import {
@@ -28,6 +29,7 @@ import {
   respondSubmit,
   startClearSubmit,
   startRevert,
+  startRollbackSubmit,
   startStopSubmit,
   type DocSubmitState,
 } from "./doc-submit"
@@ -320,6 +322,11 @@ export function createPromptDocSession(input: { session: SessionModel }): Prompt
         if (dialogOpen(state.submitID)) closeApproval()
         return
       }
+      // 되돌리기가 합의되면 서버가 파일을 되돌리고 restored 이벤트로 모두에게 알린다. 컴포저는 그대로 둔다.
+      if (state.status === "sent" && state.targetKind === "rollback") {
+        if (dialogOpen(state.submitID)) closeApproval()
+        return
+      }
       if (state.status === "sent") {
         clearComposer()
         if (dialogOpen(state.submitID)) closeApproval()
@@ -342,6 +349,7 @@ export function createPromptDocSession(input: { session: SessionModel }): Prompt
           kind={(() => {
             const current = approval()
             if (current?.targetKind === "stop" || current?.targetKind === "clear") return current.targetKind
+            if (current?.targetKind === "rollback") return "rollback"
             if (current?.targetKind === "revert") return current.revertAction ?? "revert"
             return "doc"
           })()}
@@ -471,6 +479,32 @@ export function createPromptDocSession(input: { session: SessionModel }): Prompt
     }
     return true
   }
+
+  // 되돌리기도 함께 쓰는 동작이라 언제나 투표를 거친다. 혼자면 서버가 바로 되돌린다. 서버가 거절하면 SubmitRequestError 를 그대로
+  // 던져 버전 기록 창이 사유를 보여 준다.
+  const requestRollback = async (sha: string) => {
+    const id = sessionID()
+    const docID = doc.docID()
+    const actorID = doc.actorID()
+    if (!id || !docID || !actorID) return false
+    const state = await startRollbackSubmit({
+      api: jitda.doc,
+      sessionID: id,
+      docID,
+      actorID,
+      names: peers().names,
+      sha,
+    })
+    setApprovalSession(id)
+    showApproval(state)
+    return true
+  }
+
+  createEffect(() => {
+    const id = sessionID()
+    if (!id) return
+    onCleanup(promptDocBridge.setRollback(id, requestRollback))
+  })
 
   const clear = async () => {
     const id = sessionID()

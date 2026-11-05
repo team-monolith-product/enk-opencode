@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, setSystemTime, spyOn, test } from "bun:test"
+import { afterAll, afterEach, beforeEach, describe, expect, setSystemTime, spyOn, test } from "bun:test"
 import { $ } from "bun"
 import path from "node:path"
 import os from "node:os"
 import { mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises"
 import { GitHub } from "../src/github"
+import { History } from "../src/history"
 import { Sentry } from "../src/sentry"
+import { SessionActivity } from "../src/session-activity"
+import { TurnSummary } from "../src/turn"
+import { WorkspaceRepo } from "../src/workspace-repo"
 
 async function tmpdir() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "jitda-github-"))
@@ -13,6 +17,14 @@ async function tmpdir() {
 
 const author = { name: "홍길동", email: "1+hong@users.noreply.github.com" }
 const xdg = { config: process.env["XDG_CONFIG_HOME"], data: process.env["XDG_DATA_HOME"] }
+const data = await mkdtemp(path.join(os.tmpdir(), "jitda-github-data-"))
+const fetchOriginal = globalThis.fetch
+
+beforeEach(() => {
+  process.env["XDG_DATA_HOME"] = data
+})
+
+afterAll(() => rm(data, { recursive: true, force: true }))
 
 afterEach(async () => {
   delete process.env["ENK_HACKATHON_RAILS_URL"]
@@ -27,29 +39,33 @@ afterEach(async () => {
 /** 팀 pod 가 이야기하는 hackathon-rails 역할. 실제 HTTP 를 그대로 태운다. */
 function serve(link: Record<string, unknown>) {
   const reports: unknown[] = []
+  const reads = { count: 0 }
   const server = Bun.serve({
     port: 0,
     fetch: async (req) => {
       if (req.method === "PUT") reports.push(await req.json())
+      else reads.count++
       return Response.json(link)
     },
   })
   process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
   process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
-  return { server, reports, [Symbol.asyncDispose]: () => server.stop(true) }
+  return { server, reports, reads, [Symbol.asyncDispose]: () => server.stop(true) }
 }
 
 async function workspace(root: string) {
   const work = path.join(root, "project-directory")
   const remote = path.join(root, "remote.git")
-  const gitdir = path.join(root, "gitdir")
   await mkdir(path.join(work, ".git"), { recursive: true })
   await writeFile(path.join(work, ".git", "opencode"), "team-1-project")
   await $`git init --quiet --bare --initial-branch=main ${remote}`.quiet()
   return {
     work,
     remote,
-    publish: (message: string) => GitHub.publish({ gitdir, worktree: work, remote, branch: "main", message, author }),
+    publish: async (message: string) => {
+      await History.commit(work, { message })
+      return GitHub.publish({ repo: WorkspaceRepo.open(work), remote, branch: "main", locale: "en", author })
+    },
     files: () =>
       $`git --git-dir=${remote} ls-tree -r --name-only main`
         .quiet()
@@ -70,11 +86,11 @@ async function put(root: string, files: Record<string, string>) {
   }
 }
 
-describe("GitHub.ignore", () => {
+describe("WorkspaceRepo.ignore", () => {
   test("creates a .gitignore that lists the agent leftovers", async () => {
     await using tmp = await tmpdir()
 
-    await GitHub.ignore(tmp.path)
+    await WorkspaceRepo.ignore(tmp.path)
 
     expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe(".playwright-mcp/\n")
   })
@@ -83,8 +99,8 @@ describe("GitHub.ignore", () => {
     await using tmp = await tmpdir()
     await writeFile(path.join(tmp.path, ".gitignore"), "dist")
 
-    await GitHub.ignore(tmp.path)
-    await GitHub.ignore(tmp.path)
+    await WorkspaceRepo.ignore(tmp.path)
+    await WorkspaceRepo.ignore(tmp.path)
 
     expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe("dist\n.playwright-mcp/\n")
   })
@@ -93,7 +109,7 @@ describe("GitHub.ignore", () => {
     await using tmp = await tmpdir()
     await writeFile(path.join(tmp.path, ".gitignore"), ".playwright-mcp\n")
 
-    await GitHub.ignore(tmp.path)
+    await WorkspaceRepo.ignore(tmp.path)
 
     expect(await Bun.file(path.join(tmp.path, ".gitignore")).text()).toBe(".playwright-mcp\n")
   })
@@ -116,7 +132,6 @@ describe("GitHub.publish", () => {
     const result = await ws.publish("first")
 
     expect(result.sha).toBeDefined()
-    expect(result.skipped).toEqual([])
     expect(await ws.files()).toEqual([".env.example", ".gitignore", "index.html", "src/app.js"])
     expect((await $`git --git-dir=${ws.remote} log -1 --format=%an/%ae main`.quiet().text()).trim()).toBe(
       `${author.name}/${author.email}`,
@@ -127,7 +142,7 @@ describe("GitHub.publish", () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)
     await put(ws.work, { "index.html": "a", ".playwright-mcp/console.log": "log" })
-    await GitHub.ignore(ws.work)
+    await WorkspaceRepo.ignore(ws.work)
 
     await ws.publish("first")
 
@@ -217,15 +232,14 @@ describe("GitHub.publish", () => {
     ])
   })
 
-  test("files over 100MB are skipped and reported", async () => {
+  test("files over 100MB are left out", async () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)
     await put(ws.work, { "index.html": "a", "media/intro.mp4": "" })
     await truncate(path.join(ws.work, "media/intro.mp4"), 101 * 1024 * 1024)
 
-    const result = await ws.publish("first")
+    await ws.publish("first")
 
-    expect(result.skipped).toEqual(["media/intro.mp4"])
     expect(await ws.files()).toEqual(["index.html"])
   })
 
@@ -254,38 +268,41 @@ describe("GitHub.publish", () => {
     expect((await ws.publish("again")).sha).toBeUndefined()
   })
 
-  test("a generated message sees what changed since the last push", async () => {
+  test("the message is the saved version's title with what changed since the last push", async () => {
     await using tmp = await tmpdir()
     const repo = await workspace(tmp.path)
     await put(repo.work, { "index.html": "<h1>hi</h1>", "old.txt": "bye" })
     await repo.publish("first")
     await put(repo.work, { "index.html": "<h1>hello</h1>", "new.txt": "hi" })
     await rm(path.join(repo.work, "old.txt"))
-    const seen: GitHub.Change[][] = []
-    const publish = () =>
-      GitHub.publish({
-        gitdir: path.join(tmp.path, "gitdir"),
-        worktree: repo.work,
-        remote: repo.remote,
-        branch: "main",
-        author,
-        message: async (changes) => {
-          seen.push(changes)
-          return "second"
-        },
-      })
 
-    await publish()
-    await publish()
+    await repo.publish("second")
+    expect((await repo.publish("again")).sha).toBeUndefined()
 
-    expect(seen).toEqual([
-      [
-        { status: "M", file: "index.html" },
-        { status: "A", file: "new.txt" },
-        { status: "D", file: "old.txt" },
-      ],
-    ])
     expect(await repo.log()).toEqual(["second", "first"])
+    expect((await $`git --git-dir=${repo.remote} log -1 --format=%B main`.quiet().text()).trim()).toBe(
+      "second\n\n- Update: index.html\n- Add: new.txt\n- Delete: old.txt",
+    )
+  })
+
+  test("a rollback goes up as a new commit titled with the rollback", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "v1" })
+    await ws.publish("first")
+    const first = (await History.list(ws.work)).at(-1)!
+    await put(ws.work, { "index.html": "v2" })
+    await ws.publish("second")
+    await History.restore(ws.work, {
+      sha: first.sha,
+      message: (target) => `Roll back to: ${target.subject}`,
+      backup: "backup",
+    })
+
+    await ws.publish("unused")
+
+    expect(await ws.log()).toEqual(["Roll back to: first", "second", "first"])
+    expect(await $`git --git-dir=${ws.remote} show main:index.html`.quiet().text()).toBe("v1")
   })
 
   test("a workspace with nothing but secrets is refused", async () => {
@@ -450,7 +467,8 @@ describe("GitHub.create", () => {
     expect(github.calls).toEqual(["POST /user/repos", "GET /repos/octocat/jitda-app"])
     expect(status.firstPush).toBeUndefined()
     expect(await origin.files()).toEqual([".gitignore", "index.html"])
-    expect(await origin.subjects()).toEqual(["Initial commit from Jitda"])
+    expect(await origin.subjects()).toEqual(["짓다에서 처음 올린 내용"])
+    expect((await History.list(work))[0]?.subject).toBe("짓다에서 처음 올린 내용")
     expect(rails.reports).toHaveLength(2)
     expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
   })
@@ -504,7 +522,7 @@ describe("GitHub.create", () => {
     expect(await origin.files()).toEqual([".gitignore"])
   })
 
-  test("a message builder names the first commit", async () => {
+  test("names the first commit in the viewer locale", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)
     const origin = await hub(tmp.path)
@@ -512,9 +530,9 @@ describe("GitHub.create", () => {
     await put(work, { "index.html": "a" })
     using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
 
-    await GitHub.create(work, { name: "jitda-app", message: async (changes) => `first: ${changes.length}` })
+    await GitHub.create(work, { name: "jitda-app", locale: "en" })
 
-    expect(await origin.subjects()).toEqual(["first: 2"])
+    expect(await origin.subjects()).toEqual(["First push from Jitda"])
   })
 
   test("retries the first push three times and keeps the failure reason", async () => {
@@ -593,7 +611,9 @@ describe("GitHub.create", () => {
     expect(created.firstPush).toMatchObject({ attempts: 3, code: "remote" })
 
     healthy = true
-    await GitHub.push(work, { message: "later" })
+    await put(work, { "index.html": "b" })
+    await History.commit(work, { message: "later" })
+    await GitHub.push(work, {})
 
     expect((await GitHub.status(work)).firstPush).toBeUndefined()
     expect(await origin.subjects()).toEqual(["later"])
@@ -616,6 +636,24 @@ describe("GitHub.create", () => {
     } finally {
       setSystemTime()
     }
+  })
+
+  test("while the AI is answering, the first push sends the last saved version instead of half-edited files", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const origin = await hub(tmp.path)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "saved" })
+    await History.commit(work, { message: "저장된 턴" })
+    await put(work, { "index.html": "half", "draft.js": "x" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    SessionActivity.start(work, "ses_busy")
+    await GitHub.create(work, { name: "jitda-app" })
+    SessionActivity.reset(work)
+
+    expect(await origin.files()).toEqual(["index.html"])
+    expect((await History.list(work)).map((entry) => entry.subject)).toEqual(["저장된 턴"])
   })
 
   test("a refusal that retrying cannot fix is reported after one attempt", async () => {
@@ -744,17 +782,18 @@ describe("GitHub.create", () => {
     await put(work, { "index.html": "<h1>hi</h1>" })
     let visible = false
     using _github = mockGitHub(() => Response.json({ ...remote, private: visible, default_branch: "main" }))
-    await GitHub.push(work, { message: "first" })
+    await History.commit(work, { message: "first" })
+    await GitHub.push(work, {})
     rails.reports.length = 0
     visible = true
 
-    const result = await GitHub.push(work, { message: "second" })
+    const result = await GitHub.push(work, {})
 
     expect(result.sha).toBeUndefined()
     expect(rails.reports).toEqual([{ repo_private: true }])
   })
 
-  describe("GitHub.pushNow", () => {
+  describe("GitHub.manual", () => {
     test("pushes right away with a manual message and says whether a commit went up", async () => {
       await using tmp = await tmpdir()
       await using rails = serve(link)
@@ -765,8 +804,8 @@ describe("GitHub.create", () => {
         Response.json({ ...remote, default_branch: "main", permissions: { push: true } }),
       )
 
-      const first = await GitHub.pushNow(work, "en")
-      const again = await GitHub.pushNow(work, "en")
+      const first = await GitHub.manual(work, "en")
+      const again = await GitHub.manual(work, "en")
 
       expect(first).toMatchObject({ enabled: true, login: "octocat", pushed: true })
       expect(again.pushed).toBe(false)
@@ -780,7 +819,7 @@ describe("GitHub.create", () => {
       process.env["ENK_PROJECT_DIRECTORY"] = path.join(tmp.path, "project-directory")
       using github = mockGitHub(() => Response.json(remote))
 
-      await expect(GitHub.pushNow(path.join(tmp.path, "tutorial-directory"))).rejects.toMatchObject({
+      await expect(GitHub.manual(path.join(tmp.path, "tutorial-directory"))).rejects.toMatchObject({
         code: "disabled",
         status: 409,
       })
@@ -789,77 +828,60 @@ describe("GitHub.create", () => {
   })
 })
 
+describe("GitHub.sync", () => {
+  test("does nothing for a team that has not linked a repository", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({ enabled: true, connected: false })
+
+    await GitHub.sync(tmp.path)
+
+    expect(rails.reads.count).toBe(1)
+    expect(rails.reports).toEqual([])
+  })
+
+  test("asks the hackathon backend for the link only once per turn", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      enabled: true,
+      connected: true,
+      login: "octocat",
+      token: "gho_1",
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    const spy = spyOn(globalThis, "fetch").mockImplementation(((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (url.host === "api.github.com") return Promise.resolve(Response.json({ message: "down" }, { status: 500 }))
+      return fetchOriginal(input, init)
+    }) as typeof fetch)
+
+    try {
+      await expect(GitHub.sync(tmp.path)).rejects.toMatchObject({ code: "remote" })
+      expect(rails.reads.count).toBe(1)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
 describe("GitHub.push", () => {
   test("a linked team whose token could not be issued fails as a remote error", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve({ enabled: true, connected: true, login: "octocat", app: true })
 
-    await expect(GitHub.push(tmp.path, { message: "x" })).rejects.toMatchObject({ code: "remote" })
+    await expect(GitHub.push(tmp.path, { subject: "x" })).rejects.toMatchObject({ code: "remote" })
   })
 
   test("pushing without a link is refused", async () => {
     await using tmp = await tmpdir()
 
-    await expect(GitHub.push(tmp.path, { message: "x" })).rejects.toMatchObject({ code: "unlinked" })
+    await expect(GitHub.push(tmp.path, {})).rejects.toMatchObject({ code: "unlinked" })
   })
 
   test("pushing without a repository is refused", async () => {
     await using tmp = await tmpdir()
     await using rails = serve({ enabled: true, connected: true, login: "octocat", token: "gho_1" })
 
-    await expect(GitHub.push(tmp.path, { message: "x" })).rejects.toMatchObject({ code: "norepo" })
-  })
-})
-
-describe("GitHub sync message", () => {
-  test("lists what changed under the summary", () => {
-    expect(
-      GitHub.compose("할 일 앱 만들기", [
-        { status: "A", file: "index.html" },
-        { status: "M", file: "app.js" },
-        { status: "D", file: "old.css" },
-      ]),
-    ).toBe("할 일 앱 만들기\n\n- 추가: index.html\n- 수정: app.js\n- 삭제: old.css")
-  })
-
-  test("names the first commit in the viewer locale", async () => {
-    const changes: GitHub.Change[] = [{ status: "A", file: "index.html" }]
-
-    expect(await GitHub.first("en")(changes)).toBe("First push from Jitda\n\n- Add: index.html")
-    expect(await GitHub.first()(changes)).toBe("짓다에서 처음 올린 내용\n\n- 추가: index.html")
-  })
-
-  test("names a manual push in the viewer locale", async () => {
-    const changes: GitHub.Change[] = [{ status: "M", file: "index.html" }]
-
-    expect(await GitHub.manual("en")(changes)).toBe("Manual push from Jitda\n\n- Update: index.html")
-    expect(await GitHub.manual()(changes)).toBe("짓다에서 직접 올린 내용\n\n- 수정: index.html")
-  })
-
-  test("keeps the subject short and the file list bounded", () => {
-    const text = GitHub.compose(
-      "가".repeat(100),
-      Array.from({ length: 35 }, (_, i) => ({ status: "A" as const, file: `f${i}` })),
-      "en",
-    )
-    const [subject, , ...files] = text.split("\n")
-    expect(subject.length).toBe(72)
-    expect(files).toHaveLength(31)
-    expect(files.at(-1)).toBe("- … +5")
-  })
-
-  test("reads the last request and the final reply of the turn", () => {
-    const model = { providerID: "fake", id: "m" }
-    expect(
-      GitHub.latest([
-        { type: "user", text: "첫 요청" },
-        { type: "assistant", content: [{ type: "text", text: "첫 답" }], model },
-        { type: "user", text: "버튼 색 바꿔줘", metadata: { locale: "en" } },
-        { type: "assistant", content: [{ type: "tool" }], model },
-        { type: "assistant", content: [{ type: "text", text: "바꿨어요" }], model },
-      ]),
-    ).toEqual({ request: "버튼 색 바꿔줘", reply: "바꿨어요", locale: "en", model })
-    expect(GitHub.latest([{ type: "assistant", content: [] }])).toBeUndefined()
+    await expect(GitHub.push(tmp.path, {})).rejects.toMatchObject({ code: "norepo" })
   })
 })
 
@@ -919,7 +941,7 @@ describe("GitHub failure reporting", () => {
         }),
     )
 
-    const failure = await GitHub.push(tmp.path, { message: "m" }).catch((error) => error)
+    const failure = await GitHub.push(tmp.path, { subject: "m" }).catch((error) => error)
 
     expect(failure).toBeInstanceOf(GitHub.Failure)
     expect(failure.code).toBe("missing")
@@ -940,7 +962,7 @@ describe("GitHub failure reporting", () => {
       ),
     )
 
-    const failure = await GitHub.push(tmp.path, { message: "m" }).catch((error) => error)
+    const failure = await GitHub.push(tmp.path, { subject: "m" }).catch((error) => error)
 
     expect(failure.message).toBe("Not Found")
     expect(failure.response.body.length).toBeLessThan(4100)

@@ -2,6 +2,7 @@
 import { dict as side_panel } from "../side-panel/i18n.en"
 import { dict as env } from "../env/i18n.en"
 import { dict as github } from "../github/i18n.en"
+import { dict as history } from "../history/i18n.en"
 import { dict as pdf } from "../pdf/i18n.en"
 import { dict as generated_image } from "../generated-image/i18n.en"
 import { dict as composer } from "../composer/i18n.en"
@@ -11,6 +12,7 @@ export const dict = {
   ...side_panel,
   ...env,
   ...github,
+  ...history,
   ...pdf,
   ...generated_image,
   ...composer,

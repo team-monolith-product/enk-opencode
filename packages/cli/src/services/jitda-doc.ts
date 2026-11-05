@@ -48,6 +48,10 @@ async function session(sessionID: string) {
   return next
 }
 
+type HistoryCheck = {
+  output?: { target?: { subject: string; time: number }; error?: { code: string; status: number; message: string } }
+}
+
 type FormDetail = { fields?: { key: string; type: string }[] }
 
 const host: Doc.Host = {
@@ -95,6 +99,10 @@ const host: Doc.Host = {
     return call("POST", `/api/session/${id}/revert/stage`, { messageID })
   },
   unrevert: (sessionID) => call("DELETE", `/api/session/${encodeURIComponent(sessionID)}/revert`),
+  rollback: async (sessionID, sha) => {
+    const info = await session(sessionID)
+    return call("POST", "/api/rpc/jitda.history/rollback", { input: { sessionID, sha } }, info?.directory)
+  },
   emit: (event) => {
     const frame = `data: ${JSON.stringify({ type: event.type, properties: event.properties })}\n\n`
     for (const write of streams) write(frame)
@@ -472,6 +480,34 @@ const sessionRoute = Effect.fn("cli.jitda-doc.session")(function* (
         actorID: input.actorID,
         names: names(input.names),
         ...(redo ? { redo } : { messageID: input.messageID }),
+        timeoutMs: optionalNumber(input.timeoutMs),
+      }),
+    )
+  }
+  if (route === "prompt-doc/rollback") {
+    if (!Store.valid("doc", input.docID) || !Store.valid("act", input.actorID)) return invalid()
+    if (!string(input.sha)) return invalid("Invalid rollback target")
+    const sha: string = input.sha
+    const checked = yield* Effect.tryPromise({
+      try: async () => {
+        const info = await session(sessionID)
+        const body = { input: { sessionID, sha } }
+        return (await call("POST", "/api/rpc/jitda.history/check", body, info?.directory)) as HistoryCheck
+      },
+      catch: (error) => error,
+    }).pipe(Effect.catch((error) => Effect.succeed({ failed: failure(error) })))
+    if ("failed" in checked) return checked.failed
+    const refused = checked.output?.error
+    if (refused) return json({ code: refused.code, message: refused.message }, refused.status)
+    const target = checked.output?.target
+    if (!target) return fail("UnknownError", "Rollback check failed", 500)
+    return yield* run(() =>
+      Doc.rollbackSubmitCreate({
+        sessionID,
+        docID: input.docID,
+        actorID: input.actorID,
+        names: names(input.names),
+        target: { sha, subject: target.subject, time: target.time },
         timeoutMs: optionalNumber(input.timeoutMs),
       }),
     )

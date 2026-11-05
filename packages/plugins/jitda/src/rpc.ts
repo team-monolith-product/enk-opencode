@@ -203,6 +203,35 @@ export const Github = {
   events: {},
 } as const
 
+const version = {
+  type: "object",
+  properties: { sessionID: { type: "string" }, sha: { type: "string" } },
+  required: ["sessionID", "sha"],
+  additionalProperties: false,
+} as const
+
+export const History = {
+  id: "jitda.history",
+  methods: {
+    list: { input: { type: "object", additionalProperties: false }, output: object },
+    changes: {
+      input: {
+        type: "object",
+        properties: { sha: { type: "string" } },
+        required: ["sha"],
+        additionalProperties: false,
+      },
+      output: object,
+    },
+    check: { input: version, output: object },
+    rollback: { input: version, output: object },
+  },
+  events: {
+    restored: { schema: object },
+    failed: { schema: object },
+  },
+} as const
+
 export const ProjectSummary = {
   id: "jitda.project-summary",
   methods: {
