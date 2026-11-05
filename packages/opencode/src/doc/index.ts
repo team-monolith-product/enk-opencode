@@ -558,6 +558,7 @@ export namespace Doc {
       cancelledBy: SubmitActorInfo.optional(),
       timeoutMs: z.number(),
       expiresAt: z.number(),
+      serverNow: z.number().optional(),
     })
     .meta({ ref: "DocSubmit" })
   export type SubmitState = z.infer<typeof SubmitState>
@@ -735,6 +736,7 @@ export namespace Doc {
       cancelledBy: row.cancelled_by ? actors.find((item) => item.actorID === row.cancelled_by) : undefined,
       timeoutMs: row.timeout_ms,
       expiresAt: row.expires_at,
+      serverNow: Date.now(),
     }
   }
 

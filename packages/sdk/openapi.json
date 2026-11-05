@@ -15807,6 +15807,9 @@
           },
           "expiresAt": {
             "type": "number"
+          },
+          "serverNow": {
+            "type": "number"
           }
         },
         "required": [

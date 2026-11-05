@@ -2149,6 +2149,7 @@ export type DocSubmit = {
   cancelledBy?: DocSubmitActor
   timeoutMs: number
   expiresAt: number
+  serverNow?: number
 }
 
 export type SessionActor = {
