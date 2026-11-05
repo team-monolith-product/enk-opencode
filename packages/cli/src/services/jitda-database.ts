@@ -11,7 +11,7 @@ export function prepare(target: string, data: string, source = process.env.OPENC
   if (from === target || !existsSync(from)) return false
   const temp = `${target}.copying`
   rmSync(temp, { force: true })
-  // V1 이 정상 종료한 WAL DB 는 -wal·-shm 이 없다. readonly 로는 이 파일을 열 수 없다.
+  // readonly 연결은 -shm 을 새로 만들어야 하고(macOS 는 아예 실패한다), EXCLUSIVE 면 EFS 에 -shm 없이 읽는다.
   const db = new Database(from, { readwrite: true, create: false })
   try {
     if (process.env.OPENCODE_DB_EXCLUSIVE_LOCK) db.run("PRAGMA locking_mode = EXCLUSIVE")
