@@ -11,8 +11,10 @@ export function prepare(target: string, data: string, source = process.env.OPENC
   if (from === target || !existsSync(from)) return false
   const temp = `${target}.copying`
   rmSync(temp, { force: true })
-  const db = new Database(from, { readonly: true })
+  // V1 이 정상 종료한 WAL DB 는 -wal·-shm 이 없다. readonly 로는 이 파일을 열 수 없다.
+  const db = new Database(from, { readwrite: true, create: false })
   try {
+    if (process.env.OPENCODE_DB_EXCLUSIVE_LOCK) db.run("PRAGMA locking_mode = EXCLUSIVE")
     db.run("VACUUM INTO ?", [temp])
   } finally {
     db.close()

@@ -36,6 +36,31 @@ test("copies the V1 database including uncheckpointed WAL pages and leaves the s
   expect(new Database(source).query("SELECT COUNT(*) AS n FROM session").get()).toEqual({ n: 2 })
 })
 
+test.each([undefined, "1"])("copies a cleanly closed WAL database that has no -wal or -shm (exclusive lock %s)", (lock) => {
+  const data = tmp()
+  const source = path.join(data, "opencode.db")
+  const writer = new Database(source, { create: true })
+  writer.run("PRAGMA journal_mode = WAL")
+  writer.run("CREATE TABLE session (id TEXT PRIMARY KEY)")
+  writer.run("INSERT INTO session VALUES ('ses_1')")
+  writer.run("PRAGMA wal_checkpoint(TRUNCATE)")
+  writer.close()
+  rmSync(`${source}-wal`, { force: true })
+  rmSync(`${source}-shm`, { force: true })
+  const target = path.join(data, "opencode-v2.db")
+  if (lock) process.env.OPENCODE_DB_EXCLUSIVE_LOCK = lock
+
+  try {
+    expect(JitdaDatabase.prepare(target, data, "opencode.db")).toBe(true)
+  } finally {
+    delete process.env.OPENCODE_DB_EXCLUSIVE_LOCK
+  }
+
+  const copy = new Database(target, { readonly: true })
+  expect(copy.query("SELECT id FROM session").all()).toEqual([{ id: "ses_1" }])
+  copy.close()
+})
+
 test("does nothing when the target exists, the source is missing, or no source is configured", () => {
   const data = tmp()
   const target = path.join(data, "opencode-v2.db")
