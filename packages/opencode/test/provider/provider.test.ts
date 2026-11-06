@@ -452,6 +452,62 @@ test("provider with baseURL from config", async () => {
   })
 })
 
+test("config model keeps the catalog input limit when it does not override it", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          provider: { openai: { models: { "gpt-5.2-codex": { variants: { custom: {} } } } } },
+        }),
+      )
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    init: async () => {
+      Env.set("OPENAI_API_KEY", "test-key")
+    },
+    fn: async () => {
+      const providers = await Provider.list()
+      expect(providers[ProviderID.openai].models["gpt-5.2-codex"].limit.input).toBe(272000)
+    },
+  })
+})
+
+test("config model overrides the catalog input limit", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          provider: {
+            openai: {
+              models: { "gpt-5.2-codex": { limit: { context: 272000, input: 260000, output: 128000 } } },
+            },
+          },
+        }),
+      )
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    init: async () => {
+      Env.set("OPENAI_API_KEY", "test-key")
+    },
+    fn: async () => {
+      const providers = await Provider.list()
+      expect(providers[ProviderID.openai].models["gpt-5.2-codex"].limit).toEqual({
+        context: 272000,
+        input: 260000,
+        output: 128000,
+      })
+    },
+  })
+})
+
 test("model cost defaults to zero when not specified", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {
