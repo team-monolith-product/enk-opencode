@@ -23,6 +23,14 @@
         "baseURL": "${OPENAI_BASE_URL}",
         "apiKey": "proxy-auth",
       },
+      "models": {
+        "gpt-5.6-luna": {
+          "options": { "reasoningContext": "current_turn" },
+        },
+        "gpt-6-luna": {
+          "options": { "reasoningContext": "current_turn" },
+        },
+      },
     },
     "deepseek": {
       // CHP가 anthropic 규약을 제공함으로, 여기에도 anthropic 규약을 사용한다.
