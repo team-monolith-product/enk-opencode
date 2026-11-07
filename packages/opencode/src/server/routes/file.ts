@@ -6,6 +6,7 @@ import path from "path"
 import z from "zod"
 import { File } from "../../file"
 import { Assets } from "../../file/assets"
+import { removeProjectPath } from "../../file/remove"
 import { Ripgrep } from "../../file/ripgrep"
 import { LSP } from "../../lsp"
 import { Instance } from "../../project/instance"
@@ -170,6 +171,36 @@ export const FileRoutes = lazy(() =>
         const path = c.req.valid("query").path
         const content = await File.list(path)
         return c.json(content)
+      },
+    )
+    .delete(
+      "/file",
+      describeRoute({
+        summary: "Delete a file or folder",
+        description: "Delete a file or folder inside the project directory. Folders are removed with their contents.",
+        operationId: "file.delete",
+        responses: {
+          200: {
+            description: "Deleted",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          path: z.string().min(1).meta({ description: "Path relative to the project directory" }),
+        }),
+      ),
+      async (c) => {
+        const removed = await removeProjectPath(c.req.valid("query").path)
+        if (!removed) throw new HTTPException(400, { message: "Invalid path" })
+        return c.json(true)
       },
     )
     .get(

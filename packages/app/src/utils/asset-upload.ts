@@ -63,11 +63,21 @@ type Entry = {
 }
 
 function entryFile(entry: Entry) {
-  return new Promise<File | undefined>((resolve) => entry.file?.((file) => resolve(file), () => resolve(undefined)))
+  return new Promise<File | undefined>((resolve) =>
+    entry.file?.(
+      (file) => resolve(file),
+      () => resolve(undefined),
+    ),
+  )
 }
 
 function entryChildren(reader: ReturnType<NonNullable<Entry["createReader"]>>) {
-  return new Promise<Entry[]>((resolve) => reader.readEntries((entries) => resolve(entries), () => resolve([])))
+  return new Promise<Entry[]>((resolve) =>
+    reader.readEntries(
+      (entries) => resolve(entries),
+      () => resolve([]),
+    ),
+  )
 }
 
 async function walk(entry: Entry, prefix: string, depth: number, out: PickedFile[]) {
@@ -275,6 +285,20 @@ export async function deleteAsset(input: {
       // a path it would have to validate.
       ...(input.relative ? { path: input.relative } : {}),
     })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Removes a file or folder anywhere in the project. Returns false instead of throwing, like deleteAsset. */
+export async function deleteProjectPath(input: {
+  client: OpencodeClient
+  directory: string
+  path: string
+}): Promise<boolean> {
+  try {
+    await input.client.file.delete({ directory: input.directory, path: input.path })
     return true
   } catch {
     return false

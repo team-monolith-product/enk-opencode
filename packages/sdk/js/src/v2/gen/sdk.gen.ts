@@ -69,6 +69,8 @@ import type {
   FileAssetDeleteErrors,
   FileAssetDeleteResponses,
   FileAssetListResponses,
+  FileDeleteErrors,
+  FileDeleteResponses,
   FileListResponses,
   FilePartInput,
   FilePartSource,
@@ -4893,6 +4895,38 @@ export class Asset2 extends HeyApiClient {
 }
 
 export class File extends HeyApiClient {
+  /**
+   * Delete a file or folder
+   *
+   * Delete a file or folder inside the project directory. Folders are removed with their contents.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      path: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<FileDeleteResponses, FileDeleteErrors, ThrowOnError>({
+      url: "/file",
+      ...options,
+      ...params,
+    })
+  }
+
   /**
    * List files
    *

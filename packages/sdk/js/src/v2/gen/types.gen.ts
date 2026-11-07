@@ -6159,6 +6159,38 @@ export type FindSymbolsResponses = {
 
 export type FindSymbolsResponse = FindSymbolsResponses[keyof FindSymbolsResponses]
 
+export type FileDeleteData = {
+  body?: never
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    /**
+     * Path relative to the project directory
+     */
+    path: string
+  }
+  url: "/file"
+}
+
+export type FileDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type FileDeleteError = FileDeleteErrors[keyof FileDeleteErrors]
+
+export type FileDeleteResponses = {
+  /**
+   * Deleted
+   */
+  200: boolean
+}
+
+export type FileDeleteResponse = FileDeleteResponses[keyof FileDeleteResponses]
+
 export type FileListData = {
   body?: never
   path?: never

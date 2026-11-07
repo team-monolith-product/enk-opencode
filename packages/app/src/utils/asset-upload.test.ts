@@ -8,6 +8,7 @@ import {
   assetRelativePath,
   assetSubtree,
   deleteAsset,
+  deleteProjectPath,
   isAssetPath,
   pickedFromDataTransfer,
   pickedFromInput,
@@ -346,5 +347,25 @@ describe("deleteAsset", () => {
       },
     } as any
     expect(await deleteAsset({ client, directory: "/p", relative: "a.txt" })).toBe(false)
+  })
+})
+
+describe("deleteProjectPath", () => {
+  test("sends the project path", async () => {
+    let seen: any
+    const client = { file: { delete: async (p: any) => void (seen = p) } } as any
+    expect(await deleteProjectPath({ client, directory: "/p", path: "src/a.ts" })).toBe(true)
+    expect(seen).toEqual({ directory: "/p", path: "src/a.ts" })
+  })
+
+  test("reports failure instead of throwing", async () => {
+    const client = {
+      file: {
+        delete: async () => {
+          throw new Error("boom")
+        },
+      },
+    } as any
+    expect(await deleteProjectPath({ client, directory: "/p", path: "a.ts" })).toBe(false)
   })
 })
