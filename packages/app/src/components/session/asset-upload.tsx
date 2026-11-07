@@ -16,7 +16,7 @@ import {
   assetRelativePath,
   assetSubtree,
   deleteAsset,
-  isAssetPath,
+  deleteProjectPath,
   pickedFromDataTransfer,
   pickedFromInput,
   uploadAssets,
@@ -28,7 +28,7 @@ import {
  * until it reads one. This is the path for a large corpus — prompt attachments are re-billed on
  * every step of every turn, so they cap out at ten files (see @/constants/file-picker).
  */
-export function createAssetUpload() {
+export function createAssetUpload(options?: { onDeleted?: (path: string) => void }) {
   const sdk = useSDK()
   const file = useFile()
   const language = useLanguage()
@@ -43,17 +43,17 @@ export function createAssetUpload() {
   const uploading = () => !!progress() || checking()
 
   /**
-   * Re-lists the folders a batch touched, given paths relative to the upload folder. The tree
-   * otherwise only follows the file watcher, and a batch is where a watcher event is most likely to
-   * be missing: the deferred subscription window, a disabled watcher, or a folder whose name the
-   * watcher ignores (`build`, `dist`, `logs` … see FileIgnore.PATTERNS) all leave the upload
-   * invisible until the user collapses and reopens the folder.
+   * Re-lists the folders above the given project paths. The tree otherwise only follows the file
+   * watcher, and a batch is where a watcher event is most likely to be missing: the deferred
+   * subscription window, a disabled watcher, or a folder whose name the watcher ignores (`build`,
+   * `dist`, `logs` … see FileIgnore.PATTERNS) all leave the change invisible until the user
+   * collapses and reopens the folder.
    */
-  const refreshTree = (relatives: string[]) => {
+  const refreshParents = (paths: string[]) => {
     const dirs = new Set<string>([""])
-    for (const relative of relatives) {
+    for (const path of paths) {
       // The last segment is the file or folder itself; what needs re-listing is every folder above.
-      const parts = [ASSETS_DIR, ...relative.split("/").slice(0, -1)]
+      const parts = path.split("/").slice(0, -1)
       for (let i = 1; i <= parts.length; i++) dirs.add(parts.slice(0, i).join("/"))
     }
     for (const dir of dirs) {
@@ -64,6 +64,8 @@ export function createAssetUpload() {
       void file.tree.refresh(dir)
     }
   }
+
+  const refreshTree = (relatives: string[]) => refreshParents(relatives.map((relative) => `${ASSETS_DIR}/${relative}`))
 
   const run = async (files: PickedFile[]) => {
     if (files.length === 0) return
@@ -162,15 +164,8 @@ export function createAssetUpload() {
     },
   }
 
-  /**
-   * Only the upload folder gets a delete affordance. The file tree renders the whole project, and
-   * nothing else in it should be deletable from here — code is git's to restore, not ours.
-   */
-  const deletable = (node: FileNode) => isAssetPath(node.path)
-
-  const removeNow = async (relative: string, label: string) => {
-    const ok = await deleteAsset({ client: sdk.client, directory: sdk.directory, relative })
-    refreshTree([relative])
+  const notifyDeleted = (ok: boolean, path: string, label: string) => {
+    if (ok) options?.onDeleted?.(path)
     showToast(
       ok
         ? { title: language.t("session.files.delete.done", { name: label }) }
@@ -178,62 +173,80 @@ export function createAssetUpload() {
     )
   }
 
+  const removeNow = async (relative: string, node: FileNode) => {
+    const ok = await deleteAsset({ client: sdk.client, directory: sdk.directory, relative })
+    refreshTree([relative])
+    notifyDeleted(ok, node.path, node.name)
+  }
+
+  const removeProjectNode = async (node: FileNode) => {
+    const ok = await deleteProjectPath({ client: sdk.client, directory: sdk.directory, path: node.path })
+    refreshParents([node.path])
+    notifyDeleted(ok, node.path, node.name)
+  }
+
   /**
-   * A single file goes immediately — it is one thing the user just pointed at. A folder (including
+   * An uploaded file goes immediately — it is one thing the user just pointed at. A folder (including
    * the upload folder itself, which is "delete everything") asks first, because the row gives no
-   * hint of how much is underneath it.
+   * hint of how much is underneath it. Everything outside the upload folder is the project's own
+   * work and may not be in git yet, so it always asks.
    */
   const remove = async (node: FileNode) => {
     const relative = assetRelativePath(node.path)
-    if (relative === undefined) return
+    if (relative === undefined) {
+      dialog.show(() => (
+        <FileDeleteDialog
+          title={language.t("session.files.delete.confirm.title", { name: node.name })}
+          description={language.t(
+            node.type === "file"
+              ? "session.files.delete.confirm.body.file"
+              : "session.files.delete.confirm.body.folder",
+          )}
+          onConfirm={() => removeProjectNode(node)}
+        />
+      ))
+      return
+    }
 
     if (node.type === "file") {
-      await removeNow(relative, node.name)
+      await removeNow(relative, node)
       return
     }
 
     const subtree = await assetSubtree({ client: sdk.client, directory: sdk.directory, relative })
     dialog.show(() => (
-      <AssetDeleteDialog
+      <FileDeleteDialog
         // Deleting the upload folder is "delete everything"; naming the folder there would make the
         // user translate an internal name into what is about to happen.
-        name={node.path === ASSETS_DIR ? undefined : node.name}
-        subtree={subtree}
-        onConfirm={() => removeNow(relative, node.name)}
+        title={
+          node.path === ASSETS_DIR
+            ? language.t("session.files.delete.confirm.title.all")
+            : language.t("session.files.delete.confirm.title", { name: node.name })
+        }
+        description={language.t("session.files.delete.confirm.body", {
+          count: subtree.count.toLocaleString(),
+          size: formatBytes(subtree.bytes),
+        })}
+        onConfirm={() => removeNow(relative, node)}
       />
     ))
   }
 
-  return { run, progress, uploading, dragging, drop, deletable, remove }
+  return { run, progress, uploading, dragging, drop, remove }
 }
 
 /**
- * Confirmation for a folder delete. The count and size are the whole point — the row the user
- * clicked shows neither, so a generic "are you sure" would tell them nothing they did not know.
- *
  * Chrome follows DialogEnvKeys (title / description / footer rhythm, see .asset-delete-dialog in
  * index.css) so the two modals read as one product rather than two.
  */
-function AssetDeleteDialog(props: {
-  /** The folder's name, or undefined when the target is the upload folder itself. */
-  name?: string
-  subtree: { count: number; bytes: number }
-  onConfirm: () => void
-}) {
+function FileDeleteDialog(props: { title: string; description: string; onConfirm: () => void }) {
   const dialog = useDialog()
   const language = useLanguage()
 
   return (
     <Dialog
-      title={
-        props.name
-          ? language.t("session.files.delete.confirm.title", { name: props.name })
-          : language.t("session.files.delete.confirm.title.all")
-      }
-      description={language.t("session.files.delete.confirm.body", {
-        count: props.subtree.count.toLocaleString(),
-        size: formatBytes(props.subtree.bytes),
-      })}
+      title={props.title}
+      description={props.description}
       action={<span class="sr-only" />}
       transition
       fit

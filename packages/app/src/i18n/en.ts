@@ -763,6 +763,8 @@ export const dict = {
   "session.files.delete.confirm.title": "Delete {{name}}?",
   "session.files.delete.confirm.title.all": "Delete everything?",
   "session.files.delete.confirm.body": "{{count}} files ({{size}}) will be deleted.",
+  "session.files.delete.confirm.body.file": "This can't be undone.",
+  "session.files.delete.confirm.body.folder": "Everything in this folder will be deleted. This can't be undone.",
   "session.files.delete.confirm.action": "Delete",
   "session.files.upload.label": "Upload",
   "session.files.upload.files": "Upload files",

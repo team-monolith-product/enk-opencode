@@ -219,11 +219,6 @@ export default function FileTree(props: {
   onContextAdd?: (path: string, type: "file" | "directory") => void
   contextLabel?: string
   contextFolderLabel?: string
-  /**
-   * Whether a node may be deleted from the tree. This is a whole-project tree, so the delete
-   * affordance is opt-in per node rather than global — today only the upload folder allows it.
-   */
-  deletable?: (node: FileNode) => boolean
   onDelete?: (node: FileNode) => void
   deleteLabel?: string
 
@@ -492,7 +487,7 @@ export default function FileTree(props: {
                         }}
                       />
                     </Show>
-                    <Show when={props.onDelete && props.deletable?.(node)}>
+                    <Show when={props.onDelete}>
                       <IconButton
                         icon="trash"
                         variant="ghost"
@@ -538,7 +533,6 @@ export default function FileTree(props: {
                         onContextAdd={props.onContextAdd}
                         contextLabel={props.contextLabel}
                         contextFolderLabel={props.contextFolderLabel}
-                        deletable={props.deletable}
                         onDelete={props.onDelete}
                         deleteLabel={props.deleteLabel}
                         _filter={filter()}
@@ -630,7 +624,7 @@ export default function FileTree(props: {
                       }}
                     />
                   </Show>
-                  <Show when={props.onDelete && props.deletable?.(node)}>
+                  <Show when={props.onDelete}>
                     <IconButton
                       icon="trash"
                       variant="ghost"

@@ -683,6 +683,8 @@ export const dict = {
   "session.files.delete.confirm.title": "{{name}} 삭제할까요?",
   "session.files.delete.confirm.title.all": "모두 삭제할까요?",
   "session.files.delete.confirm.body": "파일 {{count}}개 ({{size}})가 삭제돼요.",
+  "session.files.delete.confirm.body.file": "삭제하면 되돌릴 수 없어요.",
+  "session.files.delete.confirm.body.folder": "폴더 안의 파일도 모두 삭제되고, 되돌릴 수 없어요.",
   "session.files.delete.confirm.action": "삭제",
   "session.files.upload.label": "업로드",
   "session.files.upload.files": "파일 업로드",

@@ -8298,6 +8298,65 @@
       }
     },
     "/file": {
+      "delete": {
+        "operationId": "file.delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "description": "Path relative to the project directory"
+          }
+        ],
+        "summary": "Delete a file or folder",
+        "description": "Delete a file or folder inside the project directory. Folders are removed with their contents.",
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.file.delete({\n  ...\n})"
+          }
+        ]
+      },
       "get": {
         "operationId": "file.list",
         "parameters": [
