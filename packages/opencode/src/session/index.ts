@@ -321,7 +321,7 @@ export namespace Session {
       permission?: Permission.Ruleset
       workspaceID?: WorkspaceID
     }) => Effect.Effect<Info>
-    readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info>
+    readonly fork: (input: ForkInput) => Effect.Effect<Info>
     readonly touch: (sessionID: SessionID) => Effect.Effect<void>
     readonly get: (id: SessionID) => Effect.Effect<Info>
     readonly share: (id: SessionID) => Effect.Effect<{ url: string }>
@@ -508,19 +508,29 @@ export namespace Session {
         })
       })
 
-      const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
+      const fork = Effect.fn("Session.fork")(function* (input: ForkInput) {
         const original = yield* get(input.sessionID)
-        const title = getForkedTitle(original.title)
+        const title = input.title ?? getForkedTitle(original.title)
         const session = yield* createNext({
           directory: Instance.directory,
           workspaceID: original.workspaceID,
           title,
+          parentID: input.parentID,
+          permission: input.permission,
         })
         const msgs = yield* messages({ sessionID: input.sessionID })
         const idMap = new Map<string, MessageID>()
+        // 루프는 마지막으로 끝난 응답 뒤의 subtask·compaction 파트만 실행할 일로 집는다(prompt.ts). 그 앞의
+        // compaction 파트는 이미 끝난 압축의 경계라 filterCompacted 가 옛 기록을 자르는 데 쓴다 — 남긴다.
+        const settled = msgs.findLastIndex(
+          (msg) => msg.info.role === "assistant" && !!msg.info.finish && msg.info.time.completed !== undefined,
+        )
 
-        for (const msg of msgs) {
+        for (const [index, msg] of msgs.entries()) {
           if (input.messageID && msg.info.id >= input.messageID) break
+          // 원본이 응답을 쓰는 중이면 그 미완료 메시지까지 복사된다. 포크 쪽에선 영원히 끝나지 않아
+          // 계속 "실행 중"으로 보이므로, 원하는 호출자(사이드 채팅)는 끝난 턴만 가져간다.
+          if (input.inert && msg.info.role === "assistant" && msg.info.time.completed === undefined) continue
           const newID = MessageID.ascending()
           idMap.set(msg.info.id, newID)
 
@@ -533,8 +543,15 @@ export namespace Session {
           })
 
           for (const part of msg.parts) {
+            // 아직 실행되지 않은 서브태스크·압축은 다음 턴의 루프가 집어 실행한다. 맥락으로만 복사하는 포크에서
+            // 남기면 원본에서 돌던 작업이 여기서 다시 돈다 — 서브태스크는 쓰기 권한 있는 하위 에이전트로.
+            const pending = index > settled && (part.type === "subtask" || part.type === "compaction")
+            if (input.inert && pending) continue
+            // 끝난 압축 경계는 남은 꼬리의 첫 메시지를 가리킨다. 그 메시지는 앞서 복사됐으니 새 ID 로 바꾼다.
+            const tail = part.type === "compaction" && part.tail_start_id ? idMap.get(part.tail_start_id) : undefined
             yield* updatePart({
               ...part,
+              ...(tail && { tail_start_id: tail }),
               id: PartID.ascending(),
               messageID: cloned.id,
               sessionID: session.id,
@@ -701,9 +718,21 @@ export namespace Session {
     (input) => runPromise((svc) => svc.create(input)),
   )
 
-  export const fork = fn(z.object({ sessionID: SessionID.zod, messageID: MessageID.zod.optional() }), (input) =>
-    runPromise((svc) => svc.fork(input)),
-  )
+  export const ForkInput = z.object({
+    sessionID: SessionID.zod,
+    messageID: MessageID.zod.optional(),
+    title: z.string().optional(),
+    parentID: SessionID.zod.optional(),
+    permission: Info.shape.permission,
+    /**
+     * 기록을 맥락으로만 복사한다: 끝나지 않은 assistant 메시지와 실행형 파트(subtask·compaction)를
+     * 빼서, 포크에서 원본의 진행 중이던 작업이 다시 실행되지 않게 한다.
+     */
+    inert: z.boolean().optional(),
+  })
+  export type ForkInput = z.infer<typeof ForkInput>
+
+  export const fork = fn(ForkInput, (input) => runPromise((svc) => svc.fork(input)))
 
   export const touch = fn(SessionID.zod, (id) => runPromise((svc) => svc.touch(id)))
   export const get = fn(SessionID.zod, (id) => runPromise((svc) => svc.get(id)))
