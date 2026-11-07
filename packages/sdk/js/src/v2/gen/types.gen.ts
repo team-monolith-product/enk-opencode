@@ -314,6 +314,15 @@ export type EventEnvRequestResolved = {
   }
 }
 
+export type EventImageEditLock = {
+  type: "image.edit.lock"
+  properties: {
+    path: string
+    locked: boolean
+    sessionID?: string
+  }
+}
+
 export type EventTuiPromptAppend = {
   type: "tui.prompt.append"
   properties: {
@@ -1076,6 +1085,7 @@ export type Event =
   | EventTodoUpdated
   | EventEnvRequestAsked
   | EventEnvRequestResolved
+  | EventImageEditLock
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow
@@ -2290,6 +2300,11 @@ export type FileContent = {
   }
   encoding?: "base64"
   mimeType?: string
+}
+
+export type FileWritten = {
+  path: string
+  size: number
 }
 
 export type File = {
@@ -6198,6 +6213,69 @@ export type FileReadResponses = {
 }
 
 export type FileReadResponse = FileReadResponses[keyof FileReadResponses]
+
+export type FileWriteData = {
+  body: Blob | File
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    /**
+     * File path relative to the project directory
+     */
+    path: string
+    /**
+     * SHA-256 (hex) of the bytes the client edited. When given and the file no longer matches, nothing is written and the route answers 409.
+     */
+    expected?: string
+  }
+  url: "/file/content"
+}
+
+export type FileWriteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * The file changed since the client read it (see `expected`)
+   */
+  409: unknown
+}
+
+export type FileWriteError = FileWriteErrors[keyof FileWriteErrors]
+
+export type FileWriteResponses = {
+  /**
+   * Written file
+   */
+  200: FileWritten
+}
+
+export type FileWriteResponse = FileWriteResponses[keyof FileWriteResponses]
+
+export type FileLockData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/file/lock"
+}
+
+export type FileLockResponses = {
+  /**
+   * Locked images
+   */
+  200: Array<{
+    path: string
+    sessionID: string
+    since: number
+  }>
+}
+
+export type FileLockResponse = FileLockResponses[keyof FileLockResponses]
 
 export type FileStatusData = {
   body?: never
