@@ -1,0 +1,3 @@
+# PhotoCraft 추가 폰트 목록(HOSTING.md 의 Fonts 형식). 비어 있어도 둔다: 없으면 opencode 서버와 Vite 가
+# 404 대신 앱 index.html 을 돌려줘 PhotoCraft 가 HTML 을 폰트 목록으로 읽는다.
+# family | style | file (relative to the site root) | scripts | licence | licence file | sha256 | source
