@@ -31,6 +31,7 @@ import { ModelPolicy } from "../enk/model-policy"
 import { CostQuota } from "../enk/cost-quota"
 import { ModelFallback } from "../enk/model-fallback"
 import { Locale } from "../enk/locale"
+import { HistoryNote } from "../enk/history-note"
 import { SessionFallback } from "./fallback"
 import { ulid } from "ulid"
 import { spawn } from "child_process"
@@ -97,6 +98,7 @@ export namespace SessionPrompt {
     readonly prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts>
     readonly loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts>
     readonly shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts>
+    readonly exclusive: (sessionID: SessionID, work: () => Promise<void>) => Effect.Effect<void>
     readonly command: (input: CommandInput) => Effect.Effect<MessageV2.WithParts>
     readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
   }
@@ -317,6 +319,20 @@ export namespace SessionPrompt {
       }) {
         const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
         if (!userMessage) return input.messages
+
+        const reverted = yield* Effect.promise(() =>
+          HistoryNote.text(input.session.directory, input.messages, userMessage.info.id),
+        )
+        if (reverted) {
+          userMessage.parts.push({
+            id: PartID.ascending(),
+            messageID: userMessage.info.id,
+            sessionID: userMessage.info.sessionID,
+            type: "text",
+            text: reverted,
+            synthetic: true,
+          })
+        }
 
         if (!Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) {
           if (input.agent.name === "plan") {
@@ -1892,6 +1908,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         },
       )
 
+      // 모델을 부르지 않는 작업(되돌리기 등)을 셸 명령과 같은 자리에서 돌린다. 도는 동안 세션은 바쁨으로 보이고, 그
+      // 사이 들어온 프롬프트는 끝난 뒤 이어서 돈다. 이미 답이 도는 중이면 BusyError. 셸 결과 자리는 러너도 호출자도
+      // 읽지 않아 빈 값을 둔다.
+      const exclusive = Effect.fn("SessionPrompt.exclusive")(function* (sessionID: SessionID, work: () => Promise<void>) {
+        const s = yield* InstanceState.get(cache)
+        const runner = getRunner(s.runners, sessionID)
+        yield* runner.startShell(() => Effect.promise(work).pipe(Effect.as(undefined as never)))
+      })
+
       const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
         log.info("command", input)
         const cmd = yield* commands.get(input.command)
@@ -2017,6 +2042,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         prompt,
         loop,
         shell,
+        exclusive,
         command,
         resolvePromptParts,
       })
@@ -2157,6 +2183,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
   export async function shell(input: ShellInput) {
     return runPromise((svc) => svc.shell(ShellInput.parse(input)))
+  }
+
+  export async function exclusive(sessionID: SessionID, work: () => Promise<void>) {
+    return runPromise((svc) => svc.exclusive(sessionID, work))
   }
 
   export const CommandInput = z.object({

@@ -36,9 +36,31 @@ export namespace SentryReporter {
     enabled = true
   }
 
-  export function captureException(error: unknown, context?: Record<string, unknown>) {
+  export type Scope = { tags?: Record<string, string>; fingerprint?: string[] }
+
+  export function captureException(error: unknown, context?: Record<string, unknown>, scope?: Scope) {
     if (!enabled) return
-    SentryBun.captureException(error, context ? { extra: context } : undefined)
+    SentryBun.captureException(error, context || scope ? { extra: context, ...scope } : undefined)
+  }
+
+  const seen = new Map<string, number>()
+  const limit = 200
+
+  export function due(key: string, ttl = 10 * 60_000, now = Date.now()) {
+    const until = seen.get(key)
+    if (until !== undefined && now < until) return false
+    seen.set(key, now + ttl)
+    if (seen.size > limit) seen.forEach((expiry, name) => expiry <= now && seen.delete(name))
+    return true
+  }
+
+  export function tracked() {
+    return seen.size
+  }
+
+  export function captureOnce(key: string, error: unknown, context?: Record<string, unknown>, scope?: Scope) {
+    if (!enabled || !due(key)) return
+    captureException(error, context, scope)
   }
 
   export function isEnabled() {

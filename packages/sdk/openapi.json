@@ -15253,6 +15253,9 @@
           "linkedBy": {
             "type": "string"
           },
+          "app": {
+            "type": "boolean"
+          },
           "repo": {
             "type": "object",
             "properties": {
@@ -15803,6 +15806,9 @@
             "type": "number"
           },
           "expiresAt": {
+            "type": "number"
+          },
+          "serverNow": {
             "type": "number"
           }
         },

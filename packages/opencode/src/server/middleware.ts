@@ -7,9 +7,17 @@ import type { ErrorHandler } from "hono"
 import { HTTPException } from "hono/http-exception"
 import type { Log } from "../util/log"
 import { SentryReporter } from "../util/sentry"
+import { EnkFailure } from "../enk/failure"
 
 export function errorHandler(log: Log.Logger): ErrorHandler {
   return (err, c) => {
+    if (err instanceof EnkFailure) {
+      if (err.status === 500) {
+        log.error("failed", { error: err })
+        SentryReporter.captureException(err, { path: c.req.path, method: c.req.method })
+      }
+      return c.json({ code: err.code, message: err.status === 500 ? err.code : err.message }, { status: err.status })
+    }
     log.error("failed", {
       error: err,
     })

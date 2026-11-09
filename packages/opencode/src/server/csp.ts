@@ -23,7 +23,9 @@ const origins = (...parts: string[]) => parts.filter(Boolean).join(" ")
 const FRAME_SRC = origins("'self'", PREVIEW_HOST, TUTORIAL_PREVIEW_HOST, USER_RAILS_HOST)
 // Wildcard kept until the previewReady fetch chain is measured in a browser Network tab.
 const CONNECT_SRC = origins("'self'", "data:", SERVE_WILDCARD, SENTRY_INGEST, ASSET_ORIGIN)
-const FRAME_ANCESTORS = origins("'self'", SERVE_URL)
+// 다른 브랜드 도메인(bana.build 등)이 페이지를 iframe 으로 임베드할 수 있도록 허브가 넘겨주는 오리진 목록.
+const EXTRA_FRAME_ANCESTORS = (process.env["OPENCODE_EXTRA_FRAME_ANCESTORS"] ?? "").split(/\s+/).filter(Boolean)
+const FRAME_ANCESTORS = origins("'self'", SERVE_URL, ...EXTRA_FRAME_ANCESTORS)
 const SCRIPT_SRC = origins("'self'", "'wasm-unsafe-eval'", ASSET_ORIGIN)
 const STYLE_SRC = origins("'self'", "'unsafe-inline'", ASSET_ORIGIN)
 const FONT_SRC = origins("'self'", "data:", ASSET_ORIGIN)

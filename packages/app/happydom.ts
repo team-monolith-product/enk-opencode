@@ -1,4 +1,3 @@
-import "./solid-jsx-runtime"
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 
 GlobalRegistrator.register()

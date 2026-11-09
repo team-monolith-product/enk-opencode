@@ -1,2 +1,2 @@
 [test]
-preload = ["./solid-jsx-runtime.ts"]
+preload = ["./test/solid-jsx.ts"]

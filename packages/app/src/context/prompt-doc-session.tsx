@@ -27,12 +27,13 @@ import {
   connectSubmit,
   respondSubmit,
   startClearSubmit,
+  startRollbackSubmit,
   startStopSubmit,
   type DocSubmitState,
 } from "@/components/prompt-input/doc-submit"
 import { DialogDocSubmit } from "@/components/doc-submit/dialog-doc-submit"
 import { startRtcKeepalive } from "@/utils/rtc-keepalive"
-import { SessionClearVote } from "@/utils/session-clear-vote"
+import { SessionVote } from "@/utils/session-vote"
 
 export type PromptMode = "normal" | "shell" | "doc"
 
@@ -78,6 +79,19 @@ export type PromptDocSession = {
 }
 
 const PromptDocSessionContext = createContext<PromptDocSession>()
+
+const voteKind = (kind: DocSubmitState["targetKind"] | undefined) =>
+  kind === "stop" || kind === "clear" || kind === "rollback" ? kind : "doc"
+
+// 투표 창에 보일 참가자 이름. 이름이 없거나 id 그대로인 참가자는 서버가 기본 이름을 붙인다.
+function voteNames(actors: readonly { actorID: string; name?: string }[]) {
+  const names: Record<string, string> = {}
+  for (const item of actors) {
+    const name = item.name?.trim()
+    if (name && name !== item.actorID) names[item.actorID] = name
+  }
+  return names
+}
 
 export function usePromptDocSession() {
   const value = useContext(PromptDocSessionContext)
@@ -331,6 +345,11 @@ export function createPromptDocSession(): PromptDocSession {
         if (dialogOpen(state.submitID)) closeApproval()
         return
       }
+      // 되돌리기가 합의되면 서버가 파일을 되돌리고 history.restored 로 모두에게 알린다. 컴포저는 그대로 둔다.
+      if (state.status === "sent" && state.targetKind === "rollback") {
+        if (dialogOpen(state.submitID)) closeApproval()
+        return
+      }
       if (state.status === "sent") {
         // Only a doc send reaches this — a 'stop' vote returned above, and question votes run on
         // their own socket (session-question-dock) — so the composer is safe to clear wholesale.
@@ -354,7 +373,7 @@ export function createPromptDocSession(): PromptDocSession {
           state={approval}
           actorID={actorID}
           spectator={readonly}
-          kind={approval()?.targetKind === "stop" || approval()?.targetKind === "clear" ? (approval()!.targetKind as "stop" | "clear") : "doc"}
+          kind={voteKind(approval()?.targetKind)}
           sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
           approve={() => {
             const current = approval()
@@ -456,11 +475,7 @@ export function createPromptDocSession(): PromptDocSession {
       await abort()
       return
     }
-    const names: Record<string, string> = {}
-    for (const item of list) {
-      const name = item.name?.trim()
-      if (name && name !== item.actorID) names[item.actorID] = name
-    }
+    const names = voteNames(list)
     try {
       const state = await startStopSubmit({
         baseUrl: sdk.url,
@@ -500,11 +515,7 @@ export function createPromptDocSession(): PromptDocSession {
     const ids = Array.from(new Set([actorID, ...list.map((item) => item.actorID)]))
     if (ids.length <= 1) return false
 
-    const names: Record<string, string> = {}
-    for (const item of list) {
-      const name = item.name?.trim()
-      if (name && name !== item.actorID) names[item.actorID] = name
-    }
+    const names = voteNames(list)
     try {
       const state = await startClearSubmit({
         baseUrl: sdk.url,
@@ -526,12 +537,35 @@ export function createPromptDocSession(): PromptDocSession {
     return true
   }
 
-  // 지우기 확인창은 앱 셸에 있어 이 컨텍스트에 닿지 않는다. 지금 열린 세션이 자기 요청 함수를 걸어
-  // 두면, 확인창이 "지우기" 를 누른 순간 동의를 먼저 구할 수 있다.
+  /**
+   * 되돌리기도 함께 쓰는 동작이라 언제나 투표를 거친다. 혼자면 서버가 바로 되돌린다. 서버가 거절하면
+   * SubmitRequestError 를 그대로 던져 버전 기록 창이 사유를 보여 준다.
+   */
+  const requestRollback = async (sha: string) => {
+    const sessionID = params.id
+    const docID = doc.docID()
+    const actorID = doc.actorID()
+    if (!sessionID || !docID || !actorID) return false
+    const state = await startRollbackSubmit({
+      baseUrl: sdk.url,
+      directory: sdk.directory,
+      sessionID,
+      docID,
+      actorID,
+      names: voteNames(doc.actors()),
+      sha,
+    })
+    setApprovalSession(sessionID)
+    showApproval(state)
+    return true
+  }
+
+  // 지우기 확인창과 버전 기록 창은 앱 셸에 있어 이 컨텍스트에 닿지 않는다. 지금 열린 세션이 자기 요청 함수를
+  // 걸어 두면, 그 창들이 동의를 먼저 구할 수 있다.
   createEffect(() => {
     const id = params.id
     if (!id) return
-    onCleanup(SessionClearVote.register(id, requestClear))
+    onCleanup(SessionVote.register(id, { clear: requestClear, rollback: requestRollback }))
   })
 
   return {

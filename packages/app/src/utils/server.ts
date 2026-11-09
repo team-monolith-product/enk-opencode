@@ -1,6 +1,7 @@
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createClient } from "@opencode-ai/sdk/v2/gen/client"
 import type { ServerConnection } from "@/context/server"
+import type { PromptLocale } from "@/utils/prompt-locale"
 
 function basicAuth(server: ServerConnection.HttpBase) {
   if (!server.password) return
@@ -138,8 +139,10 @@ export type GitHubStatus = {
   connectUrl?: string
   login?: string
   linkedBy?: string
+  app?: boolean
   repo?: GitHubRepo
   push?: { sha: string; time: number; by?: string }
+  firstPush?: { attempts: number; code: string; reason: string }
 }
 
 export function githubCode(err: unknown) {
@@ -153,7 +156,34 @@ export function getGitHubStatus(opts: GitHubOpts): Promise<GitHubStatus> {
     .then((res) => res.data as GitHubStatus)
 }
 
-export function createGitHubRepo(opts: GitHubOpts, input: { name: string }): Promise<GitHubStatus> {
+export function pushGitHub(
+  opts: GitHubOpts,
+  input: { locale?: PromptLocale },
+): Promise<GitHubStatus & { pushed: boolean }> {
+  return devServerClient(opts)
+    .post({ url: "/github/push", body: input })
+    .then((res) => res.data as GitHubStatus & { pushed: boolean })
+}
+
+export function getGitHubRepositories(opts: GitHubOpts): Promise<GitHubRepo[]> {
+  return devServerClient(opts)
+    .get({ url: "/github/repositories" })
+    .then((res) => (res.data as { repositories: GitHubRepo[] }).repositories)
+}
+
+export function selectGitHubRepo(
+  opts: GitHubOpts,
+  input: { owner: string; name: string; locale?: PromptLocale },
+): Promise<GitHubStatus> {
+  return devServerClient(opts)
+    .put({ url: "/github/repository", body: input })
+    .then((res) => res.data as GitHubStatus)
+}
+
+export function createGitHubRepo(
+  opts: GitHubOpts,
+  input: { name: string; locale?: PromptLocale },
+): Promise<GitHubStatus> {
   return devServerClient(opts)
     .post({ url: "/github/repo", body: input })
     .then((res) => res.data as GitHubStatus)

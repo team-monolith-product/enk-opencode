@@ -1,3 +1,4 @@
+import type { DocRollbackTarget } from "@opencode-ai/sdk/v2/client"
 import { apiUrl } from "@/utils/api-url"
 import type { PromptApprovalInput } from "./submit"
 
@@ -13,17 +14,20 @@ export type DocSubmitState = {
   sessionID: string
   // 'doc' → targetID is the prompt doc id; 'question' → the question request id; 'stop' → the prompt
   // doc id whose in-flight AI response a consensus would cancel; 'clear' → the prompt doc id of the
-  // session a consensus would delete (archive).
-  targetKind: "doc" | "question" | "stop" | "clear"
+  // session a consensus would delete (archive); 'rollback' → the prompt doc id of the session whose
+  // project files a consensus would roll back to `rollback`.
+  targetKind: "doc" | "question" | "stop" | "clear" | "rollback"
   targetID: string
   // For 'question' votes: whether the vote sends a reply, dismisses the question, or navigates back.
   questionAction?: "send" | "dismiss" | "back"
+  rollback?: DocRollbackTarget
   actorID: string
   status: "pending" | "sent" | "cancelled" | "expired"
   actors: DocSubmitActor[]
   cancelledBy?: DocSubmitActor
   timeoutMs: number
   expiresAt: number
+  serverNow?: number
 }
 
 export type DocSubmitEvent = {
@@ -215,14 +219,30 @@ export function liveSocket(input: {
   }
 }
 
+/** 투표 요청을 서버가 거절했을 때. `body` 는 서버 오류 본문 그대로다(enk 실패는 `code`, 이름 있는 오류는 `name`). */
+export class SubmitRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: { code?: string; name?: string } | undefined,
+  ) {
+    super(`Submit request failed (${status})`)
+    this.name = "SubmitRequestError"
+  }
+}
+
+export const onLocalClock = (value: DocSubmitState): DocSubmitState => {
+  if (typeof value.serverNow !== "number") return value
+  return { ...value, expiresAt: Date.now() + (value.expiresAt - value.serverNow), serverNow: undefined }
+}
+
 const json = async (url: URL, body: unknown) => {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(await res.text())
-  return (await res.json()) as DocSubmitState
+  if (!res.ok) throw new SubmitRequestError(res.status, await res.json().catch(() => undefined))
+  return onLocalClock((await res.json()) as DocSubmitState)
 }
 
 export async function startSubmit(input: StartInput) {
@@ -267,6 +287,18 @@ export async function startClearSubmit(input: StopInput) {
   })
 }
 
+// Start a consent vote to roll the project files back to a saved version. With nobody else connected
+// the server rolls back right away and answers with a 'sent' state.
+export async function startRollbackSubmit(input: StopInput & { sha: string }) {
+  return json(path(input, `/session/${input.sessionID}/prompt-doc/rollback`), {
+    docID: input.docID,
+    actorID: input.actorID,
+    names: input.names,
+    sha: input.sha,
+    timeoutMs: input.timeoutMs,
+  })
+}
+
 export async function respondSubmit(input: RespondInput) {
   return json(path(input, `/session/${input.sessionID}/prompt-doc/submit/${input.submitID}/respond`), {
     actorID: input.actorID,
@@ -286,7 +318,7 @@ const state = (value: unknown): DocSubmitState | undefined => {
   )
     return
   if (!Array.isArray(item.actors)) return
-  return value as DocSubmitState
+  return onLocalClock(value as DocSubmitState)
 }
 
 const parse = (data: string) => {

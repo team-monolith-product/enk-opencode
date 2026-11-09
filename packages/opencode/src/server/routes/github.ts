@@ -1,7 +1,9 @@
 import { Hono, type Context } from "hono"
-import { describeRoute, resolver, validator } from "hono-openapi"
+import { describeRoute, validator } from "hono-openapi"
+import { failures, ok } from "../enk-responses"
 import z from "zod"
 import { GitHub } from "../../enk/github"
+import { Locale } from "../../enk/locale"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
 
@@ -17,11 +19,20 @@ const Status = z
     connectUrl: z.string().optional(),
     login: z.string().optional(),
     linkedBy: z.string().optional(),
+    app: z.boolean().optional(),
     repo: Repo.optional(),
     push: z.object({ sha: z.string(), time: z.number(), by: z.string().optional() }).optional(),
+    firstPush: z
+      .object({
+        attempts: z.number(),
+        code: z.string(),
+        reason: z.string(),
+      })
+      .optional(),
   })
   .meta({ ref: "GitHubStatus" })
-const Failure = z.object({ code: z.string(), message: z.string() }).meta({ ref: "GitHubError" })
+const Pushed = Status.extend({ pushed: z.boolean() }).meta({ ref: "GitHubPushed" })
+const Repositories = z.object({ repositories: z.array(Repo) }).meta({ ref: "GitHubRepositories" })
 const RepoName = z
   .string()
   .min(1)
@@ -29,28 +40,13 @@ const RepoName = z
   .regex(/^[A-Za-z0-9._-]+$/)
   .refine((name) => name !== "." && name !== "..")
 
-const failures = (...codes: number[]) =>
-  Object.fromEntries(
-    codes.map((code) => [
-      code,
-      { description: "GitHub error", content: { "application/json": { schema: resolver(Failure) } } },
-    ]),
-  )
-
-const ok = (description: string, schema: z.ZodType) => ({
-  200: { description, content: { "application/json": { schema: resolver(schema) } } },
-})
-
-async function handle<T>(c: Context, fn: () => Promise<T> | T) {
-  return Promise.resolve()
-    .then(fn)
-    .then(
-      (data) => c.json(data as object),
-      (err) => {
-        if (!(err instanceof GitHub.Failure)) throw err
-        return c.json({ code: err.code, message: err.message }, err.status)
-      },
-    )
+async function alerting<T>(c: Context, fn: () => Promise<T>) {
+  return fn().catch((err) => {
+    if (err instanceof GitHub.Failure && GitHub.notify.includes(err.code)) {
+      GitHub.alert("request failed", err, { method: c.req.method, path: c.req.path })
+    }
+    throw err
+  })
 }
 
 export const GitHubRoutes = lazy(() =>
@@ -64,7 +60,28 @@ export const GitHubRoutes = lazy(() =>
         operationId: "github.status",
         responses: ok("Link status", Status),
       }),
-      (c) => handle(c, () => GitHub.status(Instance.directory)),
+      async (c) => c.json(await GitHub.status(Instance.directory)),
+    )
+    .get(
+      "/repositories",
+      describeRoute({
+        summary: "List installed GitHub repositories",
+        description: "Repositories the team picked when installing the GitHub App.",
+        operationId: "github.repositories",
+        responses: { ...ok("Repositories", Repositories), ...failures(404, 409, 502) },
+      }),
+      async (c) => c.json({ repositories: await alerting(c, () => GitHub.repositories(Instance.directory)) }),
+    )
+    .put(
+      "/repository",
+      describeRoute({
+        summary: "Choose GitHub repository",
+        description: "Bind one of the installed repositories to this project and push it once.",
+        operationId: "github.repo.select",
+        responses: { ...ok("Link status", Status), ...failures(404, 409, 502) },
+      }),
+      validator("json", z.object({ owner: z.string().min(1), name: RepoName, locale: Locale.Schema.optional() })),
+      async (c) => c.json(await alerting(c, () => GitHub.select(Instance.directory, c.req.valid("json")))),
     )
     .post(
       "/repo",
@@ -74,7 +91,19 @@ export const GitHubRoutes = lazy(() =>
         operationId: "github.repo.create",
         responses: { ...ok("Link status", Status), ...failures(409, 422, 502) },
       }),
-      validator("json", z.object({ name: RepoName })),
-      (c) => handle(c, () => GitHub.create(Instance.directory, c.req.valid("json"))),
+      validator("json", z.object({ name: RepoName, locale: Locale.Schema.optional() })),
+      async (c) => c.json(await alerting(c, () => GitHub.create(Instance.directory, c.req.valid("json")))),
+    )
+    .post(
+      "/push",
+      describeRoute({
+        summary: "Push to GitHub now",
+        description:
+          "Push the project's current files to the bound repository without waiting for a conversation to end.",
+        operationId: "github.push",
+        responses: { ...ok("Link status and whether a commit was pushed", Pushed), ...failures(404, 409, 422, 502) },
+      }),
+      validator("json", z.object({ locale: Locale.Schema.optional() })),
+      async (c) => c.json(await alerting(c, () => GitHub.manual(Instance.directory, c.req.valid("json").locale))),
     ),
 )
