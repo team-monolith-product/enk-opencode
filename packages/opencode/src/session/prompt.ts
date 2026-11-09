@@ -29,6 +29,7 @@ import { FileTime } from "../file/time"
 import { Flag } from "../flag/flag"
 import { ModelPolicy } from "../enk/model-policy"
 import { CostQuota } from "../enk/cost-quota"
+import { MemoryNote } from "../enk/memory-note"
 import { ModelFallback } from "../enk/model-fallback"
 import { Locale } from "../enk/locale"
 import { HistoryNote } from "../enk/history-note"
@@ -330,6 +331,18 @@ export namespace SessionPrompt {
             sessionID: userMessage.info.sessionID,
             type: "text",
             text: reverted,
+            synthetic: true,
+          })
+        }
+
+        const memory = yield* Effect.promise(() => MemoryNote.text(userMessage))
+        if (memory) {
+          userMessage.parts.push({
+            id: PartID.ascending(),
+            messageID: userMessage.info.id,
+            sessionID: userMessage.info.sessionID,
+            type: "text",
+            text: memory,
             synthetic: true,
           })
         }
