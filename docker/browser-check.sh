@@ -15,8 +15,13 @@
 # 브라우저는 닫지 않는다. 격리가 없으면 다음 점검이 떠 있는 브라우저를 그대로 써서 빠르고(약 0.4초,
 # 새로 띄우면 약 1.1초), 쓰지 않으면 AGENT_BROWSER_IDLE_TIMEOUT_MS 뒤에 내려간다. 대신 앞 점검의 기록이
 # 남아 있으므로 접속 전 기록을 먼저 받아 두고 그 뒤에 생긴 것만 보여 준다.
-#   - 에러/콘솔: 기록은 뒤에 덧붙기만 한다. 접속 전 개수 이후만 자른다. (0.39.4 는 `errors --clear`
-#     가 에러 기록을 비우지 못해서 비우기 대신 이렇게 한다.)
+#   - 에러/콘솔: 접속 전 개수 이후만 자른다. (0.39.4 에는 에러 기록 비우기가 없어 `errors --clear`
+#     가 아무것도 안 한다.) 기록은 각 1,000개까지만 남고 넘치면 오래된 것부터 지워져서, 그때는
+#     개수로 자르면 새 기록을 잃는다. 그래서 접속 전 기록이 900개를 넘으면 먼저 브라우저를 닫아 비운다.
+#
+# 동시에 하나만 돈다. 에이전트가 batch 도구로 browser-check 를 여러 번 동시에 부르면 같은 브라우저를
+# 서로 조작해 결과가 섞이므로 잠금(flock)으로 차례를 지킨다. 호출마다 세션을 따로 쓰면 그때마다
+# Chrome 이 새로 떠 학생 컨테이너에 여러 개가 쌓이므로 그렇게 하지 않는다.
 #   - 요청: 비우기가 믿을 만하지 않아 접속 전에 있던 요청 ID 를 뺀다. 브라우저 캐시 때문에 두 번째
 #     점검부터는 favicon 같은 캐시된 요청의 404 가 다시 나오지 않을 수 있다.
 #
@@ -49,7 +54,28 @@ actions=$#
 
 dir="${TMPDIR:-/tmp}/browser-check"
 mkdir -p "$dir"
-shot="$dir/$(date +%Y%m%d-%H%M%S).png"
+shot="$dir/$(date +%Y%m%d-%H%M%S)-$$.png"
+
+# 차례 지키기. flock 은 이미지(Debian util-linux)에 있다. 없는 곳(macOS 로컬 개발)에서는 잠금 없이 돈다.
+# 앞 점검이 멈춰 있어도 영원히 기다리지 않도록 2분까지만 기다린다.
+if command -v flock > /dev/null 2>&1; then
+  exec 9> "$dir/.lock"
+  if ! flock -w 120 9; then
+    echo "browser-check: 다른 browser-check 가 2분 넘게 끝나지 않습니다. 잠시 뒤 다시 실행하세요." >&2
+    exit 1
+  fi
+fi
+# agent-browser 는 처음 부를 때 데몬을 띄우는데, 그 데몬이 잠금 fd(9) 를 물려받으면 이 점검이 끝나도
+# 잠금이 안 풀려 다음 점검이 2분을 꼬박 기다린다. 그래서 agent-browser 에는 fd 9 를 닫아서 넘긴다.
+ab() { agent-browser "$@" 9>&-; }
+
+# 기록이 상한(1,000)에 가까우면 이번 점검의 새 기록이 오래된 기록 대신 밀려 들어와 개수로 자를 수 없다.
+# 동작을 두 번 실행하지 않도록, 본 점검 전에 개수만 보고 필요하면 브라우저를 닫아 기록을 비운다.
+full=$(ab batch --json "errors" "console" 2> /dev/null |
+  jq -r '[(.[0].result.errors // [] | length), (.[1].result.messages // [] | length)] | max >= 900' 2> /dev/null || echo false)
+if [ "$full" = true ]; then
+  ab close > /dev/null 2>&1 || true
+fi
 
 # 앞의 세 단계가 접속 전 기록, 뒤의 같은 이름 단계가 접속(과 동작) 후 기록이다.
 # 브라우저를 닫는 `close` 는 넣지 않는다. batch 안에서 close 하면 데몬이 내려가 뒤 단계가 다 실패한다.
@@ -63,7 +89,7 @@ set -- "$@" "errors" "console" "network requests" "screenshot $shot"
 if [ "$snapshot" = 1 ]; then
   set -- "$@" "snapshot -i -c"
 fi
-run() { agent-browser batch --json "$@" 2>&1 || true; }
+run() { ab batch --json "$@" 2>&1 || true; }
 is_result() { printf '%s' "$1" | jq -e 'type == "array"' > /dev/null 2>&1; }
 
 out=$(run "$@")
