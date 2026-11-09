@@ -17,7 +17,8 @@
 # 남아 있으므로 접속 전 기록을 먼저 받아 두고 그 뒤에 생긴 것만 보여 준다.
 #   - 에러/콘솔: 접속 전 개수 이후만 자른다. (0.39.4 에는 에러 기록 비우기가 없어 `errors --clear`
 #     가 아무것도 안 한다.) 기록은 각 1,000개까지만 남고 넘치면 오래된 것부터 지워져서, 그때는
-#     개수로 자르면 새 기록을 잃는다. 그래서 접속 전 기록이 900개를 넘으면 먼저 브라우저를 닫아 비운다.
+#     개수로 자르면 새 기록을 잃는다. 그래서 접속 전 기록이 500개 이상이면 먼저 브라우저를 닫아 비운다
+#     (한 번 점검에 500개까지 여유). 그래도 상한에 닿으면 앞부분이 빠졌을 수 있다고 표시한다.
 #
 # 동시에 하나만 돈다. 에이전트가 batch 도구로 browser-check 를 여러 번 동시에 부르면 같은 브라우저를
 # 서로 조작해 결과가 섞이므로 잠금(flock)으로 차례를 지킨다. 호출마다 세션을 따로 쓰면 그때마다
@@ -72,7 +73,7 @@ ab() { agent-browser "$@" 9>&-; }
 # 기록이 상한(1,000)에 가까우면 이번 점검의 새 기록이 오래된 기록 대신 밀려 들어와 개수로 자를 수 없다.
 # 동작을 두 번 실행하지 않도록, 본 점검 전에 개수만 보고 필요하면 브라우저를 닫아 기록을 비운다.
 full=$(ab batch --json "errors" "console" 2> /dev/null |
-  jq -r '[(.[0].result.errors // [] | length), (.[1].result.messages // [] | length)] | max >= 900' 2> /dev/null || echo false)
+  jq -r '[(.[0].result.errors // [] | length), (.[1].result.messages // [] | length)] | max >= 500' 2> /dev/null || echo false)
 if [ "$full" = true ]; then
   ab close > /dev/null 2>&1 || true
 fi
@@ -126,9 +127,11 @@ printf '%s' "$out" | jq -r --argjson actions "$actions" '
         else "- \(.command | join(" ")) → 실패: \(.error)" end),
       "",
       "## 에러 \($errors | length)건",
+      (if (result("errors").errors // [] | length) >= 1000 then "(기록 상한 1,000개에 닿아 앞부분 에러가 빠졌을 수 있음)" else empty end),
       ($errors[] | "- \(.text)"),
       "",
       "## 콘솔 \($console | length)건",
+      (if (result("console").messages // [] | length) >= 1000 then "(기록 상한 1,000개에 닿아 앞부분 로그가 빠졌을 수 있음)" else empty end),
       ($console[] | "[\(.type)] \(.text)"),
       "",
       "## 실패한 요청 \($bad | length)건",
