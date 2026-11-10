@@ -6,7 +6,7 @@ import { MessageV2 } from "./message-v2"
 import { SessionID, MessageID } from "./schema"
 import { Snapshot } from "@/snapshot"
 
-import { Storage } from "@/storage/storage"
+import { Config } from "@/config/config"
 import { Bus } from "@/bus"
 import { NotFoundError } from "@/storage/db"
 
@@ -73,36 +73,22 @@ export namespace SessionSummary {
       messageID: MessageID.zod,
     }),
     async (input) => {
-      await Session.messages({ sessionID: input.sessionID })
-        .then((all) =>
-          Promise.all([
-            summarizeSession({ sessionID: input.sessionID, messages: all }),
-            summarizeMessage({ messageID: input.messageID, messages: all }),
-          ]),
-        )
-        .catch((err) => {
-          if (NotFoundError.isInstance(err)) return
-          throw err
+      await (async () => {
+        await Session.setSummary({
+          sessionID: input.sessionID,
+          summary: { additions: 0, deletions: 0, files: 0 },
         })
+        Bus.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: [] })
+        if ((await Config.get()).snapshot === false) return
+        const all = await Session.messages({ sessionID: input.sessionID })
+        if (!all.length) return
+        await summarizeMessage({ messageID: input.messageID, messages: all })
+      })().catch((err) => {
+        if (NotFoundError.isInstance(err)) return
+        throw err
+      })
     },
   )
-
-  async function summarizeSession(input: { sessionID: SessionID; messages: MessageV2.WithParts[] }) {
-    const diffs = await computeDiff({ messages: input.messages })
-    await Session.setSummary({
-      sessionID: input.sessionID,
-      summary: {
-        additions: diffs.reduce((sum, x) => sum + x.additions, 0),
-        deletions: diffs.reduce((sum, x) => sum + x.deletions, 0),
-        files: diffs.length,
-      },
-    })
-    await Storage.write(["session_diff", input.sessionID], diffs)
-    Bus.publish(Session.Event.Diff, {
-      sessionID: input.sessionID,
-      diff: diffs,
-    })
-  }
 
   async function summarizeMessage(input: { messageID: string; messages: MessageV2.WithParts[] }) {
     const messages = input.messages.filter(
@@ -124,19 +110,18 @@ export namespace SessionSummary {
       sessionID: SessionID.zod,
       messageID: MessageID.zod.optional(),
     }),
-    async (input) => {
-      const diffs = await Storage.read<Snapshot.FileDiff[]>(["session_diff", input.sessionID]).catch(() => [])
-      const next = diffs.map((item) => {
+    async (input): Promise<Snapshot.FileDiff[]> => {
+      if (!input.messageID) return []
+      const message = (await Session.messages({ sessionID: input.sessionID })).find(
+        (item) => item.info.id === input.messageID,
+      )
+      if (!message || message.info.role !== "user") return []
+      const diffs = message.info.summary?.diffs ?? []
+      return diffs.map((item) => {
         const file = unquoteGitPath(item.file)
         if (file === item.file) return item
-        return {
-          ...item,
-          file,
-        }
+        return { ...item, file }
       })
-      const changed = next.some((item, i) => item.file !== diffs[i]?.file)
-      if (changed) Storage.write(["session_diff", input.sessionID], next).catch(() => {})
-      return next
     },
   )
 
