@@ -16,6 +16,7 @@ import { Plugin } from "../../src/plugin"
 import { tmpdir } from "../fixture/fixture"
 import { Session } from "../../src/session"
 import { MessageV2 } from "../../src/session/message-v2"
+import { MediaTokens } from "../../src/session/media-tokens"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { ModelID, ProviderID } from "../../src/provider/schema"
@@ -557,6 +558,97 @@ describe("session.compaction.prune", () => {
         } else {
           throw new Error("completed tool part not found")
         }
+      },
+    })
+  })
+
+  function fullScan(msgs: MessageV2.WithParts[]) {
+    let total = 0
+    let pruned = 0
+    const toPrune: PartID[] = []
+    let turns = 0
+    loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
+      const msg = msgs[msgIndex]
+      if (msg.info.role === "user") turns++
+      if (turns < 2) continue
+      if (msg.info.role === "assistant" && msg.info.summary) break loop
+      for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
+        const part = msg.parts[partIndex]
+        if (part.type !== "tool" || part.state.status !== "completed") continue
+        if (part.tool === "skill") continue
+        if (part.state.time.compacted) break loop
+        const estimate = Token.estimate(part.state.output) + MediaTokens.estimateAll(part.state.attachments)
+        total += estimate
+        if (total > SessionCompaction.PRUNE_PROTECT) {
+          pruned += estimate
+          toPrune.push(part.id)
+        }
+      }
+    }
+    return { total, pruned, toPrune }
+  }
+
+  async function compacted(sessionID: SessionID) {
+    return (await Session.messages({ sessionID }))
+      .flatMap((msg) => msg.parts)
+      .flatMap((part) =>
+        part.type === "tool" && part.state.status === "completed" && part.state.time.compacted ? [part.id] : [],
+      )
+  }
+
+  async function turns(sessionID: SessionID, root: string, count: number, size: (i: number) => number) {
+    for (let i = 0; i < count; i++) {
+      const a = await user(sessionID, `turn ${i}`)
+      const b = await assistant(sessionID, a.id, root)
+      await tool(sessionID, b.id, i % 7 === 0 ? "skill" : "bash", "x".repeat(size(i)))
+      await tool(sessionID, b.id, "read", "y".repeat(size(i + 1)))
+    }
+  }
+
+  test("최신부터 읽다 멈춰도 세션 전체로 판단할 때와 같은 파트를 고른다", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await turns(session.id, tmp.path, 40, (i) => 20_000 + (i % 5) * 7_000)
+        const first = fullScan(await Session.messages({ sessionID: session.id }))
+        expect(first.toPrune.length).toBeGreaterThan(0)
+        expect(await SessionCompaction.scanPrune(session.id)).toMatchObject({
+          total: first.total,
+          pruned: first.pruned,
+        })
+        expect((await SessionCompaction.scanPrune(session.id)).toPrune.map((part) => part.id)).toEqual(first.toPrune)
+
+        await SessionCompaction.prune({ sessionID: session.id })
+        expect((await compacted(session.id)).toSorted()).toEqual(first.toPrune.toSorted())
+
+        await turns(session.id, tmp.path, 30, (i) => 30_000 + (i % 3) * 11_000)
+        const second = fullScan(await Session.messages({ sessionID: session.id }))
+        const scanned = await SessionCompaction.scanPrune(session.id)
+        expect(scanned.toPrune.map((part) => part.id)).toEqual(second.toPrune)
+        expect(scanned.total).toBe(second.total)
+        expect(scanned.pruned).toBe(second.pruned)
+      },
+    })
+  })
+
+  test("요약 메시지에서 멈추는 지점도 세션 전체로 판단할 때와 같다", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        await turns(session.id, tmp.path, 20, () => 60_000)
+        const a = await user(session.id, "compact")
+        await Session.updateMessage({ ...(await assistant(session.id, a.id, tmp.path)), summary: true })
+        await turns(session.id, tmp.path, 25, (i) => 15_000 + i * 1_000)
+
+        const expected = fullScan(await Session.messages({ sessionID: session.id }))
+        const scanned = await SessionCompaction.scanPrune(session.id)
+        expect(scanned.toPrune.map((part) => part.id)).toEqual(expected.toPrune)
+        expect(scanned.total).toBe(expected.total)
+        expect(scanned.pruned).toBe(expected.pruned)
       },
     })
   })
