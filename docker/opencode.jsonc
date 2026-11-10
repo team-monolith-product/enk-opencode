@@ -109,4 +109,5 @@
   },
   "ensureSession": true,
   "ensureOneSession": true,
+  "snapshot": false,
 }
