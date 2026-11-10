@@ -130,7 +130,7 @@ export namespace HistorySync {
 
   async function restore(input: { sessionID: SessionID; sha: string }) {
     const { session } = await verify(input)
-    const messages = await Session.messages({ sessionID: input.sessionID })
+    const messages = await TurnSummary.recent(input.sessionID)
     const locale = TurnSummary.latest(messages)?.user.locale ?? Locale.DEFAULT
     const label = LABEL[locale]
     const result = await History.restore(session.directory, {
