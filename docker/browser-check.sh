@@ -14,17 +14,22 @@
 #
 # 브라우저는 닫지 않는다. 격리가 없으면 다음 점검이 떠 있는 브라우저를 그대로 써서 빠르고(약 0.4초,
 # 새로 띄우면 약 1.1초), 쓰지 않으면 AGENT_BROWSER_IDLE_TIMEOUT_MS 뒤에 내려간다. 대신 앞 점검의 기록이
-# 남아 있으므로 접속 전 기록을 먼저 받아 두고 그 뒤에 생긴 것만 보여 준다.
-#   - 에러/콘솔: 접속 전 개수 이후만 자른다. (0.39.4 에는 에러 기록 비우기가 없어 `errors --clear`
-#     가 아무것도 안 한다.) 기록은 각 1,000개까지만 남고 넘치면 오래된 것부터 지워져서, 그때는
-#     개수로 자르면 새 기록을 잃는다. 그래서 접속 전 기록이 500개 이상이면 먼저 브라우저를 닫아 비운다
-#     (한 번 점검에 500개까지 여유). 그래도 상한에 닿으면 앞부분이 빠졌을 수 있다고 표시한다.
+# 남아 있으므로 이번 점검에서 생긴 것만 골라 보여 준다.
+#   - 에러/콘솔: 접속 직전에 지금 떠 있는 페이지에서 이번 점검만의 표식(숫자)을 콘솔과 에러에 하나씩
+#     찍고, 그 표식 뒤의 기록만 보여 준다. (0.39.4 에는 에러 기록 비우기가 없어 `errors --clear` 가
+#     아무것도 안 하고, 기록에 시각도 없다.) 기록은 각 1,000개까지만 남고 넘치면 오래된 것부터
+#     지워지는데, 표식은 개수와 상관없이 경계를 정확히 잡는다. 표식이 없으면(이번 점검에서만 1,000개를
+#     넘겨 밀려났거나, 앞 페이지가 console.log 를 바꿔 치웠거나) 상한에 닿아 있으면 남은 전부를,
+#     아니면 접속 전 개수 이후를 보여 주고, 상한에 닿았으면 앞부분이 빠졌을 수 있다고 표시한다.
+#     (콘솔이 이미 상한인데 앞 페이지가 console.log 를 치웠다면 예전 로그가 섞일 수 있다. 드물어서 둔다.)
+#     빈 페이지(about:blank)로 먼저 옮기지 않는 이유: 다른 주소로 옮기는 데 약 0.5초가 들지만, 같은
+#     주소를 다시 여는 건 0.1초가 안 걸린다.
+#   - 요청: 비우기가 믿을 만하지 않아 접속 전에 있던 요청 ID 를 뺀다. 브라우저 캐시 때문에 두 번째
+#     점검부터는 favicon 같은 캐시된 요청의 404 가 다시 나오지 않을 수 있다.
 #
 # 동시에 하나만 돈다. 에이전트가 batch 도구로 browser-check 를 여러 번 동시에 부르면 같은 브라우저를
 # 서로 조작해 결과가 섞이므로 잠금(flock)으로 차례를 지킨다. 호출마다 세션을 따로 쓰면 그때마다
 # Chrome 이 새로 떠 학생 컨테이너에 여러 개가 쌓이므로 그렇게 하지 않는다.
-#   - 요청: 비우기가 믿을 만하지 않아 접속 전에 있던 요청 ID 를 뺀다. 브라우저 캐시 때문에 두 번째
-#     점검부터는 favicon 같은 캐시된 요청의 404 가 다시 나오지 않을 수 있다.
 #
 # 결과는 --json 으로 받아 jq 로 추린다. agent-browser 0.39.4 의 errors 텍스트 출력은 잡힌 에러를
 # 빈 줄로 찍는 버그가 있고, JSON 에는 실행 상태(lifecycle)와 요청 헤더 전체가 섞여 있어 그대로
@@ -55,7 +60,6 @@ actions=$#
 
 dir="${TMPDIR:-/tmp}/browser-check"
 mkdir -p "$dir"
-shot="$dir/$(date +%Y%m%d-%H%M%S)-$$.png"
 
 # 차례 지키기. flock 은 이미지(Debian util-linux)에 있다. 없는 곳(macOS 로컬 개발)에서는 잠금 없이 돈다.
 # 앞 점검이 멈춰 있어도 영원히 기다리지 않도록 2분까지만 기다린다.
@@ -70,19 +74,26 @@ fi
 # 잠금이 안 풀려 다음 점검이 2분을 꼬박 기다린다. 그래서 agent-browser 에는 fd 9 를 닫아서 넘긴다.
 ab() { agent-browser "$@" 9>&-; }
 
-# 기록이 상한(1,000)에 가까우면 이번 점검의 새 기록이 오래된 기록 대신 밀려 들어와 개수로 자를 수 없다.
-# 동작을 두 번 실행하지 않도록, 본 점검 전에 개수만 보고 필요하면 브라우저를 닫아 기록을 비운다.
-full=$(ab batch --json "errors" "console" 2> /dev/null |
-  jq -r '[(.[0].result.errors // [] | length), (.[1].result.messages // [] | length)] | max >= 500' 2> /dev/null || echo false)
-if [ "$full" = true ]; then
-  ab close > /dev/null 2>&1 || true
-fi
+# 스크린샷은 최근 20장만 남긴다. 점검마다 한 장씩 쌓여 오래 쓰는 컨테이너의 /tmp 를 채우지 않게.
+# 파일 이름은 날짜-PID 라 공백이 없다.
+# shellcheck disable=SC2012
+ls -1t "$dir"/*.png 2> /dev/null | tail -n +20 | xargs rm -f
+shot="$dir/$(date +%Y%m%d-%H%M%S)-$$.png"
 
-# 앞의 세 단계가 접속 전 기록, 뒤의 같은 이름 단계가 접속(과 동작) 후 기록이다.
+# 이번 점검의 표식. batch 문자열은 따옴표가 벗겨지므로 따옴표가 필요 없는 숫자만 쓴다.
+mark="$(date +%s)$$"
+
+# 앞의 네 단계(접속 전 기록 셋, 표식)가 준비, 뒤의 같은 이름 단계가 접속(과 동작) 후 기록이다.
+# 접속 전 요청 목록 조회는 요청 기록도 켠다(기본은 꺼져 있다). 접속 전 에러/콘솔 개수는 표식을 못 찍은
+# 경우(앞 페이지가 console.log 를 바꿔 치운 경우 등)에 예전처럼 개수로 자르는 데 쓴다.
 # 브라우저를 닫는 `close` 는 넣지 않는다. batch 안에서 close 하면 데몬이 내려가 뒤 단계가 다 실패한다.
 # 단계 하나라도 실패하면(서버가 안 떠 있는 경우, 요소를 못 찾은 경우 등) batch 는 1 로 끝나지만,
 # 실패 내용은 JSON 에 들어 있으므로 멈추지 않고 그대로 보여 준다.
-set -- "errors" "console" "network requests" "open $url" "wait $wait_ms" "$@"
+# 에러 표식은 이벤트 리스너 안에서 던진다. reportError 나 console 은 앱이 바꿔 치울 수 있지만 리스너에서
+# 난 예외는 브라우저가 직접 잡지 않은 예외로 기록한다. (공백이 없도록 new(X) 형태로 쓴다.)
+set -- "errors" "console" "network requests" \
+  "eval console.log($mark);(t=>{t.addEventListener($mark,()=>{throw(new(Error)($mark))});t.dispatchEvent(new(Event)($mark))})(new(EventTarget))" \
+  "open $url" "wait $wait_ms" "$@"
 if [ "$actions" -gt 0 ]; then
   set -- "$@" "wait $wait_ms"
 fi
@@ -95,25 +106,40 @@ is_result() { printf '%s' "$1" | jq -e 'type == "array"' > /dev/null 2>&1; }
 
 out=$(run "$@")
 # 닫히는 중이거나 막 죽은 데몬에 붙으면 결과 대신 오류 객체(outcome_unknown)가 온다. 새 데몬이
-# 뜨도록 잠깐 두고 한 번만 다시 부른다.
-if ! is_result "$out"; then
+# 뜨도록 잠깐 두고 한 번만 다시 부른다. 단 동작(클릭·입력)이 있으면 첫 실행에서 이미 눌렸을 수 있어
+# (폼 두 번 제출 등) 다시 부르지 않고 알린다.
+if ! is_result "$out" && [ "$actions" = 0 ]; then
   sleep 1
   out=$(run "$@")
 fi
 if ! is_result "$out"; then
-  echo "browser-check: agent-browser 실행 실패. 'agent-browser doctor' 로 확인하세요." >&2
+  if [ "$actions" -gt 0 ]; then
+    echo "browser-check: agent-browser 결과를 받지 못했습니다. 동작이 실행됐는지 알 수 없어 다시 실행하지 않았습니다. 화면 상태를 확인하고 다시 부르세요." >&2
+  else
+    echo "browser-check: agent-browser 실행 실패. 'agent-browser doctor' 로 확인하세요." >&2
+  fi
   printf '%s\n' "$out" >&2
   exit 1
 fi
 
-# 동작 단계는 batch 의 6번째(접속 전 기록 3 + open + wait 다음)부터 $actions 개다.
-printf '%s' "$out" | jq -r --argjson actions "$actions" '
+# 동작 단계는 batch 의 7번째(준비 4 + open + wait 다음)부터 $actions 개다.
+printf '%s' "$out" | jq -r --argjson actions "$actions" --arg mark "$mark" '
   def before(name): (map(select(.command[0] == name)) | first | .result) // {};
   def result(name): (map(select(.command[0] == name)) | last | .result) // {};
-  .[5:5 + $actions] as $acts
-  | (.[0:5] + .[5 + $actions:] | map(select(.success | not)) | map("실패: \(.command | join(" ")) → \(.error)")) as $failed
-  | (result("errors").errors // [])[((before("errors").errors // []) | length):] as $errors
-  | (result("console").messages // [])[((before("console").messages // []) | length):] as $console
+  # 표식 뒤의 기록만. 표식이 없으면 null.
+  def after_mark(f): (to_entries | map(select(.value | f)) | last | .key) as $i
+    | if $i == null then null else .[$i + 1:] end;
+  # 표식이 없을 때: 상한(1,000)에 닿아 있으면 표식이 밀려난 것이고, 그보다 오래된 기록도 다 밀려났으니
+  # 남은 전부가 이번 점검 것이다. 상한 아래면 표식을 못 찍은 것이니 접속 전 개수 이후로 자른다.
+  def pick(xs; after; n): if after != null then after elif (xs | length) >= 1000 then xs else xs[n:] end;
+  .[6:6 + $actions] as $acts
+  | (.[0:6] + .[6 + $actions:] | map(select(.success | not)) | map("실패: \(.command | join(" ")) → \(.error)")) as $failed
+  | (result("errors").errors // []) as $all_errors
+  | ($all_errors | after_mark(.text | . == "Error: \($mark)" or startswith("Error: \($mark)\n"))) as $errors_after
+  | (result("console").messages // []) as $all_console
+  | ($all_console | after_mark(.text == $mark)) as $console_after
+  | pick($all_errors; $errors_after; (before("errors").errors // []) | length) as $errors
+  | pick($all_console; $console_after; (before("console").messages // []) | length) as $console
   | ((before("network").requests // []) | map(.requestId)) as $seen
   | ((result("network").requests // [])
       | map(select((.requestId as $id | $seen | any(.[]; . == $id) | not)
@@ -127,11 +153,11 @@ printf '%s' "$out" | jq -r --argjson actions "$actions" '
         else "- \(.command | join(" ")) → 실패: \(.error)" end),
       "",
       "## 에러 \($errors | length)건",
-      (if (result("errors").errors // [] | length) >= 1000 then "(기록 상한 1,000개에 닿아 앞부분 에러가 빠졌을 수 있음)" else empty end),
+      (if $errors_after == null and ($all_errors | length) >= 1000 then "(기록 상한 1,000개에 닿아 앞부분 에러가 빠졌을 수 있음)" else empty end),
       ($errors[] | "- \(.text)"),
       "",
       "## 콘솔 \($console | length)건",
-      (if (result("console").messages // [] | length) >= 1000 then "(기록 상한 1,000개에 닿아 앞부분 로그가 빠졌을 수 있음)" else empty end),
+      (if $console_after == null and ($all_console | length) >= 1000 then "(기록 상한 1,000개에 닿아 앞부분 로그가 빠졌을 수 있음)" else empty end),
       ($console[] | "[\(.type)] \(.text)"),
       "",
       "## 실패한 요청 \($bad | length)건",
