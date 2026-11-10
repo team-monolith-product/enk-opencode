@@ -40,6 +40,34 @@ export namespace SessionCompaction {
   const MIN_PRESERVE_RECENT_TOKENS = 2_000
   const MAX_PRESERVE_RECENT_TOKENS = 8_000
 
+  export async function scanPrune(sessionID: SessionID) {
+    let total = 0
+    let pruned = 0
+    const toPrune: MessageV2.ToolPart[] = []
+    let turns = 0
+
+    loop: for await (const msg of MessageV2.stream(sessionID)) {
+      if (msg.info.role === "user") turns++
+      if (turns < 2) continue
+      if (msg.info.role === "assistant" && msg.info.summary) break loop
+      for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
+        const part = msg.parts[partIndex]
+        if (part.type === "tool")
+          if (part.state.status === "completed") {
+            if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+            if (part.state.time.compacted) break loop
+            const estimate = Token.estimate(part.state.output) + MediaTokens.estimateAll(part.state.attachments)
+            total += estimate
+            if (total > PRUNE_PROTECT) {
+              pruned += estimate
+              toPrune.push(part)
+            }
+          }
+      }
+    }
+    return { total, pruned, toPrune }
+  }
+
   // A user message plus everything that followed it up to the next user message.
   type Turn = { start: number; end: number; id: MessageID }
   type Tail = { start: number; id: MessageID }
@@ -258,37 +286,11 @@ export namespace SessionCompaction {
         if (cfg.compaction?.prune === false) return
         log.info("pruning")
 
-        const msgs = yield* session
-          .messages({ sessionID: input.sessionID })
-          .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
-        if (!msgs) return
-
-        let total = 0
-        let pruned = 0
-        const toPrune: MessageV2.ToolPart[] = []
-        let turns = 0
-
-        loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
-          const msg = msgs[msgIndex]
-          if (msg.info.role === "user") turns++
-          if (turns < 2) continue
-          if (msg.info.role === "assistant" && msg.info.summary) break loop
-          for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
-            const part = msg.parts[partIndex]
-            if (part.type === "tool")
-              if (part.state.status === "completed") {
-                if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
-                if (part.state.time.compacted) break loop
-                const estimate =
-                  Token.estimate(part.state.output) + MediaTokens.estimateAll(part.state.attachments)
-                total += estimate
-                if (total > PRUNE_PROTECT) {
-                  pruned += estimate
-                  toPrune.push(part)
-                }
-              }
-          }
-        }
+        const found = yield* Effect.promise(() => scanPrune(input.sessionID)).pipe(
+          Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
+        )
+        if (!found) return
+        const { total, pruned, toPrune } = found
 
         log.info("found", { pruned, total })
         if (pruned > PRUNE_MINIMUM) {
