@@ -2,7 +2,7 @@ import { Agent } from "@/agent/agent"
 import { Provider } from "@/provider/provider"
 import { Session } from "@/session"
 import { LLM } from "@/session/llm"
-import type { MessageV2 } from "@/session/message-v2"
+import { MessageV2 } from "@/session/message-v2"
 import type { SessionID } from "@/session/schema"
 import { Log } from "@/util/log"
 import { Locale } from "./locale"
@@ -38,18 +38,28 @@ export namespace TurnSummary {
 
   export type Turn = { user: MessageV2.User; request: string; reply: string }
 
+  const text = (message: MessageV2.WithParts) =>
+    message.parts
+      .flatMap((part) => (part.type === "text" && !part.synthetic ? [part.text.trim()] : []))
+      .filter(Boolean)
+      .join("\n")
+
   export async function current(sessionID: SessionID) {
     const session = await Session.get(sessionID)
     if (session.parentID) return
-    return latest(await Session.messages({ sessionID }))
+    return latest(await recent(sessionID))
+  }
+
+  export async function recent(sessionID: SessionID) {
+    const messages: MessageV2.WithParts[] = []
+    for await (const message of MessageV2.stream(sessionID)) {
+      messages.push(message)
+      if (message.info.role === "user" && text(message)) break
+    }
+    return messages.reverse()
   }
 
   export function latest(messages: MessageV2.WithParts[]): Turn | undefined {
-    const text = (message: MessageV2.WithParts) =>
-      message.parts
-        .flatMap((part) => (part.type === "text" && !part.synthetic ? [part.text.trim()] : []))
-        .filter(Boolean)
-        .join("\n")
     const index = messages.findLastIndex((message) => message.info.role === "user" && text(message))
     const found = messages[index]
     if (!found || found.info.role !== "user") return
