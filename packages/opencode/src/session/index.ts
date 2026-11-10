@@ -14,7 +14,6 @@ import { SyncEvent } from "../sync"
 import type { SQL } from "../storage/db"
 import { SessionTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
-import { Storage } from "@/storage/storage"
 import { Log } from "../util/log"
 import { updateSchema } from "../util/update-schema"
 import { MessageV2 } from "./message-v2"
@@ -586,9 +585,8 @@ export namespace Session {
       })
 
       const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID) {
-        return yield* Effect.tryPromise(() => Storage.read<Snapshot.FileDiff[]>(["session_diff", sessionID])).pipe(
-          Effect.orElseSucceed(() => [] as Snapshot.FileDiff[]),
-        )
+        void sessionID
+        return [] as Snapshot.FileDiff[]
       })
 
       const messages = Effect.fn("Session.messages")(function* (input: { sessionID: SessionID; limit?: number }) {
