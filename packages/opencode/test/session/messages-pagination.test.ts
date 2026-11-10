@@ -79,6 +79,25 @@ describe("session message pagination", () => {
     })
   })
 
+  test("reads newest first in the same order whatever the page size", async () => {
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        const session = await Session.create({})
+        const ids = await fill(session.id, 7, (i) => 1000 + Math.floor(i / 2))
+        const expected = (await Array.fromAsync(MessageV2.stream(session.id))).map((item) => item.info.id)
+        expect(expected).toEqual(ids.slice().reverse())
+
+        for (const size of [1, 2, 3, 7, 50]) {
+          const items = await Array.fromAsync(MessageV2.newest(session.id, size))
+          expect(items.map((item) => item.info.id)).toEqual(expected)
+        }
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+
   test("accepts cursors generated from fractional timestamps", async () => {
     await Instance.provide({
       directory: root,
