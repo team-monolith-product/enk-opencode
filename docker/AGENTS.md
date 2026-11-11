@@ -234,7 +234,7 @@ echo "https://$JUPYTERHUB_USER.$OPENCODE_SERVE_DOMAIN/"
 
 - 이 스크립트는 dev 서버 루트(`/__preview-bridge.js`)에서 자동 제공됩니다. 학생에게 굳이 설명할 필요는 없습니다.
 - 정적 서버는 프로젝트 루트, 프레임워크(예: Vite/CRA)는 `public/` 폴더 기준으로 `/__preview-bridge.js` 경로가 서빙되도록 엔트리 HTML에 넣으세요.
-- `__preview-bridge.js` 파일은 응답이 끝날 때 자동으로 복사됩니다. 응답 도중 `/__preview-bridge.js` 가 404 여도 직접 만들거나 태그를 지우지 마세요.
+- `__preview-bridge.js` 파일은 파일을 고칠 때와 응답이 끝날 때 자동으로 복사됩니다(프로젝트 루트·`public`·`static`, 그리고 `index.html` 이 있는 `src`). 응답 도중 `/__preview-bridge.js` 가 404 여도 직접 만들거나 태그를 지우지 마세요. 다음 응답에서도 404 면 개발 서버가 위 폴더 밖을 서빙하고 있는 것이니 서빙 폴더를 확인하세요.
 - 이 태그를 임의로 제거하거나 경로를 바꾸지 마세요. 다른 스크립트보다 뒤에 두면 그 스크립트의 에러가 미리보기에 표시되지 않습니다.
 
 ## 미리보기 핫 리로드

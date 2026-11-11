@@ -81,7 +81,8 @@ ls -1t "$dir"/*.png 2> /dev/null | tail -n +20 | xargs rm -f
 shot="$dir/$(date +%Y%m%d-%H%M%S)-$$.png"
 
 # 이번 점검의 표식. batch 문자열은 따옴표가 벗겨지므로 따옴표가 필요 없는 숫자만 쓴다.
-mark="$(date +%s)$$"
+# JS 숫자는 16자리를 넘으면 반올림돼 찍힌 표식이 달라지므로, 시각은 끝 6자리만 쓴다(PID 최대 7자리, 합 13자리).
+mark="$(($(date +%s) % 1000000))$$"
 
 # 앞의 네 단계(접속 전 기록 셋, 표식)가 준비, 뒤의 같은 이름 단계가 접속(과 동작) 후 기록이다.
 # 접속 전 요청 목록 조회는 요청 기록도 켠다(기본은 꺼져 있다). 접속 전 에러/콘솔 개수는 표식을 못 찍은
@@ -133,7 +134,10 @@ printf '%s' "$out" | jq -r --argjson actions "$actions" --arg mark "$mark" '
   # 남은 전부가 이번 점검 것이다. 상한 아래면 표식을 못 찍은 것이니 접속 전 개수 이후로 자른다.
   def pick(xs; after; n): if after != null then after elif (xs | length) >= 1000 then xs else xs[n:] end;
   .[6:6 + $actions] as $acts
-  | (.[0:6] + .[6 + $actions:] | map(select(.success | not)) | map("실패: \(.command | join(" ")) → \(.error)")) as $failed
+  | (.[0:6] + .[6 + $actions:] | map(select(.success | not))
+      | map(if .command[0] == "eval"
+        then "참고: 직전 페이지가 응답하지 않아(무한 루프 등) 이번 점검 표식을 못 찍었습니다. 에러·콘솔은 접속 전 개수로 잘랐습니다."
+        else "실패: \(.command | join(" ")) → \(.error)" end)) as $failed
   | (result("errors").errors // []) as $all_errors
   | ($all_errors | after_mark(.text | . == "Error: \($mark)" or startswith("Error: \($mark)\n"))) as $errors_after
   | (result("console").messages // []) as $all_console
@@ -143,12 +147,11 @@ printf '%s' "$out" | jq -r --argjson actions "$actions" --arg mark "$mark" '
   | ((before("network").requests // []) | map(.requestId)) as $seen
   | ((result("network").requests // [])
       | map(select((.requestId as $id | $seen | any(.[]; . == $id) | not)
-          and ((.status // 0) >= 400 or .failed == true)))) as $failed_requests
-  # 미리보기 브릿지(/__preview-bridge.js)는 preview-bridge 플러그인이 응답이 끝날 때(session.idle)
-  # 복사한다. 응답 도중에는 태그만 있고 파일이 아직 없어 404 가 나는 게 정상이라, 고칠 대상처럼 보이지
-  # 않게 따로 뺀다.
-  | ($failed_requests | map(select(.url | test("/__preview-bridge\\.js([?#]|$)")))) as $bridge
-  | ($failed_requests - $bridge) as $bad
+          and ((.status // 0) >= 400 or .failed == true)))) as $bad
+  # 미리보기 브릿지(/__preview-bridge.js)는 preview-bridge 플러그인이 파일 수정 때와 응답이 끝날 때
+  # 복사한다. HTML 을 bash 로 만든 직후에는 아직 없을 수 있어 안내를 붙이되, 진짜 누락(서빙 폴더에 없음)도
+  # 보이도록 목록에서 빼지는 않는다.
+  | ($bad | map(select(.url | test("/__preview-bridge\\.js([?#]|$)"))) | length > 0) as $bridge_missing
   | [
       "페이지: \(result("open").title // "-") (\(result("open").url // "-"))",
       ($failed[]),
@@ -167,7 +170,7 @@ printf '%s' "$out" | jq -r --argjson actions "$actions" --arg mark "$mark" '
       "",
       "## 실패한 요청 \($bad | length)건",
       ($bad[] | "- \(.method) \(.url) → \(.status // "응답 없음")"),
-      (if ($bridge | length) > 0 then "(/__preview-bridge.js 404 는 위 목록에서 뺐습니다. 응답이 끝나면 자동으로 생기므로 고치지 마세요.)" else empty end),
+      (if $bridge_missing then "(/__preview-bridge.js 는 미리보기 브릿지입니다. 응답이 끝나면 자동으로 깔리니 이번 응답에서는 직접 만들거나 태그를 지우지 마세요. 다음 응답에서도 404 면 개발 서버가 프로젝트 루트·public·static·(index.html 있는) src 중 하나를 서빙하는지 확인하세요.)" else empty end),
       "",
       (if result("screenshot").path then "스크린샷: \(result("screenshot").path)" else empty end),
       (if result("snapshot") != {} then "", "## 화면 구조", (result("snapshot").snapshot // result("snapshot") | tostring) else empty end)
