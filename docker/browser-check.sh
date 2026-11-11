@@ -143,7 +143,12 @@ printf '%s' "$out" | jq -r --argjson actions "$actions" --arg mark "$mark" '
   | ((before("network").requests // []) | map(.requestId)) as $seen
   | ((result("network").requests // [])
       | map(select((.requestId as $id | $seen | any(.[]; . == $id) | not)
-          and ((.status // 0) >= 400 or .failed == true)))) as $bad
+          and ((.status // 0) >= 400 or .failed == true)))) as $failed_requests
+  # 미리보기 브릿지(/__preview-bridge.js)는 preview-bridge 플러그인이 응답이 끝날 때(session.idle)
+  # 복사한다. 응답 도중에는 태그만 있고 파일이 아직 없어 404 가 나는 게 정상이라, 고칠 대상처럼 보이지
+  # 않게 따로 뺀다.
+  | ($failed_requests | map(select(.url | test("/__preview-bridge\\.js([?#]|$)")))) as $bridge
+  | ($failed_requests - $bridge) as $bad
   | [
       "페이지: \(result("open").title // "-") (\(result("open").url // "-"))",
       ($failed[]),
@@ -162,6 +167,7 @@ printf '%s' "$out" | jq -r --argjson actions "$actions" --arg mark "$mark" '
       "",
       "## 실패한 요청 \($bad | length)건",
       ($bad[] | "- \(.method) \(.url) → \(.status // "응답 없음")"),
+      (if ($bridge | length) > 0 then "(/__preview-bridge.js 404 는 위 목록에서 뺐습니다. 응답이 끝나면 자동으로 생기므로 고치지 마세요.)" else empty end),
       "",
       (if result("screenshot").path then "스크린샷: \(result("screenshot").path)" else empty end),
       (if result("snapshot") != {} then "", "## 화면 구조", (result("snapshot").snapshot // result("snapshot") | tostring) else empty end)
