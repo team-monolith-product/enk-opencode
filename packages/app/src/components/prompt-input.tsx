@@ -1035,7 +1035,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
 
   const [composing, setComposing] = createSignal(false)
-  const isImeComposing = (event: KeyboardEvent) => event.isComposing || composing() || event.keyCode === 229
+  let lastCompositionEnd = 0
+  const imeSettling = () => performance.now() - lastCompositionEnd < 100
+  const isImeComposing = (event: KeyboardEvent) =>
+    event.isComposing || composing() || event.keyCode === 229 || imeSettling()
 
   const handleBlur = () => {
     closePopover()
@@ -1048,6 +1051,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const handleCompositionEnd = () => {
     setComposing(false)
+    lastCompositionEnd = performance.now()
+    handleInput()
     requestAnimationFrame(() => {
       if (composing()) return
       reconcile(prompt.current().filter((part) => part.type !== "image"))
@@ -1280,7 +1285,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     on(
       () => prompt.current(),
       (parts) => {
-        if (composing()) return
+        if (composing() || imeSettling()) return
         if (canvasMode(docMode())) return
         if (!editorRef) return
         reconcile(parts.filter((part) => part.type !== "image"))
@@ -1378,7 +1383,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return parts
   }
 
-  const handleInput = () => {
+  const handleInput = (event?: InputEvent) => {
+    if (composing() || event?.isComposing || event?.inputType === "insertCompositionText") return
     const rawParts = parseFromDOM()
     const images = imageAttachments()
     const cursorPosition = getCursorPosition(editorRef)
