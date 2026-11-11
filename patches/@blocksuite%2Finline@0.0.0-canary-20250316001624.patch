@@ -1,0 +1,62 @@
+diff --git a/dist/services/event.js b/dist/services/event.js
+index 10f4bf8d5feb0cbaf5c1cac602c17620d8e0493f..f353ff5147a82fcc6d8db558dec3327773624f37 100644
+--- a/dist/services/event.js
++++ b/dist/services/event.js
+@@ -1,3 +1,4 @@
++import { IS_ANDROID } from '@blocksuite/global/env';
+ import { isInEmbedElement, isInEmbedGap, isInEmptyLine, } from '../utils/index.js';
+ import { isMaybeInlineRangeEqual } from '../utils/inline-range.js';
+ import { transformInput } from '../utils/transform-input.js';
+@@ -28,10 +29,18 @@ export class EventService {
+         this._onBeforeInput = (event) => {
+             const range = this.editor.rangeService.getNativeRange();
+             if (this.editor.isReadonly ||
+-                this._isComposing ||
+                 !range ||
+                 !this._isRangeCompletelyInRoot(range))
+                 return;
++            if (this._isComposing) {
++                if (IS_ANDROID && event.inputType === 'insertCompositionText') {
++                    const compositionInlineRange = this.editor.toInlineRange(range);
++                    if (compositionInlineRange) {
++                        this._compositionInlineRange = compositionInlineRange;
++                    }
++                }
++                return;
++            }
+             let inlineRange = this.editor.toInlineRange(range);
+             if (!inlineRange)
+                 return;
+diff --git a/src/services/event.ts b/src/services/event.ts
+index 9a997e08a450019c69e6358ee29af8bb90f5adba..b0f67deb4432d6da14bae0bd9a06fc878aa8030c 100644
+--- a/src/services/event.ts
++++ b/src/services/event.ts
+@@ -1,3 +1,5 @@
++import { IS_ANDROID } from '@blocksuite/global/env';
++
+ import type { InlineEditor } from '../inline-editor.js';
+ import type { InlineRange } from '../types.js';
+ import type { BeforeinputHookCtx, CompositionEndHookCtx } from './hook.js';
+@@ -43,12 +45,21 @@ export class EventService<TextAttributes extends BaseTextAttributes> {
+     const range = this.editor.rangeService.getNativeRange();
+     if (
+       this.editor.isReadonly ||
+-      this._isComposing ||
+       !range ||
+       !this._isRangeCompletelyInRoot(range)
+     )
+       return;
+ 
++    if (this._isComposing) {
++      if (IS_ANDROID && event.inputType === 'insertCompositionText') {
++        const compositionInlineRange = this.editor.toInlineRange(range);
++        if (compositionInlineRange) {
++          this._compositionInlineRange = compositionInlineRange;
++        }
++      }
++      return;
++    }
++
+     let inlineRange = this.editor.toInlineRange(range);
+     if (!inlineRange) return;
+ 
