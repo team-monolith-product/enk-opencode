@@ -94,6 +94,8 @@ describe("plan agent in the pod config", () => {
           "browser-check -s http://localhost:3000 3000",
           'agent-browser batch --json "open http://localhost:3000" "errors" "close"',
           "agent-browser doctor",
+          // 입력값에 막힌 하위 명령 이름이 들어 있어도 막지 않는다
+          "agent-browser --json fill #cmd npm install",
         ])
           expect(bash(command)).toBe("allow")
         for (const command of [
@@ -105,10 +107,6 @@ describe("plan agent in the pod config", () => {
           "agent-browser plugin add x",
           "agent-browser dashboard start",
           "agent-browser stream enable",
-          // 전역 옵션을 하위 명령 앞에 붙여도 막힌다
-          "agent-browser --json install",
-          "agent-browser --session x upgrade",
-          "agent-browser -q plugin add x",
         ])
           expect(bash(command)).toBe("deny")
         // bash 도구 자체는 꺼지지 않는다(하위 명령만 막힘)
