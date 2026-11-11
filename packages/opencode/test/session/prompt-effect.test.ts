@@ -466,7 +466,7 @@ it.effect("loop answers a new user message whose id predates the last assistant"
       Effect.gen(function* () {
         const { test, prompt, sessions, chat } = yield* boot()
         yield* test.reply(...replyStop("world"))
-        yield* seed(chat.id, { finish: "stop" })
+        const seeded = yield* seed(chat.id, { finish: "stop" })
 
         // The web client mints the user message id in the browser, so a lagging client clock
         // produces an id that sorts before the assistant message it follows.
@@ -477,7 +477,7 @@ it.effect("loop answers a new user message whose id predates the last assistant"
           sessionID: chat.id,
           agent: "build",
           model: ref,
-          time: { created: Date.now() },
+          time: { created: seeded.assistant.time.created + 1 },
         })
         yield* sessions.updatePart({
           id: PartID.ascending(),
