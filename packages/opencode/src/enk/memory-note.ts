@@ -6,6 +6,8 @@ export namespace MemoryNote {
   const MB = 1024 * 1024
   const LEVELS = [0.75, 0.85, 0.95]
   const TOP = 3
+  const GUIDE =
+    "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking), keep the preview dev server running, and tell the user in one sentence what you stopped."
 
   export type Program = { cmd: string; mb: number; count: number }
   export type Usage = { usedMb: number; limitMb: number; selfMb: number; programs: Program[] }
@@ -101,6 +103,7 @@ export namespace MemoryNote {
       "<system-reminder>",
       `Workspace memory: ${usage.usedMb} MB of ${usage.limitMb} MB (${percent}%). OpenCode: ${usage.selfMb} MB.`,
       ...top.map((item) => `- \`${item.cmd}\`: ${item.mb} MB${item.count > 1 ? ` (${item.count} processes)` : ""}`),
+      GUIDE,
       "</system-reminder>",
     ].join("\n")
   }

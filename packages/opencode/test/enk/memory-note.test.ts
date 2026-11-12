@@ -77,7 +77,7 @@ describe("MemoryNote.text", () => {
     expect(await MemoryNote.text(user("msg_low"), paths)).toBeUndefined()
   })
 
-  test("shows only usage and the largest programs", async () => {
+  test("shows usage, the largest programs and what to do", async () => {
     const paths = await fixture({ limitMb: 2048, usedMb: 1600, procs })
 
     const note = await MemoryNote.text(user("msg_high"), paths)
@@ -89,6 +89,7 @@ describe("MemoryNote.text", () => {
         "- `chrome --headless`: 1100 MB (2 processes)",
         "- `node next dev`: 121 MB (2 processes)",
         "- `python3 app.py`: 30 MB",
+        "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking), keep the preview dev server running, and tell the user in one sentence what you stopped.",
         "</system-reminder>",
       ].join("\n"),
     )
