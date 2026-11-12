@@ -962,8 +962,9 @@ export namespace MessageV2 {
     },
   )
 
-  export const stream = fn(SessionID.zod, async function* (sessionID) {
-    const size = 50
+  export const stream = fn(SessionID.zod, (sessionID) => newest(sessionID, 50))
+
+  export async function* newest(sessionID: SessionID, size: number) {
     let before: string | undefined
     while (true) {
       const next = await page({ sessionID, limit: size, before })
@@ -974,7 +975,7 @@ export namespace MessageV2 {
       if (!next.more || !next.cursor) break
       before = next.cursor
     }
-  })
+  }
 
   export const parts = fn(MessageID.zod, async (message_id) => {
     const rows = Database.use((db) =>
