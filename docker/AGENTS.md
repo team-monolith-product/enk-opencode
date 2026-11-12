@@ -156,6 +156,9 @@
 - `python3`만 설치되어 있습니다. `python` 명령어는 없습니다.
 - `curl`, `wget`, `jq`, `make`, `zip`, `unzip`, `less`, `ps` 등 기본 리눅스 명령어를 사용할 수 있습니다.
 - 추가 패키지가 필요하면 `apt-get update && apt-get install -y <패키지명>` 으로 설치할 수 있습니다.
+- 작업 공간 메모리에는 한도가 있고, 넘으면 작업 공간 전체(OpenCode, 미리보기 dev 서버, 실행 중인 프로그램)가 재시작됩니다. 한도는 바뀔 수 있습니다.
+  - 한도는 `cat /sys/fs/cgroup/memory.max`, 현재 사용량은 `cat /sys/fs/cgroup/memory.current`(바이트), 프로그램별 사용량은 `ps -eo pid,ppid,rss,args --sort=-rss | head`로 확인합니다. `free`는 작업 공간이 아니라 서버 전체 메모리를 보여 줍니다.
+  - 사용량이 높아지면 현재 사용량과 메모리를 많이 쓰는 프로그램이 안내로 붙습니다.
 
 ## GitHub 올리기
 
