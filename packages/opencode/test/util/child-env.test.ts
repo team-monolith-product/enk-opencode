@@ -10,7 +10,7 @@ const base = {
   LANG: "ko_KR.UTF-8",
   LC_ALL: "ko_KR.UTF-8",
   PLAYWRIGHT_BROWSERS_PATH: "/opt/playwright-browsers",
-  AGENT_BROWSER_EXECUTABLE_PATH: "/opt/agent-browser/chrome",
+  AGENT_BROWSER_EXECUTABLE_PATH: "/opt/agent-browser/chrome-headless-shell",
   AGENT_BROWSER_ENCRYPTION_KEY: "state-secret",
   JAVA_HOME: "/usr/lib/jvm",
   // 배포가 주입하는 운영 시크릿
@@ -38,7 +38,7 @@ describe("ChildEnv", () => {
     expect(env.PLAYWRIGHT_BROWSERS_PATH).toBe("/opt/playwright-browsers")
     // 에이전트 셸에서 도는 agent-browser 가 이 값 없이는 이미지에 깔린 Chrome 을 못 찾는다
     // (--no-sandbox 를 넘기는 AGENT_BROWSER_ARGS 도 같은 접두사로 통과한다)
-    expect(env.AGENT_BROWSER_EXECUTABLE_PATH).toBe("/opt/agent-browser/chrome")
+    expect(env.AGENT_BROWSER_EXECUTABLE_PATH).toBe("/opt/agent-browser/chrome-headless-shell")
     // 접두사로 통과해도 시크릿 이름은 지운다
     expect(env.AGENT_BROWSER_ENCRYPTION_KEY).toBeUndefined()
   })

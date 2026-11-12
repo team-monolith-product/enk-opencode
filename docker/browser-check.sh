@@ -15,6 +15,12 @@
 # 브라우저는 닫지 않는다. 격리가 없으면 다음 점검이 떠 있는 브라우저를 그대로 써서 빠르고(약 0.4초,
 # 새로 띄우면 약 1.1초), 쓰지 않으면 AGENT_BROWSER_IDLE_TIMEOUT_MS 뒤에 내려간다. 대신 앞 점검의 기록이
 # 남아 있으므로 이번 점검에서 생긴 것만 골라 보여 준다.
+#
+# 다만 마지막으로 연 학생 앱은 탭에서 계속 돈다. 앱에 메모리 누수가 있으면 아무도 안 보는데 Chrome 이
+# 계속 커지므로, 점검 뒤 BROWSER_CHECK_RELEASE_SEC(기본 60초) 동안 다음 점검이 없으면 그 탭을 빈 탭으로
+# 바꿔 닫는다(release). 고치고 다시 점검하는 연속 점검 중에는 건드리지 않는다. about:blank 로 이동만
+# 해서는 앱이 멈출 뿐 쓰던 메모리가 돌아오지 않아(재 보니 300MB 그대로) 탭을 닫는다(84MB 로 줄었다).
+# 정리된 뒤의 첫 점검은 탭을 새로 여는 셈이라 약 0.2초 더 걸린다.
 #   - 에러/콘솔: 접속 직전에 지금 떠 있는 페이지에서 이번 점검만의 표식(숫자)을 콘솔과 에러에 하나씩
 #     찍고, 그 표식 뒤의 기록만 보여 준다. (0.39.4 에는 에러 기록 비우기가 없어 `errors --clear` 가
 #     아무것도 안 하고, 기록에 시각도 없다.) 기록은 각 1,000개까지만 남고 넘치면 오래된 것부터
@@ -25,7 +31,7 @@
 #     빈 페이지(about:blank)로 먼저 옮기지 않는 이유: 다른 주소로 옮기는 데 약 0.5초가 들지만, 같은
 #     주소를 다시 여는 건 0.1초가 안 걸린다.
 #   - 요청: 비우기가 믿을 만하지 않아 접속 전에 있던 요청 ID 를 뺀다. 브라우저 캐시 때문에 두 번째
-#     점검부터는 favicon 같은 캐시된 요청의 404 가 다시 나오지 않을 수 있다.
+#     점검부터는 캐시된 요청의 404 가 다시 나오지 않을 수 있다. (headless-shell 은 favicon 을 요청하지 않는다.)
 #
 # 동시에 하나만 돈다. 에이전트가 batch 도구로 browser-check 를 여러 번 동시에 부르면 같은 브라우저를
 # 서로 조작해 결과가 섞이므로 잠금(flock)으로 차례를 지킨다. 호출마다 세션을 따로 쓰면 그때마다
@@ -35,6 +41,32 @@
 # 빈 줄로 찍는 버그가 있고, JSON 에는 실행 상태(lifecycle)와 요청 헤더 전체가 섞여 있어 그대로
 # 보여 주면 길기만 하다.
 set -eu
+
+dir="${TMPDIR:-/tmp}/browser-check"
+mkdir -p "$dir"
+# agent-browser 는 처음 부를 때 데몬을 띄우는데, 그 데몬이 잠금 fd(9) 를 물려받으면 이 점검이 끝나도
+# 잠금이 안 풀려 다음 점검이 2분을 꼬박 기다린다. 그래서 agent-browser 에는 fd 9 를 닫아서 넘긴다.
+ab() { agent-browser "$@" 9>&-; }
+
+# 내부용: browser-check --release 초 표식. 점검이 끝날 때 뒤에서 스스로 띄운다(위 release 설명).
+if [ "${1:-}" = "--release" ]; then
+  sleep "$2"
+  # 그 사이 다음 점검이 있었으면 그 점검이 다시 예약했으니 그만둔다.
+  [ "$(cat "$dir/.last" 2> /dev/null)" = "$3" ] || exit 0
+  # 지금 점검이 도는 중이면 기다리지 않고 그만둔다(그 점검이 끝나며 다시 예약한다).
+  if command -v flock > /dev/null 2>&1; then
+    exec 9> "$dir/.lock"
+    flock -n 9 || exit 0
+  fi
+  [ "$(cat "$dir/.last" 2> /dev/null)" = "$3" ] || exit 0
+  # 데몬이 이미 내려갔으면(유휴 종료, 격리로 함께 죽음 등) 부르지 않는다. 부르면 탭 하나 닫자고
+  # Chrome 을 새로 띄운다.
+  pgrep -f 'bin/agent-browser-' > /dev/null 2>&1 || exit 0
+  old=$(ab --json tab list | jq -r '.data.tabs[] | select(.active) | .tabId' 2> /dev/null) || exit 0
+  [ -n "$old" ] || exit 0
+  ab tab new > /dev/null 2>&1 && ab tab close "$old" > /dev/null 2>&1
+  exit 0
+fi
 
 snapshot=0
 url="http://localhost:3000"
@@ -58,9 +90,6 @@ done
 # 여기서 남은 "$@" 가 동작 단계다.
 actions=$#
 
-dir="${TMPDIR:-/tmp}/browser-check"
-mkdir -p "$dir"
-
 # 차례 지키기. flock 은 이미지(Debian util-linux)에 있다. 없는 곳(macOS 로컬 개발)에서는 잠금 없이 돈다.
 # 앞 점검이 멈춰 있어도 영원히 기다리지 않도록 2분까지만 기다린다.
 if command -v flock > /dev/null 2>&1; then
@@ -70,10 +99,6 @@ if command -v flock > /dev/null 2>&1; then
     exit 1
   fi
 fi
-# agent-browser 는 처음 부를 때 데몬을 띄우는데, 그 데몬이 잠금 fd(9) 를 물려받으면 이 점검이 끝나도
-# 잠금이 안 풀려 다음 점검이 2분을 꼬박 기다린다. 그래서 agent-browser 에는 fd 9 를 닫아서 넘긴다.
-ab() { agent-browser "$@" 9>&-; }
-
 # 스크린샷은 최근 20장만 남긴다. 점검마다 한 장씩 쌓여 오래 쓰는 컨테이너의 /tmp 를 채우지 않게.
 # 파일 이름은 날짜-PID 라 공백이 없다.
 # shellcheck disable=SC2012
@@ -114,6 +139,17 @@ out=$(run "$@")
 if ! is_result "$out" && [ "$actions" = 0 ]; then
   sleep 1
   out=$(run "$@")
+fi
+# 이번 점검을 마지막 점검으로 적고, 일정 시간 뒤 탭 정리를 예약한다. 잠금 fd(9) 와 출력은 넘기지 않는다
+# (물려받으면 정리를 기다리는 동안 잠금이 안 풀리고, 셸 도구가 그 출력이 닫히기를 기다린다).
+printf '%s' "$mark" > "$dir/.last"
+release_sec="${BROWSER_CHECK_RELEASE_SEC:-60}"
+if [ "$release_sec" -gt 0 ] 2> /dev/null; then
+  if command -v setsid > /dev/null 2>&1; then
+    setsid -f sh "$0" --release "$release_sec" "$mark" < /dev/null > /dev/null 2>&1 9>&-
+  else
+    nohup sh "$0" --release "$release_sec" "$mark" < /dev/null > /dev/null 2>&1 9>&- &
+  fi
 fi
 if ! is_result "$out"; then
   if [ "$actions" -gt 0 ]; then
