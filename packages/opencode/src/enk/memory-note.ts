@@ -96,32 +96,28 @@ export namespace MemoryNote {
 
   export function compose(usage: Usage) {
     const top = usage.programs.slice(0, TOP)
+    const percent = Math.round((usage.usedMb / usage.limitMb) * 100)
     return [
       "<system-reminder>",
-      `Workspace memory is high: ${usage.usedMb} MB of ${usage.limitMb} MB. OpenCode itself uses ${usage.selfMb} MB. If the limit is reached, the whole workspace restarts: your current work, the preview dev server and every other program stop at once.`,
-      ...(top.length
-        ? [
-            "The largest programs you started:",
-            ...top.map(
-              (item) => `- \`${item.cmd}\` (${item.mb} MB${item.count > 1 ? `, ${item.count} processes` : ""})`,
-            ),
-          ]
-        : []),
-      "Before running anything heavy, free memory first: stop dev servers, watchers or browsers you no longer need, run one heavy job at a time, cap Node builds with NODE_OPTIONS=--max-old-space-size=512, and read large files or datasets in parts. Check usage with `cat /sys/fs/cgroup/memory.current` and `ps -eo pid,ppid,rss,args --sort=-rss | head`. Do not stop the preview dev server unless it is the cause; if you stop it, start it again with ensure_dev_server.",
+      `Workspace memory: ${usage.usedMb} MB of ${usage.limitMb} MB (${percent}%). OpenCode: ${usage.selfMb} MB.`,
+      ...top.map((item) => `- \`${item.cmd}\`: ${item.mb} MB${item.count > 1 ? ` (${item.count} processes)` : ""}`),
       "</system-reminder>",
     ].join("\n")
   }
 
   const cache = new Map<string, { level: number; text: string }>()
 
-  /** 같은 질문 안에서는 경고 단계가 올라갈 때만 문구를 바꿔, 스텝 사이 프롬프트 캐시를 깨지 않는다. */
+  /** 같은 질문 안에서는 단계가 바뀔 때만 문구를 바꿔, 스텝 사이 프롬프트 캐시를 깨지 않는다. */
   export async function text(userMessage: MessageV2.WithParts, paths: Paths = DEFAULT) {
     if (userMessage.info.role !== "user") return
     const cached = cache.get(userMessage.info.id)
     const current = await usage(paths).catch(() => undefined)
     const now = current ? level(current) : 0
-    if (cached && cached.level >= now) return cached.text
-    if (!current || now === 0) return
+    if (cached && cached.level === now) return cached.text
+    if (!current || now === 0) {
+      cache.delete(userMessage.info.id)
+      return
+    }
     const note = compose(current)
     if (cache.size > 100) cache.clear()
     cache.set(userMessage.info.id, { level: now, text: note })

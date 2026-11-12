@@ -77,20 +77,24 @@ describe("MemoryNote.text", () => {
     expect(await MemoryNote.text(user("msg_low"), paths)).toBeUndefined()
   })
 
-  test("names the largest programs and how to free memory", async () => {
+  test("shows only usage and the largest programs", async () => {
     const paths = await fixture({ limitMb: 2048, usedMb: 1600, procs })
 
     const note = await MemoryNote.text(user("msg_high"), paths)
 
-    expect(note).toContain("<system-reminder>")
-    expect(note).toContain("1600 MB of 2048 MB")
-    expect(note).toContain("OpenCode itself uses 400 MB")
-    expect(note).toContain("- `chrome --headless` (1100 MB, 2 processes)")
-    expect(note).toContain("NODE_OPTIONS=--max-old-space-size=512")
-    expect(note).not.toContain("—")
+    expect(note).toBe(
+      [
+        "<system-reminder>",
+        "Workspace memory: 1600 MB of 2048 MB (78%). OpenCode: 400 MB.",
+        "- `chrome --headless`: 1100 MB (2 processes)",
+        "- `node next dev`: 121 MB (2 processes)",
+        "- `python3 app.py`: 30 MB",
+        "</system-reminder>",
+      ].join("\n"),
+    )
   })
 
-  test("keeps the same text within a request until memory climbs to the next level", async () => {
+  test("keeps the same text within a request until the level changes", async () => {
     const first = await fixture({ limitMb: 2048, usedMb: 1600, procs })
     const same = await fixture({ limitMb: 2048, usedMb: 1650, procs })
     const higher = await fixture({ limitMb: 2048, usedMb: 1800, procs })
@@ -102,6 +106,17 @@ describe("MemoryNote.text", () => {
     const b = await MemoryNote.text(message, higher)
     expect(b).not.toBe(a)
     expect(b).toContain("1800 MB")
-    expect(await MemoryNote.text(message, lower)).toBe(b)
+    expect(await MemoryNote.text(message, lower)).toBeUndefined()
+  })
+
+  test("follows a limit that changes while the workspace runs", async () => {
+    const small = await fixture({ limitMb: 2048, usedMb: 1800, procs })
+    const raised = await fixture({ limitMb: 3072, usedMb: 1800, procs })
+    const busy = await fixture({ limitMb: 3072, usedMb: 2400, procs })
+    const message = user("msg_resize")
+
+    expect(await MemoryNote.text(message, small)).toContain("1800 MB of 2048 MB")
+    expect(await MemoryNote.text(message, raised)).toBeUndefined()
+    expect(await MemoryNote.text(message, busy)).toContain("2400 MB of 3072 MB")
   })
 })
