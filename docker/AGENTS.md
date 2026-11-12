@@ -283,3 +283,4 @@ browser-check http://localhost:3000 -- \
 - 화면이 바뀌는 데 오래 걸리면 동작 사이에 `"wait 1000"` 을 넣습니다.
 - `agent-browser` 를 직접 부를 때 `errors` 의 텍스트 출력은 잡힌 에러가 빈 줄로 보이는 버그가 있습니다. 에러는 `browser-check` 로 보세요.
 - `agent-browser install`, `upgrade`, `plugin`, `chat` 등은 쓰지 않습니다(막혀 있습니다). 브라우저는 이미 설치돼 있습니다.
+- 브라우저는 창 없는 가벼운 Chrome(headless-shell)입니다. 알림 권한은 늘 거부되고, PDF 를 화면에 띄우는 내장 뷰어가 없으며, favicon 은 요청하지 않습니다. 이 셋은 학생 앱 버그가 아니니 고치려 하지 마세요.
