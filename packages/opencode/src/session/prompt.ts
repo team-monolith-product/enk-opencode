@@ -1599,7 +1599,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const lastAssistant = (sessionID: SessionID) =>
         Effect.promise(async () => {
           let latest: MessageV2.WithParts | undefined
-          for await (const item of MessageV2.stream(sessionID)) {
+          for await (const item of MessageV2.newest(sessionID, 1)) {
             latest ??= item
             if (item.info.role !== "user") return item
           }
@@ -2220,7 +2220,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
   const lastModel = Effect.fnUntraced(function* (sessionID: SessionID) {
     return yield* Effect.promise(async () => {
-      for await (const item of MessageV2.stream(sessionID)) {
+      for await (const item of MessageV2.newest(sessionID, 1)) {
         if (item.info.role === "user" && item.info.model) return item.info.model
       }
       return Provider.defaultModel()

@@ -10,7 +10,7 @@ import { type SessionID, MessageID, PartID } from "../session/schema"
 import EXIT_DESCRIPTION from "./plan-exit.txt"
 
 async function getLastModel(sessionID: SessionID) {
-  for await (const item of MessageV2.stream(sessionID)) {
+  for await (const item of MessageV2.newest(sessionID, 1)) {
     if (item.info.role === "user" && item.info.model) return item.info.model
   }
   return Provider.defaultModel()
