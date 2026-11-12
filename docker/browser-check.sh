@@ -81,8 +81,10 @@ ls -1t "$dir"/*.png 2> /dev/null | tail -n +20 | xargs rm -f
 shot="$dir/$(date +%Y%m%d-%H%M%S)-$$.png"
 
 # 이번 점검의 표식. batch 문자열은 따옴표가 벗겨지므로 따옴표가 필요 없는 숫자만 쓴다.
-# JS 숫자는 16자리를 넘으면 반올림돼 찍힌 표식이 달라지므로, 시각은 끝 6자리만 쓴다(PID 최대 7자리, 합 13자리).
-mark="$(($(date +%s) % 1000000))$$"
+# JS 숫자는 16자리를 넘으면 반올림돼 찍힌 표식이 달라지므로, 시각은 끝 6자리만 쓴다. 자릿수를 6으로 채워
+# 시각과 PID 경계를 고정하고(안 그러면 5+12 와 51+2 가 같다), 0 으로 시작하면 JS 가 8진수로 읽으므로 1 을
+# 앞에 붙인다(1 + 6 + PID 최대 7 = 14자리).
+mark="1$(printf '%06d' $(($(date +%s) % 1000000)))$$"
 
 # 앞의 네 단계(접속 전 기록 셋, 표식)가 준비, 뒤의 같은 이름 단계가 접속(과 동작) 후 기록이다.
 # 접속 전 요청 목록 조회는 요청 기록도 켠다(기본은 꺼져 있다). 접속 전 에러/콘솔 개수는 표식을 못 찍은
@@ -136,7 +138,7 @@ printf '%s' "$out" | jq -r --argjson actions "$actions" --arg mark "$mark" '
   .[6:6 + $actions] as $acts
   | (.[0:6] + .[6 + $actions:] | map(select(.success | not))
       | map(if .command[0] == "eval"
-        then "참고: 직전 페이지가 응답하지 않아(무한 루프 등) 이번 점검 표식을 못 찍었습니다. 에러·콘솔은 접속 전 개수로 잘랐습니다."
+        then "참고: 직전 페이지가 응답하지 않아(무한 루프 등) 이번 점검 표식을 못 찍었습니다. 아래 에러·콘솔에 지난 점검 기록이 섞였을 수 있습니다."
         else "실패: \(.command | join(" ")) → \(.error)" end)) as $failed
   | (result("errors").errors // []) as $all_errors
   | ($all_errors | after_mark(.text | . == "Error: \($mark)" or startswith("Error: \($mark)\n"))) as $errors_after
