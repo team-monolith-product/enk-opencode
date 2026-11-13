@@ -53,7 +53,10 @@ dir="${TMPDIR:-/tmp}/browser-check"
 mkdir -p "$dir"
 # agent-browser 는 처음 부를 때 데몬을 띄우는데, 그 데몬이 잠금 fd(9) 를 물려받으면 이 점검이 끝나도
 # 잠금이 안 풀려 다음 점검이 2분을 꼬박 기다린다. 그래서 agent-browser 에는 fd 9 를 닫아서 넘긴다.
-ab() { agent-browser "$@" 9>&-; }
+# 브라우저 세션은 browser-check 전용(browser-check)을 쓴다. 에이전트가 agent-browser 를 직접 부르면 기본
+# 세션(default)의 다른 브라우저를 쓰므로, 아래 정리(release)가 에이전트가 직접 조작하던 탭을 닫는 일이 없다.
+# 둘 다 쓰면 Chrome 이 둘 뜨지만, 쓰지 않는 쪽은 AGENT_BROWSER_IDLE_TIMEOUT_MS 뒤에 내려간다.
+ab() { agent-browser --session browser-check "$@" 9>&-; }
 
 # 내부용: browser-check --release 초 표식. 점검이 끝날 때 뒤에서 스스로 띄운다(위 release 설명).
 if [ "${1:-}" = "--release" ]; then
@@ -68,7 +71,8 @@ if [ "${1:-}" = "--release" ]; then
   [ "$(cat "$dir/.last" 2> /dev/null)" = "$3" ] || exit 0
   # 데몬이 이미 내려갔으면(유휴 종료, 격리로 함께 죽음 등) 부르지 않는다. 부르면 탭 하나 닫자고
   # Chrome 을 새로 띄운다.
-  pgrep -f 'bin/agent-browser-' > /dev/null 2>&1 || exit 0
+  # 목록은 "  이름" 줄이고 현재 세션에는 앞에 → 가 붙는다. 마지막 칸만 본다.
+  ab session list 2> /dev/null | awk '{print $NF}' | grep -qx browser-check || exit 0
   # 새 빈 탭을 앞에 띄우고 나머지는 모두 닫는다. 앞 탭만 닫으면, 동작이 연 팝업이 앞에 있을 때 팝업만
   # 닫히고 학생 앱 탭이 계속 남는다.
   ab tab new > /dev/null 2>&1 || exit 0

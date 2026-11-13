@@ -8,7 +8,7 @@
     "./bridge": "./src/bridge.ts"
   },
   "scripts": {
-    "test": "bun test ../../docker/preview-bridge-plugin.test.mjs",
+    "test": "bun build src/bridge.ts --outfile dist/preview-bridge.js --minify --format iife && bun build src/plugin.ts --outfile dist/preview-bridge-plugin.js --target node --format esm --minify && PREVIEW_BRIDGE_PLUGIN=dist/preview-bridge-plugin.js bun test ../../docker/preview-bridge-plugin.test.mjs",
     "build:bridge": "bun build src/bridge.ts --outfile ../../docker/preview-bridge.js --minify --format iife",
     "build:plugin": "bun build src/plugin.ts --outfile ../../docker/preview-bridge-plugin.js --target node --format esm --minify",
     "build:preview-bridge": "bun run build:bridge && bun run build:plugin"

@@ -1,11 +1,19 @@
 // preview-bridge-plugin 유닛 테스트 (bun test).
 // 빌드 산출물을 직접 불러와 session.idle 시 엔트리 HTML 주입 결과를 검증한다.
+// PREVIEW_BRIDGE_PLUGIN 이 있으면 그 파일(packages/preview-bridge 의 test 가 소스에서 새로 빌드한 것)을,
+// 없으면 docker/ 에 커밋된 빌드 결과를 검사한다.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
-import plugin from "./preview-bridge-plugin.js"
+import { join, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
+
+const { default: plugin } = await import(
+  process.env.PREVIEW_BRIDGE_PLUGIN
+    ? pathToFileURL(resolve(process.env.PREVIEW_BRIDGE_PLUGIN)).href
+    : "./preview-bridge-plugin.js"
+)
 
 const TAG = '<script src="/__preview-bridge.js" data-preview-bridge></script>'
 

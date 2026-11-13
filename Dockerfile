@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY . .
 RUN bun install --frozen-lockfile --ignore-scripts
+# 미리보기 브릿지(자식 스크립트·opencode 플러그인)를 소스에서 다시 빌드해 이미지에 넣는다. docker/ 에 커밋된
+# 빌드 결과를 그대로 쓰면, 소스만 고치고 빌드를 잊었을 때 바뀐 내용이 이미지에 안 들어간다.
+RUN cd packages/preview-bridge && bun run build:preview-bridge
 
 ARG OPENCODE_ASSET_BASE
 ENV OPENCODE_CHANNEL=latest OPENCODE_VERSION=0.0.0-enk OPENCODE_ASSET_BASE=${OPENCODE_ASSET_BASE}
@@ -41,7 +44,10 @@ ARG AGENT_BROWSER_VERSION=0.39.4
 # fonts-noto-cjk 는 한글 화면 스크린샷이 네모로 깨지지 않게 한다.
 #   AGENT_BROWSER_ARGS: 컨테이너 안에서는 Chrome 자체 sandbox 가 서지 않는다.
 #   AGENT_BROWSER_IDLE_TIMEOUT_MS: 에이전트가 close 를 빠뜨려도 5분 뒤 데몬과 Chrome 이 내려간다.
+# 받은 압축 파일이 바뀌었으면(저장소 쪽 교체·경로 오류) 빌드를 멈추도록 sha256 을 고정한다. 버전을 올리면
+# 새 파일의 값으로 같이 바꾼다: curl -fsSL <아래 주소> | sha256sum
 ARG CHROME_HEADLESS_SHELL_VERSION=157.0.8103.38
+ARG CHROME_HEADLESS_SHELL_SHA256=deafffa74660b34853a4119c361fd427ac8c9fcb62db51ddb8a797cd83a4ba2d
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/agent-browser/chrome-headless-shell \
     AGENT_BROWSER_ARGS=--no-sandbox \
     AGENT_BROWSER_IDLE_TIMEOUT_MS=300000
@@ -54,6 +60,7 @@ RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION} \
     && mkdir -p /opt/agent-browser \
     && curl -fsSL -o /tmp/chrome-headless-shell.zip \
        "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_HEADLESS_SHELL_VERSION}/linux64/chrome-headless-shell-linux64.zip" \
+    && echo "${CHROME_HEADLESS_SHELL_SHA256}  /tmp/chrome-headless-shell.zip" | sha256sum -c - \
     && unzip -q /tmp/chrome-headless-shell.zip -d /opt/agent-browser \
     && ln -s /opt/agent-browser/chrome-headless-shell-linux64/chrome-headless-shell "${AGENT_BROWSER_EXECUTABLE_PATH}" \
     && test -x "${AGENT_BROWSER_EXECUTABLE_PATH}" \
@@ -80,8 +87,8 @@ RUN chmod 755 /usr/local/bin/opencode-entrypoint.sh /usr/local/bin/browser-check
 COPY docker/AGENTS.md /etc/opencode/AGENTS.md
 COPY docker/.gitignore /etc/opencode/.gitignore
 COPY docker/opencode.jsonc /etc/opencode/opencode.jsonc
-COPY docker/preview-bridge-plugin.js /etc/opencode/preview-bridge-plugin.js
-COPY docker/preview-bridge.js /etc/opencode/preview-bridge.js
+COPY --from=build /app/docker/preview-bridge-plugin.js /etc/opencode/preview-bridge-plugin.js
+COPY --from=build /app/docker/preview-bridge.js /etc/opencode/preview-bridge.js
 COPY docker/image-model-router-plugin.js /etc/opencode/image-model-router-plugin.js
 # .agents/skills 는 config 디렉터리(/etc/opencode)의 skills/ 로 들어가야 스킬 스캐너가 잡는다.
 COPY docker/.agents/skills /etc/opencode/skills
