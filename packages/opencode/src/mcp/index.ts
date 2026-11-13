@@ -381,19 +381,19 @@ export namespace MCP {
       const connectLocal = Effect.fn("MCP.connectLocal")(function* (key: string, mcp: Config.Mcp & { type: "local" }) {
         const [cmd, ...args] = mcp.command
         const cwd = Instance.directory
+        // 상속은 ChildEnv 필터로만. MCP 서버 커맨드는 에이전트가 고를 수 있는 자식이라 bash/PTY 와
+        // 같은 기준으로 프로젝트 .env 키까지 지운다. MCP 서버에 시크릿을 주려면 설정의
+        // `environment` 에 명시해야 한다 — 그 값은 필터 뒤에 얹히므로 .env 와 이름이 겹쳐도 그대로
+        // 전달된다.
+        const inherited = yield* Effect.promise(() =>
+          ChildEnv.forAgent(cwd, { extend: cmd === "opencode" ? { BUN_BE_BUN: "1" } : {} }),
+        )
         const transport = new StdioClientTransport({
           stderr: "pipe",
           command: cmd,
           args,
           cwd,
-          // 상속은 ChildEnv allowlist 로만. MCP 서버에 시크릿을 주려면 설정의 `environment` 에
-          // 명시해야 한다 — 그 값은 필터 뒤에 얹히므로 그대로 전달된다.
-          env: ChildEnv.sanitize({
-            extend: {
-              ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
-              ...mcp.environment,
-            },
-          }) as Record<string, string>,
+          env: { ...inherited, ...mcp.environment } as Record<string, string>,
         })
         transport.stderr?.on("data", (chunk: Buffer) => {
           log.info(`mcp stderr: ${chunk.toString()}`, { key })

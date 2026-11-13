@@ -124,8 +124,12 @@ export namespace ChildEnv {
 
   /**
    * allowlist 를 통과했더라도 이 패턴에 걸리면 지운다. allowlist 가 이미 기본 차단이라 대개는
-   * 중복이지만, 접두사 통과(NPM_CONFIG_//registry/:_authToken 같은 것)와 escape hatch 로 열어 준
-   * 이름까지 한 번 더 훑는 안전망이다.
+   * 중복이지만, 접두사 통과(NPM_CONFIG_TOKEN 같은 것)와 escape hatch 로 열어 준 이름까지 한 번 더
+   * 훑는 안전망이다.
+   *
+   * 경계가 `_` 나 문자열 끝이라 `NPM_CONFIG_//registry/:_authToken` 처럼 이름 안에 단어가 붙어
+   * 있는 형태는 걸리지 않는다. 그런 이름은 접두사 통과로 남으므로 여기 말고 forAgent 의 .env 키
+   * 제거나 Secret.redact 가 받는다.
    */
   const DENY_RE = /(^|_)(TOKEN|KEY|APIKEY|SECRET|PASSWORD|PASSWD|CREDENTIAL|CREDENTIALS|AUTH|PRIVATE)(_|$)/i
 
@@ -215,5 +219,42 @@ export namespace ChildEnv {
    */
   export async function envFileKeys(dir: string) {
     return new Set(Object.keys(await EnvFile.load(dir)))
+  }
+
+  /**
+   * 에이전트가 명령을 짜 넣을 수 있는 자식(bash 툴, PTY, MCP 서버)에 넘길 환경.
+   *
+   * sanitize 만으로는 부족하다 — Bun 이 서버 시작 시 cwd 의 `.env` 를 process.env 로 올리므로,
+   * 이름이 allowlist 와 겹치는 키(`HTTP_PROXY=http://user:pass@host`, `NPM_CONFIG_*` ...)는
+   * 필터를 그대로 통과한다. 그래서 프로젝트 `.env` 계열 파일에 정의된 이름은 마지막에 한 번 더
+   * 지운다. 앱(dev 서버)은 반대로 그 값이 있어야 도므로 여기 대신 sanitize + EnvFile.load 를 쓴다.
+   *
+   * `allow` 로 명시한 이름은 이 제거에서도 예외다 — 설정으로 "이건 넘겨라" 라고 적은 값까지 조용히
+   * 사라지면 디버깅이 불가능하다. 반대로 `extend` 는 예외가 아니다: 필터 뒤에 얹히는 값이라
+   * 상속분과 구분이 안 되고, 지금 호출부(플러그인 shell.env, PTY 요청 body)는 전부 보수적으로
+   * 지우는 게 맞다.
+   */
+  export async function forAgent(dir: string, opts: Options = {}): Promise<NodeJS.ProcessEnv> {
+    const env = sanitize(opts)
+    const allow = allowSet(opts.allow)
+    for (const name of await envFileKeys(dir)) {
+      if (allow?.has(name.toUpperCase())) continue
+      delete env[name]
+    }
+    return env
+  }
+
+  /**
+   * forAgent 의 mask 버전. LSP 런처처럼 spawn 이 동기라 await 을 걸 수 없는 호출부용이라
+   * `.env` 키도 동기로 읽는다.
+   */
+  export function maskForAgent(dir: string, opts: Pick<Options, "allow" | "base"> = {}): Record<string, undefined> {
+    const out = mask(opts)
+    const allow = allowSet(opts.allow)
+    for (const name of EnvFile.keysSync(dir)) {
+      if (allow?.has(name.toUpperCase())) continue
+      out[name] = undefined
+    }
+    return out
   }
 }
