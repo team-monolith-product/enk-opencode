@@ -260,6 +260,8 @@ browser-check http://localhost:3000
 3. 화면이 비었거나 모양이 이상하다면, 출력 끝의 `스크린샷:` 경로를 read 도구로 열어 화면을 직접 봅니다.
 4. 원인을 파악하고 코드를 수정한 뒤, 다시 `browser-check` 로 고쳐졌는지 확인합니다.
 
+점검이 끝나면 학생 앱 탭은 멈추고 닫힙니다. 같은 화면을 다시 보려면 `agent-browser` 를 직접 부르지 말고 `browser-check` 를 다시 실행하세요.
+
 옵션:
 
 - `browser-check -s http://localhost:3000` — 화면 구조(버튼·입력칸 등)도 함께 출력합니다.
@@ -283,4 +285,5 @@ browser-check http://localhost:3000 -- \
 - 화면이 바뀌는 데 오래 걸리면 동작 사이에 `"wait 1000"` 을 넣습니다.
 - `agent-browser` 를 직접 부를 때 `errors` 의 텍스트 출력은 잡힌 에러가 빈 줄로 보이는 버그가 있습니다. 에러는 `browser-check` 로 보세요.
 - `agent-browser install`, `upgrade`, `plugin`, `chat` 등은 쓰지 않습니다(막혀 있습니다). 브라우저는 이미 설치돼 있습니다.
+- 애니메이션·게임 루프는 `requestAnimationFrame`(three.js 는 `renderer.setAnimationLoop`)으로 돌리고 `setInterval`·`setTimeout` 으로 돌리지 마세요. 점검 브라우저는 GPU 없이 CPU 로 그려서, `requestAnimationFrame` 으로 도는 앱만 화면을 읽기 전에 멈출 수 있습니다. 그래야 점검이 빠르고 학생 화면에서도 부드럽습니다.
 - 브라우저는 창 없는 가벼운 Chrome(headless-shell)입니다. 알림 권한은 늘 거부되고, PDF 를 화면에 띄우는 내장 뷰어가 없으며, favicon 은 요청하지 않습니다. 이 셋은 학생 앱 버그가 아니니 고치려 하지 마세요.
