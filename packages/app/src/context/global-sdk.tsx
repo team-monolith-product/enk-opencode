@@ -108,12 +108,13 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     let run: Promise<void> | undefined
     let started = false
     const HEARTBEAT_TIMEOUT_MS = 15_000
+    const CLOCK_STALE_MS = 25_000
     const [clock, setClock] = createSignal<{ server: number; local: number }>()
     const serverNow = () => {
       const sample = clock()
       if (!sample) return
       const since = performance.now() - sample.local
-      if (since > HEARTBEAT_TIMEOUT_MS) return
+      if (since > CLOCK_STALE_MS) return
       return sample.server + since
     }
     let lastEventAt = Date.now()
