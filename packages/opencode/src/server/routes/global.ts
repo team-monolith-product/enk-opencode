@@ -27,7 +27,7 @@ async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>
       JSON.stringify({
         payload: {
           type: "server.connected",
-          properties: {},
+          properties: { time: Date.now() },
         },
       }),
     )
@@ -38,7 +38,7 @@ async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>
         JSON.stringify({
           payload: {
             type: "server.heartbeat",
-            properties: {},
+            properties: { time: Date.now() },
           },
         }),
       )

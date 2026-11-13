@@ -62,6 +62,13 @@
     }
   }
 
+  [data-slot="session-turn-elapsed"] {
+    flex-shrink: 0;
+    color: var(--text-weaker);
+    font-weight: var(--font-weight-regular);
+    font-variant-numeric: tabular-nums;
+  }
+
   [data-component="text-reveal"].session-turn-thinking-heading {
     flex: 1 1 auto;
     min-width: 0;

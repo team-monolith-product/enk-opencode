@@ -6,7 +6,7 @@ import { useFileComponent } from "../context/file"
 
 import { Binary } from "@opencode-ai/util/binary"
 import { getDirectory, getFilename } from "@opencode-ai/util/path"
-import { createEffect, createMemo, createSignal, For, on, ParentProps, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, ParentProps, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { AssistantParts, Message, MessageDivider, PART_MAPPING, type UserActions } from "./message-part"
@@ -154,6 +154,7 @@ export function SessionTurn(
     editToolDefaultOpen?: boolean
     active?: boolean
     status?: SessionStatus
+    serverNow?: () => number | undefined
     onUserInteracted?: () => void
     classes?: {
       root?: string
@@ -384,6 +385,26 @@ export function SessionTurn(
     return true
   })
 
+  const [tick, setTick] = createSignal(0)
+  createEffect(() => {
+    if (!working() || !props.serverNow) return
+    const timer = setInterval(() => setTick((value) => value + 1), 1000)
+    onCleanup(() => clearInterval(timer))
+  })
+  const elapsed = createMemo(() => {
+    if (!working()) return ""
+    tick()
+    const now = props.serverNow?.()
+    const start = message()?.time.created
+    if (now === undefined || typeof start !== "number") return ""
+    const total = Math.max(0, Math.floor((now - start) / 1000))
+    if (total < 60) return i18n.t("ui.message.duration.seconds", { count: String(total) })
+    return i18n.t("ui.message.duration.minutesSeconds", {
+      minutes: String(Math.floor(total / 60)),
+      seconds: String(total % 60).padStart(2, "0"),
+    })
+  })
+
   const autoScroll = createAutoScroll({
     working,
     onUserInteracted: props.onUserInteracted,
@@ -433,11 +454,16 @@ export function SessionTurn(
                   />
                 </div>
               </Show>
-              <Show when={showThinking()}>
+              <Show when={showThinking() || elapsed()}>
                 <div data-slot="session-turn-thinking">
                   <Spinner class="shrink-0" style={{ color: "currentColor" }} />
-                  <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
-                  <Show when={!showReasoningSummaries()}>
+                  <Show when={showThinking()}>
+                    <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
+                  </Show>
+                  <Show when={elapsed()}>
+                    <span data-slot="session-turn-elapsed">{elapsed()}</span>
+                  </Show>
+                  <Show when={showThinking() && !showReasoningSummaries()}>
                     <TextReveal
                       text={reasoningHeading()}
                       class="session-turn-thinking-heading"
