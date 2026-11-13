@@ -89,7 +89,7 @@ describe("MemoryNote.text", () => {
         "- `chrome --headless`: 1100 MB (2 processes)",
         "- `node next dev`: 121 MB (2 processes)",
         "- `python3 app.py`: 30 MB",
-        "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. Then tell the user briefly what you stopped and, for each large program you left running, its memory use and what it does in plain words, so they can decide about those. If you did not start a program, check what it actually does (for example by reading its script) instead of guessing from its name, and say so if you cannot tell.",
+        "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. Then tell the user briefly what you stopped and, for each large program you left running, its memory use and what it does in plain words, so they can decide about those. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does.",
         "</system-reminder>",
       ].join("\n"),
     )
