@@ -16,19 +16,18 @@
 # 새로 띄우면 약 1.1초), 쓰지 않으면 AGENT_BROWSER_IDLE_TIMEOUT_MS 뒤에 내려간다. 대신 앞 점검의 기록이
 # 남아 있으므로 이번 점검에서 생긴 것만 골라 보여 준다.
 #
-# 학생 앱은 점검이 끝나면 멈추고 닫는다. 파드는 CPU 1개이고 GPU 가 없어 3D(WebGL) 앱은 CPU 로 그리는데
-# (SwiftShader), 무거운 장면은 한 프레임에 0.6초쯤 걸려 그동안 페이지가 막힌다. 그대로 두면
-#   - 마지막 읽기(에러·콘솔·요청·스크린샷·화면 구조)가 프레임마다 밀려 20초 넘게 걸리고,
-#   - 점검이 끝나도 앱이 계속 그려 파드 CPU 를 독차지한다(같은 계산이 0.2초 → 2.1초).
-# 그래서
-#   1. 마지막 읽기 직전에 requestAnimationFrame 을 빈 함수로 바꿔 그리기를 멈춘다(스크린샷 4.2초 → 0.1초).
-#   2. 결과를 보여 준 뒤 뒤에서(--close-app) 새 탭(about:blank)을 띄우고 앱 탭을 닫는다. setInterval 로 도는 앱은
-#      1 로 멈추지 않으므로 탭째 닫아야 CPU 를 놓는다. 숨기기만 해서는 다시 앞으로 가져와도 그리기가
-#      돌아오지 않아(재 봄) 남겨 둘 이유가 없고, 앱에 메모리 누수가 있으면 계속 커진다. about:blank 로
-#      이동만 해서는 쓰던 메모리가 돌아오지 않는다(300MB 그대로, 닫으면 84MB).
-#      새 탭을 만드는 데 0.5초쯤 들어서 점검 시간에 넣지 않으려고 뒤에서 한다.
-# 그래서 점검 뒤 agent-browser 로 같은 화면을 직접 볼 수는 없다. 다시 보려면 browser-check 를 다시 부른다.
-# 다음 점검은 빈 탭에서 앱을 새로 여는 셈이라 같은 탭을 다시 여는 것보다 약 0.2초 더 걸린다.
+# 다만 마지막으로 연 학생 앱은 탭에서 계속 돈다. 앱에 메모리 누수가 있으면 아무도 안 보는데 Chrome 이
+# 계속 커지므로, 점검 뒤 BROWSER_CHECK_RELEASE_SEC(기본 60초) 동안 다음 점검이 없으면 그 탭을 빈 탭으로
+# 바꿔 닫는다(release). 고치고 다시 점검하는 연속 점검 중에는 건드리지 않는다. about:blank 로 이동만
+# 해서는 앱이 멈출 뿐 쓰던 메모리가 돌아오지 않아(재 보니 300MB 그대로) 탭을 닫는다(84MB 로 줄었다).
+# 정리된 뒤의 첫 점검은 탭을 새로 여는 셈이라 약 0.2초 더 걸린다.
+#
+# 3D(WebGL) 앱은 마지막 읽기 직전에 멈춘다. 파드는 CPU 1개이고 GPU 가 없어 3D 앱을 CPU 로 그리는데
+# (SwiftShader), 무거운 장면은 한 프레임에 0.6초쯤 걸려 그동안 페이지가 막힌다. 그대로 두면 마지막
+# 읽기(에러·콘솔·요청·스크린샷·화면 구조)가 프레임마다 밀려 20초 넘게 걸리고, 점검이 끝나도 앱이 계속
+# 그려 파드 CPU 를 독차지한다(같은 계산이 0.27초 → 2.1초). 그래서 읽기 직전에 requestAnimationFrame 을
+# 빈 함수로 바꿔 그리기를 멈추고(스크린샷 4.2초 → 0.1초) 다시 돌리지 않는다. 다음 점검은 페이지를 다시
+# 열어 새로 로드하므로 원래대로 돈다. setInterval 로 도는 앱은 멈추지 않지만 위 정리 때 탭째 닫힌다.
 #   - 에러/콘솔: 접속 직전에 지금 떠 있는 페이지에서 이번 점검만의 표식(숫자)을 콘솔과 에러에 하나씩
 #     찍고, 그 표식 뒤의 기록만 보여 준다. (0.39.4 에는 에러 기록 비우기가 없어 `errors --clear` 가
 #     아무것도 안 하고, 기록에 시각도 없다.) 기록은 각 1,000개까지만 남고 넘치면 오래된 것부터
@@ -36,6 +35,8 @@
 #     넘겨 밀려났거나, 앞 페이지가 console.log 를 바꿔 치웠거나) 상한에 닿아 있으면 남은 전부를,
 #     아니면 접속 전 개수 이후를 보여 주고, 상한에 닿았으면 앞부분이 빠졌을 수 있다고 표시한다.
 #     (콘솔이 이미 상한인데 앞 페이지가 console.log 를 치웠다면 예전 로그가 섞일 수 있다. 드물어서 둔다.)
+#     빈 페이지(about:blank)로 먼저 옮기지 않는 이유: 다른 주소로 옮기는 데 약 0.5초가 들지만, 같은
+#     주소를 다시 여는 건 0.1초가 안 걸린다.
 #   - 요청: 비우기가 믿을 만하지 않아 접속 전에 있던 요청 ID 를 뺀다. 브라우저 캐시 때문에 두 번째
 #     점검부터는 캐시된 요청의 404 가 다시 나오지 않을 수 있다. (headless-shell 은 favicon 을 요청하지 않는다.)
 #
@@ -54,22 +55,23 @@ mkdir -p "$dir"
 # 잠금이 안 풀려 다음 점검이 2분을 꼬박 기다린다. 그래서 agent-browser 에는 fd 9 를 닫아서 넘긴다.
 ab() { agent-browser "$@" 9>&-; }
 
-# 내부용: browser-check --close-app. 점검이 끝날 때 뒤에서 스스로 띄운다(위 2).
-if [ "${1:-}" = "--close-app" ]; then
-  # 점검이 잠금을 놓은 뒤에 돈다. 그 사이 다음 점검이 먼저 돌았으면 그 점검의 앱 탭을 닫게 되는데,
-  # 그 점검도 끝났으니 괜찮다.
+# 내부용: browser-check --release 초 표식. 점검이 끝날 때 뒤에서 스스로 띄운다(위 release 설명).
+if [ "${1:-}" = "--release" ]; then
+  sleep "$2"
+  # 그 사이 다음 점검이 있었으면 그 점검이 다시 예약했으니 그만둔다.
+  [ "$(cat "$dir/.last" 2> /dev/null)" = "$3" ] || exit 0
+  # 지금 점검이 도는 중이면 기다리지 않고 그만둔다(그 점검이 끝나며 다시 예약한다).
   if command -v flock > /dev/null 2>&1; then
     exec 9> "$dir/.lock"
-    flock -w 30 9 || exit 0
+    flock -n 9 || exit 0
   fi
+  [ "$(cat "$dir/.last" 2> /dev/null)" = "$3" ] || exit 0
   # 데몬이 이미 내려갔으면(유휴 종료, 격리로 함께 죽음 등) 부르지 않는다. 부르면 탭 하나 닫자고
   # Chrome 을 새로 띄운다.
   pgrep -f 'bin/agent-browser-' > /dev/null 2>&1 || exit 0
-  ab tab new > /dev/null 2>&1 || exit 0
-  # 지금 앞에 있는 빈 탭만 남기고 모두(앱 탭, 동작이 연 팝업 등) 닫는다.
-  for t in $(ab --json tab list 2> /dev/null | jq -r '.data.tabs[]? | select(.active | not) | .tabId' 2> /dev/null); do
-    ab tab close "$t" > /dev/null 2>&1 || true
-  done
+  old=$(ab --json tab list | jq -r '.data.tabs[] | select(.active) | .tabId' 2> /dev/null) || exit 0
+  [ -n "$old" ] || exit 0
+  ab tab new > /dev/null 2>&1 && ab tab close "$old" > /dev/null 2>&1
   exit 0
 fi
 
@@ -130,7 +132,7 @@ set -- "errors" "console" "network requests" \
 if [ "$actions" -gt 0 ]; then
   set -- "$@" "wait $wait_ms"
 fi
-# 읽기 직전에 그리기를 멈춘다(위 1).
+# 읽기 직전에 그리기를 멈춘다(위 3D 설명).
 set -- "$@" "eval window.requestAnimationFrame=()=>0;1" \
   "errors" "console" "network requests" "screenshot $shot"
 if [ "$snapshot" = 1 ]; then
@@ -147,6 +149,17 @@ if ! is_result "$out" && [ "$actions" = 0 ]; then
   sleep 1
   out=$(run "$@")
 fi
+# 이번 점검을 마지막 점검으로 적고, 일정 시간 뒤 탭 정리를 예약한다. 잠금 fd(9) 와 출력은 넘기지 않는다
+# (물려받으면 정리를 기다리는 동안 잠금이 안 풀리고, 셸 도구가 그 출력이 닫히기를 기다린다).
+printf '%s' "$mark" > "$dir/.last"
+release_sec="${BROWSER_CHECK_RELEASE_SEC:-60}"
+if [ "$release_sec" -gt 0 ] 2> /dev/null; then
+  if command -v setsid > /dev/null 2>&1; then
+    setsid -f sh "$0" --release "$release_sec" "$mark" < /dev/null > /dev/null 2>&1 9>&-
+  else
+    nohup sh "$0" --release "$release_sec" "$mark" < /dev/null > /dev/null 2>&1 9>&- &
+  fi
+fi
 if ! is_result "$out"; then
   if [ "$actions" -gt 0 ]; then
     echo "browser-check: agent-browser 결과를 받지 못했습니다. 동작이 실행됐는지 알 수 없어 다시 실행하지 않았습니다. 화면 상태를 확인하고 다시 부르세요." >&2
@@ -155,14 +168,6 @@ if ! is_result "$out"; then
   fi
   printf '%s\n' "$out" >&2
   exit 1
-fi
-# 앱 탭 닫기를 뒤에 맡긴다(위 2). 잠금 fd(9) 와 출력은 넘기지 않는다(물려받으면 이 점검이 끝나도 잠금이
-# 안 풀리고, 셸 도구가 그 출력이 닫히기를 기다린다). 결과를 못 낸 경우는 위에서 끝나 데몬이 없을 때
-# 부르지 않는다.
-if command -v setsid > /dev/null 2>&1; then
-  setsid -f sh "$0" --close-app < /dev/null > /dev/null 2>&1 9>&-
-else
-  nohup sh "$0" --close-app < /dev/null > /dev/null 2>&1 9>&- &
 fi
 
 # 동작 단계는 batch 의 7번째(준비 4 + open + wait 다음)부터 $actions 개다.
