@@ -38,6 +38,7 @@ import { BasicTool, GenericTool } from "./basic-tool"
 import { countPartialStringLines, editPendingDiff, parsePartialToolInput } from "./tool-input"
 import { edge } from "../paper-edge"
 import { writeClipboard } from "../util/clipboard"
+import { formatDuration } from "../util/duration"
 import { Accordion } from "./accordion"
 import { StickyAccordionHeader } from "./sticky-accordion-header"
 import { Card } from "./card"
@@ -1542,14 +1543,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
           ? completed - message.time.created
           : -1
     if (!(ms >= 0)) return ""
-    const total = Math.round(ms / 1000)
-    if (total < 60) return i18n.t("ui.message.duration.seconds", { count: numfmt().format(total) })
-    const minutes = Math.floor(total / 60)
-    const seconds = total % 60
-    return i18n.t("ui.message.duration.minutesSeconds", {
-      minutes: numfmt().format(minutes),
-      seconds: numfmt().format(seconds),
-    })
+    return formatDuration(i18n, numfmt(), ms)
   })
 
   const meta = createMemo(() => {

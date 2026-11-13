@@ -23,6 +23,7 @@ import { TextReveal } from "./text-reveal"
 import { Spinner } from "./spinner"
 import { createAutoScroll } from "../hooks"
 import { useI18n } from "../context/i18n"
+import { formatDuration } from "../util/duration"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -376,33 +377,33 @@ export function SessionTurn(
   const assistantVisible = createMemo(() => assistantDerived().visible)
   const assistantTailVisible = createMemo(() => assistantDerived().tail)
   const reasoningHeading = createMemo(() => assistantDerived().reason)
-  const showThinking = createMemo(() => {
+  const indicator = createMemo(() => {
     if (!working() || !!error()) return false
     // A hidden retry banner would otherwise leave the turn with no sign of life during backoff,
     // so the thinking indicator stays up instead.
     if (status().type === "retry" && !data.hideMinorErrors) return false
+    return true
+  })
+  const showThinking = createMemo(() => {
+    if (!indicator()) return false
     if (showReasoningSummaries()) return assistantVisible() === 0
     return true
   })
 
+  const numfmt = createMemo(() => new Intl.NumberFormat(i18n.locale()))
   const [tick, setTick] = createSignal(0)
   createEffect(() => {
-    if (!working() || !props.serverNow) return
+    if (!indicator() || !props.serverNow) return
     const timer = setInterval(() => setTick((value) => value + 1), 1000)
     onCleanup(() => clearInterval(timer))
   })
   const elapsed = createMemo(() => {
-    if (!working()) return ""
+    if (!indicator()) return ""
     tick()
     const now = props.serverNow?.()
     const start = message()?.time.created
     if (now === undefined || typeof start !== "number") return ""
-    const total = Math.max(0, Math.floor((now - start) / 1000))
-    if (total < 60) return i18n.t("ui.message.duration.seconds", { count: String(total) })
-    return i18n.t("ui.message.duration.minutesSeconds", {
-      minutes: String(Math.floor(total / 60)),
-      seconds: String(total % 60).padStart(2, "0"),
-    })
+    return formatDuration(i18n, numfmt(), Math.max(0, now - start))
   })
 
   const autoScroll = createAutoScroll({
