@@ -7,7 +7,7 @@ export namespace MemoryNote {
   const LEVELS = [0.75, 0.85, 0.95]
   const TOP = 3
   const GUIDE =
-    "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. Then tell the user briefly what you stopped and which large programs you left running with their memory use, so they can decide about those. Refer to programs you did not start by their command only, without guessing what they are or calling them system processes."
+    "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. Then tell the user briefly what you stopped and, for each large program you left running, its memory use and what it does in plain words, so they can decide about those. If you did not start a program, check what it actually does (for example by reading its script) instead of guessing from its name, and say so if you cannot tell."
 
   export type Program = { cmd: string; mb: number; count: number }
   export type Usage = { usedMb: number; limitMb: number; selfMb: number; programs: Program[] }
