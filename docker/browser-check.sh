@@ -53,7 +53,10 @@ dir="${TMPDIR:-/tmp}/browser-check"
 mkdir -p "$dir"
 # agent-browser 는 처음 부를 때 데몬을 띄우는데, 그 데몬이 잠금 fd(9) 를 물려받으면 이 점검이 끝나도
 # 잠금이 안 풀려 다음 점검이 2분을 꼬박 기다린다. 그래서 agent-browser 에는 fd 9 를 닫아서 넘긴다.
-ab() { agent-browser "$@" 9>&-; }
+# 브라우저 세션은 browser-check 전용(browser-check)을 쓴다. 에이전트가 agent-browser 를 직접 부르면 기본
+# 세션(default)의 다른 브라우저를 쓰므로, 아래 정리(release)가 에이전트가 직접 조작하던 탭을 닫는 일이 없다.
+# 둘 다 쓰면 Chrome 이 둘 뜨지만, 쓰지 않는 쪽은 AGENT_BROWSER_IDLE_TIMEOUT_MS 뒤에 내려간다.
+ab() { agent-browser --session browser-check "$@" 9>&-; }
 
 # 내부용: browser-check --release 초 표식. 점검이 끝날 때 뒤에서 스스로 띄운다(위 release 설명).
 if [ "${1:-}" = "--release" ]; then
@@ -68,10 +71,14 @@ if [ "${1:-}" = "--release" ]; then
   [ "$(cat "$dir/.last" 2> /dev/null)" = "$3" ] || exit 0
   # 데몬이 이미 내려갔으면(유휴 종료, 격리로 함께 죽음 등) 부르지 않는다. 부르면 탭 하나 닫자고
   # Chrome 을 새로 띄운다.
-  pgrep -f 'bin/agent-browser-' > /dev/null 2>&1 || exit 0
-  old=$(ab --json tab list | jq -r '.data.tabs[] | select(.active) | .tabId' 2> /dev/null) || exit 0
-  [ -n "$old" ] || exit 0
-  ab tab new > /dev/null 2>&1 && ab tab close "$old" > /dev/null 2>&1
+  # 목록은 "  이름" 줄이고 현재 세션에는 앞에 → 가 붙는다. 마지막 칸만 본다.
+  ab session list 2> /dev/null | awk '{print $NF}' | grep -qx browser-check || exit 0
+  # 새 빈 탭을 앞에 띄우고 나머지는 모두 닫는다. 앞 탭만 닫으면, 동작이 연 팝업이 앞에 있을 때 팝업만
+  # 닫히고 학생 앱 탭이 계속 남는다.
+  ab tab new > /dev/null 2>&1 || exit 0
+  for t in $(ab --json tab list 2> /dev/null | jq -r '.data.tabs[]? | select(.active | not) | .tabId' 2> /dev/null); do
+    ab tab close "$t" > /dev/null 2>&1 || true
+  done
   exit 0
 fi
 
@@ -126,9 +133,16 @@ mark="1$(printf '%06d' $(($(date +%s) % 1000000)))$$"
 # 실패 내용은 JSON 에 들어 있으므로 멈추지 않고 그대로 보여 준다.
 # 에러 표식은 이벤트 리스너 안에서 던진다. reportError 나 console 은 앱이 바꿔 치울 수 있지만 리스너에서
 # 난 예외는 브라우저가 직접 잡지 않은 예외로 기록한다. (공백이 없도록 new(X) 형태로 쓴다.)
+# 주소에 # 이 있으면 같은 주소를 다시 열 때 브라우저가 페이지 안 이동으로 처리해 새로 로드하지 않는다(고친
+# 코드가 안 올라오고 에러도 다시 안 난다). 그때만 빈 페이지를 거쳐 연다(약 0.5초 더 든다).
+blank=""
+case "$url" in *"#"*) blank="open about:blank" ;; esac
 set -- "errors" "console" "network requests" \
   "eval console.log($mark);(t=>{t.addEventListener($mark,()=>{throw(new(Error)($mark))});t.dispatchEvent(new(Event)($mark))})(new(EventTarget))" \
-  "open $url" "wait $wait_ms" "$@"
+  ${blank:+"$blank"} "open $url" "wait $wait_ms" "$@"
+# 동작 단계 앞의 단계 수(준비 4 + [빈 페이지] + open + wait).
+pre=6
+[ -n "$blank" ] && pre=7
 if [ "$actions" -gt 0 ]; then
   set -- "$@" "wait $wait_ms"
 fi
@@ -170,8 +184,8 @@ if ! is_result "$out"; then
   exit 1
 fi
 
-# 동작 단계는 batch 의 7번째(준비 4 + open + wait 다음)부터 $actions 개다.
-printf '%s' "$out" | jq -r --argjson actions "$actions" --arg mark "$mark" '
+# 동작 단계는 batch 의 $pre 번째 다음부터 $actions 개다.
+printf '%s' "$out" | jq -r --argjson actions "$actions" --argjson pre "$pre" --arg mark "$mark" '
   def before(name): (map(select(.command[0] == name)) | first | .result) // {};
   def result(name): (map(select(.command[0] == name)) | last | .result) // {};
   # 표식 뒤의 기록만. 표식이 없으면 null.
@@ -180,8 +194,8 @@ printf '%s' "$out" | jq -r --argjson actions "$actions" --arg mark "$mark" '
   # 표식이 없을 때: 상한(1,000)에 닿아 있으면 표식이 밀려난 것이고, 그보다 오래된 기록도 다 밀려났으니
   # 남은 전부가 이번 점검 것이다. 상한 아래면 표식을 못 찍은 것이니 접속 전 개수 이후로 자른다.
   def pick(xs; after; n): if after != null then after elif (xs | length) >= 1000 then xs else xs[n:] end;
-  .[6:6 + $actions] as $acts
-  | (.[0:6] + .[6 + $actions:] | map(select(.success | not))
+  .[$pre:$pre + $actions] as $acts
+  | (.[0:$pre] + .[$pre + $actions:] | map(select(.success | not))
       | map(if .command[0] == "eval" and (.command | join(" ") | contains($mark))
         then "참고: 직전 페이지가 응답하지 않아(무한 루프 등) 이번 점검 표식을 못 찍었습니다. 아래 에러·콘솔에 지난 점검 기록이 섞였을 수 있습니다."
         else "실패: \(.command | join(" ")) → \(.error)" end)) as $failed
