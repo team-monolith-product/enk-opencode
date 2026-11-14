@@ -15107,6 +15107,9 @@
           },
           "aiModelVariant": {
             "type": "string"
+          },
+          "sessionLimit": {
+            "type": "integer"
           }
         }
       },

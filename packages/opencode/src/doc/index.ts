@@ -1,4 +1,4 @@
-import { eq, and, desc, inArray } from "drizzle-orm"
+import { eq, and, desc, inArray, ne } from "drizzle-orm"
 import z from "zod"
 import { ulid } from "ulid"
 import { Bus } from "@/bus"
@@ -8,6 +8,7 @@ import { Question } from "@/question"
 import { QuestionID } from "@/question/schema"
 import { Session } from "@/session"
 import { SessionID } from "@/session/schema"
+import { SessionTable } from "@/session/session.sql"
 import { SessionPrompt } from "@/session/prompt"
 import { archiveSession } from "@/session/archive"
 import { HistorySync } from "@/enk/history-sync"
@@ -703,14 +704,26 @@ export namespace Doc {
     // Color is read live from SessionActorTable (the single source of truth shared with doc cursors /
     // question dock) rather than snapshotted into DocSubmitActorTable, so the "동의 전송" avatar always
     // matches the participant's current collaborative color.
+    const members = Database.use((db) =>
+      db.select().from(DocSubmitActorTable).where(eq(DocSubmitActorTable.submit_id, row.id)).all(),
+    )
     const colors = new Map(
       Database.use((db) =>
-        db.select().from(SessionActorTable).where(eq(SessionActorTable.session_id, row.session_id)).all(),
-      ).map((actor) => [actor.actor_id, actor.color]),
+        db
+          .select()
+          .from(SessionActorTable)
+          .where(
+            inArray(
+              SessionActorTable.actor_id,
+              members.map((item) => item.actor_id),
+            ),
+          )
+          .all(),
+      )
+        .sort((a, b) => Number(a.session_id === row.session_id) - Number(b.session_id === row.session_id))
+        .map((actor) => [actor.actor_id, actor.color]),
     )
-    const actors = Database.use((db) =>
-      db.select().from(DocSubmitActorTable).where(eq(DocSubmitActorTable.submit_id, row.id)).all(),
-    ).map((item) => ({
+    const actors = members.map((item) => ({
       actorID: item.actor_id,
       name: item.name,
       color: colors.get(item.actor_id) ?? color(item.actor_id),
@@ -740,9 +753,64 @@ export namespace Doc {
     }
   }
 
+  const TEAM = "team:"
+
+  function teamRoute(sessionID: string) {
+    const row = Database.use((db) =>
+      db
+        .select({ directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID as SessionID))
+        .get(),
+    )
+    return `${TEAM}${row?.directory ?? sessionID}`
+  }
+
+  function routeOf(sessionID: string, targetKind: string, targetID: string) {
+    return targetKind === "question" ? targetID : teamRoute(sessionID)
+  }
+
+  function rowRoute(row: SubmitRow) {
+    return routeOf(row.session_id, row.target_kind, row.target_id)
+  }
+
+  function pendingRows(route: string) {
+    if (!route.startsWith(TEAM)) {
+      return Database.use((db) =>
+        db
+          .select()
+          .from(DocSubmitTable)
+          .where(and(eq(DocSubmitTable.target_id, route), eq(DocSubmitTable.status, "pending")))
+          .all(),
+      )
+    }
+    const ids = Database.use((db) =>
+      db
+        .select({ id: SessionTable.id })
+        .from(SessionTable)
+        .where(eq(SessionTable.directory, route.slice(TEAM.length)))
+        .all(),
+    ).map((item) => item.id)
+    if (ids.length === 0) return []
+    return Database.use((db) =>
+      db
+        .select()
+        .from(DocSubmitTable)
+        .where(
+          and(
+            inArray(DocSubmitTable.session_id, ids),
+            eq(DocSubmitTable.status, "pending"),
+            ne(DocSubmitTable.target_kind, "question"),
+          ),
+        )
+        .all(),
+    )
+  }
+
   function cast(type: SubmitEvent["type"], state: SubmitState) {
     const data = JSON.stringify({ type, state } satisfies SubmitEvent)
-    const set = peers.get(state.targetID)
+    const route = routeOf(state.sessionID, state.targetKind, state.targetID)
+    const set = peers.get(route)
     if (set) {
       const ids = new Set(state.actors.map((actor) => actor.actorID))
       set.forEach((peer) => {
@@ -750,7 +818,7 @@ export namespace Doc {
       })
     }
     // Spectators receive every state regardless of membership — they aren't in `state.actors`.
-    observers.get(state.targetID)?.forEach((peer) => peer.send(data))
+    observers.get(route)?.forEach((peer) => peer.send(data))
   }
 
   function done(id: SubmitID) {
@@ -991,7 +1059,7 @@ export namespace Doc {
       schedule(next)
       // 재시작 뒤 다시 접속하지 않은 참여자는 퇴장과 같다. 유예 시간 안에 돌아오면 그대로 남는다.
       const now = Date.now()
-      for (const actor of read(next).actors) scheduleLeave(next.target_id, actor.actorID, now)
+      for (const actor of read(next).actors) scheduleLeave(rowRoute(next), actor.actorID, now)
     }
     // GC a question's shared draft/presence when it resolves outside the vote path (e.g. the AI
     // tool times out, or a solo participant auto-replies). The vote path GCs in send() directly.
@@ -1003,26 +1071,29 @@ export namespace Doc {
 
   function actorNames(sessionID: SessionID, ids: ActorID[], names?: Record<string, string>) {
     const actors = Database.use((db) =>
-      db.select().from(SessionActorTable).where(eq(SessionActorTable.session_id, sessionID)).all(),
+      db.select().from(SessionActorTable).where(inArray(SessionActorTable.actor_id, ids)).all(),
     )
+    const named = (id: ActorID) =>
+      actors.find((actor) => actor.actor_id === id && actor.session_id === sessionID) ??
+      actors.find((actor) => actor.actor_id === id)
     return ids.map((id) => {
       const provided = names?.[id] ? cap(names[id]!) : ""
       if (provided) return { actorID: id, name: provided }
       return {
         actorID: id,
-        name: actors.find((actor) => actor.actor_id === id)?.name ?? fallback(id),
+        name: named(id)?.name ?? fallback(id),
       }
     })
   }
 
-  function targets(targetID: string, actorID: ActorID) {
+  function targets(route: string, actorID: ActorID) {
     // Connected submit peers are the single source of truth for the initial member set (same set as
     // cast()/leave()). Membership is dynamic from here on — join() adds anyone who connects during a
     // pending vote and leave() removes anyone who drops — so a stale/zombie peer captured here can
     // no longer block consensus: the heartbeat reaps it and leave() drops it from the vote. The
     // requester is always included, even if its own socket has not finished connecting yet.
     if (!Flag.ENK_CONSENT_REQUIRED) return [actorID]
-    const result = new Set(Array.from(peers.get(targetID) ?? []).map((peer) => peer.actorID))
+    const result = new Set(Array.from(peers.get(route) ?? []).map((peer) => peer.actorID))
     result.add(actorID)
     return Array.from(result)
   }
@@ -1053,7 +1124,14 @@ export namespace Doc {
       throw new VoteConflictError({ message: "Another consent vote is in progress" })
     }
 
-    const ids = targets(input.targetID, input.actorID)
+    if (input.targetKind !== "question") {
+      const other = pendingRows(teamRoute(input.sessionID))
+        .filter((row) => row.session_id !== input.sessionID)
+        .some((row) => expire(row).status === "pending")
+      if (other) throw new VoteConflictError({ message: "Another consent vote is in progress" })
+    }
+
+    const ids = targets(routeOf(input.sessionID, input.targetKind, input.targetID), input.actorID)
     const timeout = clamp(input.timeoutMs)
     const now = Date.now()
     const build = () =>
@@ -1291,29 +1369,22 @@ export namespace Doc {
     return finished
   }
 
-  function online(targetID: string, actorID: ActorID) {
-    const set = peers.get(targetID)
+  function online(route: string, actorID: ActorID) {
+    const set = peers.get(route)
     return set ? Array.from(set).some((item) => item.actorID === actorID) : false
   }
 
   // 남은 전원이 동의했고 지금 모두 접속해 있을 때만 보낸다. 끊긴 채 유예 중인 사람의 표로는 보내지 않는다.
   function evaluate(row: SubmitRow) {
     const state = read(row)
-    if (agreed(state) && state.actors.every((item) => online(row.target_id, item.actorID))) return finalize(row)
+    if (agreed(state) && state.actors.every((item) => online(rowRoute(row), item.actorID))) return finalize(row)
     return state
   }
 
   // 참여 인원 기준 판단, 퇴장 쪽: 나간 사람들은 결론 나지 않은 모든 투표에서 표와 함께 빠지고, 남은 인원으로
   // 한 번만 다시 판단한다. 요청자도 예외가 아니다. 아무도 남지 않으면 보내지 않는다.
-  function leave(targetID: string, actorIDs: ActorID[]) {
-    const rows = Database.use((db) =>
-      db
-        .select()
-        .from(DocSubmitTable)
-        .where(and(eq(DocSubmitTable.target_id, targetID), eq(DocSubmitTable.status, "pending")))
-        .all(),
-    )
-    for (const row of rows) {
+  function leave(route: string, actorIDs: ActorID[]) {
+    for (const row of pendingRows(route)) {
       const next = expire(row)
       if (next.status !== "pending") continue
       const gone = read(next).actors.filter((item) => actorIDs.includes(item.actorID))
@@ -1342,22 +1413,9 @@ export namespace Doc {
   // gap, reaped zombie, frozen tab) at create() time — they were the ones who previously never saw
   // the dialog at all. Members reconnecting just get the current state back. Returns the first
   // pending state so connect() can replay it to the joining peer.
-  function join(sessionID: SessionID, targetID: string, actorID: ActorID) {
-    const rows = Database.use((db) =>
-      db
-        .select()
-        .from(DocSubmitTable)
-        .where(
-          and(
-            eq(DocSubmitTable.session_id, sessionID),
-            eq(DocSubmitTable.target_id, targetID),
-            eq(DocSubmitTable.status, "pending"),
-          ),
-        )
-        .all(),
-    )
+  function join(route: string, actorID: ActorID) {
     let first: SubmitState | undefined
-    for (const row of rows) {
+    for (const row of pendingRows(route)) {
       const next = expire(row)
       if (next.status !== "pending") continue
       if (!timers.has(next.id)) schedule(next)
@@ -1382,7 +1440,7 @@ export namespace Doc {
             .values({
               submit_id: next.id,
               actor_id: actorID,
-              name: actorNames(sessionID, [actorID])[0]!.name,
+              name: actorNames(next.session_id, [actorID])[0]!.name,
               status: "pending",
               time_responded: null,
             })
@@ -1481,6 +1539,7 @@ export namespace Doc {
   function connect(input: {
     sessionID: SessionID
     targetID: string
+    route: string
     actorID: ActorID
     peer: { send: (data: string) => void; close?: () => void }
     observer?: boolean
@@ -1490,15 +1549,15 @@ export namespace Doc {
     // in-progress state on connect (queried with NO actorID so membership isn't required to see it).
     if (input.observer) {
       const peer: LivePeer = { send: input.peer.send, close: input.peer.close, lastSeen: Date.now() }
-      const set = observers.get(input.targetID) ?? new Set<LivePeer>()
+      const set = observers.get(input.route) ?? new Set<LivePeer>()
       set.add(peer)
-      observers.set(input.targetID, set)
+      observers.set(input.route, set)
       heartbeatStart()
       const state = active(input.sessionID, input.targetID)
       if (state) peer.send(JSON.stringify({ type: "created", state } satisfies SubmitEvent))
       const stop = () => {
         set.delete(peer)
-        if (set.size === 0) observers.delete(input.targetID)
+        if (set.size === 0) observers.delete(input.route)
         heartbeatStop()
       }
       return Object.assign(stop, {
@@ -1513,15 +1572,15 @@ export namespace Doc {
       close: input.peer.close,
       lastSeen: Date.now(),
     }
-    const set = peers.get(input.targetID) ?? new Set<SubmitPeer>()
+    const set = peers.get(input.route) ?? new Set<SubmitPeer>()
     set.add(peer)
-    peers.set(input.targetID, set)
+    peers.set(input.route, set)
     heartbeatStart()
-    cancelLeave(input.targetID, input.actorID)
+    cancelLeave(input.route, input.actorID)
     // Unconditional replay: whatever vote is pending right now is sent to every connecting peer,
     // and a peer that isn't a member yet is joined to it (dynamic membership). No membership gate —
     // that gate was how a client that blipped at create() time ended up never seeing the dialog.
-    const state = join(input.sessionID, input.targetID, input.actorID)
+    const state = join(input.route, input.actorID)
     if (state) {
       peer.send(JSON.stringify({ type: "created", state } satisfies SubmitEvent))
     } else {
@@ -1534,8 +1593,8 @@ export namespace Doc {
     // Returns the disposer (run on socket close); `.pong` refreshes liveness on a heartbeat reply.
     const stop = () => {
       set.delete(peer)
-      if (!Array.from(set).some((item) => item.actorID === peer.actorID)) scheduleLeave(input.targetID, peer.actorID)
-      if (set.size === 0) peers.delete(input.targetID)
+      if (!Array.from(set).some((item) => item.actorID === peer.actorID)) scheduleLeave(input.route, peer.actorID)
+      if (set.size === 0) peers.delete(input.route)
       heartbeatStop()
     }
     return Object.assign(stop, {
@@ -1559,6 +1618,7 @@ export namespace Doc {
       return connect({
         sessionID: input.sessionID,
         targetID: input.docID,
+        route: teamRoute(input.sessionID),
         actorID: input.actorID,
         peer: input.peer,
         observer: input.observer,
@@ -1579,6 +1639,7 @@ export namespace Doc {
       return connect({
         sessionID: input.sessionID,
         targetID: input.requestID,
+        route: input.requestID,
         actorID: input.actorID,
         peer: input.peer,
         observer: input.observer,

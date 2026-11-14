@@ -3,7 +3,7 @@ import { Bus } from "@/bus"
 import { NamedError } from "@opencode-ai/util/error"
 import { Instance } from "@/project/instance"
 import { Session } from "@/session"
-import { getOrCreateMain } from "@/session/ensure"
+import { firstSession } from "@/session/ensure"
 import { MessageV2 } from "@/session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
 import type { SessionID } from "@/session/schema"
@@ -158,7 +158,7 @@ export namespace InitialPlan {
 
   // 메인 세션에 Plan 요청을 남기고 곧바로 돌아온다. 답변 생성은 기다리지 않는다.
   export const send: Deps["send"] = async (prompt, planningID, claimToken) => {
-    const session = await getOrCreateMain()
+    const session = await firstSession()
     await SessionPrompt.prompt({
       sessionID: session.id,
       agent: "plan",

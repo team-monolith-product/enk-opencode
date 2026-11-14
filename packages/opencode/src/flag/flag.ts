@@ -76,6 +76,7 @@ export namespace Flag {
   export declare const ENK_IMAGE_GENERATION_PHASE: string | undefined
   // Whether team consent votes need every connected member. The hub injects 0 when the hackathon turned it off.
   export declare const ENK_CONSENT_REQUIRED: boolean
+  export declare const ENK_SESSION_LIMIT: number
   // Once a session has fallen back this many times it stops granting the primary model any
   // retries: the primary still gets one attempt per turn, so a recovered provider is picked
   // back up automatically, but a dead one costs a single failed round trip instead of N.
@@ -265,6 +266,16 @@ Object.defineProperty(Flag, "ENK_IMAGE_GENERATION_LIMIT", {
 Object.defineProperty(Flag, "ENK_CONSENT_REQUIRED", {
   get() {
     return !falsy("ENK_CONSENT_REQUIRED")
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_SESSION_LIMIT", {
+  get() {
+    const value = Flag.nonNegativeNumber("ENK_SESSION_LIMIT")
+    if (value === undefined || value < 1) return 1
+    return Math.min(3, Math.floor(value))
   },
   enumerable: true,
   configurable: false,

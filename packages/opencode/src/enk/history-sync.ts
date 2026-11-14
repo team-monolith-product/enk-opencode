@@ -109,10 +109,24 @@ export namespace HistorySync {
     throw err
   }
 
-  /** 투표를 열어도 되는지. AI 가 답하는 중이면 busy 로 거절한다. */
+  function teamSessions(directory: string) {
+    return [...Session.list({ directory, roots: true })].filter((item) => !item.time.archived).map((item) => item.id)
+  }
+
+  async function assertTeamIdle(directory: string) {
+    for (const item of Session.list({ directory })) await SessionPrompt.assertNotBusy(item.id)
+  }
+
+  function lockAll(ids: SessionID[], work: () => Promise<void>): Promise<void> {
+    const [head, ...rest] = ids
+    if (!head) return work()
+    return SessionPrompt.exclusive(head, () => lockAll(rest, work))
+  }
+
+  /** 투표를 열어도 되는지. 팀의 어느 세션이든 AI 가 답하는 중이면 busy 로 거절한다. */
   export async function check(input: { sessionID: SessionID; sha: string }) {
     const found = await verify(input)
-    await SessionPrompt.assertNotBusy(input.sessionID).catch(busy)
+    await assertTeamIdle(found.session.directory).catch(busy)
     return found
   }
 
@@ -121,7 +135,9 @@ export namespace HistorySync {
    * 보낸 요청은 끝난 뒤 이어서 돈다). 실패하면 참가자 모두에게 사유를 알린다.
    */
   export async function rollback(input: { sessionID: SessionID; sha: string }) {
-    await SessionPrompt.exclusive(input.sessionID, () => restore(input)).catch(async (err) => {
+    const session = await Session.get(input.sessionID)
+    const ids = [input.sessionID, ...teamSessions(session.directory).filter((id) => id !== input.sessionID)]
+    await lockAll(ids, () => restore(input)).catch(async (err) => {
       const code = reason(err)
       log.warn("rollback failed", { code, error: err instanceof Error ? err.message : String(err) })
       await Bus.publish(Event.Failed, { sessionID: input.sessionID, code })
