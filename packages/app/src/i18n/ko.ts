@@ -181,6 +181,7 @@ export const dict = {
   "history.readonly": "관전 중에는 되돌릴 수 없어요.",
   "history.error.load": "버전 기록을 불러오지 못했어요",
   "history.error.changes": "바뀐 파일을 불러오지 못했어요. 다시 눌러 주세요",
+  "history.error.busy.title": "지금은 되돌릴 수 없어요",
   "history.error.busy": "팀의 어느 대화에서든 AI가 답하는 중에는 되돌릴 수 없어요. 답이 끝난 뒤 다시 해 주세요",
   "history.error.missing": "이 버전을 찾을 수 없어요",
   "history.error.same": "이미 지금 파일과 같은 버전이에요",

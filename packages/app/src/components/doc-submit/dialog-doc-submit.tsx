@@ -13,7 +13,6 @@ import {
 import { useClientEnv } from "@/context/client-env"
 import { useLanguage } from "@/context/language"
 import { createPage } from "@/components/blocksuite/blocksuite-doc"
-import { useColorScheme } from "@/utils/color-scheme"
 import { SessionPreviewMascot } from "@/pages/session/session-preview-mascot"
 import type { DocSubmitActor, DocSubmitState } from "../prompt-input/doc-submit"
 import { getRelativeTime } from "@/utils/time"
@@ -336,7 +335,6 @@ function ConsentCountdownChip(props: { sec: number; danger: boolean }) {
 // ── prompt doc snapshot — read-only mount of the doc being sent ────────────
 function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
   const language = useLanguage()
-  const snapshotTheme = useColorScheme()
   const [fail, setFail] = createSignal(false)
   // 테마 동기화 이펙트가 mount 완료보다 먼저 돌므로 시그널로 둔다.
   const [page, setPage] = createSignal<Awaited<ReturnType<typeof createPage>>>()
@@ -350,7 +348,7 @@ function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
       return
     }
     void createPage({
-      theme: snapshotTheme(),
+      theme: "light",
       init: false,
       readonly: true,
       preview: true,
@@ -377,11 +375,6 @@ function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
         setPage(undefined)
         setFail(true)
       })
-  })
-
-  // OS 색 구성이 바뀌면 다시 칠한다 — 에디터는 테마를 내부 상태로 들고 있다.
-  createEffect(() => {
-    page()?.setTheme(snapshotTheme())
   })
 
   onCleanup(() => {

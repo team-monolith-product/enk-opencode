@@ -74,7 +74,12 @@ export function DialogHistory(props: { sessionID: string }) {
     try {
       if (!(await vote?.rollback(sha))) showToast({ title: language.t("history.error.unavailable") })
     } catch (err) {
-      showToast({ title: language.t(`history.error.${refusal(err)}`) })
+      const code = refusal(err)
+      if (code === "busy") {
+        showToast({ title: language.t("history.error.busy.title"), description: language.t("history.error.busy") })
+        return
+      }
+      showToast({ title: language.t(`history.error.${code}`) })
     }
   }
 

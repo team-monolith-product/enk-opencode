@@ -233,7 +233,7 @@ export function createPromptDocSession(): PromptDocSession {
    * and a file part is inlined by the server on each one — so the same file's contents get re-sent,
    * and re-billed, forever.
    */
-  const teamWide = () => (sync.data.env?.sessionLimit ?? 1) > 1
+  const teamWide = () => (sync.data.env?.sessionLimit ?? 1) > 1 || teamSessions(sync.data.session ?? []).length > 1
 
   const clearComposer = () => {
     for (const item of prompt.context.items()) {

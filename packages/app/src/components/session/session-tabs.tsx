@@ -65,7 +65,7 @@ export function SessionTabs() {
   }
 
   return (
-    <Show when={limit() > 1}>
+    <Show when={limit() > 1 || sessions().length > 1}>
       <div data-component="session-tabs" role="tablist" aria-label={language.t("session.tabs.label")}>
         <For each={sessions()}>
           {(item, index) => (

@@ -186,6 +186,7 @@ export const dict = {
   "history.readonly": "You can't roll back while spectating.",
   "history.error.load": "Could not load the version history",
   "history.error.changes": "Could not load the changed files. Tap again to retry",
+  "history.error.busy.title": "Can't roll back right now",
   "history.error.busy": "You can't roll back while the AI is answering in any of your team's chats. Try again when it's done",
   "history.error.missing": "This version could not be found",
   "history.error.same": "The files already match this version",
