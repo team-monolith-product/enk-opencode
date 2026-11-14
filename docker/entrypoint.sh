@@ -16,6 +16,13 @@
 # 넓게 잡아도 안전하다 — 값을 지우는 게 아니라 전달 경로만 바꾸므로 opencode 는 그대로 다 본다.
 set -eu
 
+start_memory_guard() {
+  guard=/etc/opencode/memory-guard.mjs
+  [ "${ENK_MEMORY_GUARD:-1}" = 0 ] && return 0
+  [ -f "$guard" ] && command -v node > /dev/null 2>&1 || return 0
+  "$@" node "$guard" > /dev/null 2>&1 &
+}
+
 boot="${TMPDIR:-/tmp}/opencode-boot-$$.env"
 extra="${OPENCODE_SCRUB_ENV:-}"
 
@@ -23,6 +30,7 @@ extra="${OPENCODE_SCRUB_ENV:-}"
 # 예전처럼 그대로 띄운다.
 if ! command -v awk > /dev/null 2>&1 || ! command -v base64 > /dev/null 2>&1; then
   echo "opencode-entrypoint: awk/base64 not found, starting without env scrubbing" >&2
+  start_memory_guard
   exec "$@"
 fi
 
@@ -30,6 +38,7 @@ fi
 umask 077
 if ! : > "$boot" 2> /dev/null; then
   echo "opencode-entrypoint: cannot write $boot, starting without env scrubbing" >&2
+  start_memory_guard
   exec "$@"
 fi
 
@@ -55,5 +64,7 @@ done
 export OPENCODE_BOOT_ENV="$boot"
 
 # 이름에는 공백이 없으므로 $scrub 의 단어 분리는 의도된 것이다.
+# shellcheck disable=SC2086
+start_memory_guard env $scrub -u OPENCODE_BOOT_ENV
 # shellcheck disable=SC2086
 exec env $scrub "$@"
