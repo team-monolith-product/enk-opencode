@@ -308,6 +308,8 @@
 
 [data-component="doc-submit-overlay"] .ds-snap [data-component="prompt-doc-viewer"] {
   width: 100%;
+  --text-strong: var(--c-ink);
+  --affine-text-primary-color: var(--c-ink);
 }
 
 [data-component="doc-submit-overlay"] .ds-snap-fallback {
