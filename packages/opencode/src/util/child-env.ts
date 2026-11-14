@@ -120,7 +120,7 @@ export namespace ChildEnv {
   )
 
   /** 접두사로 통과. 개별 이름을 다 적기 어려운 계열만 둔다. */
-  const ALLOW_PREFIXES = ["LC_", "XDG_", "NPM_CONFIG_", "PLAYWRIGHT_"]
+  const ALLOW_PREFIXES = ["LC_", "XDG_", "NPM_CONFIG_", "PLAYWRIGHT_", "AGENT_BROWSER_"]
 
   /**
    * allowlist 를 통과했더라도 이 패턴에 걸리면 지운다. allowlist 가 이미 기본 차단이라 대개는
