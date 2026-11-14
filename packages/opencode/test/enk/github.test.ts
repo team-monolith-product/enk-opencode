@@ -320,6 +320,7 @@ describe("GitHub.status", () => {
       enabled: true,
       connected: true,
       connect_url: "https://dev.jitda.io/auth/github?team_id=7",
+      manage_url: "https://dev.jitda.io/auth/github/manage?team_id=7",
       login: "octocat",
       linked_by: "홍길동",
       token: "gho_secret_token",
@@ -332,6 +333,7 @@ describe("GitHub.status", () => {
     expect(status).toEqual({
       enabled: true,
       connectUrl: "https://dev.jitda.io/auth/github?team_id=7",
+      manageUrl: "https://dev.jitda.io/auth/github/manage?team_id=7",
       login: "octocat",
       linkedBy: "홍길동",
       repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
@@ -362,6 +364,7 @@ describe("GitHub.status", () => {
       enabled: true,
       connected: false,
       connect_url: "https://dev.jitda.io/auth/github?team_id=7",
+      manage_url: "https://dev.jitda.io/auth/github/manage?team_id=7",
       login: "octocat",
       linked_by: "홍길동",
       repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
@@ -371,6 +374,7 @@ describe("GitHub.status", () => {
 
     expect(status.login).toBeUndefined()
     expect(status.linkedBy).toBeUndefined()
+    expect(status.manageUrl).toBeUndefined()
     expect(status.connectUrl).toBe("https://dev.jitda.io/auth/github?team_id=7")
     expect(status.repo?.name).toBe("jitda-app")
   })

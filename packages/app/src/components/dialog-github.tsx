@@ -98,7 +98,7 @@ export function DialogGitHub() {
   const back = () => {
     if (document.visibilityState !== "visible") return
     if (view() === "choose" && state.status?.app) void loadRepos()
-    if (!state.waiting) return
+    if (!state.waiting && !state.status?.manageUrl) return
     setState("waiting", false)
     void refetch()
   }
@@ -119,6 +119,15 @@ export function DialogGitHub() {
     if (!url || spectator) return
     setState("waiting", true)
     window.open(connectUrlFor(url), "_blank", "noopener")
+  }
+
+  const manage = (action: "change" | "unlink") => {
+    const url = state.status?.manageUrl
+    if (!url || spectator) return
+    const target = new URL(connectUrlFor(url))
+    target.searchParams.set("action", action)
+    setState("waiting", true)
+    window.open(target.toString(), "_blank", "noopener")
   }
 
   const run = async <T,>(fn: () => Promise<T>) => {
@@ -263,6 +272,22 @@ export function DialogGitHub() {
                   </Show>
                 </div>
               </div>
+
+              <Show when={state.status?.manageUrl && !spectator}>
+                <div class="flex flex-col gap-1">
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <Show when={state.status?.app && state.status?.repo}>
+                      <button type="button" class="github-link text-12-regular" onClick={() => manage("change")}>
+                        {language.t("github.repo.change")}
+                      </button>
+                    </Show>
+                    <button type="button" class="github-link text-12-regular" onClick={() => manage("unlink")}>
+                      {language.t("github.unlink")}
+                    </button>
+                  </div>
+                  <span class="github-hint">{language.t("github.manage.hint")}</span>
+                </div>
+              </Show>
 
               <Show when={view() === "choose" && state.status?.app}>
                 <Branch>
