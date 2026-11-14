@@ -15247,6 +15247,9 @@
           "connectUrl": {
             "type": "string"
           },
+          "manageUrl": {
+            "type": "string"
+          },
           "login": {
             "type": "string"
           },

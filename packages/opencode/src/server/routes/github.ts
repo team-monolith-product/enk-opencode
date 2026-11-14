@@ -17,6 +17,7 @@ const Status = z
   .object({
     enabled: z.boolean(),
     connectUrl: z.string().optional(),
+    manageUrl: z.string().optional(),
     login: z.string().optional(),
     linkedBy: z.string().optional(),
     app: z.boolean().optional(),

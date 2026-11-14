@@ -34,6 +34,7 @@ export namespace GitHub {
   export type Status = {
     enabled: boolean
     connectUrl?: string
+    manageUrl?: string
     login?: string
     linkedBy?: string
     app?: boolean
@@ -99,6 +100,7 @@ export namespace GitHub {
     enabled: boolean
     connected: boolean
     connect_url?: string
+    manage_url?: string
     login?: string
     github_user_id?: number
     linked_by?: string
@@ -211,6 +213,7 @@ export namespace GitHub {
     return {
       enabled: true,
       connectUrl: hit.connect_url,
+      manageUrl: hit.connected ? hit.manage_url : undefined,
       login: hit.connected ? hit.login : undefined,
       linkedBy: hit.connected ? hit.linked_by : undefined,
       app: hit.connected ? hit.app : undefined,
