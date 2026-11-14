@@ -1003,6 +1003,7 @@ export function MessageTimeline(props: {
                         hideUserMeta={props.hideUserMeta}
                         active={active()}
                         status={active() ? sessionStatus() : undefined}
+                        serverNow={globalSDK.serverNow}
                         showReasoningSummaries={settings.general.showReasoningSummaries()}
                         shellToolDefaultOpen={settings.general.shellToolPartsExpanded()}
                         editToolDefaultOpen={settings.general.editToolPartsExpanded()}

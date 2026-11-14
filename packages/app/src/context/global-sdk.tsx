@@ -1,7 +1,7 @@
 import type { Event } from "@opencode-ai/sdk/v2/client"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
-import { batch, onCleanup } from "solid-js"
+import { batch, createSignal, onCleanup } from "solid-js"
 import z from "zod"
 import { createSdkForServer } from "@/utils/server"
 import { useLanguage } from "./language"
@@ -108,6 +108,15 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     let run: Promise<void> | undefined
     let started = false
     const HEARTBEAT_TIMEOUT_MS = 15_000
+    const CLOCK_STALE_MS = 25_000
+    const [clock, setClock] = createSignal<{ server: number; local: number }>()
+    const serverNow = () => {
+      const sample = clock()
+      if (!sample) return
+      const since = performance.now() - sample.local
+      if (since > CLOCK_STALE_MS) return
+      return sample.server + since
+    }
     let lastEventAt = Date.now()
     let heartbeat: ReturnType<typeof setTimeout> | undefined
     const resetHeartbeat = () => {
@@ -139,6 +148,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
               signal: attempt.signal,
               onSseError: (error) => {
                 if (aborted(error)) return
+                setClock(undefined)
                 if (streamErrorLogged) return
                 streamErrorLogged = true
                 console.error("[global-sdk] event stream error", {
@@ -155,6 +165,10 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
               streamErrorLogged = false
               const directory = event.directory ?? "global"
               const payload = event.payload
+              if ((payload.type as string) === "server.connected" || (payload.type as string) === "server.heartbeat") {
+                const time = (payload.properties as { time?: unknown } | undefined)?.time
+                if (typeof time === "number") setClock({ server: time, local: performance.now() })
+              }
               const k = key(directory, payload)
               if (k) {
                 const i = coalesced.get(k)
@@ -188,6 +202,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
             abort.signal.removeEventListener("abort", onAbort)
             attempt = undefined
             clearHeartbeat()
+            setClock(undefined)
           }
 
           if (abort.signal.aborted || !started) return
@@ -235,6 +250,7 @@ export const { use: useGlobalSDK, provider: GlobalSDKProvider } = createSimpleCo
     return {
       url: currentServer.http.url,
       client: sdk,
+      serverNow,
       event: {
         on: emitter.on.bind(emitter),
         listen: emitter.listen.bind(emitter),

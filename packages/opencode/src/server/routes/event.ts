@@ -38,7 +38,7 @@ export const EventRoutes = () =>
         q.push(
           JSON.stringify({
             type: "server.connected",
-            properties: {},
+            properties: { time: Date.now() },
           }),
         )
 
@@ -47,7 +47,7 @@ export const EventRoutes = () =>
           q.push(
             JSON.stringify({
               type: "server.heartbeat",
-              properties: {},
+              properties: { time: Date.now() },
             }),
           )
         }, 10_000)

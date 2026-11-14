@@ -6,7 +6,7 @@ import { useFileComponent } from "../context/file"
 
 import { Binary } from "@opencode-ai/util/binary"
 import { getDirectory, getFilename } from "@opencode-ai/util/path"
-import { createEffect, createMemo, createSignal, For, on, ParentProps, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, ParentProps, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { AssistantParts, Message, MessageDivider, PART_MAPPING, type UserActions } from "./message-part"
@@ -23,6 +23,7 @@ import { TextReveal } from "./text-reveal"
 import { Spinner } from "./spinner"
 import { createAutoScroll } from "../hooks"
 import { useI18n } from "../context/i18n"
+import { formatDuration } from "../util/duration"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -154,6 +155,7 @@ export function SessionTurn(
     editToolDefaultOpen?: boolean
     active?: boolean
     status?: SessionStatus
+    serverNow?: () => number | undefined
     onUserInteracted?: () => void
     classes?: {
       root?: string
@@ -375,13 +377,33 @@ export function SessionTurn(
   const assistantVisible = createMemo(() => assistantDerived().visible)
   const assistantTailVisible = createMemo(() => assistantDerived().tail)
   const reasoningHeading = createMemo(() => assistantDerived().reason)
-  const showThinking = createMemo(() => {
+  const indicator = createMemo(() => {
     if (!working() || !!error()) return false
     // A hidden retry banner would otherwise leave the turn with no sign of life during backoff,
     // so the thinking indicator stays up instead.
     if (status().type === "retry" && !data.hideMinorErrors) return false
+    return true
+  })
+  const showThinking = createMemo(() => {
+    if (!indicator()) return false
     if (showReasoningSummaries()) return assistantVisible() === 0
     return true
+  })
+
+  const numfmt = createMemo(() => new Intl.NumberFormat(i18n.locale()))
+  const [tick, setTick] = createSignal(0)
+  createEffect(() => {
+    if (!indicator() || !props.serverNow) return
+    const timer = setInterval(() => setTick((value) => value + 1), 1000)
+    onCleanup(() => clearInterval(timer))
+  })
+  const elapsed = createMemo(() => {
+    if (!indicator()) return ""
+    tick()
+    const now = props.serverNow?.()
+    const start = message()?.time.created
+    if (now === undefined || typeof start !== "number") return ""
+    return formatDuration(i18n, numfmt(), Math.max(0, now - start))
   })
 
   const autoScroll = createAutoScroll({
@@ -433,11 +455,16 @@ export function SessionTurn(
                   />
                 </div>
               </Show>
-              <Show when={showThinking()}>
+              <Show when={showThinking() || elapsed()}>
                 <div data-slot="session-turn-thinking">
                   <Spinner class="shrink-0" style={{ color: "currentColor" }} />
-                  <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
-                  <Show when={!showReasoningSummaries()}>
+                  <Show when={showThinking()}>
+                    <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
+                  </Show>
+                  <Show when={elapsed()}>
+                    <span data-slot="session-turn-elapsed">{elapsed()}</span>
+                  </Show>
+                  <Show when={showThinking() && !showReasoningSummaries()}>
                     <TextReveal
                       text={reasoningHeading()}
                       class="session-turn-thinking-heading"
