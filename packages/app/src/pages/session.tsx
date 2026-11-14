@@ -1,4 +1,5 @@
 import type { Project, UserMessage } from "@opencode-ai/sdk/v2"
+import { SessionTabs } from "@/components/session/session-tabs"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useMutation } from "@tanstack/solid-query"
 import {
@@ -1766,6 +1767,7 @@ export default function Page() {
 
   const SessionPanelBody = () => (
     <>
+      <SessionTabs />
       <div class="flex-1 min-h-0 overflow-hidden">
         <Switch>
           <Match when={params.id}>
