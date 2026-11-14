@@ -135,13 +135,14 @@ export namespace HistorySync {
    * 보낸 요청은 끝난 뒤 이어서 돈다). 실패하면 참가자 모두에게 사유를 알린다.
    */
   export async function rollback(input: { sessionID: SessionID; sha: string }) {
-    const session = await Session.get(input.sessionID)
-    const ids = [input.sessionID, ...teamSessions(session.directory).filter((id) => id !== input.sessionID)]
-    await lockAll(ids, () => restore(input)).catch(async (err) => {
-      const code = reason(err)
-      log.warn("rollback failed", { code, error: err instanceof Error ? err.message : String(err) })
-      await Bus.publish(Event.Failed, { sessionID: input.sessionID, code })
-    })
+    await Session.get(input.sessionID)
+      .then((session) => [input.sessionID, ...teamSessions(session.directory).filter((id) => id !== input.sessionID)])
+      .then((ids) => lockAll(ids, () => restore(input)))
+      .catch(async (err) => {
+        const code = reason(err)
+        log.warn("rollback failed", { code, error: err instanceof Error ? err.message : String(err) })
+        await Bus.publish(Event.Failed, { sessionID: input.sessionID, code })
+      })
   }
 
   async function restore(input: { sessionID: SessionID; sha: string }) {

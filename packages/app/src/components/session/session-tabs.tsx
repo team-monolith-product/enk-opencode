@@ -79,7 +79,7 @@ export function SessionTabs() {
               title={sessionLabel(item.title, index(), language.t)}
             >
               <span class="session-tab__title">{sessionLabel(item.title, index(), language.t)}</span>
-              <Show when={sync.data.session_status?.[item.id]?.type === "busy"}>
+              <Show when={(sync.data.session_status?.[item.id]?.type ?? "idle") !== "idle"}>
                 <span class="session-tab__busy" aria-hidden="true" />
               </Show>
             </button>

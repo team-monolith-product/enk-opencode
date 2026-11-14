@@ -755,7 +755,11 @@ export namespace Doc {
 
   const TEAM = "team:"
 
+  const routes = new Map<string, string>()
+
   function teamRoute(sessionID: string) {
+    const cached = routes.get(sessionID)
+    if (cached) return cached
     const row = Database.use((db) =>
       db
         .select({ directory: SessionTable.directory })
@@ -763,7 +767,10 @@ export namespace Doc {
         .where(eq(SessionTable.id, sessionID as SessionID))
         .get(),
     )
-    return `${TEAM}${row?.directory ?? sessionID}`
+    if (!row) return `${TEAM}${sessionID}`
+    const route = `${TEAM}${row.directory}`
+    routes.set(sessionID, route)
+    return route
   }
 
   function routeOf(sessionID: string, targetKind: string, targetID: string) {
