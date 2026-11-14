@@ -1924,6 +1924,7 @@ export type DevServerLogs = {
 export type GitHubStatus = {
   enabled: boolean
   connectUrl?: string
+  manageUrl?: string
   login?: string
   linkedBy?: string
   app?: boolean
