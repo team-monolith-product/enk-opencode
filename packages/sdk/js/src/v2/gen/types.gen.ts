@@ -1873,6 +1873,7 @@ export type Env = {
   environment?: string
   aiModel?: string
   aiModelVariant?: string
+  sessionLimit?: number
 }
 
 export type EnvFileKeys = {
