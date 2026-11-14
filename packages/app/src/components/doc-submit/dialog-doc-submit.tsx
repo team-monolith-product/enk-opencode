@@ -44,6 +44,7 @@ type Props = {
   state: Accessor<DocSubmitState | undefined>
   actorID: string
   kind?: DocSubmitKind
+  origin?: string
   preview?: () => DocSubmitPreviewItem[]
   // Required for kind === "doc": lets the snapshot mount the prompt doc read-only.
   sdk?: DocSubmitSdk
@@ -483,6 +484,7 @@ function SnapshotArea(props: {
 function VotingBody(props: {
   state: DocSubmitState
   kind?: DocSubmitKind
+  origin?: string
   preview?: () => DocSubmitPreviewItem[]
   sdk?: DocSubmitSdk
   actorID: string
@@ -511,6 +513,9 @@ function VotingBody(props: {
             language.t("docSubmit.request.line", { verb: language.t(requestVerb(props.kind)) }),
             requesterName(),
           )}
+          <Show when={props.origin}>
+            {(title) => <div class="ds-vote-origin">{language.t("docSubmit.origin", { title: title() })}</div>}
+          </Show>
         </div>
         <ConsentCountdownChip sec={props.sec} danger={danger()} />
       </div>
@@ -725,6 +730,7 @@ function ConsentFrame(props: {
   view: "voting" | "waiting"
   state: DocSubmitState
   kind?: DocSubmitKind
+  origin?: string
   preview?: () => DocSubmitPreviewItem[]
   sdk?: DocSubmitSdk
   actorID: string
@@ -764,6 +770,7 @@ function ConsentFrame(props: {
             <VotingBody
               state={props.state}
               kind={props.kind}
+              origin={props.origin}
               preview={props.preview}
               sdk={props.sdk}
               actorID={props.actorID}
@@ -838,6 +845,7 @@ export function DialogDocSubmit(props: Props) {
               view={props.spectator || (pending() && approved()) ? "waiting" : "voting"}
               state={current()}
               kind={props.kind}
+              origin={props.origin}
               preview={props.preview}
               sdk={props.sdk}
               actorID={props.actorID}

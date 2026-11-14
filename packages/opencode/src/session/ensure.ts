@@ -26,7 +26,7 @@ function serial<T>(dir: string, fn: () => Promise<T>) {
   return task
 }
 
-export async function getOrCreateMain(input?: MainInput) {
+export async function getOrCreateMain(input?: MainInput, opts?: { fresh?: boolean }) {
   if (input?.parentID) return Session.create(input)
 
   const config = await Config.get()
@@ -35,7 +35,8 @@ export async function getOrCreateMain(input?: MainInput) {
   const dir = Instance.directory
   return serial(dir, async () => {
     const existing = active(dir)
-    if (existing.length >= sessionLimit() && existing[0]) return existing[0]
+    const room = opts?.fresh ? sessionLimit() : 1
+    if (existing.length >= room && existing[0]) return existing[0]
     return Session.create(input)
   })
 }

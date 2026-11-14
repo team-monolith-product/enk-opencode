@@ -125,8 +125,8 @@ describe("team session limit", () => {
       directory: tmp.path,
       fn: async () => {
         const one = await getOrCreateMain()
-        const two = await getOrCreateMain()
-        const three = await getOrCreateMain()
+        const two = await getOrCreateMain(undefined, { fresh: true })
+        const three = await getOrCreateMain(undefined, { fresh: true })
         expect(two.id).not.toBe(one.id)
         expect([one.id, two.id]).toContain(three.id)
         expect(await active(tmp.path)).toHaveLength(2)
@@ -140,8 +140,28 @@ describe("team session limit", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        await Promise.all([getOrCreateMain(), getOrCreateMain(), getOrCreateMain(), getOrCreateMain()])
+        const fresh = { fresh: true }
+        await Promise.all([
+          getOrCreateMain(undefined, fresh),
+          getOrCreateMain(undefined, fresh),
+          getOrCreateMain(undefined, fresh),
+          getOrCreateMain(undefined, fresh),
+        ])
         expect(await active(tmp.path)).toHaveLength(2)
+      },
+    })
+  })
+
+  test("a create without the fresh request reuses the open session", async () => {
+    process.env["ENK_SESSION_LIMIT"] = "2"
+    await using tmp = await tmpdir({ config: { ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const one = await getOrCreateMain()
+        const two = await getOrCreateMain()
+        expect(two.id).toBe(one.id)
+        expect(await active(tmp.path)).toHaveLength(1)
       },
     })
   })
@@ -162,7 +182,7 @@ describe("team session limit", () => {
       directory: tmp.path,
       fn: async () => {
         const one = await getOrCreateMain()
-        await getOrCreateMain()
+        await getOrCreateMain(undefined, { fresh: true })
         await Session.setTitle({ sessionID: one.id, title: "touched" })
         expect((await firstSession()).id).toBe(one.id)
       },
