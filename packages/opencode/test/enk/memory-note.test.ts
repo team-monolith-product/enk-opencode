@@ -16,6 +16,7 @@ async function fixture(input: {
   limitMb?: number
   usedMb: number
   procs: { pid: number; ppid: number; mb: number; cmd: string }[]
+  stat?: string[]
 }) {
   const root = await mkdtemp(path.join(tmpdir(), "memory-note-"))
   dirs.push(root)
@@ -25,7 +26,9 @@ async function fixture(input: {
   await writeFile(path.join(cgroup, "memory.max"), input.limitMb ? `${input.limitMb * MB}\n` : "max\n")
   await writeFile(
     path.join(cgroup, "memory.stat"),
-    [`anon ${input.usedMb * MB}`, `file ${500 * MB}`, "shmem 0", "kernel 0", "slab_reclaimable 0"].join("\n"),
+    (input.stat ?? [`anon ${input.usedMb * MB}`, `file ${500 * MB}`, "shmem 0", "kernel 0", "slab_reclaimable 0"]).join(
+      "\n",
+    ),
   )
   for (const item of input.procs) {
     await mkdir(path.join(proc, String(item.pid)), { recursive: true })
@@ -57,7 +60,7 @@ describe("MemoryNote.usage", () => {
 
     expect(usage).toMatchObject({ usedMb: 1700, limitMb: 2048, selfMb: 400 })
     expect(usage?.programs).toEqual([
-      { cmd: "chrome --headless", mb: 1100, count: 2 },
+      { cmd: "chrome", mb: 1100, count: 2 },
       { cmd: "node next dev", mb: 121, count: 2 },
       { cmd: "python3 app.py", mb: 30, count: 1 },
     ])
@@ -86,7 +89,7 @@ describe("MemoryNote.text", () => {
       [
         "<system-reminder>",
         "Workspace memory: 1600 MB of 2048 MB (78%). OpenCode: 400 MB.",
-        "- `chrome --headless`: 1100 MB (2 processes)",
+        "- `chrome`: 1100 MB (2 processes)",
         "- `node next dev`: 121 MB (2 processes)",
         "- `python3 app.py`: 30 MB",
         "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. Then tell the user briefly what you stopped and, for each large program you left running, its memory use and what it does in plain words, so they can decide about those. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does.",
@@ -119,5 +122,60 @@ describe("MemoryNote.text", () => {
     expect(await MemoryNote.text(message, small)).toContain("1800 MB of 2048 MB")
     expect(await MemoryNote.text(message, raised)).toBeUndefined()
     expect(await MemoryNote.text(message, busy)).toContain("2400 MB of 3072 MB")
+  })
+})
+
+describe("MemoryNote details", () => {
+  test("skips reading processes below three quarters of the limit", async () => {
+    const paths = await fixture({ limitMb: 2048, usedMb: 1400, procs })
+
+    expect(await MemoryNote.usage(paths)).toEqual({ usedMb: 1400, limitMb: 2048, selfMb: 0, programs: [] })
+  })
+
+  test("counts kernel memory from its parts on kernels without a kernel total", async () => {
+    const paths = await fixture({
+      limitMb: 2048,
+      usedMb: 0,
+      procs,
+      stat: [`anon ${1500 * MB}`, "shmem 0", `kernel_stack ${50 * MB}`, `pagetables ${60 * MB}`, `sock ${10 * MB}`],
+    })
+
+    expect((await MemoryNote.usage(paths))?.usedMb).toBe(1620)
+  })
+
+  test("keeps the script path, drops long flags and hides secrets", () => {
+    expect(
+      MemoryNote.label([
+        "node",
+        "--max-old-space-size=4096",
+        "--api-key",
+        "sk-live-123",
+        "/home/jovyan/project/server.js",
+        "abcdefghijklmnopqrstuvwxyz0123456789",
+        "</system-reminder>`",
+      ]),
+    ).toBe("node /home/jovyan/project/server.js *** /system-reminder")
+  })
+
+  test("says OpenCode itself is using the memory when no other program is large", async () => {
+    const paths = await fixture({
+      limitMb: 2048,
+      usedMb: 1700,
+      procs: [{ pid: 1, ppid: 0, mb: 1600, cmd: "opencode" }],
+    })
+
+    const note = await MemoryNote.text(user("msg_alone"), paths)
+
+    expect(note).toContain("most of it is OpenCode itself")
+    expect(note).not.toContain("programs above")
+  })
+
+  test("keeps the note of an earlier request so later turns send the same history", async () => {
+    const paths = await fixture({ limitMb: 2048, usedMb: 1600, procs })
+
+    const note = await MemoryNote.text(user("msg_earlier"), paths)
+
+    expect(MemoryNote.earlier("msg_earlier")).toBe(note)
+    expect(MemoryNote.earlier("msg_unknown")).toBeUndefined()
   })
 })

@@ -336,13 +336,16 @@ export namespace SessionPrompt {
         }
 
         const memory = yield* Effect.promise(() => MemoryNote.text(userMessage))
-        if (memory) {
-          userMessage.parts.push({
+        for (const msg of input.messages) {
+          if (msg.info.role !== "user") continue
+          const note = msg === userMessage ? memory : MemoryNote.earlier(msg.info.id)
+          if (!note) continue
+          msg.parts.push({
             id: PartID.ascending(),
-            messageID: userMessage.info.id,
-            sessionID: userMessage.info.sessionID,
+            messageID: msg.info.id,
+            sessionID: msg.info.sessionID,
             type: "text",
-            text: memory,
+            text: note,
             synthetic: true,
           })
         }
