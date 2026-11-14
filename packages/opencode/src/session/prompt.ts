@@ -32,6 +32,7 @@ import { CostQuota } from "../enk/cost-quota"
 import { ModelFallback } from "../enk/model-fallback"
 import { Locale } from "../enk/locale"
 import { HistoryNote } from "../enk/history-note"
+import { MemoryNote } from "../enk/memory-note"
 import { SessionFallback } from "./fallback"
 import { ulid } from "ulid"
 import { spawn } from "child_process"
@@ -330,6 +331,21 @@ export namespace SessionPrompt {
             sessionID: userMessage.info.sessionID,
             type: "text",
             text: reverted,
+            synthetic: true,
+          })
+        }
+
+        const memory = yield* Effect.promise(() => MemoryNote.text(userMessage))
+        for (const msg of input.messages) {
+          if (msg.info.role !== "user") continue
+          const note = msg === userMessage ? memory : MemoryNote.earlier(msg.info.id)
+          if (!note) continue
+          msg.parts.push({
+            id: PartID.ascending(),
+            messageID: msg.info.id,
+            sessionID: msg.info.sessionID,
+            type: "text",
+            text: note,
             synthetic: true,
           })
         }
