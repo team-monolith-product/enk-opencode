@@ -12,9 +12,12 @@ import { ProviderTransform } from "../provider/transform"
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
+import PROMPT_SIDE from "./prompt/side.txt"
+import { SIDE_AGENT } from "../tool/handoff"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { Permission } from "@/permission"
+import { Wildcard } from "@/util/wildcard"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@/global"
 import path from "path"
@@ -51,6 +54,50 @@ export namespace Agent {
       ref: "Agent",
     })
   export type Info = z.infer<typeof Info>
+
+  // 사이드 채팅(메인 세션을 포크한 개인용 대화) 전용. 메인 에이전트가 같은 워크트리에서 일하는 중에도
+  // 돌기 때문에 읽기만 한다 — bash 는 읽기 전용으로 묶을 방법이 없어 통째로 막는다. "ask" 규칙을 두지
+  // 않아서 권한 요청 독이 뜰 일이 없다. 포크한 세션의 permission 에도 그대로 넣어(세션 규칙이 마지막에
+  // 적용된다) 에이전트를 바꿔 불러도 풀리지 않게 한다.
+  export const SIDE = SIDE_AGENT
+  /** 사이드 에이전트가 쓰는 도구. 나머지는 전부 막힌다. */
+  const SIDE_TOOLS = ["read", "grep", "glob", "codesearch", "webfetch", "websearch", "handoff", "external_directory"]
+
+  // 모듈 로드 시점이 아니라 호출 시점에 만든다 — Truncate 와 순환 import 가 생겨도 undefined 를 읽지 않게.
+  export function sidePermission(): Permission.Ruleset {
+    return Permission.fromConfig({
+      "*": "deny",
+      read: "allow",
+      grep: "allow",
+      glob: "allow",
+      codesearch: "allow",
+      webfetch: "allow",
+      websearch: "allow",
+      handoff: "allow",
+      external_directory: {
+        "*": "deny",
+        [Truncate.GLOB]: "allow",
+        [ATTACHMENT_GLOB]: "allow",
+      },
+    })
+  }
+
+  /**
+   * 설정 규칙 중 사이드가 쓰는 도구에 걸리는 것을 순서대로 다시 붙인다. 사이드 규칙 뒤에 오므로 배포의
+   * 읽기·네트워크 정책(막은 경로와 그 안의 허용 예외 모두)이 사이드에서도 메인과 같게 적용된다.
+   * - ask 는 deny 로 — 사이드는 권한 요청 독을 띄우지 않으므로 묻는 대신 막는다.
+   * - allow 는 도구 이름이 정확히 사이드 도구일 때만 남긴다. "*" 같은 와일드카드 allow 는 사이드가 막은
+   *   쓰기 도구까지 다시 열기 때문이다(그 deny·ask 는 사이드 도구에도 걸리므로 남긴다).
+   * - 사이드가 이미 통째로 막은 도구의 규칙은 버린다. 경로별 규칙(edit "migration/*" 등)이 마지막에 오면
+   *   그 도구가 "통째로 막힘"으로 보이지 않아 도구 목록에 다시 나타난다(Permission.disabled).
+   */
+  export function configured(ruleset: Permission.Ruleset): Permission.Ruleset {
+    return ruleset.flatMap((rule) => {
+      if (!SIDE_TOOLS.some((tool) => Wildcard.match(tool, rule.permission))) return []
+      if (rule.action === "allow") return SIDE_TOOLS.includes(rule.permission) ? [rule] : []
+      return [{ ...rule, action: "deny" as const }]
+    })
+  }
 
   export interface Interface {
     readonly get: (agent: string) => Effect.Effect<Agent.Info>
@@ -93,6 +140,8 @@ export namespace Agent {
             question: "deny",
             plan_enter: "deny",
             plan_exit: "deny",
+            // 사이드 채팅 → 메인 입력창 전달 툴. side 에이전트만 쓴다.
+            handoff: "deny",
             // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
             read: {
               "*": "allow",
@@ -184,6 +233,18 @@ export namespace Agent {
               options: {},
               mode: "subagent",
               native: true,
+            },
+            [SIDE]: {
+              name: SIDE,
+              description: "Side chat. Answers questions about the forked conversation using read-only tools.",
+              mode: "primary",
+              native: true,
+              hidden: true,
+              prompt: PROMPT_SIDE,
+              // 사이드 규칙은 사용자 설정의 allow 보다 뒤에 둔다 — 전역 "bash": "allow" 같은 설정이 읽기 전용을
+              // 풀면 안 된다. 사용자 설정의 deny·ask 는 그 뒤에 다시 붙여, 배포가 막은 것은 사이드에서도 막힌다.
+              permission: Permission.merge(defaults, user, sidePermission(), configured(user)),
+              options: {},
             },
             compaction: {
               name: "compaction",

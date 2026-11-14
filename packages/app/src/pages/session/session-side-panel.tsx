@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { IconButton } from "@opencode-ai/ui/icon-button"
-import { TooltipKeybind } from "@opencode-ai/ui/tooltip"
+import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Mark } from "@opencode-ai/ui/logo"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
@@ -27,7 +27,15 @@ import { useSync } from "@/context/sync"
 import { createFileTabListSync } from "@/pages/session/file-tab-scroll"
 import { DiffTabContent } from "@/pages/session/diff-tab"
 import { FileTabContent } from "@/pages/session/file-tabs"
-import { createOpenSessionFileTab, createSessionTabs, getTabReorderIndex, type Sizing } from "@/pages/session/helpers"
+import {
+  SIDE_CHAT_TAB,
+  createOpenSessionFileTab,
+  createSessionTabs,
+  getTabReorderIndex,
+  type Sizing,
+} from "@/pages/session/helpers"
+import { useSideChat } from "@/pages/session/side-chat/context"
+import { SideChatPanel } from "@/pages/session/side-chat/panel"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { SessionPreviewPanel, SessionBrowserChrome, createSessionPreview } from "@/pages/session/session-preview-panel"
 import { useSessionLayout } from "@/pages/session/session-layout"
@@ -156,12 +164,16 @@ export function SessionSidePanel(props: {
     setActive: tabs().setActive,
   })
 
+  const side = useSideChat()
+  const sideTab = createMemo(() => isDesktop() && side.enabled())
+
   const tabState = createSessionTabs({
     tabs,
     pathFromTab: pathFromContentTab,
     normalizeTab,
     review: reviewTab,
     preview: previewTab,
+    side: sideTab,
     hasReview,
   })
   const contextOpen = tabState.contextOpen
@@ -171,7 +183,23 @@ export function SessionSidePanel(props: {
 
   // 미리보기 우선: 콘텐츠가 미리보기뿐일 때는 탭 스트립을 숨긴다.
   // 파일·컨텍스트 탭이 열리거나 리뷰 변경이 있을 때만 상단 탭 스트립을 노출(시안 OcBrowser showStrip 확장).
-  const showTabStrip = createMemo(() => openedTabs().length > 0 || contextOpen() || (reviewTab() && hasReview()))
+  // 사이드 채팅 탭은 세션이 있거나 지금 보고 있을 때 스트립에 둔다(닫으면 세션째 지운다).
+  const sideOpen = createMemo(() => sideTab() && (!!side.sessionID() || activeTab() === SIDE_CHAT_TAB))
+  const showTabStrip = createMemo(
+    () => openedTabs().length > 0 || contextOpen() || (reviewTab() && hasReview()) || sideOpen(),
+  )
+
+  // 크롬 바 버튼: 사이드 채팅 탭으로 가고, 세션이 없으면 지금 대화로 바로 포크한다.
+  const openSideChat = () => {
+    openReviewPanel()
+    tabs().open(SIDE_CHAT_TAB)
+    if (!side.sessionID()) void side.open()
+  }
+
+  const closeSideChat = () => {
+    tabs().close(SIDE_CHAT_TAB)
+    void side.close()
+  }
 
   // 미리보기 브라우저 chrome 바(시안 SafariChrome) — URL·새로고침 공유.
   const preview = createSessionPreview()
@@ -303,6 +331,14 @@ export function SessionSidePanel(props: {
               tabs().setActive("preview")
               preview.goHome()
             }}
+            sideChat={
+              sideTab()
+                ? {
+                    active: reviewOpen() && activeTab() === SIDE_CHAT_TAB,
+                    onClick: openSideChat,
+                  }
+                : undefined
+            }
             showErrorButton={preview.showErrorButton()}
             errorCount={preview.errorCount()}
             errorOpen={preview.showErrorOverlay()}
@@ -356,6 +392,34 @@ export function SessionSidePanel(props: {
                           <Tabs.Trigger value="preview">
                             <div class="flex items-center gap-1.5">
                               <div>{language.t("session.tab.preview")}</div>
+                            </div>
+                          </Tabs.Trigger>
+                        </Show>
+                        {/* 트리거는 언마운트하지 않고 숨기기만 한다 — 탭 값을 side-chat 으로 바꾸는 순간 트리거가
+                          없으면 Kobalte 가 첫 트리거(미리보기)로 폴백해 탭이 안 열린다(위 스트립과 같은 경합). */}
+                        <Show when={sideTab()}>
+                          <Tabs.Trigger
+                            value={SIDE_CHAT_TAB}
+                            classList={{ hidden: !sideOpen() }}
+                            closeButton={
+                              <Tooltip value={language.t("sideChat.close")} placement="bottom" gutter={10}>
+                                <IconButton
+                                  icon="close-small"
+                                  variant="ghost"
+                                  class="h-5 w-5"
+                                  onClick={closeSideChat}
+                                  aria-label={language.t("sideChat.close")}
+                                />
+                              </Tooltip>
+                            }
+                            hideCloseButton
+                            onMiddleClick={closeSideChat}
+                          >
+                            <div class="flex items-center gap-1.5">
+                              <div>{language.t("session.tab.sideChat")}</div>
+                              <Show when={side.busy()}>
+                                <span class="size-1.5 rounded-full bg-icon-info-base animate-pulse" aria-hidden />
+                              </Show>
                             </div>
                           </Tabs.Trigger>
                         </Show>
@@ -461,6 +525,14 @@ export function SessionSidePanel(props: {
                         </div>
                       </Show>
                     </Tabs.Content>
+
+                    <Show when={sideTab()}>
+                      <Tabs.Content value={SIDE_CHAT_TAB} class="flex flex-col h-full overflow-hidden contain-strict">
+                        <Show when={activeTab() === SIDE_CHAT_TAB}>
+                          <SideChatPanel />
+                        </Show>
+                      </Tabs.Content>
+                    </Show>
 
                     <Show when={contextOpen()}>
                       <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
