@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { HTTPException } from "hono/http-exception"
 import { describeRoute, validator, resolver } from "hono-openapi"
 import fs from "fs/promises"
+import { createHash } from "crypto"
 import path from "path"
 import z from "zod"
 import { File } from "../../file"
@@ -10,7 +11,47 @@ import { Ripgrep } from "../../file/ripgrep"
 import { LSP } from "../../lsp"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
+import { EnvFile } from "../../util/env-file"
+import { Filesystem } from "../../util/filesystem"
+import { Bus } from "../../bus"
+import { FileWatcher } from "../../file/watcher"
 import { errors } from "../error"
+
+const WrittenFile = z
+  .object({
+    path: z.string(),
+    size: z.number().int(),
+  })
+  .meta({ ref: "FileWritten" })
+
+/** Same cap as one uploaded file (Assets.MAX_FILE_BYTES); an edited image is never near it. */
+const MAX_WRITE_BYTES = 100 * 1024 * 1024
+
+/**
+ * The file `requested` names, if the write route may replace it: an existing regular file whose
+ * real location (symlinks followed) is inside the project, outside `.git`, and not a secret env file.
+ * The client controls `requested`, so every one of those checks is needed — a lexical check alone
+ * lets a symlink in the project point the write at any file the server can reach.
+ */
+async function writableFile(requested: string) {
+  const full = path.resolve(Instance.directory, requested)
+  if (!Instance.containsPath(full)) return
+  if (EnvFile.isSecretFile(full)) return
+
+  const stat = await fs.stat(full).catch(() => undefined)
+  if (!stat?.isFile()) return
+
+  const real = await fs.realpath(full)
+  const roots = [Instance.directory, ...(Instance.worktree === "/" ? [] : [Instance.worktree])]
+  const realRoots = await Promise.all(roots.map((root) => fs.realpath(root).catch(() => root)))
+  const root = realRoots.find((item) => Filesystem.contains(item, real))
+  if (!root) return
+  const relative = path.relative(root, real)
+  if (relative.split(path.sep).includes(".git")) return
+  if (EnvFile.isSecretFile(real)) return
+
+  return { real, relative: path.relative(Instance.directory, full).split(path.sep).join("/"), mode: stat.mode & 0o777 }
+}
 
 const AssetEntry = z
   .object({
@@ -199,6 +240,112 @@ export const FileRoutes = lazy(() =>
         const path = c.req.valid("query").path
         const content = await File.read(path)
         return c.json(content)
+      },
+    )
+    .put(
+      "/file/content",
+      describeRoute({
+        summary: "Overwrite file",
+        description: [
+          "Replace the bytes of an existing file in the project, such as an image saved from the image editor.",
+          "The body is the raw bytes; the file comes from the `path` query parameter. Only existing files are written.",
+        ].join(" "),
+        operationId: "file.write",
+        // Raw bytes for the same reason as the upload route: images are binary, and base64 would
+        // inflate every save by a third.
+        requestBody: {
+          required: true,
+          content: {
+            "application/octet-stream": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: "Written file",
+            content: {
+              "application/json": {
+                schema: resolver(WrittenFile),
+              },
+            },
+          },
+          ...errors(400),
+          409: { description: "The file changed since the client read it (see `expected`)" },
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          path: z.string().min(1).meta({ description: "File path relative to the project directory" }),
+          expected: z
+            .string()
+            .regex(/^[0-9a-f]{64}$/)
+            .optional()
+            .meta({
+              description:
+                "SHA-256 (hex) of the bytes the client edited. When given and the file no longer matches, nothing is written and the route answers 409.",
+            }),
+        }),
+      ),
+      async (c) => {
+        const query = c.req.valid("query")
+        const target = await writableFile(query.path)
+        if (!target) throw new HTTPException(400, { message: "Invalid file path" })
+
+        // 편집기를 연 뒤 에이전트·다른 사람이 같은 파일을 바꿨다면, 옛 사본에서 만든 결과로 덮어써
+        // 그 변경을 지우지 않는다.
+        if (query.expected) {
+          const current = createHash("sha256").update(await fs.readFile(target.real)).digest("hex")
+          if (current !== query.expected) {
+            throw new HTTPException(409, { message: "File changed since it was opened" })
+          }
+        }
+
+        // Content-Length is a hint only; the streaming loop below is what enforces the cap.
+        const declared = Number(c.req.header("content-length") ?? 0)
+        if (declared > MAX_WRITE_BYTES) throw new HTTPException(400, { message: "File is too large" })
+
+        const body = c.req.raw.body
+        if (!body) throw new HTTPException(400, { message: "Missing request body" })
+
+        // Written next to the file and renamed over it, so a save cut off half way leaves the old
+        // file whole instead of a truncated one.
+        const temp = path.join(path.dirname(target.real), `.${path.basename(target.real)}.${crypto.randomUUID()}.tmp`)
+        const handle = await fs.open(temp, "wx", target.mode)
+        let written = 0
+        try {
+          const reader = body.getReader()
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            written += value.byteLength
+            if (written > MAX_WRITE_BYTES) {
+              await reader.cancel().catch(() => {})
+              throw new HTTPException(400, { message: "File is too large" })
+            }
+            // write() 는 디스크가 부족하면 일부만 쓰고 resolve 할 수 있다. 남은 바이트를 다 쓸 때까지
+            // 이어 쓰지 않으면 잘린 파일이 원본을 대신하게 된다.
+            for (let offset = 0; offset < value.byteLength; ) {
+              const { bytesWritten } = await handle.write(value, offset, value.byteLength - offset)
+              if (bytesWritten <= 0) throw new Error("Could not write file")
+              offset += bytesWritten
+            }
+          }
+          // open() 의 mode 에는 프로세스 umask 가 걸려(예: 0664 → 0644) 원본 권한이 바뀌므로 다시 맞춘다.
+          await handle.chmod(target.mode)
+          await handle.close()
+          await fs.rename(temp, target.real)
+        } catch (error) {
+          await handle.close().catch(() => {})
+          await fs.rm(temp, { force: true }).catch(() => {})
+          throw error
+        }
+
+        // Same notifications as the write tool, so open file tabs and the tree reload the new bytes.
+        Bus.publish(File.Event.Edited, { file: target.real })
+        await Bus.publish(FileWatcher.Event.Updated, { file: target.real, event: "change" })
+        return c.json({ path: target.relative, size: written })
       },
     )
     .get(
