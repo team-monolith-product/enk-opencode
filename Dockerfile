@@ -12,6 +12,20 @@ ARG OPENCODE_ASSET_BASE
 ENV OPENCODE_CHANNEL=latest OPENCODE_VERSION=0.0.0-enk OPENCODE_ASSET_BASE=${OPENCODE_ASSET_BASE}
 RUN cd packages/opencode && bun run build --single
 
+# AI 이미지 편집 도구(image_edit)가 부르는 헤드리스 PhotoCraft. 릴리스에는 Linux CLI 가 없어 소스에서 빌드한다.
+# 편집 창의 웹 빌드(packages/app/public/photocraft, 0.7.0)와 같은 엔진이어야 결과가 같으므로 같은 커밋에 고정한다.
+# 런타임(node:22-slim)과 같은 bookworm 에서 빌드해 glibc 를 맞춘다.
+FROM rust:1.99-slim-bookworm AS photocraft
+ARG PHOTOCRAFT_COMMIT=79261615956ab21334e49ca1d384390272e647da
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+RUN git init /src && cd /src \
+    && git fetch --depth 1 https://github.com/storytold/photocraft.git ${PHOTOCRAFT_COMMIT} \
+    && git checkout FETCH_HEAD
+WORKDIR /src
+RUN cargo build --release --locked -p photocraft-cli --features heif \
+    && cp target/release/photocraft-cli /photocraft-cli
+
 FROM scratch AS asset-export
 COPY --from=build /app/packages/app/dist /
 
@@ -53,6 +67,7 @@ RUN chmod -R 777 ${HOME} \
     && chmod -R 777 ${PLAYWRIGHT_BROWSERS_PATH}
 
 COPY --from=build /app/packages/opencode/dist/opencode-linux-x64/bin/opencode /usr/local/bin/opencode
+COPY --from=photocraft /photocraft-cli /usr/local/bin/photocraft-cli
 COPY docker/entrypoint.sh /usr/local/bin/opencode-entrypoint.sh
 RUN chmod 755 /usr/local/bin/opencode-entrypoint.sh
 COPY docker/AGENTS.md /etc/opencode/AGENTS.md
