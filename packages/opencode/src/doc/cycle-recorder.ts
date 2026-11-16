@@ -1,13 +1,22 @@
-import { Database, eq } from "@/storage/db"
+import { Database, eq, inArray } from "@/storage/db"
 import { MessageTable, PartTable } from "@/session/session.sql"
 import { MessageV2 } from "@/session/message-v2"
-import type { MessageID } from "@/session/schema"
+import type { MessageID, SessionID } from "@/session/schema"
 import { Log } from "@/util/log"
-import { PromptCycleTable, PromptCycleInputTable, SessionPromptDocTable, DocSubmitTable, DocSubmitActorTable } from "./doc.sql"
+import {
+  PromptCycleTable,
+  PromptCycleInputTable,
+  PromptCycleLinkTable,
+  SessionPromptDocTable,
+  DocSubmitTable,
+  DocSubmitActorTable,
+} from "./doc.sql"
 import { CycleID, CycleInputID } from "./schema"
 import type { ActorID, DocID } from "./schema"
 
 const log = Log.create({ service: "doc.cycle-recorder" })
+
+type Tokens = { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
 
 // The shape of a message part's JSON `data` payload (the fields the recorder reads).
 type PartData = {
@@ -19,6 +28,7 @@ type PartData = {
   filename?: string
   url?: string
   metadata?: { actorID?: string; docID?: string }
+  tokens?: Tokens // step-finish
 }
 
 // Read a message's parts once, ordered, as plain data objects.
@@ -116,7 +126,7 @@ type AssistantData = {
   role?: string
   parentID?: string
   cost?: number
-  tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
+  tokens?: Tokens
   modelID?: string
   providerID?: string
   path?: { cwd?: string; root?: string }
@@ -124,35 +134,121 @@ type AssistantData = {
   error?: { name?: string; data?: { message?: string } }
 }
 
+// One assistant message's token usage. A message can hold several model calls (one step-finish
+// part each), but the message itself keeps only the LAST call's counts — right for judging the
+// context size, wrong for a usage total. Sum the step-finish parts; fall back to the message's own
+// counts when it has none (a refused turn, older data).
+function tokensOf(parts: PartData[], data: AssistantData) {
+  const steps = parts.filter((p) => p?.type === "step-finish" && p.tokens)
+  if (steps.length === 0) return data.tokens ?? {}
+  const sum = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+  for (const p of steps) {
+    sum.input += p.tokens?.input ?? 0
+    sum.output += p.tokens?.output ?? 0
+    sum.reasoning += p.tokens?.reasoning ?? 0
+    sum.cache.read += p.tokens?.cache?.read ?? 0
+    sum.cache.write += p.tokens?.cache?.write ?? 0
+  }
+  return sum
+}
+
+// The user message that started the run `userMessageID` belongs to (itself when it started one).
+function anchorOf(db: Database.TxOrDb, userMessageID: string) {
+  const row = db
+    .select({ anchor: PromptCycleLinkTable.anchor_user_message_id })
+    .from(PromptCycleLinkTable)
+    .where(eq(PromptCycleLinkTable.user_message_id, userMessageID))
+    .get()
+  return row?.anchor ?? userMessageID
+}
+
 /**
- * Record one prompt cycle per user prompt (turn). A single turn can produce several
- * assistant messages (multi-step agent loop); they all share the same parentID (the user
- * message) and are AGGREGATED into one cycle: tokens/cost summed, response texts joined.
+ * The run started by `anchorID` read `userMessageID`, a user message it did not start with: a steer
+ * or a consented send that landed mid-run, or one the run created itself (auto-compaction, a subtask
+ * summary). Called by the run loop right when it reads the message — before any answer to it exists —
+ * so the recorder folds that answer into the run's cycle instead of opening a new one.
+ *
+ * The anchor is resolved first: a run that re-starts for a message which already joined an earlier
+ * run keeps feeding that earlier run's cycle. The first run to read a message owns it.
+ */
+export function link(input: { sessionID: SessionID; userMessageID: MessageID; anchorID: MessageID }) {
+  Database.use((db) => {
+    const anchor = anchorOf(db, input.anchorID)
+    if (anchor === input.userMessageID) return
+    db.insert(PromptCycleLinkTable)
+      .values({
+        user_message_id: input.userMessageID,
+        anchor_user_message_id: anchor,
+        session_id: input.sessionID,
+        time_created: Date.now(),
+      })
+      .onConflictDoNothing()
+      .run()
+  })
+}
+
+/**
+ * Record one prompt cycle per AI run. A run starts from one user message (its anchor) and can go
+ * on for many assistant messages (multi-step agent loop) — and it can absorb more user messages
+ * while it runs (see link()). Every completed step answering the anchor or a linked message is
+ * AGGREGATED into the anchor's cycle: tokens/cost summed, response texts joined, and each real
+ * prompt kept as one input (seq 0 = the anchor, then in arrival order).
  *
  * Runs inside the message-update projector transaction, so it fires for EVERY prompt path
- * (normal / shell / doc). Idempotent: re-derives the whole cycle from all completed steps
- * of the turn each time, so duplicate events converge to the same row.
- *
- * TODO(steer): records only one input (the parent user message). Accumulating several
- * prompts into one run (followup "steer" mode) is planned but not implemented.
+ * (normal / shell / doc). Idempotent: re-derives the whole cycle — inputs included — from the
+ * stored messages each time, so duplicate events converge to the same rows.
  */
 export function record(db: Database.TxOrDb, info: MessageV2.Info) {
   if (info.role !== "assistant") return
   if (!info.time.completed) return // only finished steps
-  const parentID = info.parentID
-  if (!parentID) return // no turn anchor
+  if (!info.parentID) return // no turn anchor
+  derive(db, info.sessionID, anchorOf(db, info.parentID))
+}
 
-  const parent = db.select().from(MessageTable).where(eq(MessageTable.id, parentID)).get()
-  if (!parent) return
+/**
+ * Re-derive the cycle a user message belongs to. For facts that arrive after the run's steps were
+ * recorded — a consent vote links its user message only once the message exists, and a steer can be
+ * answered before that link lands.
+ */
+export function refresh(db: Database.TxOrDb, userMessageID: MessageID) {
+  const anchor = anchorOf(db, userMessageID)
+  const row = db.select({ session_id: MessageTable.session_id }).from(MessageTable).where(eq(MessageTable.id, anchor as MessageID)).get()
+  if (!row) return
+  derive(db, row.session_id, anchor)
+}
 
-  // All completed assistant steps of this turn (same parent user message), in order.
+function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
+  const linked = db
+    .select({ id: PromptCycleLinkTable.user_message_id })
+    .from(PromptCycleLinkTable)
+    .where(eq(PromptCycleLinkTable.anchor_user_message_id, anchorID))
+    .all()
+    .map((row) => row.id)
+  const memberIDs = [anchorID, ...linked]
+  const members = db
+    .select()
+    .from(MessageTable)
+    .where(inArray(MessageTable.id, memberIDs as MessageID[]))
+    .all()
+    .sort((a, b) => a.time_created - b.time_created || (a.id < b.id ? -1 : 1))
+  const anchor = members.find((m) => m.id === anchorID)
+  if (!anchor) return
+  const memberSet = new Set(memberIDs)
+
+  // All completed assistant steps of this run, in order.
   const steps = db
     .select()
     .from(MessageTable)
-    .where(eq(MessageTable.session_id, info.sessionID))
+    .where(eq(MessageTable.session_id, sessionID))
     .all()
     .map((m) => ({ id: m.id, data: m.data as AssistantData }))
-    .filter((m) => m.data?.role === "assistant" && m.data.parentID === parentID && m.data.time?.completed)
+    .filter(
+      (m) =>
+        m.data?.role === "assistant" &&
+        m.data.parentID !== undefined &&
+        memberSet.has(m.data.parentID) &&
+        m.data.time?.completed,
+    )
     .sort((a, b) => (a.data.time?.created ?? 0) - (b.data.time?.created ?? 0))
   if (steps.length === 0) return
 
@@ -164,58 +260,72 @@ export function record(db: Database.TxOrDb, info: MessageV2.Info) {
   let tokensCacheWrite = 0
   let cost = 0
   const responses: string[] = []
-  let aborted = false
-  let errorMessage: string | null = null
   for (const s of steps) {
-    const tk = s.data.tokens ?? {}
+    const parts = partsOf(db, s.id as MessageID)
+    const tk = tokensOf(parts, s.data)
     tokensInput += tk.input ?? 0
     tokensOutput += tk.output ?? 0
     tokensReasoning += tk.reasoning ?? 0
     tokensCacheRead += tk.cache?.read ?? 0
     tokensCacheWrite += tk.cache?.write ?? 0
     cost += s.data.cost ?? 0
-    const text = textOf(partsOf(db, s.id as MessageID))
+    const text = textOf(parts)
     if (text) responses.push(text)
-    if (s.data.error) {
-      if (s.data.error.name === "MessageAbortedError") aborted = true
-      errorMessage = s.data.error.data?.message ?? s.data.error.name ?? "error"
-    }
   }
   const first = steps[0]!
   const last = steps[steps.length - 1]!
+  // The run ends the way its last step ended. An earlier step that failed and was recovered from —
+  // a model fallback, a steer re-run after an error — does not make the whole run a failure.
+  const lastError = last.data.error
+  const aborted = lastError?.name === "MessageAbortedError"
+  const errorMessage = lastError ? (lastError.data?.message ?? lastError.name ?? "error") : null
   const status = aborted ? "aborted" : errorMessage ? "error" : "completed"
 
-  const parentParts = partsOf(db, parent.id)
-  const meta = metaOf(parentParts)
-  const consent = resolveConsent(db, parent.id, meta.actorID)
-  // docID = the doc the prompt was authored in (part metadata); fall back to the session's
-  // current prompt doc for prompts with no doc metadata (normal path).
-  const docID =
-    meta.docID ??
-    (db
+  // The session's current prompt doc: the fallback docID for prompts with no doc metadata.
+  const sessionDoc =
+    db
       .select({ doc_id: SessionPromptDocTable.doc_id })
       .from(SessionPromptDocTable)
-      .where(eq(SessionPromptDocTable.session_id, info.sessionID))
-      .get()?.doc_id ??
-      null)
+      .where(eq(SessionPromptDocTable.session_id, sessionID))
+      .get()?.doc_id ?? null
 
-  const promptStart = parent.time_created
+  // One input per real prompt. The anchor always counts; a joined message counts only if a person
+  // wrote it — the run's own messages (compaction, continue, subtask summary) carry no text of their
+  // own (synthetic) and are folded in silently.
+  const inputs = members
+    .map((m) => {
+      const parts = partsOf(db, m.id as MessageID)
+      const prompt = textOf(parts)
+      const assets = assetsOf(parts)
+      if (m.id !== anchorID && !prompt && !assets) return
+      const meta = metaOf(parts)
+      return {
+        message: m,
+        prompt,
+        assets,
+        docID: meta.docID ?? sessionDoc,
+        consent: resolveConsent(db, m.id as MessageID, meta.actorID),
+      }
+    })
+    .filter((item) => item !== undefined)
+
+  const promptStart = anchor.time_created
   // TTFT from when the prompt was actually sent to the AI (consent for a doc submit, else
   // when it was authored) to the first assistant step.
-  const ttftStart = consent.timeConsented ?? promptStart
-  const outputStart = first.data.time?.created ?? info.time.created
+  const ttftStart = inputs[0]?.consent.timeConsented ?? promptStart
+  const outputStart = first.data.time?.created ?? promptStart
 
   const cycleValues = {
-    session_id: info.sessionID,
-    user_message_id: parentID,
-    path: last.data.path?.cwd ?? info.path?.cwd ?? null,
+    session_id: sessionID,
+    user_message_id: anchorID,
+    path: last.data.path?.cwd ?? null,
     time_created: promptStart,
     assistant_message_id: last.id,
     response: responses.join("\n\n"),
-    model_id: last.data.modelID ?? info.modelID,
-    provider_id: last.data.providerID ?? info.providerID,
+    model_id: last.data.modelID ?? null,
+    provider_id: last.data.providerID ?? null,
     time_output_start: outputStart,
-    time_completed: last.data.time?.completed ?? info.time.completed ?? null,
+    time_completed: last.data.time?.completed ?? null,
     ttft_ms: Math.max(0, outputStart - ttftStart),
     tokens_input: tokensInput,
     tokens_output: tokensOutput,
@@ -231,37 +341,53 @@ export function record(db: Database.TxOrDb, info: MessageV2.Info) {
   const existing = db
     .select({ id: PromptCycleTable.id })
     .from(PromptCycleTable)
-    .where(eq(PromptCycleTable.user_message_id, parentID))
+    .where(eq(PromptCycleTable.user_message_id, anchorID))
     .get()
+  const cycleID = existing?.id ?? CycleID.ascending()
+  if (existing) db.update(PromptCycleTable).set(cycleValues).where(eq(PromptCycleTable.id, cycleID)).run()
+  else
+    db.insert(PromptCycleTable)
+      .values({ id: cycleID, ...cycleValues })
+      .run()
 
-  if (existing) {
-    db.update(PromptCycleTable).set(cycleValues).where(eq(PromptCycleTable.id, existing.id)).run()
-    log.info("updated cycle", { cycleID: existing.id, session: info.sessionID, steps: steps.length, status })
-    return
-  }
-
-  const cycleID = CycleID.ascending()
-  db.insert(PromptCycleTable)
-    .values({ id: cycleID, ...cycleValues })
-    .run()
-  db.insert(PromptCycleInputTable)
-    .values({
-      id: CycleInputID.ascending(),
-      cycle_id: cycleID,
-      session_id: info.sessionID,
-      doc_id: docID,
-      submit_id: consent.submitID,
-      actor_ids: consent.actorIDs,
-      initiator_actor_id: consent.initiatorActorID,
-      actor_count: consent.actorCount,
-      seq: 0,
-      prompt: textOf(parentParts),
-      assets: assetsOf(parentParts),
-      user_message_id: parent.id,
-      time_created: parent.time_created,
-      time_consented: consent.timeConsented,
-      consent_ms: consent.consentMs,
-    })
-    .run()
-  log.info("recorded cycle", { cycleID, session: info.sessionID, steps: steps.length, status })
+  // Inputs are re-derived every time (a joined prompt or a late consent link can change them), but
+  // an input keeps its id across rewrites so callers holding it still find it.
+  const ids = new Map(
+    db
+      .select({ id: PromptCycleInputTable.id, user_message_id: PromptCycleInputTable.user_message_id })
+      .from(PromptCycleInputTable)
+      .where(eq(PromptCycleInputTable.cycle_id, cycleID))
+      .all()
+      .map((row) => [row.user_message_id, row.id] as const),
+  )
+  db.delete(PromptCycleInputTable).where(eq(PromptCycleInputTable.cycle_id, cycleID)).run()
+  if (inputs.length > 0)
+    db.insert(PromptCycleInputTable)
+      .values(
+        inputs.map((item, seq) => ({
+          id: ids.get(item.message.id) ?? CycleInputID.ascending(),
+          cycle_id: cycleID,
+          session_id: sessionID,
+          doc_id: item.docID,
+          submit_id: item.consent.submitID,
+          actor_ids: item.consent.actorIDs,
+          initiator_actor_id: item.consent.initiatorActorID,
+          actor_count: item.consent.actorCount,
+          seq,
+          prompt: item.prompt,
+          assets: item.assets,
+          user_message_id: item.message.id,
+          time_created: item.message.time_created,
+          time_consented: item.consent.timeConsented,
+          consent_ms: item.consent.consentMs,
+        })),
+      )
+      .run()
+  log.info(existing ? "updated cycle" : "recorded cycle", {
+    cycleID,
+    session: sessionID,
+    steps: steps.length,
+    inputs: inputs.length,
+    status,
+  })
 }

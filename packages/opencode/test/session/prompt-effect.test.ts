@@ -8,6 +8,7 @@ import type { Agent } from "../../src/agent/agent"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
 import { Command } from "../../src/command"
+import { Doc } from "../../src/doc"
 import { Config } from "../../src/config/config"
 import { FileTime } from "../../src/file/time"
 import { LSP } from "../../src/lsp"
@@ -980,6 +981,12 @@ it.effect(
           const inputs = yield* test.inputs
           expect(inputs).toHaveLength(2)
           expect(JSON.stringify(inputs.at(-1)?.messages)).toContain("second")
+
+          // One AI run took both prompts, so it is one usage record with both as inputs.
+          const cycles = Doc.cycleList({ sessionID: chat.id })
+          expect(cycles).toHaveLength(1)
+          expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
+          expect(cycles[0]!.inputs[1]!.userMessageID).toBe(id)
         }),
       { git: true, config: cfg },
     ),

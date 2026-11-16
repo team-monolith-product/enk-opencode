@@ -1734,6 +1734,311 @@ describe("doc", () => {
     })
   }
 
+  // A run that started from `anchor` read `userID` mid-run (what the run loop does on a steer).
+  function joinRun(sessionID: string, userID: string, anchor: string) {
+    CycleRecorder.link({ sessionID: sessionID as never, userMessageID: userID as never, anchorID: anchor as never })
+  }
+
+  function addStepFinish(sessionID: string, messageID: string, n: number, tokens: { input: number; output: number }) {
+    Database.use((db) =>
+      db
+        .insert(PartTable)
+        .values({
+          id: `${messageID}_sf${n}` as never,
+          message_id: messageID as never,
+          session_id: sessionID as never,
+          time_created: 0,
+          data: {
+            type: "step-finish",
+            reason: "tool-calls",
+            cost: 0,
+            tokens: { ...tokens, reasoning: 0, cache: { read: 0, write: 0 } },
+          } as never,
+        })
+        .run(),
+    )
+  }
+
+  test("a steer that joins a running AI run is recorded in that run's cycle", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const tokens = (input: number, output: number) => ({ input, output, reasoning: 0, cache: { read: 0, write: 0 } })
+        const first = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_run1",
+          parentID: "msg_user_start",
+          cost: 0.1,
+          tokens: tokens(100, 10),
+          created: 1100,
+          completed: 1200,
+          finish: "tool-calls",
+        })
+        seedTurn({ userText: "build the page", userTime: 1000, steps: [{ info: first, text: "working" }] })
+        Database.use((db) => CycleRecorder.record(db, first as never))
+
+        // Mid-run, someone steers. The run loop links the steer to the run before answering it.
+        const steered = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_run2",
+          parentID: "msg_user_steer",
+          cost: 0.2,
+          tokens: tokens(200, 20),
+          created: 1300,
+          completed: 1500,
+          finish: "stop",
+        })
+        joinRun(session.id, "msg_user_steer", "msg_user_start")
+        seedTurn({
+          userText: "use blue, not red",
+          userTime: 1150,
+          userActorID: "act_bob",
+          steps: [{ info: steered, text: "done in blue" }],
+        })
+        Database.use((db) => CycleRecorder.record(db, steered as never))
+
+        const cycles = Doc.cycleList({ sessionID: session.id })
+        expect(cycles).toHaveLength(1) // one AI run → one cycle, not one per prompt
+        const cycle = cycles[0]!
+        expect(cycle.inputs.map((item) => [item.seq, item.prompt])).toEqual([
+          [0, "build the page"],
+          [1, "use blue, not red"],
+        ])
+        expect(cycle.inputs[1].userMessageID).toBe("msg_user_steer")
+        expect(cycle.inputs[1].actorIDs).toEqual(["act_bob" as never])
+        expect(cycle.tokensInput).toBe(300)
+        expect(cycle.tokensOutput).toBe(30)
+        expect(cycle.costTotal).toBeCloseTo(0.3)
+        expect(cycle.response).toBe("working\n\ndone in blue")
+        expect(cycle.assistantMessageID).toBe("msg_a_run2")
+        expect(cycle.ttftMs).toBe(100) // from the run's start (1000) to its first output (1100)
+        expect(cycle.status).toBe("completed")
+
+        // A run that restarts for a message that already joined (the loop re-runs an unread steer)
+        // keeps feeding the original run's cycle rather than linking to the steer.
+        joinRun(session.id, "msg_user_more", "msg_user_steer")
+        const more = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_run3",
+          parentID: "msg_user_more",
+          cost: 0,
+          tokens: tokens(1, 1),
+          created: 1700,
+          completed: 1800,
+          finish: "stop",
+        })
+        seedTurn({ userText: "and a footer", userTime: 1600, steps: [{ info: more, text: "footer added" }] })
+        Database.use((db) => CycleRecorder.record(db, more as never))
+        const after = Doc.cycleList({ sessionID: session.id })
+        expect(after).toHaveLength(1)
+        expect(after[0]!.inputs.map((item) => item.prompt)).toEqual(["build the page", "use blue, not red", "and a footer"])
+        // Input ids survive the rewrites.
+        expect(after[0]!.inputs[0].id).toBe(cycle.inputs[0].id)
+        expect(after[0]!.inputs[1].id).toBe(cycle.inputs[1].id)
+      },
+    })
+  })
+
+  test("messages the run makes itself are folded in without becoming inputs", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const tokens = { input: 10, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+        const first = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_before_compact",
+          parentID: "msg_user_task",
+          cost: 0.1,
+          tokens,
+          created: 1100,
+          completed: 1200,
+          finish: "tool-calls",
+        })
+        seedTurn({ userText: "refactor everything", userTime: 1000, steps: [{ info: first, text: "" }] })
+
+        // Auto-compaction's "continue" message: a user message whose only text is synthetic.
+        const cont = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_after_compact",
+          parentID: "msg_user_continue",
+          cost: 0.1,
+          tokens,
+          created: 1400,
+          completed: 1500,
+          finish: "stop",
+        })
+        joinRun(session.id, "msg_user_continue", "msg_user_task")
+        seedTurn({ userText: "", userTime: 1300, steps: [{ info: cont, text: "all refactored" }] })
+        Database.use((db) =>
+          db
+            .update(PartTable)
+            .set({ data: { type: "text", text: "Continue if you have next steps", synthetic: true } as never })
+            .where(eq(PartTable.id, "msg_user_continue_p0" as never))
+            .run(),
+        )
+        Database.use((db) => CycleRecorder.record(db, first as never))
+        Database.use((db) => CycleRecorder.record(db, cont as never))
+
+        const cycles = Doc.cycleList({ sessionID: session.id })
+        expect(cycles).toHaveLength(1)
+        expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["refactor everything"])
+        expect(cycles[0]!.costTotal).toBeCloseTo(0.2)
+        expect(cycles[0]!.response).toBe("all refactored")
+      },
+    })
+  })
+
+  test("sums every model call of a step, not just the last one the message keeps", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        // The message's own tokens hold only its last call (that is what context-size checks need).
+        const info = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_two_calls",
+          parentID: "msg_user_two_calls",
+          cost: 0.3,
+          tokens: { input: 50, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
+          created: 1100,
+          completed: 1500,
+          finish: "stop",
+        })
+        seedTurn({ userText: "go", userTime: 1000, steps: [{ info, text: "gone" }] })
+        addStepFinish(session.id, "msg_a_two_calls", 1, { input: 40, output: 4 })
+        addStepFinish(session.id, "msg_a_two_calls", 2, { input: 50, output: 5 })
+        Database.use((db) => CycleRecorder.record(db, info as never))
+
+        const cycle = Doc.cycleList({ sessionID: session.id })[0]!
+        expect(cycle.tokensInput).toBe(90)
+        expect(cycle.tokensOutput).toBe(9)
+        expect(cycle.costTotal).toBeCloseTo(0.3) // cost is already accumulated on the message
+      },
+    })
+  })
+
+  test("a consent linked after the steer was answered still reaches the cycle", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const info = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_late",
+          parentID: "msg_user_late",
+          cost: 0,
+          tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          created: 1100,
+          completed: 1200,
+          finish: "stop",
+        })
+        seedTurn({ userText: "team steer", userTime: 1000, steps: [{ info, text: "ok" }] })
+        Database.use((db) => CycleRecorder.record(db, info as never))
+        expect(Doc.cycleList({ sessionID: session.id })[0]!.inputs[0].submitID).toBeNull()
+
+        // The vote's dispatch links its user message only after the message exists.
+        Database.use((db) => {
+          db.insert(DocSubmitTable)
+            .values({
+              id: "sub_late" as never,
+              session_id: session.id as never,
+              target_kind: "doc",
+              target_id: docID as never,
+              doc_id: docID as never,
+              actor_id: alice.actorID as never,
+              status: "sent",
+              prompt: "{}",
+              timeout_ms: 1000,
+              expires_at: 9999999999999,
+              cancelled_by: null,
+              user_message_id: "msg_user_late" as never,
+              time_created: 900,
+              time_updated: 950,
+            } as never)
+            .run()
+          for (const a of [alice, bob])
+            db.insert(DocSubmitActorTable)
+              .values({
+                submit_id: "sub_late" as never,
+                actor_id: a.actorID as never,
+                name: "x",
+                status: "approved",
+                time_responded: 950,
+              } as never)
+              .run()
+          CycleRecorder.refresh(db, "msg_user_late" as never)
+        })
+
+        const input = Doc.cycleList({ sessionID: session.id })[0]!.inputs[0]
+        expect(input.submitID).toBe("sub_late" as never)
+        expect(input.actorIDs?.sort()).toEqual([alice.actorID, bob.actorID].sort())
+      },
+    })
+  })
+
+  test("a run is judged by how it ended, not by a step it recovered from", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+        const failed = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_failed",
+          parentID: "msg_user_recover",
+          cost: 0,
+          tokens,
+          created: 1100,
+          completed: 1200,
+          error: { name: "UnknownError", data: { message: "model died" } },
+        })
+        const recovered = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_recovered",
+          parentID: "msg_user_recover",
+          cost: 0,
+          tokens,
+          created: 1300,
+          completed: 1400,
+          finish: "stop",
+        })
+        seedTurn({
+          userText: "try",
+          userTime: 1000,
+          steps: [
+            { info: failed, text: "" },
+            { info: recovered, text: "fine" },
+          ],
+        })
+        Database.use((db) => CycleRecorder.record(db, recovered as never))
+
+        const cycle = Doc.cycleList({ sessionID: session.id })[0]!
+        expect(cycle.status).toBe("completed")
+        expect(cycle.error).toBeNull()
+      },
+    })
+  })
+
   test("records a prompt cycle when an assistant turn finishes (any prompt path)", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

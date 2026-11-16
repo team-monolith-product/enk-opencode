@@ -19,6 +19,7 @@ import { fn } from "@/util/fn"
 import { Color } from "@/util/color"
 import { NamedError } from "@opencode-ai/util/error"
 import * as Room from "./room"
+import * as CycleRecorder from "./cycle-recorder"
 import { MSG_DOC, pack, unpack } from "./wire"
 import {
   DocAssetTable,
@@ -123,8 +124,8 @@ export namespace Doc {
   export type CycleInput = z.infer<typeof CycleInput>
 
   // A full AI run: the input prompt(s) through to one reply (or stop). Token/cost are the
-  // run's single total. `inputs` currently always holds exactly one item; it is an array to
-  // later support followup "steer" mode (several prompts in one run) — not implemented yet.
+  // run's single total. `inputs` holds the prompt that started the run, then every prompt that
+  // joined it while it ran (followup "steer", a consented send landing mid-run), in seq order.
   // docID lives per-input (inputs[].docID), not on the run.
   export const Cycle = z
     .object({
@@ -840,14 +841,16 @@ export namespace Doc {
         rotate(row)
         // Link the produced user message back to this submit so the recorder can resolve
         // the consenting actors (doc_submit_actor) when it records the cycle.
+        // A steer joins a run that is already going, so its answer can be recorded before this link
+        // lands — re-derive the cycle so its consent is not lost.
         if (message?.info?.id)
-          Database.use((db) =>
-            db
-              .update(DocSubmitTable)
+          Database.transaction((db) => {
+            db.update(DocSubmitTable)
               .set({ user_message_id: message.info.id })
               .where(eq(DocSubmitTable.id, row.id))
-              .run(),
-          )
+              .run()
+            CycleRecorder.refresh(db, message.info.id)
+          })
         if (body.noReply === true) return
         return SessionPrompt.loop({ sessionID: row.session_id })
       })

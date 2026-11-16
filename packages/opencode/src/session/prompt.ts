@@ -59,6 +59,7 @@ import { Secret } from "@/util/secret"
 import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
+import * as CycleRecorder from "@/doc/cycle-recorder"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1663,6 +1664,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           let step = 0
           // Position in the model chain. Turn-scoped: every turn starts back at the primary model.
           let modelIndex = 0
+          // The user message this run started from, and the later ones it has already linked to it.
+          let anchor: MessageID | undefined
+          const joined = new Set<MessageID>()
           const session = yield* sessions.get(sessionID)
 
           while (true) {
@@ -1699,6 +1703,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             ) {
               log.info("exiting loop", { sessionID })
               break
+            }
+
+            // 사용 기록(prompt cycle)은 실행 하나에 하나다. 이 실행이 처음 읽은 user 메시지가 기준이고, 그 뒤 새로
+            // 읽는 user 메시지(스티어, 실행 중 통과한 동의 전송, 자동 압축·하위 작업 요약)는 이 실행에 합류한 것이다.
+            // 답이 생기기 전인 지금 남겨야 기록기가 그 답을 이 실행의 기록에 합친다.
+            anchor ??= lastUser.id
+            if (lastUser.id !== anchor && !joined.has(lastUser.id)) {
+              joined.add(lastUser.id)
+              const input = { sessionID, userMessageID: lastUser.id, anchorID: anchor }
+              yield* Effect.sync(() => CycleRecorder.link(input)).pipe(
+                Effect.catchCause((cause) => Effect.sync(() => log.warn("cycle link failed", { sessionID, cause }))),
+              )
             }
 
             // 팀의 주·월 비용 한도(rails)가 바닥났으면 모델을 부르지 않는다. 제목 생성·압축보다 앞에 두어 한 번의
