@@ -321,6 +321,14 @@ export namespace SessionPrompt {
         const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
         if (!userMessage) return input.messages
 
+        const memory = yield* Effect.promise(() => MemoryNote.update(input.messages))
+        if (memory) {
+          const part = yield* sessions.updatePart(memory)
+          const at = userMessage.parts.findIndex((item) => item.id === part.id)
+          if (at >= 0) userMessage.parts[at] = part
+          else userMessage.parts.push(part)
+        }
+
         const reverted = yield* Effect.promise(() =>
           HistoryNote.text(input.session.directory, input.messages, userMessage.info.id),
         )
@@ -331,21 +339,6 @@ export namespace SessionPrompt {
             sessionID: userMessage.info.sessionID,
             type: "text",
             text: reverted,
-            synthetic: true,
-          })
-        }
-
-        const memory = yield* Effect.promise(() => MemoryNote.text(userMessage))
-        for (const msg of input.messages) {
-          if (msg.info.role !== "user") continue
-          const note = msg === userMessage ? memory : MemoryNote.earlier(msg.info.id)
-          if (!note) continue
-          msg.parts.push({
-            id: PartID.ascending(),
-            messageID: msg.info.id,
-            sessionID: msg.info.sessionID,
-            type: "text",
-            text: note,
             synthetic: true,
           })
         }

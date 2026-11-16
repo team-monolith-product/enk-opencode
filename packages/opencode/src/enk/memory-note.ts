@@ -1,20 +1,26 @@
 import { readdir, readFile } from "node:fs/promises"
 import type { MessageV2 } from "@/session/message-v2"
+import { PartID } from "@/session/schema"
 
 export namespace MemoryNote {
   const MB = 1024 * 1024
   const LEVELS = [0.75, 0.85, 0.95]
   const TOP = 3
   const LABEL = 160
-  const KEEP = 200
+  const KEY = "memoryNote"
   const RESTART = "If the limit is reached, the whole workspace restarts."
   const GUIDE =
-    "Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. Then tell the user briefly what you stopped and, for each large program you left running, its memory use and what it does in plain words, so they can decide about those. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does."
+    "Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. The names above are shortened, so stop a program by its pid, not by matching its name. Then tell the user briefly what you stopped and, for each large program you left running, its memory use and what it does in plain words, so they can decide about those. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does."
   const ALONE =
     "No other program is using much memory; most of it is OpenCode itself. Do not stop the preview dev server. Avoid starting heavy programs such as builds or browsers until memory goes down, and tell the user briefly that the workspace memory is high."
+  const RECOVERED = [
+    "<system-reminder>",
+    "Workspace memory is back below the warning level. Earlier memory notes in this conversation are out of date; do not act on them.",
+    "</system-reminder>",
+  ].join("\n")
   const SECRET = /key|token|secret|pass|auth|cred/i
 
-  export type Program = { cmd: string; mb: number; count: number }
+  export type Program = { cmd: string; pid: number; mb: number; count: number }
   export type Usage = { usedMb: number; limitMb: number; selfMb: number; programs: Program[] }
   export type Paths = { cgroup: string; proc: string; root: number }
 
@@ -64,6 +70,11 @@ export namespace MemoryNote {
         if (!arg.includes("=") && SECRET.test(arg)) i++
         continue
       }
+      const at = arg.indexOf("=")
+      if (at > 0 && SECRET.test(arg.slice(0, at))) {
+        out.push(`${arg.slice(0, at)}=***`)
+        continue
+      }
       out.push(!arg.includes("/") && /^[\w.+=-]{32,}$/.test(arg) ? "***" : arg)
     }
     return out.join(" ").replace(/[`<>]/g, "").slice(0, LABEL)
@@ -83,11 +94,12 @@ export namespace MemoryNote {
         while (stack.length) {
           const item = stack.pop()!
           members.push(item)
-          stack.push(...(children.get(item.pid) ?? []))
+          for (const child of children.get(item.pid) ?? []) stack.push(child)
         }
         const largest = members.reduce((a, b) => (b.bytes > a.bytes ? b : a))
         return {
           cmd: label(largest.argv),
+          pid: largest.pid,
           mb: Math.round(members.reduce((sum, item) => sum + item.bytes, 0) / MB),
           count: members.length,
         }
@@ -111,16 +123,16 @@ export namespace MemoryNote {
     if (!stat) return
     const s = Object.fromEntries(Object.entries(fields(stat, " ")).map(([key, value]) => [key, Number(value)]))
     const used = (s.anon ?? 0) + (s.shmem ?? 0) + kernel(s)
-    const result: Usage = {
+    const base: Usage = {
       usedMb: Math.round(used / MB),
       limitMb: Math.round(Number(max) / MB),
       selfMb: 0,
       programs: [],
     }
-    if (used / Number(max) < LEVELS[0]) return result
+    if (level(base) === 0) return base
     const list = await processes(paths.proc)
     const self = list.find((item) => item.pid === paths.root)
-    return { ...result, selfMb: Math.round((self?.bytes ?? 0) / MB), programs: programs(list, paths.root) }
+    return { ...base, selfMb: Math.round((self?.bytes ?? 0) / MB), programs: programs(list, paths.root) }
   }
 
   export function level(usage: Usage) {
@@ -134,36 +146,43 @@ export namespace MemoryNote {
     return [
       "<system-reminder>",
       `Workspace memory: ${usage.usedMb} MB of ${usage.limitMb} MB (${percent}%). OpenCode: ${usage.selfMb} MB.`,
-      ...top.map((item) => `- \`${item.cmd}\`: ${item.mb} MB${item.count > 1 ? ` (${item.count} processes)` : ""}`),
+      ...top.map(
+        (item) =>
+          `- \`${item.cmd}\` (pid ${item.pid}): ${item.mb} MB${item.count > 1 ? ` (${item.count} processes)` : ""}`,
+      ),
       `${RESTART} ${top.length ? GUIDE : ALONE}`,
       "</system-reminder>",
     ].join("\n")
   }
 
-  const cache = new Map<string, { level: number; text: string }>()
-
-  function remember(id: string, value: { level: number; text: string }) {
-    cache.delete(id)
-    cache.set(id, value)
-    if (cache.size > KEEP) cache.delete(cache.keys().next().value!)
+  function stored(message: MessageV2.WithParts) {
+    for (const part of message.parts) {
+      const value = part.type === "text" && part.synthetic ? part.metadata?.[KEY] : undefined
+      if (typeof value === "number") return { part: part as MessageV2.TextPart, level: value }
+    }
   }
 
-  export function earlier(messageID: string) {
-    return cache.get(messageID)?.text
-  }
-
-  export async function text(userMessage: MessageV2.WithParts, paths: Paths = DEFAULT) {
-    if (userMessage.info.role !== "user") return
-    const cached = cache.get(userMessage.info.id)
+  export async function update(
+    messages: MessageV2.WithParts[],
+    paths: Paths = DEFAULT,
+  ): Promise<MessageV2.TextPart | undefined> {
+    const users = messages.filter((message) => message.info.role === "user")
+    const last = users.at(-1)
+    if (!last) return
+    const existing = stored(last)
     const current = await usage(paths).catch(() => undefined)
     const now = current ? level(current) : 0
-    if (cached && cached.level === now) return cached.text
-    if (!current || now === 0) {
-      cache.delete(userMessage.info.id)
-      return
+    if (existing?.level === now) return
+    const before = existing ?? users.slice(0, -1).reverse().map(stored).find(Boolean)
+    if (now === 0 && !before?.level) return
+    return {
+      id: existing?.part.id ?? PartID.ascending(),
+      messageID: last.info.id,
+      sessionID: last.info.sessionID,
+      type: "text",
+      text: now > 0 ? compose(current!) : RECOVERED,
+      synthetic: true,
+      metadata: { [KEY]: now },
     }
-    const note = compose(current)
-    remember(userMessage.info.id, { level: now, text: note })
-    return note
   }
 }

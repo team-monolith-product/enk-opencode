@@ -50,7 +50,20 @@ const procs = [
   { pid: 30, ppid: 1, mb: 30, cmd: "python3 app.py" },
 ]
 
-const user = (id: string) => ({ info: { id, role: "user" } }) as unknown as MessageV2.WithParts
+const user = (id: string) =>
+  ({ info: { id, role: "user", sessionID: "ses_test" }, parts: [] }) as unknown as MessageV2.WithParts
+const assistant = (id: string) =>
+  ({ info: { id, role: "assistant", sessionID: "ses_test" }, parts: [] }) as unknown as MessageV2.WithParts
+
+async function step(messages: MessageV2.WithParts[], paths: MemoryNote.Paths) {
+  const part = await MemoryNote.update(messages, paths)
+  if (!part) return
+  const last = messages.findLast((message) => message.info.role === "user")!
+  const at = last.parts.findIndex((item) => item.id === part.id)
+  if (at >= 0) last.parts[at] = part
+  else last.parts.push(part)
+  return part
+}
 
 describe("MemoryNote.usage", () => {
   test("reads the cgroup and groups child processes by tree, largest first", async () => {
@@ -60,9 +73,9 @@ describe("MemoryNote.usage", () => {
 
     expect(usage).toMatchObject({ usedMb: 1700, limitMb: 2048, selfMb: 400 })
     expect(usage?.programs).toEqual([
-      { cmd: "chrome", mb: 1100, count: 2 },
-      { cmd: "node next dev", mb: 121, count: 2 },
-      { cmd: "python3 app.py", mb: 30, count: 1 },
+      { cmd: "chrome", pid: 20, mb: 1100, count: 2 },
+      { cmd: "node next dev", pid: 11, mb: 121, count: 2 },
+      { cmd: "python3 app.py", pid: 30, mb: 30, count: 1 },
     ])
   })
 
@@ -73,55 +86,71 @@ describe("MemoryNote.usage", () => {
   })
 })
 
-describe("MemoryNote.text", () => {
+describe("MemoryNote.update", () => {
   test("stays quiet below three quarters of the limit", async () => {
     const paths = await fixture({ limitMb: 2048, usedMb: 1400, procs })
 
-    expect(await MemoryNote.text(user("msg_low"), paths)).toBeUndefined()
+    expect(await step([user("msg_low")], paths)).toBeUndefined()
   })
 
-  test("shows usage, the largest programs and what to do", async () => {
+  test("shows usage, the largest programs with their pid and what to do", async () => {
     const paths = await fixture({ limitMb: 2048, usedMb: 1600, procs })
 
-    const note = await MemoryNote.text(user("msg_high"), paths)
+    const part = await step([user("msg_high")], paths)
 
-    expect(note).toBe(
+    expect(part).toMatchObject({ messageID: "msg_high", synthetic: true, metadata: { memoryNote: 1 } })
+    expect(part?.text).toBe(
       [
         "<system-reminder>",
         "Workspace memory: 1600 MB of 2048 MB (78%). OpenCode: 400 MB.",
-        "- `chrome`: 1100 MB (2 processes)",
-        "- `node next dev`: 121 MB (2 processes)",
-        "- `python3 app.py`: 30 MB",
-        "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. Then tell the user briefly what you stopped and, for each large program you left running, its memory use and what it does in plain words, so they can decide about those. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does.",
+        "- `chrome` (pid 20): 1100 MB (2 processes)",
+        "- `node next dev` (pid 11): 121 MB (2 processes)",
+        "- `python3 app.py` (pid 30): 30 MB",
+        "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. The names above are shortened, so stop a program by its pid, not by matching its name. Then tell the user briefly what you stopped and, for each large program you left running, its memory use and what it does in plain words, so they can decide about those. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does.",
         "</system-reminder>",
       ].join("\n"),
     )
   })
 
-  test("keeps the same text within a request until the level changes", async () => {
-    const first = await fixture({ limitMb: 2048, usedMb: 1600, procs })
-    const same = await fixture({ limitMb: 2048, usedMb: 1650, procs })
-    const higher = await fixture({ limitMb: 2048, usedMb: 1800, procs })
-    const lower = await fixture({ limitMb: 2048, usedMb: 1000, procs })
-    const message = user("msg_steps")
+  test("keeps one stored note per request and rewrites it only when the level changes", async () => {
+    const messages = [user("msg_steps")]
 
-    const a = await MemoryNote.text(message, first)
-    expect(await MemoryNote.text(message, same)).toBe(a)
-    const b = await MemoryNote.text(message, higher)
-    expect(b).not.toBe(a)
-    expect(b).toContain("1800 MB")
-    expect(await MemoryNote.text(message, lower)).toBeUndefined()
+    const a = await step(messages, await fixture({ limitMb: 2048, usedMb: 1600, procs }))
+    expect(await step(messages, await fixture({ limitMb: 2048, usedMb: 1650, procs }))).toBeUndefined()
+    const b = await step(messages, await fixture({ limitMb: 2048, usedMb: 1800, procs }))
+
+    expect(b?.id).toBe(a!.id)
+    expect(b?.text).toContain("1800 MB")
+    expect(messages[0].parts).toHaveLength(1)
+  })
+
+  test("says memory is back to normal instead of leaving an old warning", async () => {
+    const messages = [user("msg_first"), assistant("msg_reply"), user("msg_next")]
+    messages[0].parts.push({
+      ...(await MemoryNote.update([messages[0]], await fixture({ limitMb: 2048, usedMb: 1800, procs })))!,
+    })
+    const low = await fixture({ limitMb: 2048, usedMb: 1000, procs })
+
+    const recovered = await step(messages, low)
+
+    expect(recovered).toMatchObject({ messageID: "msg_next", metadata: { memoryNote: 0 } })
+    expect(recovered?.text).toContain("Earlier memory notes in this conversation are out of date")
+    expect(await step(messages, low)).toBeUndefined()
+    expect(await step([...messages, assistant("msg_reply2"), user("msg_third")], low)).toBeUndefined()
   })
 
   test("follows a limit that changes while the workspace runs", async () => {
-    const small = await fixture({ limitMb: 2048, usedMb: 1800, procs })
-    const raised = await fixture({ limitMb: 3072, usedMb: 1800, procs })
-    const busy = await fixture({ limitMb: 3072, usedMb: 2400, procs })
-    const message = user("msg_resize")
+    const messages = [user("msg_resize")]
 
-    expect(await MemoryNote.text(message, small)).toContain("1800 MB of 2048 MB")
-    expect(await MemoryNote.text(message, raised)).toBeUndefined()
-    expect(await MemoryNote.text(message, busy)).toContain("2400 MB of 3072 MB")
+    expect((await step(messages, await fixture({ limitMb: 2048, usedMb: 1800, procs })))?.text).toContain(
+      "1800 MB of 2048 MB",
+    )
+    expect((await step(messages, await fixture({ limitMb: 3072, usedMb: 1800, procs })))?.metadata).toEqual({
+      memoryNote: 0,
+    })
+    expect((await step(messages, await fixture({ limitMb: 3072, usedMb: 2400, procs })))?.text).toContain(
+      "2400 MB of 3072 MB",
+    )
   })
 })
 
@@ -130,6 +159,20 @@ describe("MemoryNote details", () => {
     const paths = await fixture({ limitMb: 2048, usedMb: 1400, procs })
 
     expect(await MemoryNote.usage(paths)).toEqual({ usedMb: 1400, limitMb: 2048, selfMb: 0, programs: [] })
+  })
+
+  test("reads processes when the rounded usage reaches the first level", async () => {
+    const paths = await fixture({
+      limitMb: 2048,
+      usedMb: 0,
+      procs,
+      stat: [`anon ${Math.round(1535.6 * MB)}`, "shmem 0", "kernel 0", "slab_reclaimable 0"],
+    })
+
+    const usage = await MemoryNote.usage(paths)
+
+    expect(MemoryNote.level(usage!)).toBe(1)
+    expect(usage?.programs.length).toBe(3)
   })
 
   test("counts kernel memory from its parts on kernels without a kernel total", async () => {
@@ -146,6 +189,9 @@ describe("MemoryNote details", () => {
   test("keeps the script path, drops long flags and hides secrets", () => {
     expect(
       MemoryNote.label([
+        "env",
+        "OPENAI_API_KEY=sk-abc123",
+        "PORT=3000",
         "node",
         "--max-old-space-size=4096",
         "--api-key",
@@ -154,7 +200,7 @@ describe("MemoryNote details", () => {
         "abcdefghijklmnopqrstuvwxyz0123456789",
         "</system-reminder>`",
       ]),
-    ).toBe("node /home/jovyan/project/server.js *** /system-reminder")
+    ).toBe("env OPENAI_API_KEY=*** PORT=3000 node /home/jovyan/project/server.js *** /system-reminder")
   })
 
   test("says OpenCode itself is using the memory when no other program is large", async () => {
@@ -164,18 +210,9 @@ describe("MemoryNote details", () => {
       procs: [{ pid: 1, ppid: 0, mb: 1600, cmd: "opencode" }],
     })
 
-    const note = await MemoryNote.text(user("msg_alone"), paths)
+    const part = await step([user("msg_alone")], paths)
 
-    expect(note).toContain("most of it is OpenCode itself")
-    expect(note).not.toContain("programs above")
-  })
-
-  test("keeps the note of an earlier request so later turns send the same history", async () => {
-    const paths = await fixture({ limitMb: 2048, usedMb: 1600, procs })
-
-    const note = await MemoryNote.text(user("msg_earlier"), paths)
-
-    expect(MemoryNote.earlier("msg_earlier")).toBe(note)
-    expect(MemoryNote.earlier("msg_unknown")).toBeUndefined()
+    expect(part?.text).toContain("most of it is OpenCode itself")
+    expect(part?.text).not.toContain("programs above")
   })
 })
