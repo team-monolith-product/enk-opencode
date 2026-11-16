@@ -2037,6 +2037,64 @@ describe("doc", () => {
     })
   })
 
+  test("a step whose parts arrive after it completed (a fork copies them later) is read again", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+        const first = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_forked_1",
+          parentID: "msg_user_forked",
+          cost: 0,
+          tokens,
+          created: 1100,
+          completed: 1200,
+          finish: "tool-calls",
+        })
+        const second = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_forked_2",
+          parentID: "msg_user_forked",
+          cost: 0,
+          tokens,
+          created: 1300,
+          completed: 1400,
+          finish: "stop",
+        })
+        seedTurn({
+          userText: "fork me",
+          userTime: 1000,
+          steps: [
+            { info: first, text: "first answer" },
+            { info: second, text: "second answer" },
+          ],
+        })
+        // Fork order: the completed message lands (and is recorded) before its parts are copied.
+        const copied = Database.use((db) =>
+          db.select().from(PartTable).where(eq(PartTable.id, "msg_a_forked_1_p0" as never)).get(),
+        )!
+        Database.use((db) =>
+          db
+            .delete(PartTable)
+            .where(eq(PartTable.id, "msg_a_forked_1_p0" as never))
+            .run(),
+        )
+        Database.use((db) => CycleRecorder.record(db, first as never))
+        Database.use((db) => db.insert(PartTable).values(copied).run())
+        // What the part-updated projector does when the copy is written.
+        CycleRecorder.forget(session.id, "msg_a_forked_1")
+        Database.use((db) => CycleRecorder.record(db, second as never))
+
+        expect(Doc.cycleList({ sessionID: session.id })[0]!.response).toBe("first answer\n\nsecond answer")
+      },
+    })
+  })
+
   test("sums every model call of a step, not just the last one the message keeps", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

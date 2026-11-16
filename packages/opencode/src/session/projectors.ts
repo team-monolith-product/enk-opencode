@@ -131,10 +131,14 @@ export default [
     db.delete(PartTable)
       .where(and(eq(PartTable.id, data.partID), eq(PartTable.session_id, data.sessionID)))
       .run()
+    CycleRecorder.forget(data.sessionID, data.messageID)
   }),
 
   SyncEvent.project(MessageV2.Event.PartUpdated, (db, data) => {
     const { id, messageID, sessionID, ...rest } = data.part
+    // The cycle recorder caches a finished step's summary; a part written after that (a forked
+    // session copies the message before its parts) must not leave it stale.
+    CycleRecorder.forget(sessionID, messageID)
 
     try {
       db.insert(PartTable)
