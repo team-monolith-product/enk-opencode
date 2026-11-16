@@ -1,4 +1,4 @@
-import { Database, and, eq, gte, inArray } from "@/storage/db"
+import { Database, and, eq, gte, inArray, sql } from "@/storage/db"
 import { MessageTable, PartTable } from "@/session/session.sql"
 import { MessageV2 } from "@/session/message-v2"
 import type { MessageID, SessionID } from "@/session/schema"
@@ -338,13 +338,20 @@ function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
   if (!anchor) return
   const memberSet = new Set(memberIDs)
 
-  // All completed assistant steps of this run, in order. A step is created after the message it
-  // answers (both stamped by the server), so only rows from the run's start on can belong to it —
-  // read just those through the (session, time) index instead of the whole session on every step.
+  // All completed assistant steps of this run, in order. A step is stored after the message it
+  // answers, so only rows stored from the run's start on can belong to it — read just those, by
+  // rowid (insertion order), instead of the whole session on every step. Not by timestamp: user and
+  // assistant messages are stamped on different paths, and a clock stepped back would cut steps off.
+  const anchorRow =
+    db
+      .select({ row: sql<number>`rowid` })
+      .from(MessageTable)
+      .where(eq(MessageTable.id, anchorID as MessageID))
+      .get()?.row ?? 0
   const steps = db
     .select()
     .from(MessageTable)
-    .where(and(eq(MessageTable.session_id, sessionID), gte(MessageTable.time_created, anchor.time_created)))
+    .where(and(gte(sql`rowid`, anchorRow), eq(MessageTable.session_id, sessionID)))
     .all()
     .map((m) => ({ id: m.id, data: m.data as AssistantData }))
     .filter(

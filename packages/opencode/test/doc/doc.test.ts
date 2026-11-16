@@ -2139,6 +2139,35 @@ describe("doc", () => {
     })
   })
 
+  test("steps stamped earlier than their prompt (clock stepped back) still belong to the run", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        // NTP pulled the clock back: the answer is stored after the prompt but stamped 5s before it.
+        const info = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_skewed",
+          parentID: "msg_user_skewed",
+          cost: 0.25,
+          tokens: { input: 3, output: 4, reasoning: 0, cache: { read: 0, write: 0 } },
+          created: 5_000,
+          completed: 6_000,
+          finish: "stop",
+        })
+        seedTurn({ userText: "late clock", userTime: 10_000, steps: [{ info, text: "answered" }] })
+        Database.use((db) => CycleRecorder.record(db, info as never))
+
+        const cycle = Doc.cycleList({ sessionID: session.id })[0]
+        expect(cycle?.response).toBe("answered")
+        expect(cycle?.costTotal).toBeCloseTo(0.25)
+      },
+    })
+  })
+
   test("the step cache is bounded by the text it holds", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

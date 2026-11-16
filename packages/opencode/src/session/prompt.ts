@@ -60,26 +60,25 @@ import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import * as CycleRecorder from "@/doc/cycle-recorder"
-import { Database, and, eq, gte } from "@/storage/db"
+import { Database, and, eq, gt, sql } from "@/storage/db"
 import { MessageTable } from "./session.sql"
 
 // One loop() call waiting on a session's run. `stopped` flips when someone cancels the session
 // while it waits, so the caller does not restart what was just stopped.
 type Waiter = { stopped: boolean }
-// Everyone currently waiting on a session's run, when that run last read the session's messages,
-// and when someone last called loop() to have the session answered. Lives only while someone
-// waits, so nothing accumulates per session.
+// Everyone currently waiting on a session's run, how far the message table was when that run last
+// read the session, and how far it was when someone last called loop() to have the session
+// answered. Lives only while someone waits, so nothing accumulates per session.
 type Watch = { waiters: Set<Waiter>; readAt: number; wantedAt: number }
 
-// Wall-clock milliseconds that never go backward in this process. loop()'s re-run check orders a
-// prompt's creation against the run's last read and the latest loop() call; with Date.now() a clock
-// stepped back (NTP) between those moments could hide an unread steer. If the clock jumps back this
-// holds at the last value until real time catches up — equal stamps count as "maybe unread", and
-// the answer check keeps that from re-running anything already answered.
-let lastNow = 0
-export function monotonicNow() {
-  lastNow = Math.max(lastNow, Date.now())
-  return lastNow
+/**
+ * The message table's newest rowid. SQLite hands out rowids in insertion order (max + 1, and a row
+ * older than the one compared against is never deleted mid-run), so "stored after this point" is a
+ * rowid comparison — no clock involved. Message timestamps come from different clocks on different
+ * paths, so a system clock stepped back could reorder them; rowids cannot be reordered.
+ */
+export function lastMessageRow() {
+  return Database.use((db) => db.select({ row: sql<number | null>`max(rowid)` }).from(MessageTable).get())?.row ?? 0
 }
 
 // @ts-ignore
@@ -1152,9 +1151,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           id: input.messageID ?? MessageID.ascending(),
           role: "user",
           sessionID: input.sessionID,
-          // Same clock as loop()'s re-run check (readAt / wantedAt), so their order holds even if the
-          // system clock is stepped back.
-          time: { created: monotonicNow() },
+          time: { created: Date.now() },
           tools: input.tools,
           imageGeneration: input.imageGeneration,
           agent: ag.name,
@@ -1634,23 +1631,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           throw new Error("Impossible")
         })
 
-      // 실행이 마지막으로 메시지를 읽은 뒤 들어와 아무도 읽지 않은 user 메시지가 있는지. 그 뒤에 만들어진 행만
-      // 보므로 세션 길이와 상관없이 몇 줄이다(user 메시지 시각은 서버가 찍고, (session, time) 인덱스를 탄다).
-      // 그 사이 생긴 답(assistant)이 있으면 읽힌 것이고, 실패한 답도 답으로 친다 — 실패한 프롬프트를 자동으로
-      // 다시 시도하지 않는다.
+      // 실행이 마지막으로 메시지를 읽은 뒤 들어와 아무도 읽지 않은 user 메시지가 있는지. 그 뒤에 저장된 행만
+      // (rowid 범위로) 보므로 세션 길이와 상관없이 몇 줄이고, 시계에도 기대지 않는다. 그 사이 생긴 답(assistant)이
+      // 있으면 읽힌 것이고, 실패한 답도 답으로 친다 — 실패한 프롬프트를 자동으로 다시 시도하지 않는다.
       // Only messages someone asked to have answered count: a user message stored after the last
       // loop() call (a noReply prompt) is for context and never triggers a re-run.
       const unread = (sessionID: SessionID, readAt: number, wantedAt: number) =>
         Effect.sync(() => {
-          if (!Number.isFinite(readAt) || wantedAt < readAt) return false
+          if (!Number.isFinite(readAt) || wantedAt <= readAt) return false
           const rows = Database.use((db) =>
             db
-              .select({ id: MessageTable.id, data: MessageTable.data, time_created: MessageTable.time_created })
+              .select({ id: MessageTable.id, data: MessageTable.data, row: sql<number>`rowid` })
               .from(MessageTable)
-              .where(and(eq(MessageTable.session_id, sessionID), gte(MessageTable.time_created, readAt)))
+              .where(and(gt(sql`rowid`, readAt), eq(MessageTable.session_id, sessionID)))
               .all(),
           )
-            .filter((row) => (row.data as { role?: string }).role !== "user" || row.time_created <= wantedAt)
+            .filter((row) => (row.data as { role?: string }).role !== "user" || row.row <= wantedAt)
           const infos = rows.map((row) => ({ id: row.id, ...(row.data as { role?: string; parentID?: string }) }))
           const answered = new Set(infos.flatMap((info) => (info.role === "assistant" ? [info.parentID] : [])))
           return infos.some((info) => info.role === "user" && !answered.has(info.id))
@@ -1701,7 +1697,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             // Taken before the read, so a message stored while the read is in flight still counts as
             // possibly unread for loop()'s re-run check.
-            const readAt = monotonicNow()
+            const readAt = lastMessageRow()
             let msgs = yield* Effect.promise(() => MessageV2.filterCompacted(MessageV2.stream(sessionID)))
             const watch = (yield* InstanceState.get(cache)).watches.get(sessionID)
             if (watch) watch.readAt = readAt
@@ -2001,7 +1997,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // Everything stored up to now is something this caller wants answered (prompt() stores its
         // message, then calls loop()). A noReply message stored later, with no loop() of its own,
         // asked for no answer and must not trigger a re-run.
-        watch.wantedAt = monotonicNow()
+        watch.wantedAt = lastMessageRow()
         const me: Waiter = { stopped: false }
         watch.waiters.add(me)
         return yield* Effect.gen(function* () {
