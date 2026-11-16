@@ -71,6 +71,17 @@ type Waiter = { stopped: boolean }
 // waits, so nothing accumulates per session.
 type Watch = { waiters: Set<Waiter>; readAt: number; wantedAt: number }
 
+// Wall-clock milliseconds that never go backward in this process. loop()'s re-run check orders a
+// prompt's creation against the run's last read and the latest loop() call; with Date.now() a clock
+// stepped back (NTP) between those moments could hide an unread steer. If the clock jumps back this
+// holds at the last value until real time catches up — equal stamps count as "maybe unread", and
+// the answer check keeps that from re-running anything already answered.
+let lastNow = 0
+export function monotonicNow() {
+  lastNow = Math.max(lastNow, Date.now())
+  return lastNow
+}
+
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
 
@@ -1141,7 +1152,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           id: input.messageID ?? MessageID.ascending(),
           role: "user",
           sessionID: input.sessionID,
-          time: { created: Date.now() },
+          // Same clock as loop()'s re-run check (readAt / wantedAt), so their order holds even if the
+          // system clock is stepped back.
+          time: { created: monotonicNow() },
           tools: input.tools,
           imageGeneration: input.imageGeneration,
           agent: ag.name,
@@ -1688,7 +1701,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             // Taken before the read, so a message stored while the read is in flight still counts as
             // possibly unread for loop()'s re-run check.
-            const readAt = Date.now()
+            const readAt = monotonicNow()
             let msgs = yield* Effect.promise(() => MessageV2.filterCompacted(MessageV2.stream(sessionID)))
             const watch = (yield* InstanceState.get(cache)).watches.get(sessionID)
             if (watch) watch.readAt = readAt
@@ -1988,7 +2001,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // Everything stored up to now is something this caller wants answered (prompt() stores its
         // message, then calls loop()). A noReply message stored later, with no loop() of its own,
         // asked for no answer and must not trigger a re-run.
-        watch.wantedAt = Date.now()
+        watch.wantedAt = monotonicNow()
         const me: Waiter = { stopped: false }
         watch.waiters.add(me)
         return yield* Effect.gen(function* () {

@@ -943,13 +943,25 @@ export namespace Doc {
    * 않았을 때만 닫는다.
    */
   const SETTLE_MS = 1_000
+  /**
+   * The timer behind the settle window. Swappable so tests can fire it by hand instead of sleeping
+   * through real time; production always uses the real setTimeout.
+   */
+  export const SettleTimer = {
+    set: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+    clear: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  }
   // 지금 AI 가 도는 세션. 세션 상태 이벤트로만 채운다 — 프로세스가 막 떴을 때는 아무것도 돌고 있지 않다.
   const running = new Set<string>()
-  const settling = new Map<string, ReturnType<typeof setTimeout>>()
+  const settling = new Map<string, unknown>()
+
+  /** Whether this module currently sees the session's AI as running (it follows status events). */
+  export function isRunning(sessionID: SessionID) {
+    return running.has(sessionID)
+  }
 
   function track(sessionID: SessionID, busy: boolean) {
-    const pending = settling.get(sessionID)
-    if (pending) clearTimeout(pending)
+    if (settling.has(sessionID)) SettleTimer.clear(settling.get(sessionID))
     settling.delete(sessionID)
     if (busy) {
       running.add(sessionID)
@@ -958,7 +970,7 @@ export namespace Doc {
     running.delete(sessionID)
     settling.set(
       sessionID,
-      setTimeout(() => {
+      SettleTimer.set(() => {
         settling.delete(sessionID)
         if (running.has(sessionID)) return
         close(pendingOf(sessionID, "stop"), null)

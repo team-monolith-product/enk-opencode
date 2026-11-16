@@ -1735,11 +1735,16 @@ describe("doc", () => {
     })
   }
 
-  // Tell the doc module the session's AI is running (it follows session status events).
-  async function working(sessionID: string) {
-    await SessionStatus.set(sessionID as never, { type: "busy" })
-    await Bun.sleep(20)
+  // Tell the doc module the session's AI is running / has stopped (it follows session status events),
+  // and wait until it has seen it rather than for a fixed time.
+  async function status(sessionID: string, busy: boolean) {
+    await SessionStatus.set(sessionID as never, { type: busy ? "busy" : "idle" })
+    const deadline = Date.now() + 2000
+    while (Doc.isRunning(sessionID as never) !== busy && Date.now() < deadline) await Bun.sleep(1)
+    expect(Doc.isRunning(sessionID as never)).toBe(busy)
   }
+  const working = (sessionID: string) => status(sessionID, true)
+  const idle = (sessionID: string) => status(sessionID, false)
 
   // A run that started from `anchor` read `userID` mid-run (what the run loop does on a steer).
   function joinRun(sessionID: string, userID: string, anchor: string) {
@@ -2091,6 +2096,41 @@ describe("doc", () => {
         Database.use((db) => CycleRecorder.record(db, second as never))
 
         expect(Doc.cycleList({ sessionID: session.id })[0]!.response).toBe("first answer\n\nsecond answer")
+      },
+    })
+  })
+
+  test("the step cache is bounded by the text it holds", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+        const big = "x".repeat(1_500_000) // a long code answer
+        const steps = [1, 2, 3, 4].map((n) =>
+          assistantInfo({
+            sessionID: session.id,
+            id: `msg_a_big_${n}`,
+            parentID: `msg_user_big_${n}`,
+            cost: 0,
+            tokens,
+            created: 1000 * n + 100,
+            completed: 1000 * n + 200,
+            finish: "stop",
+          }),
+        )
+        steps.forEach((info, i) =>
+          seedTurn({ userText: `q${i}`, userTime: 1000 * (i + 1), steps: [{ info, text: big }] }),
+        )
+        for (const info of steps) Database.use((db) => CycleRecorder.record(db, info as never))
+
+        // Four 1.5M-char answers do not all stay resident: the cache keeps under its ~4M-char budget.
+        expect(CycleRecorder.cacheUsage().chars).toBeLessThanOrEqual(4_000_000)
+        // ...and each cycle still got its full answer.
+        expect(Doc.cycleList({ sessionID: session.id }).every((cycle) => cycle.response === big)).toBe(true)
       },
     })
   })
@@ -3066,29 +3106,48 @@ describe("doc", () => {
           peer: { send: (data) => events.push(JSON.parse(data) as Doc.SubmitEvent) },
         })
         const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
-        await working(session.id)
+        // Drive the settle window by hand instead of sleeping through real time.
+        const timers = new Map<number, () => void>()
+        let next = 0
+        const real = { ...Doc.SettleTimer }
+        Doc.SettleTimer.set = (fn) => {
+          timers.set(++next, fn)
+          return next
+        }
+        Doc.SettleTimer.clear = (handle) => void timers.delete(handle as number)
+        const fire = () => {
+          const due = [...timers.values()]
+          timers.clear()
+          for (const fn of due) fn()
+        }
+        try {
+          await working(session.id)
 
-        const stop = Doc.stopSubmitCreate({
-          sessionID: session.id,
-          docID,
-          actorID: alice.actorID,
-          actorIDs: [alice.actorID, bob.actorID],
-        })
-        expect(stop.status).toBe("pending")
+          const stop = Doc.stopSubmitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            actorIDs: [alice.actorID, bob.actorID],
+          })
+          expect(stop.status).toBe("pending")
 
-        // A run that ends and starts again right away (loop() re-running for an unread steer) leaves the
-        // vote alone: the team is still voting to stop that AI.
-        await SessionStatus.set(session.id, { type: "idle" })
-        await working(session.id)
-        await Bun.sleep(1300)
-        expect(events.some((e) => e.type === "cancelled" && e.state.submitID === stop.submitID)).toBe(false)
+          // A run that ends and starts again right away (loop() re-running for an unread steer) leaves
+          // the vote alone: the busy event cancels the settle timer before it can fire.
+          await idle(session.id)
+          expect(timers.size).toBe(1)
+          await working(session.id)
+          expect(timers.size).toBe(0)
+          fire()
+          expect(events.some((e) => e.type === "cancelled" && e.state.submitID === stop.submitID)).toBe(false)
 
-        // The run ends by itself and stays idle: nothing is left to stop.
-        await SessionStatus.set(session.id, { type: "idle" })
-        const deadline = Date.now() + 3000
-        while (!events.some((e) => e.type === "cancelled") && Date.now() < deadline) await Bun.sleep(10)
-        const closed = events.find((e) => e.type === "cancelled" && e.state.submitID === stop.submitID)
-        expect(closed?.state.targetKind).toBe("stop")
+          // The run ends by itself and stays idle through the window: nothing is left to stop.
+          await idle(session.id)
+          fire()
+          const closed = events.find((e) => e.type === "cancelled" && e.state.submitID === stop.submitID)
+          expect(closed?.state.targetKind).toBe("stop")
+        } finally {
+          Object.assign(Doc.SettleTimer, real)
+        }
 
         // ...so a send goes through instead of being refused until the stale vote expires.
         const send = Doc.submitCreate({

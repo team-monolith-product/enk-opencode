@@ -165,12 +165,24 @@ function tokensOf(parts: PartData[], data: AssistantData) {
 // a long agent run, inside the projector's write transaction. Keyed by session as well (message ids
 // are only unique per database); an entry is only used for the same completion time, and forget()
 // drops it whenever one of the message's parts changes — a forked session copies a completed message
-// first and its parts after, so "completed" alone does not mean the parts are in. Bounded: the oldest
-// entries go first; a dropped entry is simply read again.
+// first and its parts after, so "completed" alone does not mean the parts are in.
+//
+// Bounded by the text it holds, not just by entry count — a response can be tens of KB of code, and
+// the cache only has to cover the runs being recorded right now. The oldest entries go first (the
+// Map keeps insertion order and a re-read entry is re-inserted); a dropped entry is simply read again.
 type StepSummary = { tokens: Tokens; text: string }
-const STEP_CACHE_MAX = 5_000
+const STEP_CACHE_MAX_ENTRIES = 5_000
+const STEP_CACHE_MAX_CHARS = 4_000_000 // ~8 MB of UTF-16 text
 const stepCache = new Map<string, { completed: number | undefined; summary: StepSummary }>()
+let stepCacheChars = 0
 const stepKey = (sessionID: string, messageID: string) => `${sessionID}:${messageID}`
+
+function drop(key: string) {
+  const entry = stepCache.get(key)
+  if (!entry) return
+  stepCacheChars -= entry.summary.text.length
+  stepCache.delete(key)
+}
 
 function summaryOf(db: Database.TxOrDb, sessionID: string, messageID: string, data: AssistantData): StepSummary {
   const key = stepKey(sessionID, messageID)
@@ -178,15 +190,27 @@ function summaryOf(db: Database.TxOrDb, sessionID: string, messageID: string, da
   if (hit && hit.completed === data.time?.completed) return hit.summary
   const parts = partsOf(db, messageID as MessageID)
   const summary = { tokens: tokensOf(parts, data), text: textOf(parts) }
-  stepCache.delete(key)
-  if (stepCache.size >= STEP_CACHE_MAX) stepCache.delete(stepCache.keys().next().value!)
+  drop(key)
+  // A single step bigger than the whole budget is not kept at all.
+  if (summary.text.length > STEP_CACHE_MAX_CHARS) return summary
+  while (
+    stepCache.size > 0 &&
+    (stepCache.size >= STEP_CACHE_MAX_ENTRIES || stepCacheChars + summary.text.length > STEP_CACHE_MAX_CHARS)
+  )
+    drop(stepCache.keys().next().value!)
   stepCache.set(key, { completed: data.time?.completed, summary })
+  stepCacheChars += summary.text.length
   return summary
 }
 
 /** A part of this message was written or removed: its cached step summary, if any, is stale. */
 export function forget(sessionID: string, messageID: string) {
-  stepCache.delete(stepKey(sessionID, messageID))
+  drop(stepKey(sessionID, messageID))
+}
+
+/** What the step cache holds right now — for tests and diagnostics. */
+export function cacheUsage() {
+  return { entries: stepCache.size, chars: stepCacheChars }
 }
 
 // The user message that started the run `userMessageID` belongs to (itself when it started one).
