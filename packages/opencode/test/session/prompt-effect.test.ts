@@ -1063,6 +1063,61 @@ it.effect(
 )
 
 it.effect(
+  "two prompts that arrive during one model call both join the run's usage record",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const gate = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          yield* test.push((_input) =>
+            stream(start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+              Stream.concat(
+                Stream.fromEffect(Effect.promise(() => gate.promise)).pipe(
+                  Stream.flatMap(() =>
+                    stream(textStart("a"), textDelta("a", "first"), textEnd("a"), finishStep(), finish()),
+                  ),
+                ),
+              ),
+            ),
+          )
+
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "first" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+
+          const steer = (text: string) =>
+            Effect.gen(function* () {
+              const id = MessageID.ascending()
+              const fiber = yield* prompt
+                .prompt({ sessionID: chat.id, messageID: id, agent: "build", model: ref, parts: [{ type: "text", text }] })
+                .pipe(Effect.forkChild)
+              yield* saved(sessions, chat.id, id)
+              return fiber
+            })
+          const b = yield* steer("second")
+          const c = yield* steer("third")
+
+          yield* test.reply(...replyStop("both handled"))
+          gate.resolve()
+          yield* Effect.all([Fiber.await(a), Fiber.await(b), Fiber.await(c)])
+          expect(yield* test.calls).toBe(2)
+
+          // The model read both steers in one step and answered only the newer; the older still counts.
+          const cycles = Doc.cycleList({ sessionID: chat.id })
+          expect(cycles).toHaveLength(1)
+          expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second", "third"])
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+it.effect(
   "a prompt that joined a run someone stopped is not answered",
   () =>
     provideTmpdirInstance(

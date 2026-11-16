@@ -171,7 +171,13 @@ function anchorOf(db: Database.TxOrDb, userMessageID: string) {
  * The anchor is resolved first: a run that re-starts for a message which already joined an earlier
  * run keeps feeding that earlier run's cycle. The first run to read a message owns it.
  */
-export function link(input: { sessionID: SessionID; userMessageID: MessageID; anchorID: MessageID }) {
+export function link(input: {
+  sessionID: SessionID
+  userMessageID: MessageID
+  anchorID: MessageID
+  /** The message re-sends an earlier prompt (auto-compaction replay): fold its answer, not its text. */
+  replay?: boolean
+}) {
   Database.use((db) => {
     const anchor = anchorOf(db, input.anchorID)
     if (anchor === input.userMessageID) return
@@ -179,6 +185,7 @@ export function link(input: { sessionID: SessionID; userMessageID: MessageID; an
       .values({
         user_message_id: input.userMessageID,
         anchor_user_message_id: anchor,
+        replay: input.replay ?? false,
         session_id: input.sessionID,
         time_created: Date.now(),
       })
@@ -218,13 +225,13 @@ export function refresh(db: Database.TxOrDb, userMessageID: MessageID) {
 }
 
 function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
-  const linked = db
-    .select({ id: PromptCycleLinkTable.user_message_id })
+  const links = db
+    .select({ id: PromptCycleLinkTable.user_message_id, replay: PromptCycleLinkTable.replay })
     .from(PromptCycleLinkTable)
     .where(eq(PromptCycleLinkTable.anchor_user_message_id, anchorID))
     .all()
-    .map((row) => row.id)
-  const memberIDs = [anchorID, ...linked]
+  const replays = new Set(links.filter((row) => row.replay).map((row) => row.id))
+  const memberIDs = [anchorID, ...links.map((row) => row.id)]
   const members = db
     .select()
     .from(MessageTable)
@@ -291,9 +298,11 @@ function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
 
   // One input per real prompt. The anchor always counts; a joined message counts only if a person
   // wrote it — the run's own messages (compaction, continue, subtask summary) carry no text of their
-  // own (synthetic) and are folded in silently.
+  // own (synthetic), and a compaction replay repeats a prompt already counted; both are folded in
+  // silently.
   const inputs = members
     .map((m) => {
+      if (replays.has(m.id)) return
       const parts = partsOf(db, m.id as MessageID)
       const prompt = textOf(parts)
       const assets = assetsOf(parts)

@@ -215,7 +215,7 @@ export const PromptCycleInputTable = sqliteTable(
 
 // Which run a user message joined. The run loop writes a row the moment it reads a user message
 // that is not the one it started with — a steer, a consented send landing mid-run, or a message
-// the run made itself (auto-compaction, a subtask summary). The recorder folds the answers to
+// the run made itself (auto-compaction, a subtask summary; compaction marks its replay first). The recorder folds the answers to
 // those messages into the anchor's cycle instead of opening a cycle per message. A message with
 // no row here anchors its own run. Recorded at read time, before any answer exists, so the
 // recorder never has to guess from timestamps (browser-minted ids can be clock-skewed).
@@ -224,6 +224,9 @@ export const PromptCycleLinkTable = sqliteTable(
   {
     user_message_id: text().primaryKey(),
     anchor_user_message_id: text().notNull(),
+    // A copy of an earlier prompt that auto-compaction re-sent after summarizing. Its answer is part
+    // of the run, but the prompt is not a new one — it never becomes an input.
+    replay: integer({ mode: "boolean" }).notNull().default(false),
     session_id: text()
       .$type<SessionID>()
       .notNull()

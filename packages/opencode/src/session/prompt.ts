@@ -1665,7 +1665,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // Position in the model chain. Turn-scoped: every turn starts back at the primary model.
           let modelIndex = 0
           // The user message this run started from, and the later ones it has already linked to it.
-          let anchor: MessageID | undefined
+          let anchor: { id: MessageID; created: number } | undefined
           const joined = new Set<MessageID>()
           const session = yield* sessions.get(sessionID)
 
@@ -1708,10 +1708,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // 사용 기록(prompt cycle)은 실행 하나에 하나다. 이 실행이 처음 읽은 user 메시지가 기준이고, 그 뒤 새로
             // 읽는 user 메시지(스티어, 실행 중 통과한 동의 전송, 자동 압축·하위 작업 요약)는 이 실행에 합류한 것이다.
             // 답이 생기기 전인 지금 남겨야 기록기가 그 답을 이 실행의 기록에 합친다.
-            anchor ??= lastUser.id
-            if (lastUser.id !== anchor && !joined.has(lastUser.id)) {
-              joined.add(lastUser.id)
-              const input = { sessionID, userMessageID: lastUser.id, anchorID: anchor }
+            // 한 스텝 사이에 여러 개가 들어오면 모델은 그 전부를 읽으므로, 가장 최근 것만이 아니라 실행이 시작된
+            // 뒤 들어온 user 메시지를 모두 남긴다.
+            if (!anchor) anchor = { id: lastUser.id, created: lastUser.time.created }
+            const run = anchor
+            const fresh = ordered.filter(
+              (msg) =>
+                msg.info.role === "user" &&
+                msg.info.id !== run.id &&
+                msg.info.time.created >= run.created &&
+                !joined.has(msg.info.id),
+            )
+            for (const msg of fresh) {
+              joined.add(msg.info.id)
+              const input = { sessionID, userMessageID: msg.info.id, anchorID: run.id }
               yield* Effect.sync(() => CycleRecorder.link(input)).pipe(
                 Effect.catchCause((cause) => Effect.sync(() => log.warn("cycle link failed", { sessionID, cause }))),
               )
@@ -1940,8 +1950,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // 그런데 그 실행이 오류·차단으로 끝나거나, 메시지를 마지막으로 읽은 직후 끝나 버리면 합류한 프롬프트는
         // 아무도 읽지 않은 채 남는다. 그때 한 번 더 돈다. 기다리는 사이 누가 중지했으면 다시 돌리지 않는다 —
         // 중지는 답이 생기기 전에 걸릴 수도 있어서, 결과 메시지의 오류만으로는 중지를 알아볼 수 없다.
-        if ((s.stops.get(input.sessionID) ?? 0) !== stops) return result
+        const stopped = () => (s.stops.get(input.sessionID) ?? 0) !== stops
+        if (stopped()) return result
         if (!(yield* unanswered(input.sessionID))) return result
+        // The scan reads storage asynchronously; a stop that lands meanwhile finds no busy runner to
+        // interrupt, so it must be honored here or the replacement run would ignore it.
+        if (stopped()) return result
         log.info("answering a prompt the finished run never read", { sessionID: input.sessionID })
         return yield* getRunner(s.runners, input.sessionID).ensureRunning(runLoop(input.sessionID))
       })

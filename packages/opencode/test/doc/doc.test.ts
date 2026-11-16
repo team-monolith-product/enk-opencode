@@ -1887,11 +1887,33 @@ describe("doc", () => {
         Database.use((db) => CycleRecorder.record(db, first as never))
         Database.use((db) => CycleRecorder.record(db, cont as never))
 
+        // Compaction's replay copies the original prompt's parts verbatim — real, non-synthetic text.
+        // It is marked as a replay before the loop reads it, and the loop's own link must not undo that.
+        const replayed = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_after_replay",
+          parentID: "msg_user_replay",
+          cost: 0.1,
+          tokens,
+          created: 1700,
+          completed: 1800,
+          finish: "stop",
+        })
+        CycleRecorder.link({
+          sessionID: session.id as never,
+          userMessageID: "msg_user_replay" as never,
+          anchorID: "msg_user_task" as never,
+          replay: true,
+        })
+        joinRun(session.id, "msg_user_replay", "msg_user_task")
+        seedTurn({ userText: "refactor everything", userTime: 1600, steps: [{ info: replayed, text: "again" }] })
+        Database.use((db) => CycleRecorder.record(db, replayed as never))
+
         const cycles = Doc.cycleList({ sessionID: session.id })
         expect(cycles).toHaveLength(1)
         expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["refactor everything"])
-        expect(cycles[0]!.costTotal).toBeCloseTo(0.2)
-        expect(cycles[0]!.response).toBe("all refactored")
+        expect(cycles[0]!.costTotal).toBeCloseTo(0.3)
+        expect(cycles[0]!.response).toBe("all refactored\n\nagain")
       },
     })
   })
