@@ -29,6 +29,7 @@ type PartData = {
   url?: string
   metadata?: { actorID?: string; docID?: string }
   tokens?: Tokens // step-finish
+  prompt?: string // subtask
 }
 
 // Read a message's parts once, ordered, as plain data objects.
@@ -49,6 +50,13 @@ function textOf(parts: PartData[]) {
     if (p?.type === "text" && !p.synthetic && !p.ignored && typeof p.text === "string") out.push(p.text)
   }
   return out.join("\n")
+}
+
+// What a person asked for in a user message: its verbatim text, plus the prompt of any subtask
+// command they ran (a slash command that delegates to a subagent carries no text part of its own).
+function promptOf(parts: PartData[]) {
+  const subtasks = parts.filter((p) => p?.type === "subtask" && typeof p.prompt === "string").map((p) => p.prompt!)
+  return [textOf(parts), ...subtasks].filter(Boolean).join("\n")
 }
 
 // Pull the asset id out of a reference URL like `/doc/{docID}/asset/{assetID}` (with an
@@ -296,6 +304,30 @@ function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
       .where(eq(SessionPromptDocTable.session_id, sessionID))
       .get()?.doc_id ?? null
 
+  const existing = db
+    .select({ id: PromptCycleTable.id })
+    .from(PromptCycleTable)
+    .where(eq(PromptCycleTable.user_message_id, anchorID))
+    .get()
+  const cycleID = existing?.id ?? CycleID.ascending()
+
+  // Inputs are re-derived every time (a joined prompt or a late consent link can change them), but
+  // what an input already settled carries over: its id, so callers holding it still find it, and the
+  // doc it was filed under — a consented steer rotates the session's prompt doc mid-run, and an
+  // earlier prompt without doc metadata must not move to that new doc.
+  const previous = new Map(
+    db
+      .select({
+        id: PromptCycleInputTable.id,
+        user_message_id: PromptCycleInputTable.user_message_id,
+        doc_id: PromptCycleInputTable.doc_id,
+      })
+      .from(PromptCycleInputTable)
+      .where(eq(PromptCycleInputTable.cycle_id, cycleID))
+      .all()
+      .map((row) => [row.user_message_id, row] as const),
+  )
+
   // One input per real prompt. The anchor always counts; a joined message counts only if a person
   // wrote it — the run's own messages (compaction, continue, subtask summary) carry no text of their
   // own (synthetic), and a compaction replay repeats a prompt already counted; both are folded in
@@ -304,7 +336,7 @@ function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
     .map((m) => {
       if (replays.has(m.id)) return
       const parts = partsOf(db, m.id as MessageID)
-      const prompt = textOf(parts)
+      const prompt = promptOf(parts)
       const assets = assetsOf(parts)
       if (m.id !== anchorID && !prompt && !assets) return
       const meta = metaOf(parts)
@@ -312,7 +344,7 @@ function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
         message: m,
         prompt,
         assets,
-        docID: meta.docID ?? sessionDoc,
+        docID: meta.docID ?? previous.get(m.id)?.doc_id ?? sessionDoc,
         consent: resolveConsent(db, m.id as MessageID, meta.actorID),
       }
     })
@@ -347,34 +379,18 @@ function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
     error: errorMessage,
   }
 
-  const existing = db
-    .select({ id: PromptCycleTable.id })
-    .from(PromptCycleTable)
-    .where(eq(PromptCycleTable.user_message_id, anchorID))
-    .get()
-  const cycleID = existing?.id ?? CycleID.ascending()
   if (existing) db.update(PromptCycleTable).set(cycleValues).where(eq(PromptCycleTable.id, cycleID)).run()
   else
     db.insert(PromptCycleTable)
       .values({ id: cycleID, ...cycleValues })
       .run()
 
-  // Inputs are re-derived every time (a joined prompt or a late consent link can change them), but
-  // an input keeps its id across rewrites so callers holding it still find it.
-  const ids = new Map(
-    db
-      .select({ id: PromptCycleInputTable.id, user_message_id: PromptCycleInputTable.user_message_id })
-      .from(PromptCycleInputTable)
-      .where(eq(PromptCycleInputTable.cycle_id, cycleID))
-      .all()
-      .map((row) => [row.user_message_id, row.id] as const),
-  )
   db.delete(PromptCycleInputTable).where(eq(PromptCycleInputTable.cycle_id, cycleID)).run()
   if (inputs.length > 0)
     db.insert(PromptCycleInputTable)
       .values(
         inputs.map((item, seq) => ({
-          id: ids.get(item.message.id) ?? CycleInputID.ascending(),
+          id: previous.get(item.message.id)?.id ?? CycleInputID.ascending(),
           cycle_id: cycleID,
           session_id: sessionID,
           doc_id: item.docID,

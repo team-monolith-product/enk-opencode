@@ -1918,6 +1918,74 @@ describe("doc", () => {
     })
   })
 
+  test("a subtask command joining a run is an input, and earlier inputs keep their doc", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID: original } = Doc.prompt(session.id)
+        const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+        const first = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_plain",
+          parentID: "msg_user_plain",
+          cost: 0,
+          tokens,
+          created: 1100,
+          completed: 1200,
+          finish: "tool-calls",
+        })
+        // A normal (API) prompt: no doc metadata, so it is filed under the session's current doc.
+        seedTurn({ userText: "plain prompt", userTime: 1000, steps: [{ info: first, text: "" }] })
+        Database.use((db) => CycleRecorder.record(db, first as never))
+        expect(Doc.cycleList({ sessionID: session.id })[0]!.inputs[0].docID).toBe(original)
+
+        // A consented steer rotates the session's prompt doc mid-run (what the vote's rotate() does).
+        const rotated = Doc.promptAdvance({ sessionID: session.id }).docID
+        Doc.promptReady({ sessionID: session.id, docID: rotated })
+        expect(rotated).not.toBe(original)
+
+        // A subtask slash command joins the run: its message holds only a subtask part.
+        const sub = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_sub",
+          parentID: "msg_user_sub",
+          cost: 0,
+          tokens,
+          created: 1400,
+          completed: 1500,
+          finish: "stop",
+        })
+        joinRun(session.id, "msg_user_sub", "msg_user_plain")
+        seedTurn({ userText: "", userTime: 1300, steps: [{ info: sub, text: "reviewed" }] })
+        Database.use((db) => {
+          db.delete(PartTable)
+            .where(eq(PartTable.id, "msg_user_sub_p0" as never))
+            .run()
+          db.insert(PartTable)
+            .values({
+              id: "msg_user_sub_st" as never,
+              message_id: "msg_user_sub" as never,
+              session_id: session.id as never,
+              time_created: 1300,
+              data: { type: "subtask", prompt: "review the diff", description: "review", agent: "general" } as never,
+            })
+            .run()
+        })
+        Database.use((db) => CycleRecorder.record(db, sub as never))
+
+        const inputs = Doc.cycleList({ sessionID: session.id })[0]!.inputs
+        expect(inputs.map((item) => item.prompt)).toEqual(["plain prompt", "review the diff"])
+        expect(inputs[0].docID).toBe(original) // not moved to the rotated doc
+        expect(inputs[1].docID).toBe(rotated)
+        expect(Doc.cycleList({ sessionID: session.id, docID: original })).toHaveLength(1)
+      },
+    })
+  })
+
   test("sums every model call of a step, not just the last one the message keeps", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
