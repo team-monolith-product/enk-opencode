@@ -1710,7 +1710,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // 답이 생기기 전인 지금 남겨야 기록기가 그 답을 이 실행의 기록에 합친다.
             // 한 스텝 사이에 여러 개가 들어오면 모델은 그 전부를 읽으므로, 가장 최근 것만이 아니라 실행이 시작된
             // 뒤 들어온 user 메시지를 모두 남긴다.
-            if (!anchor) anchor = { id: lastUser.id, created: lastUser.time.created }
+            // 기준은 이 실행이 처음 읽은 것들 중 가장 오래된 미답 메시지다. 첫 읽기 전에 둘이 들어와 있으면(동의 전송
+            // 두 개가 연달아 통과, 재실행 전에 쌓인 스티어) 모델은 둘 다 읽지만 답은 최근 것에만 달리므로, 최근 것을
+            // 기준으로 삼으면 먼저 온 쪽이 기록에서 빠진다. "이번 실행의 것"은 마지막 답보다 뒤에 온 메시지로 한정한다
+            // — 아주 오래전에 답을 못 받은 메시지까지 끌어오지 않도록.
+            if (!anchor) {
+              const answered = new Set(
+                ordered.flatMap((msg) => (msg.info.role === "assistant" ? [msg.info.parentID] : [])),
+              )
+              const since = lastAssistant?.time.created ?? -Infinity
+              const first = ordered.find(
+                (msg) => msg.info.role === "user" && msg.info.time.created > since && !answered.has(msg.info.id),
+              )
+              const start = first?.info ?? lastUser
+              anchor = { id: start.id, created: start.time.created }
+            }
             const run = anchor
             const fresh = ordered.filter(
               (msg) =>

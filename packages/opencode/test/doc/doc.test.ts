@@ -5,6 +5,7 @@ import { Instance } from "../../src/project/instance"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Session } from "../../src/session"
 import { SessionPrompt } from "../../src/session/prompt"
+import { SessionStatus } from "../../src/session/status"
 import { Doc } from "../../src/doc"
 import * as Room from "../../src/doc/room"
 import { Database } from "../../src/storage/db"
@@ -2932,6 +2933,98 @@ describe("doc", () => {
 
         stopA()
         stopB()
+      },
+    })
+  })
+
+  test("a stop vote closes once the AI finishes on its own, so sending is open again", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const events: Doc.SubmitEvent[] = []
+        const stopA = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => events.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+
+        const stop = Doc.stopSubmitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+        })
+        expect(stop.status).toBe("pending")
+
+        // The run ends by itself: nothing is left to stop.
+        await SessionStatus.set(session.id, { type: "idle" })
+        const deadline = Date.now() + 2000
+        while (!events.some((e) => e.type === "cancelled") && Date.now() < deadline) await Bun.sleep(10)
+        const closed = events.find((e) => e.type === "cancelled" && e.state.submitID === stop.submitID)
+        expect(closed?.state.targetKind).toBe("stop")
+
+        // ...so a send goes through instead of being refused until the stale vote expires.
+        const send = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+          prompt,
+        })
+        expect(send.status).toBe("pending")
+
+        stopA()
+        stopB()
+      },
+    })
+  })
+
+  test("a failing cycle refresh neither undoes the consent link nor stops the send", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const refresh = spyOn(CycleRecorder, "refresh").mockImplementation(() => {
+          throw new Error("recorder broke")
+        })
+        try {
+          // Solo: no vote to wait for, the send dispatches straight away (noReply keeps the AI out).
+          const state = Doc.submitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: alice.actorID,
+            prompt,
+          })
+          expect(state.status).toBe("sent")
+          const linked = () =>
+            Database.use((db) =>
+              db
+                .select({ id: DocSubmitTable.user_message_id })
+                .from(DocSubmitTable)
+                .where(eq(DocSubmitTable.id, state.submitID as never))
+                .get(),
+            )?.id
+          const deadline = Date.now() + 3000
+          while (!linked() && Date.now() < deadline) await Bun.sleep(10)
+          expect(refresh).toHaveBeenCalled()
+          expect(linked()).toBeTruthy()
+        } finally {
+          refresh.mockRestore()
+        }
       },
     })
   })

@@ -1117,6 +1117,28 @@ it.effect(
   30_000,
 )
 
+it.effect("prompts already waiting when a run starts all count, the oldest first", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { test, prompt, chat } = yield* boot()
+        yield* test.reply(...replyStop("both"))
+
+        // Two consented sends land back to back before the run's first read (what dispatch does:
+        // store the message, then start the loop).
+        yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "first" }] })
+        yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "second" }] })
+        yield* prompt.loop({ sessionID: chat.id })
+
+        expect(yield* test.calls).toBe(1)
+        const cycles = Doc.cycleList({ sessionID: chat.id })
+        expect(cycles).toHaveLength(1)
+        expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
+      }),
+    { git: true, config: cfg },
+  ),
+)
+
 it.effect(
   "a prompt that joined a run someone stopped is not answered",
   () =>

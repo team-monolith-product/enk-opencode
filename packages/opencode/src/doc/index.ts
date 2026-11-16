@@ -9,6 +9,7 @@ import { QuestionID } from "@/question/schema"
 import { Session } from "@/session"
 import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionStatus } from "@/session/status"
 import { archiveSession } from "@/session/archive"
 import { HistorySync } from "@/enk/history-sync"
 import { Instance } from "@/project/instance"
@@ -841,16 +842,23 @@ export namespace Doc {
         rotate(row)
         // Link the produced user message back to this submit so the recorder can resolve
         // the consenting actors (doc_submit_actor) when it records the cycle.
-        // A steer joins a run that is already going, so its answer can be recorded before this link
-        // lands — re-derive the cycle so its consent is not lost.
-        if (message?.info?.id)
-          Database.transaction((db) => {
-            db.update(DocSubmitTable)
+        if (message?.info?.id) {
+          Database.use((db) =>
+            db
+              .update(DocSubmitTable)
               .set({ user_message_id: message.info.id })
               .where(eq(DocSubmitTable.id, row.id))
-              .run()
-            CycleRecorder.refresh(db, message.info.id)
-          })
+              .run(),
+          )
+          // A steer joins a run that is already going, so its answer can be recorded before this link
+          // lands — re-derive the cycle so its consent is not lost. Bookkeeping only: a failure here
+          // must neither undo the link above nor keep the consented prompt from running.
+          try {
+            Database.use((db) => CycleRecorder.refresh(db, message.info.id))
+          } catch (err) {
+            Log.Default.warn("cycle refresh failed", { submitID: row.id, err: String(err) })
+          }
+        }
         if (body.noReply === true) return
         return SessionPrompt.loop({ sessionID: row.session_id })
       })
@@ -920,7 +928,20 @@ export namespace Doc {
 
   /** 중지 투표에 밀려난 전송 투표를 취소한다. 취소한 사람은 중지를 요청한 사람으로 남긴다. */
   function superseded(sessionID: SessionID, actorID: ActorID) {
-    for (const row of pendingOf(sessionID, "doc")) {
+    close(pendingOf(sessionID, "doc"), actorID)
+  }
+
+  /**
+   * AI 가 스스로 끝나면 남은 중지 투표는 멈출 것이 없다. 그대로 두면 투표가 끝날 때까지(30초, 참가자가 들어올
+   * 때마다 연장) 새 전송이 막히므로 바로 닫는다. 중지 투표는 어떻게 끝나든 창만 닫히고, 스스로 끝난 것과 중지된
+   * 것은 같은 결과라 사람이 따로 알 필요가 없다.
+   */
+  function settleStops(sessionID: SessionID) {
+    close(pendingOf(sessionID, "stop"), null)
+  }
+
+  function close(rows: SubmitRow[], actorID: ActorID | null) {
+    for (const row of rows) {
       const item = Database.use((db) =>
         db
           .update(DocSubmitTable)
@@ -1037,6 +1058,9 @@ export namespace Doc {
     Bus.subscribe(Question.Event.Rejected, async (event) => questionDraftReset(String(event.properties.requestID)))
     // 값 요청이 닫히면 초안을 즉시 지운다. 여기 남은 값이 나중에 접속한 사람에게 흘러가면 안 된다.
     Bus.subscribe(EnvRequest.Event.Resolved, async (event) => envDraftReset(String(event.properties.requestID)))
+    Bus.subscribe(SessionStatus.Event.Status, async (event) => {
+      if (event.properties.status.type === "idle") settleStops(event.properties.sessionID)
+    })
   }
 
   function actorNames(sessionID: SessionID, ids: ActorID[], names?: Record<string, string>) {
@@ -1092,7 +1116,8 @@ export namespace Doc {
     }
     // 중지가 전송보다 먼저다. 동의 창은 한 번에 하나만 뜨므로 둘이 함께 돌면 가려진 쪽은 아무도 답하지 못한 채
     // 만료되고, "멈추자"와 "이것도 해 줘"가 함께 통과하는 모순도 생긴다. 중지는 급할 때 누르는 것이라 막지 않고,
-    // 대신 중지 투표가 도는 동안에는 새 전송을 받지 않는다(아래 superseded 가 반대 방향을 맡는다).
+    // 대신 중지 투표가 도는 동안에는 새 전송을 받지 않는다(아래 superseded 가 반대 방향을 맡는다). AI 가 스스로
+    // 끝나면 settleStops 가 중지 투표를 닫으므로, 이 막힘은 실제로 멈출 것이 있는 동안에만 남는다.
     if (input.targetKind === "doc" && pendingOf(input.sessionID, "stop").length > 0) {
       throw new VoteConflictError({ message: "A stop vote is in progress" })
     }
