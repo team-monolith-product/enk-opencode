@@ -1140,6 +1140,55 @@ it.effect("prompts already waiting when a run starts all count, the oldest first
 )
 
 it.effect(
+  "a noReply message stored while a run ends does not make it run again",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const gate = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          yield* test.push((_input) =>
+            stream(start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+              Stream.concat(
+                Stream.fromEffect(Effect.promise(() => gate.promise)).pipe(
+                  Stream.flatMap(() => Stream.fail(new Error("boom"))),
+                ),
+              ),
+            ),
+          )
+
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "first" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+
+          // Context added with noReply: stored, but nobody calls loop() to have it answered.
+          const id = MessageID.ascending()
+          yield* prompt.prompt({
+            sessionID: chat.id,
+            messageID: id,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [{ type: "text", text: "just so you know" }],
+          })
+          yield* saved(sessions, chat.id, id)
+
+          gate.resolve()
+          yield* Fiber.await(a)
+          expect(yield* test.calls).toBe(1)
+          const msgs = yield* sessions.messages({ sessionID: chat.id })
+          expect(msgs.some((msg) => msg.info.role === "assistant" && msg.info.parentID === id)).toBe(false)
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+it.effect(
   "a prompt that joined a run someone stopped is not answered",
   () =>
     provideTmpdirInstance(

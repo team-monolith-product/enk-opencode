@@ -233,6 +233,9 @@ describe("rollback consent vote", () => {
           peer: { send: () => {} },
         })
 
+        // A stop vote only opens while the AI runs; an idle session's stop goes straight through.
+        await SessionStatus.set(session.id, { type: "busy" })
+        await Bun.sleep(20)
         const stop = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: alice.actorID })
         expect(() =>
           Doc.rollbackSubmitCreate({

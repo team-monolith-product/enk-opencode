@@ -1735,6 +1735,12 @@ describe("doc", () => {
     })
   }
 
+  // Tell the doc module the session's AI is running (it follows session status events).
+  async function working(sessionID: string) {
+    await SessionStatus.set(sessionID as never, { type: "busy" })
+    await Bun.sleep(20)
+  }
+
   // A run that started from `anchor` read `userID` mid-run (what the run loop does on a steer).
   function joinRun(sessionID: string, userID: string, anchor: string) {
     CycleRecorder.link({ sessionID: sessionID as never, userMessageID: userID as never, anchorID: anchor as never })
@@ -2835,6 +2841,7 @@ describe("doc", () => {
           peer: { send: (data) => events.push(JSON.parse(data) as Doc.SubmitEvent) },
         })
         const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+        await working(session.id)
 
         const state = Doc.stopSubmitCreate({
           sessionID: session.id,
@@ -2906,7 +2913,8 @@ describe("doc", () => {
         })
         expect(send.status).toBe("pending")
 
-        // Bob hits stop: stopping is never blocked, it takes the steer's place.
+        // Bob hits stop while the AI runs: stopping is never blocked, it takes the steer's place.
+        await working(session.id)
         const stop = Doc.stopSubmitCreate({
           sessionID: session.id,
           docID,
@@ -2956,6 +2964,7 @@ describe("doc", () => {
           peer: { send: (data) => events.push(JSON.parse(data) as Doc.SubmitEvent) },
         })
         const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+        await working(session.id)
 
         const stop = Doc.stopSubmitCreate({
           sessionID: session.id,
@@ -2965,14 +2974,59 @@ describe("doc", () => {
         })
         expect(stop.status).toBe("pending")
 
-        // The run ends by itself: nothing is left to stop.
+        // A run that ends and starts again right away (loop() re-running for an unread steer) leaves the
+        // vote alone: the team is still voting to stop that AI.
         await SessionStatus.set(session.id, { type: "idle" })
-        const deadline = Date.now() + 2000
+        await working(session.id)
+        await Bun.sleep(1300)
+        expect(events.some((e) => e.type === "cancelled" && e.state.submitID === stop.submitID)).toBe(false)
+
+        // The run ends by itself and stays idle: nothing is left to stop.
+        await SessionStatus.set(session.id, { type: "idle" })
+        const deadline = Date.now() + 3000
         while (!events.some((e) => e.type === "cancelled") && Date.now() < deadline) await Bun.sleep(10)
         const closed = events.find((e) => e.type === "cancelled" && e.state.submitID === stop.submitID)
         expect(closed?.state.targetKind).toBe("stop")
 
         // ...so a send goes through instead of being refused until the stale vote expires.
+        const send = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+          prompt,
+        })
+        expect(send.status).toBe("pending")
+
+        stopA()
+        stopB()
+      },
+    })
+  })
+
+  test("stopping a session whose AI is not running goes through without a vote", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const stopA = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+
+        // The screen still shows "working" (an unfinished answer was left behind) but nothing runs.
+        const stop = Doc.stopSubmitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+        })
+        // Sent at once — the cancel's recovery path unsticks the screen — and nobody's sends are held up.
+        expect(stop.status).toBe("sent")
         const send = Doc.submitCreate({
           sessionID: session.id,
           docID,

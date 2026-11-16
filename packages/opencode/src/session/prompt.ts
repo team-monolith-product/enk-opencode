@@ -66,9 +66,10 @@ import { MessageTable } from "./session.sql"
 // One loop() call waiting on a session's run. `stopped` flips when someone cancels the session
 // while it waits, so the caller does not restart what was just stopped.
 type Waiter = { stopped: boolean }
-// Everyone currently waiting on a session's run, and when that run last read the session's
-// messages. Lives only while someone waits, so nothing accumulates per session.
-type Watch = { waiters: Set<Waiter>; readAt: number }
+// Everyone currently waiting on a session's run, when that run last read the session's messages,
+// and when someone last called loop() to have the session answered. Lives only while someone
+// waits, so nothing accumulates per session.
+type Watch = { waiters: Set<Waiter>; readAt: number; wantedAt: number }
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1624,16 +1625,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // 보므로 세션 길이와 상관없이 몇 줄이다(user 메시지 시각은 서버가 찍고, (session, time) 인덱스를 탄다).
       // 그 사이 생긴 답(assistant)이 있으면 읽힌 것이고, 실패한 답도 답으로 친다 — 실패한 프롬프트를 자동으로
       // 다시 시도하지 않는다.
-      const unread = (sessionID: SessionID, readAt: number) =>
+      // Only messages someone asked to have answered count: a user message stored after the last
+      // loop() call (a noReply prompt) is for context and never triggers a re-run.
+      const unread = (sessionID: SessionID, readAt: number, wantedAt: number) =>
         Effect.sync(() => {
-          if (!Number.isFinite(readAt)) return false
+          if (!Number.isFinite(readAt) || wantedAt < readAt) return false
           const rows = Database.use((db) =>
             db
-              .select({ id: MessageTable.id, data: MessageTable.data })
+              .select({ id: MessageTable.id, data: MessageTable.data, time_created: MessageTable.time_created })
               .from(MessageTable)
               .where(and(eq(MessageTable.session_id, sessionID), gte(MessageTable.time_created, readAt)))
               .all(),
           )
+            .filter((row) => (row.data as { role?: string }).role !== "user" || row.time_created <= wantedAt)
           const infos = rows.map((row) => ({ id: row.id, ...(row.data as { role?: string; parentID?: string }) }))
           const answered = new Set(infos.flatMap((info) => (info.role === "assistant" ? [info.parentID] : [])))
           return infos.some((info) => info.role === "user" && !answered.has(info.id))
@@ -1975,8 +1979,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const id = input.sessionID
         // A run is always started by a loop() call that waits for it, so the watch exists before the run's
         // first read; readAt stays infinite (no re-run check) only until that first read.
-        const watch = s.watches.get(id) ?? { waiters: new Set<Waiter>(), readAt: Number.POSITIVE_INFINITY }
+        const watch = s.watches.get(id) ?? {
+          waiters: new Set<Waiter>(),
+          readAt: Number.POSITIVE_INFINITY,
+          wantedAt: 0,
+        }
         s.watches.set(id, watch)
+        // Everything stored up to now is something this caller wants answered (prompt() stores its
+        // message, then calls loop()). A noReply message stored later, with no loop() of its own,
+        // asked for no answer and must not trigger a re-run.
+        watch.wantedAt = Date.now()
         const me: Waiter = { stopped: false }
         watch.waiters.add(me)
         return yield* Effect.gen(function* () {
@@ -1986,7 +1998,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // 아무도 읽지 않은 채 남는다. 그때 한 번 더 돈다. 기다리는 사이 누가 중지했으면 다시 돌리지 않는다 —
           // 중지는 답이 생기기 전에 걸릴 수도 있어서, 결과 메시지의 오류만으로는 중지를 알아볼 수 없다.
           // unread() 는 동기라 그 사이에 중지가 끼어들 틈은 없다.
-          if (me.stopped || !(yield* unread(id, watch.readAt))) return result
+          if (me.stopped || !(yield* unread(id, watch.readAt, watch.wantedAt))) return result
           log.info("answering a prompt the finished run never read", { sessionID: id })
           return yield* getRunner(s.runners, id).ensureRunning(runLoop(id))
         }).pipe(

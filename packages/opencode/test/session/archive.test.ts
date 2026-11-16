@@ -8,6 +8,7 @@ import { archiveSession, removeSession } from "../../src/session/archive"
 import { SessionPrompt } from "../../src/session/prompt"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
+import { SessionStatus } from "../../src/session/status"
 
 Log.init({ print: false })
 
@@ -164,6 +165,9 @@ describe("clear consent vote", () => {
           peer: { send: () => {} },
         })
 
+        // A stop vote only opens while the AI runs; an idle session's stop goes straight through.
+        await SessionStatus.set(session.id, { type: "busy" })
+        await Bun.sleep(20)
         const stop = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: alice.actorID })
         expect(stop.status).toBe("pending")
         expect(() => Doc.clearSubmitCreate({ sessionID: session.id, docID, actorID: alice.actorID })).toThrow()

@@ -933,11 +933,35 @@ export namespace Doc {
 
   /**
    * AI 가 스스로 끝나면 남은 중지 투표는 멈출 것이 없다. 그대로 두면 투표가 끝날 때까지(30초, 참가자가 들어올
-   * 때마다 연장) 새 전송이 막히므로 바로 닫는다. 중지 투표는 어떻게 끝나든 창만 닫히고, 스스로 끝난 것과 중지된
+   * 때마다 연장) 새 전송이 막히므로 닫는다. 중지 투표는 어떻게 끝나든 창만 닫히고, 스스로 끝난 것과 중지된
    * 것은 같은 결과라 사람이 따로 알 필요가 없다.
+   *
+   * 쉬는 상태가 되자마자 닫지는 않는다. 실행이 읽지 못한 프롬프트 때문에 곧바로 다시 도는 경우(SessionPrompt.loop
+   * 의 재실행)가 있어, 그 틈에 닫으면 팀이 멈추려던 AI 가 투표 없이 계속 돈다. 잠깐 기다려 그동안 다시 바빠지지
+   * 않았을 때만 닫는다.
    */
-  function settleStops(sessionID: SessionID) {
-    close(pendingOf(sessionID, "stop"), null)
+  const SETTLE_MS = 1_000
+  // 지금 AI 가 도는 세션. 세션 상태 이벤트로만 채운다 — 프로세스가 막 떴을 때는 아무것도 돌고 있지 않다.
+  const running = new Set<string>()
+  const settling = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function track(sessionID: SessionID, busy: boolean) {
+    const pending = settling.get(sessionID)
+    if (pending) clearTimeout(pending)
+    settling.delete(sessionID)
+    if (busy) {
+      running.add(sessionID)
+      return
+    }
+    running.delete(sessionID)
+    settling.set(
+      sessionID,
+      setTimeout(() => {
+        settling.delete(sessionID)
+        if (running.has(sessionID)) return
+        close(pendingOf(sessionID, "stop"), null)
+      }, SETTLE_MS),
+    )
   }
 
   function close(rows: SubmitRow[], actorID: ActorID | null) {
@@ -1059,7 +1083,7 @@ export namespace Doc {
     // 값 요청이 닫히면 초안을 즉시 지운다. 여기 남은 값이 나중에 접속한 사람에게 흘러가면 안 된다.
     Bus.subscribe(EnvRequest.Event.Resolved, async (event) => envDraftReset(String(event.properties.requestID)))
     Bus.subscribe(SessionStatus.Event.Status, async (event) => {
-      if (event.properties.status.type === "idle") settleStops(event.properties.sessionID)
+      track(event.properties.sessionID, event.properties.status.type !== "idle")
     })
   }
 
@@ -1117,12 +1141,16 @@ export namespace Doc {
     // 중지가 전송보다 먼저다. 동의 창은 한 번에 하나만 뜨므로 둘이 함께 돌면 가려진 쪽은 아무도 답하지 못한 채
     // 만료되고, "멈추자"와 "이것도 해 줘"가 함께 통과하는 모순도 생긴다. 중지는 급할 때 누르는 것이라 막지 않고,
     // 대신 중지 투표가 도는 동안에는 새 전송을 받지 않는다(아래 superseded 가 반대 방향을 맡는다). AI 가 스스로
-    // 끝나면 settleStops 가 중지 투표를 닫으므로, 이 막힘은 실제로 멈출 것이 있는 동안에만 남는다.
+    // 끝나면 track() 이 중지 투표를 닫으므로, 이 막힘은 실제로 멈출 것이 있는 동안에만 남는다.
     if (input.targetKind === "doc" && pendingOf(input.sessionID, "stop").length > 0) {
       throw new VoteConflictError({ message: "A stop vote is in progress" })
     }
 
-    const ids = targets(input.targetID, input.actorID)
+    // 돌고 있지 않은 세션의 중지는 멈출 것이 없다. 화면만 "작업 중"으로 남은 경우(끝나지 않은 채 남은 답)에
+    // 누르는 것이라, 투표 없이 바로 보내 SessionPrompt.cancel 의 복구 경로가 화면을 풀게 한다. 투표를 열면 쉬는
+    // 세션에는 닫아 줄 상태 변화도 오지 않아, 투표가 끝날 때까지 모두의 전송이 막힌다.
+    const idleStop = input.targetKind === "stop" && !running.has(input.sessionID)
+    const ids = idleStop ? [input.actorID] : targets(input.targetID, input.actorID)
     const timeout = clamp(input.timeoutMs)
     const now = Date.now()
     const build = () =>
