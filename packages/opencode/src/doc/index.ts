@@ -1181,7 +1181,9 @@ export namespace Doc {
     }
 
     // 중지가 시작되면 기다리던 전송 투표는 접는다. 내용은 공유 문서에 그대로 남아 중지 뒤 다시 보낼 수 있다.
-    if (input.targetKind === "stop") superseded(input.sessionID, input.actorID)
+    // 돌고 있지 않은 세션의 중지는 예외다 — 멈출 AI 도, 끼어들 실행도 없으니 그때 기다리던 전송은 스티어가
+    // 아니라 평범한 새 요청이고, 한 사람 화면이 "작업 중"으로 멈춰 누른 중지가 그것을 지우면 안 된다.
+    if (input.targetKind === "stop" && !idleStop) superseded(input.sessionID, input.actorID)
 
     const state = read(row)
     if (state.status === "sent") {

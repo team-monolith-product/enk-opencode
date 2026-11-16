@@ -3120,14 +3120,25 @@ describe("doc", () => {
         const stopA = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
         const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
 
-        // The screen still shows "working" (an unfinished answer was left behind) but nothing runs.
+        // Bob sees an idle screen and starts an ordinary send.
+        const before = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+          prompt,
+        })
+        expect(before.status).toBe("pending")
+
+        // Alice's screen still shows "working" (an unfinished answer was left behind) but nothing runs.
         const stop = Doc.stopSubmitCreate({
           sessionID: session.id,
           docID,
           actorID: alice.actorID,
           actorIDs: [alice.actorID, bob.actorID],
         })
-        // Sent at once — the cancel's recovery path unsticks the screen — and nobody's sends are held up.
+        // Sent at once — the cancel's recovery path unsticks the screen — and nobody's sends are held up:
+        // with nothing running there is no steer to drop, so Bob's send is still open.
         expect(stop.status).toBe("sent")
         const send = Doc.submitCreate({
           sessionID: session.id,
@@ -3136,6 +3147,7 @@ describe("doc", () => {
           actorIDs: [alice.actorID, bob.actorID],
           prompt,
         })
+        expect(send.submitID).toBe(before.submitID)
         expect(send.status).toBe("pending")
 
         stopA()
