@@ -33,6 +33,7 @@ import { Global } from "@/global"
 import type { LanguageModelV2Usage } from "@ai-sdk/provider"
 import { Effect, Layer, Scope, ServiceMap } from "effect"
 import { makeRuntime } from "@/effect/run-service"
+import * as CycleRecorder from "@/doc/cycle-recorder"
 
 export namespace Session {
   const log = Log.create({ service: "session" })
@@ -530,6 +531,12 @@ export namespace Session {
             id: newID,
             ...(parentID && { parentID }),
           })
+          // A user message that joined a run (a steer, a compaction replay) must stay in that run in the
+          // fork too — before the cloned answers are recorded, or they would each open their own cycle.
+          if (msg.info.role === "user") {
+            const link = { sessionID: session.id, fromMessageID: msg.info.id, toMessageID: cloned.id, idMap }
+            yield* Effect.sync(() => CycleRecorder.cloneLink(link))
+          }
 
           for (const part of msg.parts) {
             yield* updatePart({

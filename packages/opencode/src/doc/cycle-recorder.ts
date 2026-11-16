@@ -256,6 +256,41 @@ export function link(input: {
 }
 
 /**
+ * A forked session clones messages under new ids. Carry over the run a cloned user message belonged
+ * to (and whether it was a compaction replay), remapped to the clone's ids, so the fork's usage keeps
+ * the original grouping instead of splitting each run back into one record per message. The anchor
+ * is older than the message, so a fork that includes the message has already cloned the anchor; if
+ * it somehow has not, the clone simply anchors its own run.
+ */
+export function cloneLink(input: {
+  sessionID: SessionID
+  fromMessageID: string
+  toMessageID: MessageID
+  idMap: ReadonlyMap<string, string>
+}) {
+  Database.use((db) => {
+    const row = db
+      .select()
+      .from(PromptCycleLinkTable)
+      .where(eq(PromptCycleLinkTable.user_message_id, input.fromMessageID))
+      .get()
+    if (!row) return
+    const anchor = input.idMap.get(row.anchor_user_message_id)
+    if (!anchor) return
+    db.insert(PromptCycleLinkTable)
+      .values({
+        user_message_id: input.toMessageID,
+        anchor_user_message_id: anchor,
+        replay: row.replay,
+        session_id: input.sessionID,
+        time_created: Date.now(),
+      })
+      .onConflictDoNothing()
+      .run()
+  })
+}
+
+/**
  * Record one prompt cycle per AI run. A run starts from one user message (its anchor) and can go
  * on for many assistant messages (multi-step agent loop) — and it can absorb more user messages
  * while it runs (see link()). Every completed step answering the anchor or a linked message is

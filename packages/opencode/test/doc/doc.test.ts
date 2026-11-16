@@ -9,7 +9,7 @@ import { SessionStatus } from "../../src/session/status"
 import { Doc } from "../../src/doc"
 import * as Room from "../../src/doc/room"
 import { Database } from "../../src/storage/db"
-import { DocSubmitTable, DocSubmitActorTable } from "../../src/doc/doc.sql"
+import { DocSubmitTable, DocSubmitActorTable, PromptCycleLinkTable } from "../../src/doc/doc.sql"
 import { MessageTable, PartTable } from "../../src/session/session.sql"
 import * as CycleRecorder from "../../src/doc/cycle-recorder"
 import { and, eq } from "drizzle-orm"
@@ -2096,6 +2096,45 @@ describe("doc", () => {
         Database.use((db) => CycleRecorder.record(db, second as never))
 
         expect(Doc.cycleList({ sessionID: session.id })[0]!.response).toBe("first answer\n\nsecond answer")
+      },
+    })
+  })
+
+  test("a fork carries a message's run and its replay marker over to the clone's ids", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const fork = await Session.create({})
+        CycleRecorder.link({
+          sessionID: session.id as never,
+          userMessageID: "msg_user_replayed" as never,
+          anchorID: "msg_user_origin" as never,
+          replay: true,
+        })
+        const idMap = new Map([
+          ["msg_user_origin", "msg_user_origin_copy"],
+          ["msg_user_replayed", "msg_user_replayed_copy"],
+        ])
+        CycleRecorder.cloneLink({
+          sessionID: fork.id as never,
+          fromMessageID: "msg_user_replayed",
+          toMessageID: "msg_user_replayed_copy" as never,
+          idMap,
+        })
+        const row = Database.use((db) =>
+          db
+            .select()
+            .from(PromptCycleLinkTable)
+            .where(eq(PromptCycleLinkTable.user_message_id, "msg_user_replayed_copy"))
+            .get(),
+        )
+        expect(row?.anchor_user_message_id).toBe("msg_user_origin_copy")
+        expect(row?.replay).toBe(true)
+        expect(row?.session_id).toBe(fork.id)
       },
     })
   })

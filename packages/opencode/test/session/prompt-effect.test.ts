@@ -1134,6 +1134,13 @@ it.effect("prompts already waiting when a run starts all count, the oldest first
         const cycles = Doc.cycleList({ sessionID: chat.id })
         expect(cycles).toHaveLength(1)
         expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
+
+        // A fork clones the messages under new ids; the run keeps its grouping there too.
+        const sessions = yield* Session.Service
+        const forked = yield* sessions.fork({ sessionID: chat.id })
+        const copies = Doc.cycleList({ sessionID: forked.id })
+        expect(copies).toHaveLength(1)
+        expect(copies[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
       }),
     { git: true, config: cfg },
   ),
