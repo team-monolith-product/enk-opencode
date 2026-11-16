@@ -897,6 +897,41 @@ export namespace Doc {
     return undefined
   }
 
+  /** 이 세션에서 아직 결론 나지 않은 한 종류의 투표들. 만료된 행은 여기서 정리하며 지나간다. */
+  function pendingOf(sessionID: SessionID, kind: SubmitTargetKind) {
+    const rows = Database.use((db) =>
+      db
+        .select()
+        .from(DocSubmitTable)
+        .where(
+          and(
+            eq(DocSubmitTable.session_id, sessionID),
+            eq(DocSubmitTable.status, "pending"),
+            eq(DocSubmitTable.target_kind, kind),
+          ),
+        )
+        .all(),
+    )
+    return rows.map((row) => expire(row)).filter((row) => row.status === "pending")
+  }
+
+  /** 중지 투표에 밀려난 전송 투표를 취소한다. 취소한 사람은 중지를 요청한 사람으로 남긴다. */
+  function superseded(sessionID: SessionID, actorID: ActorID) {
+    for (const row of pendingOf(sessionID, "doc")) {
+      const item = Database.use((db) =>
+        db
+          .update(DocSubmitTable)
+          .set({ status: "cancelled", cancelled_by: actorID, time_updated: Date.now() })
+          .where(and(eq(DocSubmitTable.id, row.id), eq(DocSubmitTable.status, "pending")))
+          .returning()
+          .get(),
+      )
+      if (!item) continue
+      done(item.id)
+      cast("cancelled", read(item))
+    }
+  }
+
   function active(sessionID: SessionID, targetID: string, actorID?: ActorID, targetKind?: SubmitTargetKind) {
     const rows = Database.use((db) =>
       db
@@ -1052,6 +1087,12 @@ export namespace Doc {
     if (busy && (exclusive(input.targetKind) || exclusive(busy.target_kind))) {
       throw new VoteConflictError({ message: "Another consent vote is in progress" })
     }
+    // 중지가 전송보다 먼저다. 동의 창은 한 번에 하나만 뜨므로 둘이 함께 돌면 가려진 쪽은 아무도 답하지 못한 채
+    // 만료되고, "멈추자"와 "이것도 해 줘"가 함께 통과하는 모순도 생긴다. 중지는 급할 때 누르는 것이라 막지 않고,
+    // 대신 중지 투표가 도는 동안에는 새 전송을 받지 않는다(아래 superseded 가 반대 방향을 맡는다).
+    if (input.targetKind === "doc" && pendingOf(input.sessionID, "stop").length > 0) {
+      throw new VoteConflictError({ message: "A stop vote is in progress" })
+    }
 
     const ids = targets(input.targetID, input.actorID)
     const timeout = clamp(input.timeoutMs)
@@ -1099,6 +1140,9 @@ export namespace Doc {
       if (winner) return winner
       throw err
     }
+
+    // 중지가 시작되면 기다리던 전송 투표는 접는다. 내용은 공유 문서에 그대로 남아 중지 뒤 다시 보낼 수 있다.
+    if (input.targetKind === "stop") superseded(input.sessionID, input.actorID)
 
     const state = read(row)
     if (state.status === "sent") {

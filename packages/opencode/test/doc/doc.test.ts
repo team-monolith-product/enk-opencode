@@ -2451,16 +2451,17 @@ describe("doc", () => {
         expect(state.targetID).toBe(docID)
         expect(events[0]?.type).toBe("created")
 
-        // A stop vote and a doc send vote can coexist (different kind, same target) — keyed apart.
-        const send = Doc.submitCreate({
-          sessionID: session.id,
-          docID,
-          actorID: alice.actorID,
-          actorIDs: [alice.actorID, bob.actorID],
-          prompt,
-        })
-        expect(send.targetKind).toBe("doc")
-        expect(send.submitID).not.toBe(state.submitID)
+        // While a stop vote runs, a new send (a steer into the run being stopped) is refused — only one
+        // consent dialog can be on screen, so the two must never be pending together.
+        expect(() =>
+          Doc.submitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: bob.actorID,
+            actorIDs: [alice.actorID, bob.actorID],
+            prompt,
+          }),
+        ).toThrow(Doc.VoteConflictError)
 
         // Bob approves the stop → consensus → sent (send() calls SessionPrompt.cancel; no-op when idle).
         const sent = Doc.submitRespond({
@@ -2471,6 +2472,68 @@ describe("doc", () => {
         })
         expect(sent.status).toBe("sent")
         expect(events.some((e) => e.type === "sent" && e.state.submitID === state.submitID)).toBe(true)
+
+        stopA()
+        stopB()
+      },
+    })
+  })
+
+  test("a stop vote cancels the pending send vote it overtakes", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+
+        const events: Doc.SubmitEvent[] = []
+        const stopA = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => events.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+
+        // Alice steers the running AI; the send waits for Bob.
+        const send = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+          prompt,
+        })
+        expect(send.status).toBe("pending")
+
+        // Bob hits stop: stopping is never blocked, it takes the steer's place.
+        const stop = Doc.stopSubmitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+        })
+        expect(stop.status).toBe("pending")
+
+        const cancelled = events.find((e) => e.type === "cancelled" && e.state.submitID === send.submitID)
+        expect(cancelled?.state.status).toBe("cancelled")
+        expect(cancelled?.state.cancelledBy?.actorID).toBe(bob.actorID)
+        // The cancel is announced before the stop vote, so clients end the old dialog first.
+        const order = events.map((e) => `${e.type}:${e.state.submitID}`)
+        expect(order.indexOf(`cancelled:${send.submitID}`)).toBeLessThan(order.indexOf(`created:${stop.submitID}`))
+
+        // The steer is gone for good: approving it now answers with its terminal state.
+        const late = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: send.submitID,
+          actorID: bob.actorID,
+          action: "approve",
+        })
+        expect(late.status).toBe("cancelled")
 
         stopA()
         stopB()

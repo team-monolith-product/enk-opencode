@@ -986,6 +986,125 @@ it.effect(
   30_000,
 )
 
+// Waits until a user message with this id is stored — the second prompt joins the run only after that.
+const saved = (sessions: Session.Interface, sessionID: SessionID, id: MessageID) =>
+  Effect.promise(async () => {
+    const end = Date.now() + 5000
+    while (Date.now() < end) {
+      const msgs = await Effect.runPromise(sessions.messages({ sessionID }))
+      if (msgs.some((msg) => msg.info.role === "user" && msg.info.id === id)) return
+      await new Promise((done) => setTimeout(done, 20))
+    }
+    throw new Error("timed out waiting for second prompt to save")
+  })
+
+it.effect(
+  "a prompt that joined a run ending in an error is still answered",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const gate = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          // The first answer fails mid-stream. A failing step ends the run without re-reading the
+          // session, so the steer that arrived meanwhile used to be left unanswered.
+          yield* test.push((_input) =>
+            stream(start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+              Stream.concat(
+                Stream.fromEffect(Effect.promise(() => gate.promise)).pipe(
+                  Stream.flatMap(() => Stream.fail(new Error("boom"))),
+                ),
+              ),
+            ),
+          )
+
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "first" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+
+          const id = MessageID.ascending()
+          const b = yield* prompt
+            .prompt({
+              sessionID: chat.id,
+              messageID: id,
+              agent: "build",
+              model: ref,
+              parts: [{ type: "text", text: "second" }],
+            })
+            .pipe(Effect.forkChild)
+          yield* saved(sessions, chat.id, id)
+
+          yield* test.reply(...replyStop("second"))
+          gate.resolve()
+
+          const [ea, eb] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
+          expect(Exit.isSuccess(ea)).toBe(true)
+          expect(Exit.isSuccess(eb)).toBe(true)
+          expect(yield* test.calls).toBe(2)
+
+          const msgs = yield* sessions.messages({ sessionID: chat.id })
+          const answer = msgs.find((msg) => msg.info.role === "assistant" && msg.info.parentID === id)
+          expect(answer?.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+it.effect(
+  "a prompt that joined a run someone stopped is not answered",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          yield* test.push((input) =>
+            hang(input, start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+            ),
+          )
+
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "first" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+
+          const id = MessageID.ascending()
+          const b = yield* prompt
+            .prompt({
+              sessionID: chat.id,
+              messageID: id,
+              agent: "build",
+              model: ref,
+              parts: [{ type: "text", text: "second" }],
+            })
+            .pipe(Effect.forkChild)
+          yield* saved(sessions, chat.id, id)
+          // Let the second prompt reach the runner and join the run before it is stopped.
+          yield* Effect.sleep(50)
+
+          yield* prompt.cancel(chat.id)
+
+          const [ea, eb] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
+          expect(Exit.isSuccess(ea)).toBe(true)
+          expect(Exit.isSuccess(eb)).toBe(true)
+          // Stopping means stopping: the joined prompt waits for the next send instead of restarting the AI.
+          expect(yield* test.calls).toBe(1)
+          const msgs = yield* sessions.messages({ sessionID: chat.id })
+          expect(msgs.some((msg) => msg.info.role === "assistant" && msg.info.parentID === id)).toBe(false)
+          yield* prompt.assertNotBusy(chat.id)
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
 it.effect(
   "assertNotBusy throws BusyError when loop running",
   () =>
