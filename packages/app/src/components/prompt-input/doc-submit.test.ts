@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { liveSocket, onLocalClock, type DocSubmitState } from "./doc-submit"
+import { liveSocket, onLocalClock, supersededByStop, type DocSubmitState } from "./doc-submit"
 
 // The consent socket IS this client's membership in a vote, so the interesting cases are the ones
 // where the connection is gone but the browser has not noticed: on a real device that is a wifi
@@ -162,5 +162,26 @@ describe("onLocalClock", () => {
   test("a state without serverNow is left as it is", () => {
     const state = vote(123)
     expect(onLocalClock(state)).toBe(state)
+  })
+})
+
+describe("supersededByStop", () => {
+  const state = (submitID: string, targetKind: DocSubmitState["targetKind"], status: DocSubmitState["status"]) =>
+    ({ submitID, targetKind, status }) as unknown as DocSubmitState
+
+  test("a stop vote replacing a send it just cancelled", () => {
+    expect(supersededByStop(state("sub_send", "doc", "cancelled"), state("sub_stop", "stop", "pending"))).toBe(true)
+  })
+
+  test("anything else is not a superseded send", () => {
+    // The send was still pending (no cancellation seen) or ended some other way.
+    expect(supersededByStop(state("sub_send", "doc", "pending"), state("sub_stop", "stop", "pending"))).toBe(false)
+    expect(supersededByStop(state("sub_send", "doc", "expired"), state("sub_stop", "stop", "pending"))).toBe(false)
+    // A cancelled send followed by another send, or a stop replacing a stop.
+    expect(supersededByStop(state("sub_send", "doc", "cancelled"), state("sub_next", "doc", "pending"))).toBe(false)
+    expect(supersededByStop(state("sub_a", "stop", "cancelled"), state("sub_b", "stop", "pending"))).toBe(false)
+    // Nothing was on screen, or it is the same vote.
+    expect(supersededByStop(undefined, state("sub_stop", "stop", "pending"))).toBe(false)
+    expect(supersededByStop(state("sub_stop", "doc", "cancelled"), state("sub_stop", "stop", "pending"))).toBe(false)
   })
 })

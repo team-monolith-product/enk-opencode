@@ -29,6 +29,7 @@ import {
   startClearSubmit,
   startRollbackSubmit,
   startStopSubmit,
+  supersededByStop,
   type DocSubmitState,
 } from "@/components/prompt-input/doc-submit"
 import { DialogDocSubmit } from "@/components/doc-submit/dialog-doc-submit"
@@ -363,6 +364,15 @@ export function createPromptDocSession(): PromptDocSession {
       if (!dialogOpen(state.submitID)) return
       setApproval(state)
       return
+    }
+    // The server cancels a pending send the moment a stop vote starts and the stop dialog is about to
+    // cover the "cancelled" screen — say it in a toast so the send is not silently gone.
+    const shown = approval()
+    if (shown && supersededByStop(shown, state) && dialogOpen(shown.submitID)) {
+      showToast({
+        title: language.t("docSubmit.toast.supersededByStop"),
+        description: language.t("docSubmit.toast.supersededByStop.description"),
+      })
     }
     setApproval(state)
     if (dialogOpen(state.submitID)) return
