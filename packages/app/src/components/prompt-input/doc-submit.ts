@@ -234,10 +234,15 @@ export class SubmitRequestError extends Error {
  * A stop vote is taking over the dialog that was just showing a send vote the server cancelled for
  * it (a stop always outranks a pending send). The stop dialog replaces the "cancelled" outcome in the
  * same tick, so without a separate notice nobody would see that the send was dropped.
+ *
+ * The shown send may still read "pending": whoever pressed stop gets the stop vote back over HTTP,
+ * which can land before their socket delivers the send's cancellation. The server cancels every
+ * pending send when a stop vote opens, so a pending send meeting a new stop vote is just as dropped.
  */
 export function supersededByStop(shown: DocSubmitState | undefined, next: DocSubmitState) {
   if (!shown || shown.submitID === next.submitID) return false
-  return shown.targetKind === "doc" && shown.status === "cancelled" && next.targetKind === "stop" && next.status === "pending"
+  if (shown.targetKind !== "doc" || (shown.status !== "cancelled" && shown.status !== "pending")) return false
+  return next.targetKind === "stop" && next.status === "pending"
 }
 
 export const onLocalClock = (value: DocSubmitState): DocSubmitState => {

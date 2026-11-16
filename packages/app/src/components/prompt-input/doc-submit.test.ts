@@ -173,10 +173,15 @@ describe("supersededByStop", () => {
     expect(supersededByStop(state("sub_send", "doc", "cancelled"), state("sub_stop", "stop", "pending"))).toBe(true)
   })
 
+  test("the stopper's own HTTP answer can arrive before the send's cancellation", () => {
+    // The server cancels every pending send when a stop vote opens, so it is dropped all the same.
+    expect(supersededByStop(state("sub_send", "doc", "pending"), state("sub_stop", "stop", "pending"))).toBe(true)
+  })
+
   test("anything else is not a superseded send", () => {
-    // The send was still pending (no cancellation seen) or ended some other way.
-    expect(supersededByStop(state("sub_send", "doc", "pending"), state("sub_stop", "stop", "pending"))).toBe(false)
+    // The send ended some other way before the stop.
     expect(supersededByStop(state("sub_send", "doc", "expired"), state("sub_stop", "stop", "pending"))).toBe(false)
+    expect(supersededByStop(state("sub_send", "doc", "sent"), state("sub_stop", "stop", "pending"))).toBe(false)
     // A cancelled send followed by another send, or a stop replacing a stop.
     expect(supersededByStop(state("sub_send", "doc", "cancelled"), state("sub_next", "doc", "pending"))).toBe(false)
     expect(supersededByStop(state("sub_a", "stop", "cancelled"), state("sub_b", "stop", "pending"))).toBe(false)

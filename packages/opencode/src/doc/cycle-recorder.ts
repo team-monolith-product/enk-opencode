@@ -160,6 +160,27 @@ function tokensOf(parts: PartData[], data: AssistantData) {
   return sum
 }
 
+// A finished step's usage and response text. The recorder re-derives the whole run every time a step
+// finishes, so without this every step would re-read the parts of every earlier step — quadratic in
+// a long agent run, inside the projector's write transaction. A step's parts are final once it is
+// completed, so its summary is computed once. Keyed by session as well (message ids are only unique
+// per database) and by completion time, so a message completed again is read afresh. Bounded: the
+// oldest entries go first; a dropped entry is simply read again.
+type StepSummary = { tokens: Tokens; text: string }
+const STEP_CACHE_MAX = 5_000
+const stepCache = new Map<string, StepSummary>()
+
+function summaryOf(db: Database.TxOrDb, sessionID: string, messageID: string, data: AssistantData): StepSummary {
+  const key = `${sessionID}:${messageID}:${data.time?.completed}`
+  const hit = stepCache.get(key)
+  if (hit) return hit
+  const parts = partsOf(db, messageID as MessageID)
+  const summary = { tokens: tokensOf(parts, data), text: textOf(parts) }
+  if (stepCache.size >= STEP_CACHE_MAX) stepCache.delete(stepCache.keys().next().value!)
+  stepCache.set(key, summary)
+  return summary
+}
+
 // The user message that started the run `userMessageID` belongs to (itself when it started one).
 function anchorOf(db: Database.TxOrDb, userMessageID: string) {
   const row = db
@@ -278,15 +299,13 @@ function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
   let cost = 0
   const responses: string[] = []
   for (const s of steps) {
-    const parts = partsOf(db, s.id as MessageID)
-    const tk = tokensOf(parts, s.data)
+    const { tokens: tk, text } = summaryOf(db, sessionID, s.id, s.data)
     tokensInput += tk.input ?? 0
     tokensOutput += tk.output ?? 0
     tokensReasoning += tk.reasoning ?? 0
     tokensCacheRead += tk.cache?.read ?? 0
     tokensCacheWrite += tk.cache?.write ?? 0
     cost += s.data.cost ?? 0
-    const text = textOf(parts)
     if (text) responses.push(text)
   }
   const first = steps[0]!

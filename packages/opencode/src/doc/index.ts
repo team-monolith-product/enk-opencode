@@ -890,26 +890,11 @@ export namespace Doc {
     return kind === "clear" || kind === "rollback"
   }
 
-  /** 이 세션에서 아직 결론 나지 않은 투표. 만료된 행은 여기서 정리하며 지나간다. */
-  function pending(sessionID: SessionID) {
-    const rows = Database.use((db) =>
-      db
-        .select()
-        .from(DocSubmitTable)
-        .where(and(eq(DocSubmitTable.session_id, sessionID), eq(DocSubmitTable.status, "pending")))
-        .all(),
-    )
-    for (const row of rows) {
-      const next = expire(row)
-      if (next.status !== "pending") continue
-      if (!timers.has(next.id)) schedule(next)
-      return next
-    }
-    return undefined
-  }
-
-  /** 이 세션에서 아직 결론 나지 않은 한 종류의 투표들. 만료된 행은 여기서 정리하며 지나간다. */
-  function pendingOf(sessionID: SessionID, kind: SubmitTargetKind) {
+  /**
+   * 이 세션에서 아직 결론 나지 않은 투표들(종류·대상으로 좁힐 수 있다). 지나가며 마감이 지난 행은 만료시키고,
+   * 남은 행은 만료 타이머가 걸려 있는지 확인한다 — 타이머는 메모리에만 있어 재시작 뒤에는 이렇게 되살린다.
+   */
+  function pendingRows(sessionID: SessionID, filter: { kind?: SubmitTargetKind; targetID?: string } = {}) {
     const rows = Database.use((db) =>
       db
         .select()
@@ -918,12 +903,29 @@ export namespace Doc {
           and(
             eq(DocSubmitTable.session_id, sessionID),
             eq(DocSubmitTable.status, "pending"),
-            eq(DocSubmitTable.target_kind, kind),
+            ...(filter.kind ? [eq(DocSubmitTable.target_kind, filter.kind)] : []),
+            ...(filter.targetID ? [eq(DocSubmitTable.target_id, filter.targetID)] : []),
           ),
         )
         .all(),
     )
-    return rows.map((row) => expire(row)).filter((row) => row.status === "pending")
+    return rows
+      .map((row) => expire(row))
+      .filter((row) => row.status === "pending")
+      .map((row) => {
+        if (!timers.has(row.id)) schedule(row)
+        return row
+      })
+  }
+
+  /** 이 세션에서 아직 결론 나지 않은 투표 하나. */
+  function pending(sessionID: SessionID) {
+    return pendingRows(sessionID)[0]
+  }
+
+  /** 이 세션에서 아직 결론 나지 않은 한 종류의 투표들. */
+  function pendingOf(sessionID: SessionID, kind: SubmitTargetKind) {
+    return pendingRows(sessionID, { kind })
   }
 
   /** 중지 투표에 밀려난 전송 투표를 취소한다. 취소한 사람은 중지를 요청한 사람으로 남긴다. */
@@ -981,28 +983,9 @@ export namespace Doc {
   }
 
   function active(sessionID: SessionID, targetID: string, actorID?: ActorID, targetKind?: SubmitTargetKind) {
-    const rows = Database.use((db) =>
-      db
-        .select()
-        .from(DocSubmitTable)
-        .where(
-          and(
-            eq(DocSubmitTable.session_id, sessionID),
-            eq(DocSubmitTable.target_id, targetID),
-            eq(DocSubmitTable.status, "pending"),
-            ...(targetKind ? [eq(DocSubmitTable.target_kind, targetKind)] : []),
-          ),
-        )
-        .all(),
-    )
-    const state = rows
-      .map((row) => {
-        const next = expire(row)
-        if (next.status === "pending" && !timers.has(next.id)) schedule(next)
-        return read(next)
-      })
-      .find((item) => item.status === "pending" && (!actorID || item.actors.some((actor) => actor.actorID === actorID)))
-    return state
+    return pendingRows(sessionID, { kind: targetKind, targetID })
+      .map((row) => read(row))
+      .find((item) => !actorID || item.actors.some((actor) => actor.actorID === actorID))
   }
 
   function recent(sessionID: SessionID, targetID: string, actorID: ActorID, now = Date.now()) {

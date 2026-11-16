@@ -1993,6 +1993,50 @@ describe("doc", () => {
     })
   })
 
+  test("a finished step is read once, not again for every later step of the run", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+        const step = (n: number) =>
+          assistantInfo({
+            sessionID: session.id,
+            id: `msg_a_long_${n}`,
+            parentID: "msg_user_long",
+            cost: 0,
+            tokens,
+            created: 1000 + n * 100,
+            completed: 1050 + n * 100,
+            finish: n === 3 ? "stop" : "tool-calls",
+          })
+        seedTurn({
+          userText: "long run",
+          userTime: 1000,
+          steps: [1, 2, 3].map((n) => ({ info: step(n), text: `step ${n}` })),
+        })
+        Database.use((db) => CycleRecorder.record(db, step(1) as never))
+        Database.use((db) => CycleRecorder.record(db, step(2) as never))
+        Database.use((db) => CycleRecorder.record(db, step(3) as never))
+
+        // Proof by stale data: rewrite step 1's text after it was summarized. A recorder that
+        // re-read every step on each record would pick the rewrite up; the cached summary does not.
+        Database.use((db) =>
+          db
+            .update(PartTable)
+            .set({ data: { type: "text", text: "rewritten" } as never })
+            .where(eq(PartTable.id, "msg_a_long_1_p0" as never))
+            .run(),
+        )
+        Database.use((db) => CycleRecorder.record(db, step(3) as never))
+        expect(Doc.cycleList({ sessionID: session.id })[0]!.response).toBe("step 1\n\nstep 2\n\nstep 3")
+      },
+    })
+  })
+
   test("sums every model call of a step, not just the last one the message keeps", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
