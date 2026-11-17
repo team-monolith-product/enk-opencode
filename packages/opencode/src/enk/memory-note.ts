@@ -5,19 +5,23 @@ import { PartID } from "@/session/schema"
 export namespace MemoryNote {
   const MB = 1024 * 1024
   const LEVELS = [0.75, 0.85, 0.95]
+  const MARGIN = 0.05
+  const MOSTLY_SELF = 0.25
   const TOP = 3
   const LABEL = 160
   const KEY = "memoryNote"
   const RESTART = "If the limit is reached, the whole workspace restarts."
   const GUIDE =
-    "Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. The names above are shortened, so stop a program by its pid, not by matching its name. While this note is shown, do not start a command that uses more memory, such as a browser check or a build, until you have freed memory; if nothing can be stopped, do not run it and ask the user what to do. In your final answer of this turn, always tell the user briefly the memory use, what you stopped, and, for each large program you left running, its memory use and what it does in plain words, even if you stopped nothing. Stopping these programs is what this note asks for, so do not apologize for it or call it a mistake. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does."
+    "Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. The names above are shortened, so stop a program by its pid, not by matching its name. While this note is shown, free memory before a command that uses more memory, such as a browser check or a build; if nothing can be stopped, tell the user briefly that the workspace may restart and then run it. In your final answer of this turn, always tell the user briefly the memory use, what you stopped, and, for each large program you left running, its memory use and what it does in plain words, even if you stopped nothing. Stopping these programs is what this note asks for, so do not apologize for it or call it a mistake. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does."
   const ALONE =
-    "No other program is using much memory; most of it is OpenCode itself. Do not stop the preview dev server. While this note is shown, do not start a command that uses more memory, such as a browser check or a build; if the request needs one, ask the user first. In your final answer of this turn, always tell the user briefly that the workspace memory is high."
-  const RECOVERED = [
-    "<system-reminder>",
+    "Most of this memory is used by OpenCode itself, not by other programs, so there is little to stop. Do not stop the preview dev server. Before a command that uses more memory, such as a browser check or a build, tell the user briefly that the workspace may restart and then run it. In your final answer of this turn, always tell the user briefly that the workspace memory is high."
+  const reminder = (text: string) => ["<system-reminder>", text, "</system-reminder>"].join("\n")
+  const RECOVERED = reminder(
     "Workspace memory is back below the warning level. Earlier memory notes in this conversation are out of date; do not act on them.",
-    "</system-reminder>",
-  ].join("\n")
+  )
+  const FREED = reminder(
+    "Workspace memory is back below the warning level, so you no longer need to free memory before heavy commands. In your final answer of this turn, still tell the user briefly the memory use now and what you stopped in this turn, if anything. Stopping them is what the earlier note asked for, so do not apologize for it or call it a mistake.",
+  )
   const SECRET = /key|token|secret|pass|auth|cred/i
 
   export type Program = { cmd: string; pid: number; mb: number; count: number }
@@ -116,7 +120,7 @@ export namespace MemoryNote {
     )
   }
 
-  export async function usage(paths: Paths = DEFAULT): Promise<Usage | undefined> {
+  export async function usage(paths: Paths = DEFAULT, previous = 0): Promise<Usage | undefined> {
     const max = (await read(`${paths.cgroup}/memory.max`))?.trim()
     if (!max || max === "max") return
     const stat = await read(`${paths.cgroup}/memory.stat`)
@@ -129,36 +133,46 @@ export namespace MemoryNote {
       selfMb: 0,
       programs: [],
     }
-    if (level(base) === 0) return base
+    if (level(base, previous) === 0) return base
     const list = await processes(paths.proc)
     const self = list.find((item) => item.pid === paths.root)
     return { ...base, selfMb: Math.round((self?.bytes ?? 0) / MB), programs: programs(list, paths.root) }
   }
 
-  export function level(usage: Usage) {
+  export function level(usage: Usage, previous = 0) {
     const ratio = usage.usedMb / usage.limitMb
-    return LEVELS.filter((item) => ratio >= item).length
+    const raw = LEVELS.filter((item) => ratio >= item).length
+    const held = Math.min(previous, LEVELS.filter((item) => ratio >= item - MARGIN).length)
+    return Math.max(raw, held)
   }
 
   export function compose(usage: Usage) {
     const top = usage.programs.slice(0, TOP)
+    const others = usage.programs.reduce((sum, item) => sum + item.mb, 0)
     const percent = Math.round((usage.usedMb / usage.limitMb) * 100)
-    return [
-      "<system-reminder>",
-      `Workspace memory: ${usage.usedMb} MB of ${usage.limitMb} MB (${percent}%). OpenCode: ${usage.selfMb} MB.`,
-      ...top.map(
-        (item) =>
-          `- \`${item.cmd}\` (pid ${item.pid}): ${item.mb} MB${item.count > 1 ? ` (${item.count} processes)` : ""}`,
-      ),
-      `${RESTART} ${top.length ? GUIDE : ALONE}`,
-      "</system-reminder>",
-    ].join("\n")
+    return reminder(
+      [
+        `Workspace memory: ${usage.usedMb} MB of ${usage.limitMb} MB (${percent}%). OpenCode: ${usage.selfMb} MB.`,
+        ...top.map(
+          (item) =>
+            `- \`${item.cmd}\` (pid ${item.pid}): ${item.mb} MB${item.count > 1 ? ` (${item.count} processes)` : ""}`,
+        ),
+        `${RESTART} ${others >= usage.usedMb * MOSTLY_SELF ? GUIDE : ALONE}`,
+      ].join("\n"),
+    )
   }
 
   function stored(message: MessageV2.WithParts) {
     for (const part of message.parts) {
       const value = part.type === "text" && part.synthetic ? part.metadata?.[KEY] : undefined
       if (typeof value === "number") return { part: part as MessageV2.TextPart, level: value }
+    }
+  }
+
+  function earlier(users: MessageV2.WithParts[]) {
+    for (let i = users.length - 2; i >= 0; i--) {
+      const found = stored(users[i])
+      if (found) return found
     }
   }
 
@@ -170,17 +184,17 @@ export namespace MemoryNote {
     const last = users.at(-1)
     if (!last) return
     const existing = stored(last)
-    const current = await usage(paths).catch(() => undefined)
-    const now = current ? level(current) : 0
+    const before = existing ?? earlier(users)
+    const current = await usage(paths, before?.level).catch(() => undefined)
+    const now = current ? level(current, before?.level) : 0
     if (existing?.level === now) return
-    const before = existing ?? users.slice(0, -1).reverse().map(stored).find(Boolean)
     if (now === 0 && !before?.level) return
     return {
       id: existing?.part.id ?? PartID.ascending(),
       messageID: last.info.id,
       sessionID: last.info.sessionID,
       type: "text",
-      text: now > 0 ? compose(current!) : RECOVERED,
+      text: now > 0 ? compose(current!) : existing ? FREED : RECOVERED,
       synthetic: true,
       metadata: { [KEY]: now },
     }

@@ -106,7 +106,7 @@ describe("MemoryNote.update", () => {
         "- `chrome` (pid 20): 1100 MB (2 processes)",
         "- `node next dev` (pid 11): 121 MB (2 processes)",
         "- `python3 app.py` (pid 30): 30 MB",
-        "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. The names above are shortened, so stop a program by its pid, not by matching its name. While this note is shown, do not start a command that uses more memory, such as a browser check or a build, until you have freed memory; if nothing can be stopped, do not run it and ask the user what to do. In your final answer of this turn, always tell the user briefly the memory use, what you stopped, and, for each large program you left running, its memory use and what it does in plain words, even if you stopped nothing. Stopping these programs is what this note asks for, so do not apologize for it or call it a mistake. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does.",
+        "If the limit is reached, the whole workspace restarts. Before continuing, stop the programs above that are no longer needed (such as a browser you finished checking) and keep the preview dev server running. The names above are shortened, so stop a program by its pid, not by matching its name. While this note is shown, free memory before a command that uses more memory, such as a browser check or a build; if nothing can be stopped, tell the user briefly that the workspace may restart and then run it. In your final answer of this turn, always tell the user briefly the memory use, what you stopped, and, for each large program you left running, its memory use and what it does in plain words, even if you stopped nothing. Stopping these programs is what this note asks for, so do not apologize for it or call it a mistake. For a program you did not start, first read the start of its script in this turn (for example `head -30 <file>`) and describe it only from what you read, not from its name. If you cannot read it, say you do not know what it does.",
         "</system-reminder>",
       ].join("\n"),
     )
@@ -212,7 +212,49 @@ describe("MemoryNote details", () => {
 
     const part = await step([user("msg_alone")], paths)
 
-    expect(part?.text).toContain("most of it is OpenCode itself")
+    expect(part?.text).toContain("Most of this memory is used by OpenCode itself")
     expect(part?.text).not.toContain("programs above")
+  })
+
+  test("says OpenCode itself is using the memory when only small programs run beside it", async () => {
+    const paths = await fixture({
+      limitMb: 2048,
+      usedMb: 1700,
+      procs: [
+        { pid: 1, ppid: 0, mb: 1500, cmd: "opencode" },
+        { pid: 10, ppid: 1, mb: 100, cmd: "node serve -l 3000" },
+      ],
+    })
+
+    const part = await step([user("msg_self")], paths)
+
+    expect(part?.text).toContain("- `node serve -l 3000` (pid 10): 100 MB")
+    expect(part?.text).toContain("Most of this memory is used by OpenCode itself")
+    expect(part?.text).not.toContain("stop the programs above")
+  })
+
+  test("keeps the warning until usage falls a margin below the level", async () => {
+    const messages = [user("msg_flap")]
+
+    expect((await step(messages, await fixture({ limitMb: 2000, usedMb: 1520, procs })))?.metadata).toEqual({
+      memoryNote: 1,
+    })
+    expect(await step(messages, await fixture({ limitMb: 2000, usedMb: 1480, procs }))).toBeUndefined()
+    expect(await step(messages, await fixture({ limitMb: 2000, usedMb: 1420, procs }))).toBeUndefined()
+    expect((await step(messages, await fixture({ limitMb: 2000, usedMb: 1390, procs })))?.metadata).toEqual({
+      memoryNote: 0,
+    })
+  })
+
+  test("still asks for the report when memory is freed within the same request", async () => {
+    const messages = [user("msg_freed")]
+    const warning = await step(messages, await fixture({ limitMb: 2048, usedMb: 1800, procs }))
+
+    const freed = await step(messages, await fixture({ limitMb: 2048, usedMb: 500, procs }))
+
+    expect(freed?.id).toBe(warning!.id)
+    expect(freed?.metadata).toEqual({ memoryNote: 0 })
+    expect(freed?.text).toContain("still tell the user briefly the memory use now and what you stopped")
+    expect(freed?.text).not.toContain("do not act on them")
   })
 })
