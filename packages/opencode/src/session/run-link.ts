@@ -26,9 +26,22 @@ export namespace RunLink {
 
   type Role = { role?: string; parentID?: string }
 
-  /** The message table's newest rowid. "Stored after this point" is then a rowid comparison. */
-  export function lastRow() {
-    return Database.use((db) => db.select({ row: sql<number | null>`max(rowid)` }).from(MessageTable).get())?.row ?? 0
+  /**
+   * The session's newest message rowid. "Stored after this point" is then a rowid comparison. Scoped to
+   * the session on purpose: SQLite hands out max + 1, so once the table's newest rows are deleted (another
+   * session removed) a new row can get a rowid at or below a table-wide mark taken earlier. The session's
+   * own newest row is not deleted while it runs, so every message stored later in it is above this mark.
+   */
+  export function lastRow(sessionID: SessionID) {
+    return (
+      Database.use((db) =>
+        db
+          .select({ row: sql<number | null>`max(rowid)` })
+          .from(MessageTable)
+          .where(eq(MessageTable.session_id, sessionID))
+          .get(),
+      )?.row ?? 0
+    )
   }
 
   export function rowOf(db: Database.TxOrDb, messageID: string) {
@@ -144,8 +157,13 @@ export namespace RunLink {
    * answer (the first run read takes in every prompt that was waiting, and only the newest gets an
    * answer — anchoring on the newest would drop the others from the record). Falls back to
    * `fallback`, the message the loop is about to answer.
+   *
+   * `after` is where the session's previous run last read. A prompt stored up to there was already read
+   * by that run, and if it has no answer it is because that run was stopped or failed before answering
+   * — not a prompt waiting for this run. Starting from it would date this run (its start time and TTFT)
+   * from that old prompt.
    */
-  export function start(sessionID: SessionID, fallback: MessageID) {
+  export function start(sessionID: SessionID, fallback: MessageID, after?: number) {
     return Database.use((db) => {
       const recent = db
         .select({ id: MessageTable.id, data: MessageTable.data, row: sql<number>`rowid` })
@@ -157,25 +175,32 @@ export namespace RunLink {
       let first: { id: MessageID; row: number } | undefined
       for (const item of recent) {
         if ((item.data as Role).role === "assistant") break
+        if (after !== undefined && item.row <= after) break
         if ((item.data as Role).role === "user") first = { id: item.id, row: item.row }
       }
       if (first) return first
-      return { id: fallback, row: rowOf(db, fallback) ?? lastRow() }
+      return { id: fallback, row: rowOf(db, fallback) ?? lastRow(sessionID) }
     })
   }
 
-  /** User messages of the session stored after `afterRow`, in the order they were stored. */
+  /**
+   * User messages of the session stored after `afterRow`, in the order they were stored, and the newest
+   * rowid looked at (`last`) — pass it back as `afterRow` next time so a long run never re-reads the rows
+   * it has already been through.
+   */
   export function arrivals(sessionID: SessionID, afterRow: number) {
-    return Database.use((db) =>
+    const rows = Database.use((db) =>
       db
-        .select({ id: MessageTable.id, data: MessageTable.data })
+        .select({ id: MessageTable.id, data: MessageTable.data, row: sql<number>`rowid` })
         .from(MessageTable)
         .where(and(gt(sql`rowid`, afterRow), eq(MessageTable.session_id, sessionID)))
         .orderBy(sql`rowid`)
         .all(),
     )
-      .filter((item) => (item.data as Role).role === "user")
-      .map((item) => item.id)
+    return {
+      ids: rows.filter((item) => (item.data as Role).role === "user").map((item) => item.id),
+      last: rows.at(-1)?.row ?? afterRow,
+    }
   }
 
   /**

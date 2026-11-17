@@ -141,13 +141,16 @@ export namespace SessionPrompt {
           const runners = new Map<string, Runner<MessageV2.WithParts>>()
           // loop() 로 실행을 기다리는 사람들. 기다리는 동안만 남는다.
           const watches = new Map<string, Watch>()
+          // 세션마다 마지막 실행이 마지막으로 메시지를 읽은 위치(RunLink.lastRow). 다음 실행의 기준을 고를 때, 이미
+          // 앞 실행이 읽고도 답하지 못한 프롬프트(답이 생기기 전에 중지·실패)를 기다리던 프롬프트로 착각하지 않게 한다.
+          const lastRead = new Map<string, number>()
           yield* Effect.addFinalizer(
             Effect.fnUntraced(function* () {
               yield* Effect.forEach(runners.values(), (r) => r.cancel, { concurrency: "unbounded", discard: true })
               runners.clear()
             }),
           )
-          return { runners, watches }
+          return { runners, watches, lastRead }
         }),
       )
 
@@ -1655,8 +1658,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           let modelIndex = 0
           // The user message this run started from, and the later ones it has already linked to it.
           let anchor: { id: MessageID; row: number } | undefined
+          // How far linkRun has already looked for joined messages (rowid), so each step scans only new rows.
+          let scanned = 0
           const joined = new Set<MessageID>()
           const session = yield* sessions.get(sessionID)
+          const state = yield* InstanceState.get(cache)
+          // Where the previous run of this session last read. Prompts stored up to there were already read
+          // by that run; if it stopped or failed before answering them, they are not this run's start.
+          const previousRead = state.lastRead.get(sessionID)
 
           while (true) {
             yield* status.set(sessionID, { type: "busy" })
@@ -1664,9 +1673,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             // Taken before the read, so a message stored while the read is in flight still counts as
             // possibly unread for loop()'s re-run check.
-            const readAt = RunLink.lastRow()
+            const readAt = RunLink.lastRow(sessionID)
             let msgs = yield* Effect.promise(() => MessageV2.filterCompacted(MessageV2.stream(sessionID)))
-            const watch = (yield* InstanceState.get(cache)).watches.get(sessionID)
+            state.lastRead.set(sessionID, readAt)
+            const watch = state.watches.get(sessionID)
             if (watch) watch.readAt = readAt
 
             let lastUser: MessageV2.User | undefined
@@ -1705,9 +1715,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // 실행의 기록에 합친다. 순서는 저장 순서(rowid)로만 판단한다(RunLink 참고 — 시각은 시계가 뒤로 가면
             // 뒤집힌다). 기록은 부수 작업이라 실패해도 실행은 계속한다.
             const linkRun = Effect.sync(() => {
-              anchor ??= RunLink.start(sessionID, lastUser.id)
+              anchor ??= RunLink.start(sessionID, lastUser.id, previousRead)
               const run = anchor
-              for (const id of RunLink.arrivals(sessionID, run.row)) {
+              const found = RunLink.arrivals(sessionID, Math.max(run.row, scanned))
+              scanned = found.last
+              for (const id of found.ids) {
                 if (id === run.id || joined.has(id)) continue
                 joined.add(id)
                 RunLink.link({ sessionID, messageID: id, anchorID: run.id })
@@ -1946,7 +1958,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // Everything stored up to now is something this caller wants answered (prompt() stores its
         // message, then calls loop()). A noReply message stored later, with no loop() of its own,
         // asked for no answer and must not trigger a re-run.
-        watch.wantedAt = RunLink.lastRow()
+        watch.wantedAt = RunLink.lastRow(id)
         const me: Waiter = { stopped: false }
         watch.waiters.add(me)
         return yield* Effect.gen(function* () {

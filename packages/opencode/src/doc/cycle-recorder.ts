@@ -232,6 +232,21 @@ export function record(db: Database.TxOrDb, info: MessageV2.Info) {
 }
 
 /**
+ * Record a stored assistant message again, for parts that arrived after it completed (see the
+ * part-updated projector). Does nothing unless it is a finished step.
+ */
+export function recordStored(db: Database.TxOrDb, sessionID: SessionID, messageID: string) {
+  const row = db
+    .select({ data: MessageTable.data })
+    .from(MessageTable)
+    .where(eq(MessageTable.id, messageID as MessageID))
+    .get()
+  const data = row?.data as AssistantData | undefined
+  if (data?.role !== "assistant" || !data.time?.completed || !data.parentID) return
+  derive(db, sessionID, RunLink.anchorOf(db, data.parentID))
+}
+
+/**
  * Re-derive the cycle a user message belongs to. For facts that arrive after the run's steps were
  * recorded — a consent vote links its user message only once the message exists, and a steer can be
  * answered before that link lands.

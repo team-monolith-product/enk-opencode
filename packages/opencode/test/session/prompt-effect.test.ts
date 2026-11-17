@@ -37,6 +37,9 @@ import { Attachment } from "../../src/session/attachment"
 import { Log } from "../../src/util/log"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirInstance } from "../fixture/fixture"
+import { Database, and, eq, sql } from "../../src/storage/db"
+import { MessageTable } from "../../src/session/session.sql"
+import { PromptCycleTable } from "../../src/doc/doc.sql"
 import { testEffect } from "../lib/effect"
 
 Log.init({ print: false })
@@ -1265,6 +1268,51 @@ it.effect(
           const msgs = yield* sessions.messages({ sessionID: chat.id })
           expect(msgs.some((msg) => msg.info.role === "assistant" && msg.info.parentID === id)).toBe(false)
           yield* prompt.assertNotBusy(chat.id)
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+it.effect(
+  "the next run is not dated from a prompt that was stopped before any answer",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          yield* test.push((input) =>
+            hang(input, start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+            ),
+          )
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "stopped" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+          yield* prompt.cancel(chat.id)
+          yield* Fiber.await(a)
+          // The stop landed before the step wrote anything: the run read the prompt but left no answer
+          // (and so no usage record).
+          Database.use((db) => {
+            db.delete(MessageTable)
+              .where(and(eq(MessageTable.session_id, chat.id), sql`json_extract(data, '$.role') = 'assistant'`))
+              .run()
+            db.delete(PromptCycleTable).where(eq(PromptCycleTable.session_id, chat.id)).run()
+          })
+
+          yield* test.reply(...replyStop("fresh"))
+          yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "again" }] })
+
+          // The record starts at the prompt that started this run, not at the one the stopped run read.
+          const cycles = Doc.cycleList({ sessionID: chat.id })
+          expect(cycles).toHaveLength(1)
+          expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["again"])
+          const msgs = yield* sessions.messages({ sessionID: chat.id })
+          const again = msgs.find((msg) => msg.info.role === "user" && msg.parts.some((p) => p.type === "text" && p.text === "again"))
+          expect(cycles[0]!.inputs[0]!.userMessageID).toBe(again!.info.id)
         }),
       { git: true, config: cfg },
     ),

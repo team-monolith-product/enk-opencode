@@ -2101,6 +2101,125 @@ describe("doc", () => {
     })
   })
 
+  test("a run's last step whose parts are copied after it completed is recorded again", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+        const only = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_forked_last",
+          parentID: "msg_user_forked_last",
+          cost: 0,
+          tokens,
+          created: 1100,
+          completed: 1200,
+          finish: "stop",
+        })
+        seedTurn({ userText: "fork me too", userTime: 1000, steps: [{ info: only, text: "last answer" }] })
+        // Fork order: the completed message is recorded before any of its parts exist.
+        Database.use((db) =>
+          db
+            .delete(PartTable)
+            .where(eq(PartTable.message_id, "msg_a_forked_last" as never))
+            .run(),
+        )
+        Database.use((db) => CycleRecorder.record(db, only as never))
+        expect(Doc.cycleList({ sessionID: session.id })[0]!.response).toBe("")
+
+        // Then the parts are copied, through the real projector: the text, then the step's usage.
+        const base = { sessionID: session.id, messageID: "msg_a_forked_last" as never }
+        await Session.updatePart({ ...base, id: "prt_forked_last_text" as never, type: "text", text: "last answer" })
+        await Session.updatePart({
+          ...base,
+          id: "prt_forked_last_sf" as never,
+          type: "step-finish",
+          reason: "stop",
+          cost: 0,
+          tokens: { input: 70, output: 7, reasoning: 0, cache: { read: 0, write: 0 } },
+        })
+
+        const cycle = Doc.cycleList({ sessionID: session.id })[0]!
+        expect(cycle.response).toBe("last answer")
+        expect(cycle.tokensInput).toBe(70)
+      },
+    })
+  })
+
+  test("a run does not start from a prompt the previous run read but never answered", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const user = (id: string) =>
+          Database.use((db) =>
+            db
+              .insert(MessageTable)
+              .values({
+                id: id as never,
+                session_id: session.id,
+                time_created: 0,
+                data: { role: "user", time: { created: 0 } } as never,
+              })
+              .run(),
+          )
+        // A was read by a run that was stopped before it wrote any answer.
+        user("msg_user_stopped")
+        const previousRead = RunLink.lastRow(session.id as never)
+        // Two prompts then wait for the next run.
+        user("msg_user_waiting_1")
+        user("msg_user_waiting_2")
+
+        expect(RunLink.start(session.id as never, "msg_user_waiting_2" as never, previousRead).id as string).toBe("msg_user_waiting_1")
+        // Without a previous read (a fresh process) every unanswered prompt still counts.
+        expect(RunLink.start(session.id as never, "msg_user_waiting_2" as never).id as string).toBe("msg_user_stopped")
+        // Nothing new since the previous read: the message being answered is the start.
+        const now = RunLink.lastRow(session.id as never)
+        expect(RunLink.start(session.id as never, "msg_user_waiting_2" as never, now).id as string).toBe("msg_user_waiting_2")
+      },
+    })
+  })
+
+  test("joined messages are looked for only in rows a run has not already scanned", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const other = await Session.create({})
+        const add = (sessionID: string, id: string, role: string) =>
+          Database.use((db) =>
+            db
+              .insert(MessageTable)
+              .values({ id: id as never, session_id: sessionID as never, time_created: 0, data: { role } as never })
+              .run(),
+          )
+        add(session.id, "msg_user_scan_anchor", "user")
+        const start = RunLink.lastRow(session.id as never)
+        add(session.id, "msg_a_scan_1", "assistant")
+        add(session.id, "msg_user_scan_steer", "user")
+        add(other.id, "msg_user_scan_elsewhere", "user")
+
+        const first = RunLink.arrivals(session.id as never, start)
+        expect(first.ids as string[]).toEqual(["msg_user_scan_steer"])
+        expect(first.last).toBe(RunLink.lastRow(session.id as never))
+        // The next step starts where this one stopped: nothing new, nothing re-read.
+        expect(RunLink.arrivals(session.id as never, first.last)).toEqual({ ids: [], last: first.last })
+        // The session's own mark ignores rows of other sessions.
+        expect(RunLink.lastRow(session.id as never)).toBeLessThan(RunLink.lastRow(other.id as never))
+      },
+    })
+  })
+
   test("a fork carries a message's run and its replay marker over to the clone's ids", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
@@ -3279,7 +3398,25 @@ describe("doc", () => {
           action: "approve",
         })
         expect(late.status).toBe("cancelled")
+        // The reason is stored with the vote, so every later read says the same as the live cast.
+        expect(late.cancelReason).toBe("stop")
 
+        // Alice's connection blips and comes back while the stop vote is pending: she is told her send
+        // was dropped (with its reason) before she is shown the stop vote.
+        const replay: Doc.SubmitEvent[] = []
+        const again = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => replay.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        expect(replay.map((e) => `${e.type}:${e.state.submitID}`)).toEqual([
+          `cancelled:${send.submitID}`,
+          `created:${stop.submitID}`,
+        ])
+        expect(replay[0]!.state.cancelReason).toBe("stop")
+
+        again()
         stopA()
         stopB()
       },
@@ -3380,7 +3517,13 @@ describe("doc", () => {
       },
     })
     // A stale "running" would make every later stop on this session open a vote nothing settles.
-    expect(Doc.isRunning(sessionID as never)).toBe(false)
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        expect(Doc.isRunning(sessionID as never)).toBe(false)
+      },
+    })
   })
 
   test("stopping a session whose AI is not running goes through without a vote", async () => {

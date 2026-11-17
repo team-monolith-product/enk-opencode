@@ -232,6 +232,11 @@ export class SubmitRequestError extends Error {
   }
 }
 
+/** The server refused to open a vote because another one (a stop vote, a clear/rollback) is running. */
+export function voteConflict(err: unknown) {
+  return err instanceof SubmitRequestError && err.body?.name === "DocVoteConflictError"
+}
+
 /**
  * A send vote the server cancelled because a stop vote took over (the server says so in
  * `cancelReason`, it is not guessed here). The stop dialog covers the "cancelled" outcome in the same

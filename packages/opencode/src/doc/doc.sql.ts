@@ -105,6 +105,8 @@ export const DocSubmitTable = sqliteTable(
     timeout_ms: integer().notNull(),
     expires_at: integer().notNull(),
     cancelled_by: text().$type<ActorID>(),
+    // Why the server itself cancelled the vote ('stop': a stop vote took over a waiting send).
+    cancel_reason: text().$type<"stop">(),
     // The user message this submit produced once sent — links a cycle back to its submit/actors.
     user_message_id: text(),
     ...Timestamps,

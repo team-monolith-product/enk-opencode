@@ -154,6 +154,18 @@ export default [
     } catch (err) {
       if (!foreign(err)) throw err
       log.warn("ignored late part update", { partID: id, messageID, sessionID })
+      return
+    }
+
+    // A step's usage lives in its step-finish parts. When one lands on a message that is already
+    // complete — a fork copies the message first and its parts after — the cycle recorded at completion
+    // missed it, so record again. While a step is still streaming the message is not complete and this
+    // is a single lookup.
+    if (rest.type !== "step-finish") return
+    try {
+      CycleRecorder.recordStored(db, sessionID, messageID)
+    } catch (err) {
+      log.warn("cycle record failed", { messageID, sessionID, err: String(err) })
     }
   }),
 ]

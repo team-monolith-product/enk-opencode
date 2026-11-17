@@ -742,6 +742,7 @@ export namespace Doc {
       status: SubmitStatus.parse(row.status),
       actors,
       cancelledBy: row.cancelled_by ? actors.find((item) => item.actorID === row.cancelled_by) : undefined,
+      cancelReason: SubmitCancelReason.safeParse(row.cancel_reason).data,
       timeoutMs: row.timeout_ms,
       expiresAt: row.expires_at,
       serverNow: Date.now(),
@@ -970,53 +971,32 @@ export namespace Doc {
     }
   }
 
-  // 지금 AI 가 도는 세션. 세션 상태 이벤트로만 채운다 — 프로세스가 막 떴을 때는 아무것도 돌고 있지 않다.
-  const running = new Set<string>()
+  // 지금 AI 가 도는 세션: SessionStatus 가 들고 있는 "idle 아님"을 그 상태 이벤트로 따라 적은 것이다. SessionStatus 는
+  // Effect 로만 읽혀 동기인 create() 에서 물어볼 수 없어 사본을 두되, SessionStatus 와 똑같이 인스턴스(작업 디렉터리)
+  // 상태로 둔다 — 인스턴스가 내려가면 함께 사라지므로, 종료로 idle 이벤트를 못 낸 실행이 "도는 중"으로 남지 않는다.
+  // 프로세스가 막 떴을 때는 아무것도 돌고 있지 않다.
+  const running = Instance.state(() => new Set<string>())
   const settling = new Map<string, unknown>()
-
-  function forgetSession(sessionID: string) {
-    running.delete(sessionID)
-    if (settling.has(sessionID)) settleTimer.clear(settling.get(sessionID))
-    settling.delete(sessionID)
-  }
-
-  // The sessions each instance (working directory) has reported busy. When the instance shuts down
-  // they are forgotten: a run cut off by shutdown may never get its idle event out, and a session left
-  // "running" here would make every later stop on it open a vote that nothing ever settles.
-  const instanceSessions = Instance.state(
-    () => new Set<string>(),
-    async (ids) => {
-      for (const id of ids) forgetSession(id)
-    },
-  )
 
   /** Whether this module currently sees the session's AI as running (it follows status events). */
   export function isRunning(sessionID: SessionID) {
-    return running.has(sessionID)
+    return running().has(sessionID)
   }
 
   function track(sessionID: SessionID, busy: boolean) {
     if (settling.has(sessionID)) settleTimer.clear(settling.get(sessionID))
     settling.delete(sessionID)
     if (busy) {
-      running.add(sessionID)
-      // Outside an instance context (should not happen for status events) there is nothing to tie
-      // the session to; it still clears on its idle event.
-      try {
-        instanceSessions().add(sessionID)
-      } catch {}
+      running().add(sessionID)
       return
     }
-    running.delete(sessionID)
-    try {
-      instanceSessions().delete(sessionID)
-    } catch {}
-    const timer = settleTimer
+    running().delete(sessionID)
+    // A busy event clears this timer above, so when it fires the session has stayed idle for the whole
+    // window — nothing to re-check (the callback runs outside any instance context anyway).
     settling.set(
       sessionID,
-      timer.set(() => {
+      settleTimer.set(() => {
         settling.delete(sessionID)
-        if (running.has(sessionID)) return
         close(pendingOf(sessionID, "stop"), null)
       }, SETTLE_MS),
     )
@@ -1031,14 +1011,14 @@ export namespace Doc {
       const item = Database.use((db) =>
         db
           .update(DocSubmitTable)
-          .set({ status: "cancelled", cancelled_by: actorID, time_updated: Date.now() })
+          .set({ status: "cancelled", cancelled_by: actorID, cancel_reason: reason ?? null, time_updated: Date.now() })
           .where(and(eq(DocSubmitTable.id, row.id), eq(DocSubmitTable.status, "pending")))
           .returning()
           .get(),
       )
       if (!item) continue
       done(item.id)
-      cast("cancelled", { ...read(item), ...(reason ? { cancelReason: reason } : {}) })
+      cast("cancelled", read(item))
     }
   }
 
@@ -1192,7 +1172,7 @@ export namespace Doc {
     // 돌고 있지 않은 세션의 중지는 멈출 것이 없다. 화면만 "작업 중"으로 남은 경우(끝나지 않은 채 남은 답)에
     // 누르는 것이라, 투표 없이 바로 보내 SessionPrompt.cancel 의 복구 경로가 화면을 풀게 한다. 투표를 열면 쉬는
     // 세션에는 닫아 줄 상태 변화도 오지 않아, 투표가 끝날 때까지 모두의 전송이 막힌다.
-    const idleStop = input.targetKind === "stop" && !running.has(input.sessionID)
+    const idleStop = input.targetKind === "stop" && !running().has(input.sessionID)
     const ids = idleStop ? [input.actorID] : targets(input.targetID, input.actorID)
     const timeout = clamp(input.timeoutMs)
     const now = Date.now()
@@ -1210,6 +1190,7 @@ export namespace Doc {
           timeout_ms: timeout,
           expires_at: now + timeout,
           cancelled_by: null,
+          cancel_reason: null,
           user_message_id: null,
           time_created: now,
           time_updated: now,
@@ -1668,6 +1649,12 @@ export namespace Doc {
     // that gate was how a client that blipped at create() time ended up never seeing the dialog.
     const state = join(input.sessionID, input.targetID, input.actorID)
     if (state) {
+      // A stop vote that just took over this peer's send: the send's cancellation went out while the
+      // peer was away, and the stop vote is all that is pending now. Replay the cancellation first, so
+      // the peer still learns its send was dropped (it carries the stored reason).
+      const dropped = state.targetKind === "stop" ? recent(input.sessionID, input.targetID, input.actorID) : undefined
+      if (dropped?.targetKind === "doc" && dropped.status === "cancelled" && dropped.cancelReason === "stop")
+        peer.send(JSON.stringify({ type: "cancelled", state: dropped } satisfies SubmitEvent))
       peer.send(JSON.stringify({ type: "created", state } satisfies SubmitEvent))
     } else {
       // No live vote — but if one resolved moments ago, replay its terminal state so a

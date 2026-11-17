@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { droppedForStop, liveSocket, onLocalClock, type DocSubmitState } from "./doc-submit"
+import {
+  droppedForStop,
+  liveSocket,
+  onLocalClock,
+  SubmitRequestError,
+  voteConflict,
+  type DocSubmitState,
+} from "./doc-submit"
 
 // The consent socket IS this client's membership in a vote, so the interesting cases are the ones
 // where the connection is gone but the browser has not noticed: on a real device that is a wifi
@@ -162,6 +169,18 @@ describe("onLocalClock", () => {
   test("a state without serverNow is left as it is", () => {
     const state = vote(123)
     expect(onLocalClock(state)).toBe(state)
+  })
+})
+
+describe("voteConflict", () => {
+  test("a send refused because another vote (a stop vote) is running", () => {
+    expect(voteConflict(new SubmitRequestError(400, { name: "DocVoteConflictError" }))).toBe(true)
+  })
+
+  test("any other failure is not a vote conflict", () => {
+    expect(voteConflict(new SubmitRequestError(500, { name: "UnknownError" }))).toBe(false)
+    expect(voteConflict(new SubmitRequestError(400, undefined))).toBe(false)
+    expect(voteConflict(new Error("network"))).toBe(false)
   })
 })
 
