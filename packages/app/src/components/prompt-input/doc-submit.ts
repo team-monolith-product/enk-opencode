@@ -25,6 +25,8 @@ export type DocSubmitState = {
   status: "pending" | "sent" | "cancelled" | "expired"
   actors: DocSubmitActor[]
   cancelledBy?: DocSubmitActor
+  // Why the server itself cancelled the vote. 'stop': a stop vote took over a send waiting for consent.
+  cancelReason?: "stop"
   timeoutMs: number
   expiresAt: number
   serverNow?: number
@@ -231,18 +233,12 @@ export class SubmitRequestError extends Error {
 }
 
 /**
- * A stop vote is taking over the dialog that was just showing a send vote the server cancelled for
- * it (a stop always outranks a pending send). The stop dialog replaces the "cancelled" outcome in the
- * same tick, so without a separate notice nobody would see that the send was dropped.
- *
- * The shown send may still read "pending": whoever pressed stop gets the stop vote back over HTTP,
- * which can land before their socket delivers the send's cancellation. The server cancels every
- * pending send when a stop vote opens, so a pending send meeting a new stop vote is just as dropped.
+ * A send vote the server cancelled because a stop vote took over (the server says so in
+ * `cancelReason`, it is not guessed here). The stop dialog covers the "cancelled" outcome in the same
+ * tick, so without a separate notice nobody would see that the send was dropped.
  */
-export function supersededByStop(shown: DocSubmitState | undefined, next: DocSubmitState) {
-  if (!shown || shown.submitID === next.submitID) return false
-  if (shown.targetKind !== "doc" || (shown.status !== "cancelled" && shown.status !== "pending")) return false
-  return next.targetKind === "stop" && next.status === "pending"
+export function droppedForStop(state: DocSubmitState) {
+  return state.targetKind === "doc" && state.status === "cancelled" && state.cancelReason === "stop"
 }
 
 export const onLocalClock = (value: DocSubmitState): DocSubmitState => {

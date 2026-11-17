@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { APICallError } from "ai"
-import { expect, spyOn } from "bun:test"
+import { expect, setSystemTime, spyOn } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer, ServiceMap } from "effect"
 import * as Stream from "effect/Stream"
 import z from "zod"
@@ -1141,6 +1141,32 @@ it.effect("prompts already waiting when a run starts all count, the oldest first
         const copies = Doc.cycleList({ sessionID: forked.id })
         expect(copies).toHaveLength(1)
         expect(copies[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
+      }),
+    { git: true, config: cfg },
+  ),
+)
+
+it.effect("a clock stepped back between two waiting prompts does not change which run they join", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { test, prompt, chat } = yield* boot()
+        yield* test.reply(...replyStop("both"))
+        const now = Date.now()
+        try {
+          setSystemTime(new Date(now + 10_000))
+          yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "first" }] })
+          setSystemTime(new Date(now)) // NTP pulls the clock back 10s
+          yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "second" }] })
+        } finally {
+          setSystemTime()
+        }
+        yield* prompt.loop({ sessionID: chat.id })
+
+        // Stored order wins over the (now inverted) timestamps: one run, both inputs, first first.
+        const cycles = Doc.cycleList({ sessionID: chat.id })
+        expect(cycles).toHaveLength(1)
+        expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
       }),
     { git: true, config: cfg },
   ),

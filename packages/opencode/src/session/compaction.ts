@@ -18,7 +18,7 @@ import { NotFoundError } from "@/storage/db"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { Effect, Layer, ServiceMap } from "effect"
 import { makeRuntime } from "@/effect/run-service"
-import * as CycleRecorder from "@/doc/cycle-recorder"
+import { RunLink } from "./run-link"
 import { isOverflow as overflow, usable } from "./overflow"
 
 export namespace SessionCompaction {
@@ -493,8 +493,8 @@ When constructing the summary, try to stick to this template:
             // The replay copies a prompt someone already sent (parts and all), so the usage record must
             // not count it as a new prompt. Marked before the run loop reads it, which would otherwise
             // link it as an ordinary joined message.
-            const mark = { sessionID: input.sessionID, userMessageID: replayMsg.id, anchorID: original.id, replay: true }
-            yield* Effect.sync(() => CycleRecorder.link(mark)).pipe(
+            const mark = { sessionID: input.sessionID, messageID: replayMsg.id, anchorID: original.id, replay: true }
+            yield* Effect.sync(() => RunLink.link(mark)).pipe(
               Effect.catchCause((cause) => Effect.sync(() => log.warn("cycle replay link failed", { cause }))),
             )
             for (const part of replay.parts) {

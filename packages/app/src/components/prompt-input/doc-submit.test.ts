@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { liveSocket, onLocalClock, supersededByStop, type DocSubmitState } from "./doc-submit"
+import { droppedForStop, liveSocket, onLocalClock, type DocSubmitState } from "./doc-submit"
 
 // The consent socket IS this client's membership in a vote, so the interesting cases are the ones
 // where the connection is gone but the browser has not noticed: on a real device that is a wifi
@@ -165,28 +165,20 @@ describe("onLocalClock", () => {
   })
 })
 
-describe("supersededByStop", () => {
-  const state = (submitID: string, targetKind: DocSubmitState["targetKind"], status: DocSubmitState["status"]) =>
-    ({ submitID, targetKind, status }) as unknown as DocSubmitState
+describe("droppedForStop", () => {
+  const state = (targetKind: DocSubmitState["targetKind"], status: DocSubmitState["status"], cancelReason?: "stop") =>
+    ({ submitID: "sub_1", targetKind, status, cancelReason }) as unknown as DocSubmitState
 
-  test("a stop vote replacing a send it just cancelled", () => {
-    expect(supersededByStop(state("sub_send", "doc", "cancelled"), state("sub_stop", "stop", "pending"))).toBe(true)
+  test("a send the server cancelled because a stop vote took over", () => {
+    expect(droppedForStop(state("doc", "cancelled", "stop"))).toBe(true)
   })
 
-  test("the stopper's own HTTP answer can arrive before the send's cancellation", () => {
-    // The server cancels every pending send when a stop vote opens, so it is dropped all the same.
-    expect(supersededByStop(state("sub_send", "doc", "pending"), state("sub_stop", "stop", "pending"))).toBe(true)
-  })
-
-  test("anything else is not a superseded send", () => {
-    // The send ended some other way before the stop.
-    expect(supersededByStop(state("sub_send", "doc", "expired"), state("sub_stop", "stop", "pending"))).toBe(false)
-    expect(supersededByStop(state("sub_send", "doc", "sent"), state("sub_stop", "stop", "pending"))).toBe(false)
-    // A cancelled send followed by another send, or a stop replacing a stop.
-    expect(supersededByStop(state("sub_send", "doc", "cancelled"), state("sub_next", "doc", "pending"))).toBe(false)
-    expect(supersededByStop(state("sub_a", "stop", "cancelled"), state("sub_b", "stop", "pending"))).toBe(false)
-    // Nothing was on screen, or it is the same vote.
-    expect(supersededByStop(undefined, state("sub_stop", "stop", "pending"))).toBe(false)
-    expect(supersededByStop(state("sub_stop", "doc", "cancelled"), state("sub_stop", "stop", "pending"))).toBe(false)
+  test("only the server's stated reason counts, not a guess from the surrounding votes", () => {
+    // A participant withdrew it, or it ended another way.
+    expect(droppedForStop(state("doc", "cancelled"))).toBe(false)
+    expect(droppedForStop(state("doc", "expired"))).toBe(false)
+    expect(droppedForStop(state("doc", "pending"))).toBe(false)
+    // A stop vote itself is never "dropped for a stop".
+    expect(droppedForStop(state("stop", "cancelled", "stop"))).toBe(false)
   })
 })

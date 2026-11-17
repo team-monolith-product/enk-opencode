@@ -542,6 +542,9 @@ export namespace Doc {
     }),
   )
 
+  export const SubmitCancelReason = z.enum(["stop"]).meta({ ref: "DocSubmitCancelReason" })
+  export type SubmitCancelReason = z.infer<typeof SubmitCancelReason>
+
   export const SubmitState = z
     .object({
       submitID: SubmitID.zod,
@@ -558,6 +561,9 @@ export namespace Doc {
       status: SubmitStatus,
       actors: SubmitActorInfo.array(),
       cancelledBy: SubmitActorInfo.optional(),
+      // Why the server (not a participant) cancelled this vote, sent with the cancellation itself.
+      // 'stop': a stop vote took over a send waiting for consent while the AI ran.
+      cancelReason: SubmitCancelReason.optional(),
       timeoutMs: z.number(),
       expiresAt: z.number(),
       serverNow: z.number().optional(),
@@ -930,7 +936,7 @@ export namespace Doc {
 
   /** 중지 투표에 밀려난 전송 투표를 취소한다. 취소한 사람은 중지를 요청한 사람으로 남긴다. */
   function superseded(sessionID: SessionID, actorID: ActorID) {
-    close(pendingOf(sessionID, "doc"), actorID)
+    close(pendingOf(sessionID, "doc"), actorID, "stop")
   }
 
   /**
@@ -943,17 +949,46 @@ export namespace Doc {
    * 않았을 때만 닫는다.
    */
   const SETTLE_MS = 1_000
-  /**
-   * The timer behind the settle window. Swappable so tests can fire it by hand instead of sleeping
-   * through real time; production always uses the real setTimeout.
-   */
-  export const SettleTimer = {
-    set: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
-    clear: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  type Timer = { set: (fn: () => void, ms: number) => unknown; clear: (handle: unknown) => void }
+  const realTimer: Timer = {
+    set: (fn, ms) => setTimeout(fn, ms),
+    clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   }
+  let settleTimer = realTimer
+
+  /**
+   * Run `fn` with the settle window driven by `timer` (a test firing it by hand instead of sleeping
+   * through real time). The real timer always comes back afterwards, even if `fn` throws, so one test
+   * cannot leave fake timers behind for the rest of the process.
+   */
+  export async function withSettleTimer<T>(timer: Timer, fn: () => Promise<T>) {
+    settleTimer = timer
+    try {
+      return await fn()
+    } finally {
+      settleTimer = realTimer
+    }
+  }
+
   // 지금 AI 가 도는 세션. 세션 상태 이벤트로만 채운다 — 프로세스가 막 떴을 때는 아무것도 돌고 있지 않다.
   const running = new Set<string>()
   const settling = new Map<string, unknown>()
+
+  function forgetSession(sessionID: string) {
+    running.delete(sessionID)
+    if (settling.has(sessionID)) settleTimer.clear(settling.get(sessionID))
+    settling.delete(sessionID)
+  }
+
+  // The sessions each instance (working directory) has reported busy. When the instance shuts down
+  // they are forgotten: a run cut off by shutdown may never get its idle event out, and a session left
+  // "running" here would make every later stop on it open a vote that nothing ever settles.
+  const instanceSessions = Instance.state(
+    () => new Set<string>(),
+    async (ids) => {
+      for (const id of ids) forgetSession(id)
+    },
+  )
 
   /** Whether this module currently sees the session's AI as running (it follows status events). */
   export function isRunning(sessionID: SessionID) {
@@ -961,16 +996,25 @@ export namespace Doc {
   }
 
   function track(sessionID: SessionID, busy: boolean) {
-    if (settling.has(sessionID)) SettleTimer.clear(settling.get(sessionID))
+    if (settling.has(sessionID)) settleTimer.clear(settling.get(sessionID))
     settling.delete(sessionID)
     if (busy) {
       running.add(sessionID)
+      // Outside an instance context (should not happen for status events) there is nothing to tie
+      // the session to; it still clears on its idle event.
+      try {
+        instanceSessions().add(sessionID)
+      } catch {}
       return
     }
     running.delete(sessionID)
+    try {
+      instanceSessions().delete(sessionID)
+    } catch {}
+    const timer = settleTimer
     settling.set(
       sessionID,
-      SettleTimer.set(() => {
+      timer.set(() => {
         settling.delete(sessionID)
         if (running.has(sessionID)) return
         close(pendingOf(sessionID, "stop"), null)
@@ -978,7 +1022,11 @@ export namespace Doc {
     )
   }
 
-  function close(rows: SubmitRow[], actorID: ActorID | null) {
+  /**
+   * Cancel pending votes on the server's own initiative. `reason` travels with the cancellation so a
+   * client can tell people why their vote ended, instead of guessing from what happened around it.
+   */
+  function close(rows: SubmitRow[], actorID: ActorID | null, reason?: SubmitCancelReason) {
     for (const row of rows) {
       const item = Database.use((db) =>
         db
@@ -990,7 +1038,7 @@ export namespace Doc {
       )
       if (!item) continue
       done(item.id)
-      cast("cancelled", read(item))
+      cast("cancelled", { ...read(item), ...(reason ? { cancelReason: reason } : {}) })
     }
   }
 

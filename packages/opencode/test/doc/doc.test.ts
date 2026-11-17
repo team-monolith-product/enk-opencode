@@ -9,8 +9,9 @@ import { SessionStatus } from "../../src/session/status"
 import { Doc } from "../../src/doc"
 import * as Room from "../../src/doc/room"
 import { Database } from "../../src/storage/db"
-import { DocSubmitTable, DocSubmitActorTable, PromptCycleLinkTable } from "../../src/doc/doc.sql"
-import { MessageTable, PartTable } from "../../src/session/session.sql"
+import { DocSubmitTable, DocSubmitActorTable } from "../../src/doc/doc.sql"
+import { MessageTable, PartTable, RunLinkTable } from "../../src/session/session.sql"
+import { RunLink } from "../../src/session/run-link"
 import * as CycleRecorder from "../../src/doc/cycle-recorder"
 import { and, eq } from "drizzle-orm"
 import { ActorID, AssetID, CycleID, DocID } from "../../src/doc/schema"
@@ -1748,7 +1749,7 @@ describe("doc", () => {
 
   // A run that started from `anchor` read `userID` mid-run (what the run loop does on a steer).
   function joinRun(sessionID: string, userID: string, anchor: string) {
-    CycleRecorder.link({ sessionID: sessionID as never, userMessageID: userID as never, anchorID: anchor as never })
+    RunLink.link({ sessionID: sessionID as never, messageID: userID as never, anchorID: anchor as never })
   }
 
   function addStepFinish(sessionID: string, messageID: string, n: number, tokens: { input: number; output: number }) {
@@ -1911,9 +1912,9 @@ describe("doc", () => {
           completed: 1800,
           finish: "stop",
         })
-        CycleRecorder.link({
+        RunLink.link({
           sessionID: session.id as never,
-          userMessageID: "msg_user_replay" as never,
+          messageID: "msg_user_replay" as never,
           anchorID: "msg_user_task" as never,
           replay: true,
         })
@@ -2109,9 +2110,9 @@ describe("doc", () => {
         await Project.fromDirectory(tmp.path)
         const session = await Session.create({})
         const fork = await Session.create({})
-        CycleRecorder.link({
+        RunLink.link({
           sessionID: session.id as never,
-          userMessageID: "msg_user_replayed" as never,
+          messageID: "msg_user_replayed" as never,
           anchorID: "msg_user_origin" as never,
           replay: true,
         })
@@ -2119,7 +2120,7 @@ describe("doc", () => {
           ["msg_user_origin", "msg_user_origin_copy"],
           ["msg_user_replayed", "msg_user_replayed_copy"],
         ])
-        CycleRecorder.cloneLink({
+        RunLink.clone({
           sessionID: fork.id as never,
           fromMessageID: "msg_user_replayed",
           toMessageID: "msg_user_replayed_copy" as never,
@@ -2128,11 +2129,11 @@ describe("doc", () => {
         const row = Database.use((db) =>
           db
             .select()
-            .from(PromptCycleLinkTable)
-            .where(eq(PromptCycleLinkTable.user_message_id, "msg_user_replayed_copy"))
+            .from(RunLinkTable)
+            .where(eq(RunLinkTable.user_message_id, "msg_user_replayed_copy" as never))
             .get(),
         )
-        expect(row?.anchor_user_message_id).toBe("msg_user_origin_copy")
+        expect(row?.anchor_user_message_id).toBe("msg_user_origin_copy" as never)
         expect(row?.replay).toBe(true)
         expect(row?.session_id).toBe(fork.id)
       },
@@ -2164,6 +2165,134 @@ describe("doc", () => {
         const cycle = Doc.cycleList({ sessionID: session.id })[0]
         expect(cycle?.response).toBe("answered")
         expect(cycle?.costTotal).toBeCloseTo(0.25)
+      },
+    })
+  })
+
+  test("run links never chain or loop, and an anchor is not relinked into another run", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const sid = session.id as never
+        // X anchors a run that Y joined.
+        RunLink.link({ sessionID: sid, messageID: "msg_y" as never, anchorID: "msg_x" as never })
+        // Relinking X into Z would strand Y; it is refused.
+        RunLink.link({ sessionID: sid, messageID: "msg_x" as never, anchorID: "msg_z" as never })
+        Database.use((db) => expect(RunLink.anchorOf(db, "msg_y")).toBe("msg_x"))
+        Database.use((db) => expect(RunLink.anchorOf(db, "msg_x")).toBe("msg_x"))
+
+        // Links written behind link()'s back: a chain is followed to its end, a loop is cut.
+        Database.use((db) => {
+          db.insert(RunLinkTable)
+            .values([
+              { user_message_id: "msg_c3" as never, anchor_user_message_id: "msg_c2" as never, session_id: sid, time_created: 0 },
+              { user_message_id: "msg_c2" as never, anchor_user_message_id: "msg_c1" as never, session_id: sid, time_created: 0 },
+              { user_message_id: "msg_l1" as never, anchor_user_message_id: "msg_l2" as never, session_id: sid, time_created: 0 },
+              { user_message_id: "msg_l2" as never, anchor_user_message_id: "msg_l1" as never, session_id: sid, time_created: 0 },
+            ])
+            .run()
+          expect(RunLink.anchorOf(db, "msg_c3")).toBe("msg_c1")
+          expect(["msg_l1", "msg_l2"]).toContain(RunLink.anchorOf(db, "msg_l1"))
+        })
+      },
+    })
+  })
+
+  test("a message that already had its own cycle is folded in, not counted twice", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }
+        const a = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_main_link",
+          parentID: "msg_user_main",
+          cost: 0.1,
+          tokens,
+          created: 1100,
+          completed: 1200,
+          finish: "tool-calls",
+        })
+        seedTurn({ userText: "main", userTime: 1000, steps: [{ info: a, text: "a" }] })
+        // A later message got answered and recorded on its own before its link existed.
+        const late = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_late_link",
+          parentID: "msg_user_late_link",
+          cost: 0.2,
+          tokens,
+          created: 1400,
+          completed: 1500,
+          finish: "stop",
+        })
+        seedTurn({ userText: "late", userTime: 1300, steps: [{ info: late, text: "b" }] })
+        Database.use((db) => CycleRecorder.record(db, a as never))
+        Database.use((db) => CycleRecorder.record(db, late as never))
+        expect(Doc.cycleList({ sessionID: session.id })).toHaveLength(2)
+
+        joinRun(session.id, "msg_user_late_link", "msg_user_main")
+        Database.use((db) => CycleRecorder.record(db, late as never))
+
+        const cycles = Doc.cycleList({ sessionID: session.id })
+        expect(cycles).toHaveLength(1)
+        expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["main", "late"])
+        expect(cycles[0]!.costTotal).toBeCloseTo(0.3)
+      },
+    })
+  })
+
+  test("steps stored before their prompt are still found, through the fallback", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const info = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_imported",
+          parentID: "msg_user_imported",
+          cost: 0.5,
+          tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          created: 1100,
+          completed: 1200,
+          finish: "stop",
+        })
+        // An import writes the answer row first and its prompt after.
+        Database.use((db) => {
+          const { id, sessionID: _sid, ...data } = info
+          db.insert(MessageTable)
+            .values({ id: id as never, session_id: session.id as never, time_created: 1100, data: data as never })
+            .run()
+          db.insert(MessageTable)
+            .values({
+              id: "msg_user_imported" as never,
+              session_id: session.id as never,
+              time_created: 1000,
+              data: { role: "user", time: { created: 1000 } } as never,
+            })
+            .run()
+          db.insert(PartTable)
+            .values({
+              id: "msg_user_imported_p0" as never,
+              message_id: "msg_user_imported" as never,
+              session_id: session.id as never,
+              time_created: 1000,
+              data: { type: "text", text: "imported" } as never,
+            })
+            .run()
+        })
+        Database.use((db) => CycleRecorder.record(db, info as never))
+        expect(Doc.cycleList({ sessionID: session.id })[0]?.costTotal).toBeCloseTo(0.5)
       },
     })
   })
@@ -3136,6 +3265,8 @@ describe("doc", () => {
         const cancelled = events.find((e) => e.type === "cancelled" && e.state.submitID === send.submitID)
         expect(cancelled?.state.status).toBe("cancelled")
         expect(cancelled?.state.cancelledBy?.actorID).toBe(bob.actorID)
+        // The server says why, so clients do not have to infer it from the stop vote that follows.
+        expect(cancelled?.state.cancelReason).toBe("stop")
         // The cancel is announced before the stop vote, so clients end the old dialog first.
         const order = events.map((e) => `${e.type}:${e.state.submitID}`)
         expect(order.indexOf(`cancelled:${send.submitID}`)).toBeLessThan(order.indexOf(`created:${stop.submitID}`))
@@ -3177,18 +3308,19 @@ describe("doc", () => {
         // Drive the settle window by hand instead of sleeping through real time.
         const timers = new Map<number, () => void>()
         let next = 0
-        const real = { ...Doc.SettleTimer }
-        Doc.SettleTimer.set = (fn) => {
-          timers.set(++next, fn)
-          return next
-        }
-        Doc.SettleTimer.clear = (handle) => void timers.delete(handle as number)
         const fire = () => {
           const due = [...timers.values()]
           timers.clear()
           for (const fn of due) fn()
         }
-        try {
+        const manual = {
+          set: (fn: () => void) => {
+            timers.set(++next, fn)
+            return next
+          },
+          clear: (handle: unknown) => void timers.delete(handle as number),
+        }
+        await Doc.withSettleTimer(manual, async () => {
           await working(session.id)
 
           const stop = Doc.stopSubmitCreate({
@@ -3213,9 +3345,8 @@ describe("doc", () => {
           fire()
           const closed = events.find((e) => e.type === "cancelled" && e.state.submitID === stop.submitID)
           expect(closed?.state.targetKind).toBe("stop")
-        } finally {
-          Object.assign(Doc.SettleTimer, real)
-        }
+          expect(closed?.state.cancelReason).toBeUndefined()
+        })
 
         // ...so a send goes through instead of being refused until the stale vote expires.
         const send = Doc.submitCreate({
@@ -3231,6 +3362,25 @@ describe("doc", () => {
         stopB()
       },
     })
+  })
+
+  test("an instance shutting down forgets the sessions it saw running", async () => {
+    await using tmp = await tmpdir()
+    let sessionID = ""
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        sessionID = session.id
+        await working(session.id)
+        // Shutdown can cut a run off before its idle event gets out.
+        await Instance.dispose()
+      },
+    })
+    // A stale "running" would make every later stop on this session open a vote nothing settles.
+    expect(Doc.isRunning(sessionID as never)).toBe(false)
   })
 
   test("stopping a session whose AI is not running goes through without a vote", async () => {

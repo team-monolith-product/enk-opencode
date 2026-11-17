@@ -29,7 +29,7 @@ import {
   startClearSubmit,
   startRollbackSubmit,
   startStopSubmit,
-  supersededByStop,
+  droppedForStop,
   type DocSubmitState,
 } from "@/components/prompt-input/doc-submit"
 import { DialogDocSubmit } from "@/components/doc-submit/dialog-doc-submit"
@@ -358,21 +358,20 @@ export function createPromptDocSession(): PromptDocSession {
         if (dialogOpen(state.submitID)) closeApproval()
         return
       }
+      // A send dropped because a stop vote took over: the stop dialog is about to cover this outcome,
+      // so say it in a toast — to every member, whichever of the two messages reached them first.
+      if (droppedForStop(state)) {
+        showToast({
+          title: language.t("docSubmit.toast.supersededByStop"),
+          description: language.t("docSubmit.toast.supersededByStop.description"),
+        })
+      }
       // Cancelled/expired/left: show the outcome to whoever is looking at this vote. With no dialog
       // on screen there is nothing to resolve — opening one now would announce the end of a vote the
       // user never saw (and, after a local expiry, announce it twice).
       if (!dialogOpen(state.submitID)) return
       setApproval(state)
       return
-    }
-    // The server cancels a pending send the moment a stop vote starts and the stop dialog is about to
-    // cover the "cancelled" screen — say it in a toast so the send is not silently gone.
-    const shown = approval()
-    if (shown && supersededByStop(shown, state) && dialogOpen(shown.submitID)) {
-      showToast({
-        title: language.t("docSubmit.toast.supersededByStop"),
-        description: language.t("docSubmit.toast.supersededByStop.description"),
-      })
     }
     setApproval(state)
     if (dialogOpen(state.submitID)) return

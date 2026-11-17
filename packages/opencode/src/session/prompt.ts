@@ -59,27 +59,15 @@ import { Secret } from "@/util/secret"
 import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
-import * as CycleRecorder from "@/doc/cycle-recorder"
-import { Database, and, eq, gt, sql } from "@/storage/db"
-import { MessageTable } from "./session.sql"
+import { RunLink } from "./run-link"
 
 // One loop() call waiting on a session's run. `stopped` flips when someone cancels the session
 // while it waits, so the caller does not restart what was just stopped.
 type Waiter = { stopped: boolean }
-// Everyone currently waiting on a session's run, how far the message table was when that run last
-// read the session, and how far it was when someone last called loop() to have the session
-// answered. Lives only while someone waits, so nothing accumulates per session.
+// Everyone currently waiting on a session's run, how far the message table was (RunLink.lastRow)
+// when that run last read the session, and how far it was when someone last called loop() to have
+// the session answered. Lives only while someone waits, so nothing accumulates per session.
 type Watch = { waiters: Set<Waiter>; readAt: number; wantedAt: number }
-
-/**
- * The message table's newest rowid. SQLite hands out rowids in insertion order (max + 1, and a row
- * older than the one compared against is never deleted mid-run), so "stored after this point" is a
- * rowid comparison — no clock involved. Message timestamps come from different clocks on different
- * paths, so a system clock stepped back could reorder them; rowids cannot be reordered.
- */
-export function lastMessageRow() {
-  return Database.use((db) => db.select({ row: sql<number | null>`max(rowid)` }).from(MessageTable).get())?.row ?? 0
-}
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1631,27 +1619,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           throw new Error("Impossible")
         })
 
-      // 실행이 마지막으로 메시지를 읽은 뒤 들어와 아무도 읽지 않은 user 메시지가 있는지. 그 뒤에 저장된 행만
-      // (rowid 범위로) 보므로 세션 길이와 상관없이 몇 줄이고, 시계에도 기대지 않는다. 그 사이 생긴 답(assistant)이
-      // 있으면 읽힌 것이고, 실패한 답도 답으로 친다 — 실패한 프롬프트를 자동으로 다시 시도하지 않는다.
-      // Only messages someone asked to have answered count: a user message stored after the last
-      // loop() call (a noReply prompt) is for context and never triggers a re-run.
-      const unread = (sessionID: SessionID, readAt: number, wantedAt: number) =>
-        Effect.sync(() => {
-          if (!Number.isFinite(readAt) || wantedAt <= readAt) return false
-          const rows = Database.use((db) =>
-            db
-              .select({ id: MessageTable.id, data: MessageTable.data, row: sql<number>`rowid` })
-              .from(MessageTable)
-              .where(and(gt(sql`rowid`, readAt), eq(MessageTable.session_id, sessionID)))
-              .all(),
-          )
-            .filter((row) => (row.data as { role?: string }).role !== "user" || row.row <= wantedAt)
-          const infos = rows.map((row) => ({ id: row.id, ...(row.data as { role?: string; parentID?: string }) }))
-          const answered = new Set(infos.flatMap((info) => (info.role === "assistant" ? [info.parentID] : [])))
-          return infos.some((info) => info.role === "user" && !answered.has(info.id))
-        })
-
       // 모델을 부르지 않고 턴을 닫는다. 안내는 모델 오류와 같은 자리(assistant 메시지의 error)에 보인다.
       const refuseTurn = Effect.fn("SessionPrompt.refuseTurn")(function* (input: {
         sessionID: SessionID
@@ -1687,7 +1654,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // Position in the model chain. Turn-scoped: every turn starts back at the primary model.
           let modelIndex = 0
           // The user message this run started from, and the later ones it has already linked to it.
-          let anchor: { id: MessageID; created: number } | undefined
+          let anchor: { id: MessageID; row: number } | undefined
           const joined = new Set<MessageID>()
           const session = yield* sessions.get(sessionID)
 
@@ -1697,7 +1664,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             // Taken before the read, so a message stored while the read is in flight still counts as
             // possibly unread for loop()'s re-run check.
-            const readAt = lastMessageRow()
+            const readAt = RunLink.lastRow()
             let msgs = yield* Effect.promise(() => MessageV2.filterCompacted(MessageV2.stream(sessionID)))
             const watch = (yield* InstanceState.get(cache)).watches.get(sessionID)
             if (watch) watch.readAt = readAt
@@ -1732,41 +1699,23 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               break
             }
 
-            // 사용 기록(prompt cycle)은 실행 하나에 하나다. 이 실행이 처음 읽은 user 메시지가 기준이고, 그 뒤 새로
-            // 읽는 user 메시지(스티어, 실행 중 통과한 동의 전송, 자동 압축·하위 작업 요약)는 이 실행에 합류한 것이다.
-            // 답이 생기기 전인 지금 남겨야 기록기가 그 답을 이 실행의 기록에 합친다.
-            // 한 스텝 사이에 여러 개가 들어오면 모델은 그 전부를 읽으므로, 가장 최근 것만이 아니라 실행이 시작된
-            // 뒤 들어온 user 메시지를 모두 남긴다.
-            // 기준은 이 실행이 처음 읽은 것들 중 가장 오래된 미답 메시지다. 첫 읽기 전에 둘이 들어와 있으면(동의 전송
-            // 두 개가 연달아 통과, 재실행 전에 쌓인 스티어) 모델은 둘 다 읽지만 답은 최근 것에만 달리므로, 최근 것을
-            // 기준으로 삼으면 먼저 온 쪽이 기록에서 빠진다. "이번 실행의 것"은 마지막 답보다 뒤에 온 메시지로 한정한다
-            // — 아주 오래전에 답을 못 받은 메시지까지 끌어오지 않도록.
-            if (!anchor) {
-              const answered = new Set(
-                ordered.flatMap((msg) => (msg.info.role === "assistant" ? [msg.info.parentID] : [])),
-              )
-              const since = lastAssistant?.time.created ?? -Infinity
-              const first = ordered.find(
-                (msg) => msg.info.role === "user" && msg.info.time.created > since && !answered.has(msg.info.id),
-              )
-              const start = first?.info ?? lastUser
-              anchor = { id: start.id, created: start.time.created }
-            }
-            const run = anchor
-            const fresh = ordered.filter(
-              (msg) =>
-                msg.info.role === "user" &&
-                msg.info.id !== run.id &&
-                msg.info.time.created >= run.created &&
-                !joined.has(msg.info.id),
+            // 사용 기록(prompt cycle)은 실행 하나에 하나다. 이 실행이 시작한 user 메시지가 기준이고, 그 뒤 저장된
+            // user 메시지(스티어, 실행 중 통과한 동의 전송, 자동 압축·하위 작업 요약)는 모두 이 실행에 합류한 것이다 —
+            // 한 스텝 사이에 여럿이 들어와도 모델은 전부 읽는다. 답이 생기기 전인 지금 남겨야 기록기가 그 답을 이
+            // 실행의 기록에 합친다. 순서는 저장 순서(rowid)로만 판단한다(RunLink 참고 — 시각은 시계가 뒤로 가면
+            // 뒤집힌다). 기록은 부수 작업이라 실패해도 실행은 계속한다.
+            const linkRun = Effect.sync(() => {
+              anchor ??= RunLink.start(sessionID, lastUser.id)
+              const run = anchor
+              for (const id of RunLink.arrivals(sessionID, run.row)) {
+                if (id === run.id || joined.has(id)) continue
+                joined.add(id)
+                RunLink.link({ sessionID, messageID: id, anchorID: run.id })
+              }
+            })
+            yield* linkRun.pipe(
+              Effect.catchCause((cause) => Effect.sync(() => log.warn("run link failed", { sessionID, cause }))),
             )
-            for (const msg of fresh) {
-              joined.add(msg.info.id)
-              const input = { sessionID, userMessageID: msg.info.id, anchorID: run.id }
-              yield* Effect.sync(() => CycleRecorder.link(input)).pipe(
-                Effect.catchCause((cause) => Effect.sync(() => log.warn("cycle link failed", { sessionID, cause }))),
-              )
-            }
 
             // 팀의 주·월 비용 한도(rails)가 바닥났으면 모델을 부르지 않는다. 제목 생성·압축보다 앞에 두어 한 번의
             // 모델 호출도 새지 않게 한다. 스텝마다 묻되 캐시로 받으므로 긴 에이전트 턴도 한도에 닿은 스텝에서 멈춘다.
@@ -1997,7 +1946,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // Everything stored up to now is something this caller wants answered (prompt() stores its
         // message, then calls loop()). A noReply message stored later, with no loop() of its own,
         // asked for no answer and must not trigger a re-run.
-        watch.wantedAt = lastMessageRow()
+        watch.wantedAt = RunLink.lastRow()
         const me: Waiter = { stopped: false }
         watch.waiters.add(me)
         return yield* Effect.gen(function* () {
@@ -2007,7 +1956,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // 아무도 읽지 않은 채 남는다. 그때 한 번 더 돈다. 기다리는 사이 누가 중지했으면 다시 돌리지 않는다 —
           // 중지는 답이 생기기 전에 걸릴 수도 있어서, 결과 메시지의 오류만으로는 중지를 알아볼 수 없다.
           // unread() 는 동기라 그 사이에 중지가 끼어들 틈은 없다.
-          if (me.stopped || !(yield* unread(id, watch.readAt, watch.wantedAt))) return result
+          // RunLink.unread() is synchronous, so no stop can slip in between this check and the re-run.
+          if (me.stopped || !RunLink.unread(id, watch.readAt, watch.wantedAt)) return result
           log.info("answering a prompt the finished run never read", { sessionID: id })
           return yield* getRunner(s.runners, id).ensureRunning(runLoop(id))
         }).pipe(
