@@ -105,4 +105,7 @@
   "ensureSession": true,
   "ensureOneSession": true,
   "snapshot": false,
+  "experimental": {
+    "media_blob": true,
+  },
 }

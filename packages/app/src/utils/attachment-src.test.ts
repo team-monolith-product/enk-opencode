@@ -16,6 +16,13 @@ describe("attachmentSrc", () => {
     )
   })
 
+  test("points a stored media ref at the experimental media route", () => {
+    const hash = "a".repeat(64)
+    expect(attachmentSrc({ ...base, url: `media:${hash}` })).toBe(
+      `http://localhost:4096/experimental/media/${hash}?directory=%2Ftmp%2Fproject`,
+    )
+  })
+
   test("leaves anything that is not an asset reference alone", () => {
     expect(attachmentSrc({ ...base, url: "data:image/png;base64,AAA" })).toBe("data:image/png;base64,AAA")
     expect(attachmentSrc({ ...base, url: "file:///repo/README.md" })).toBe("file:///repo/README.md")

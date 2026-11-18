@@ -53,6 +53,9 @@ import { AppFileSystem } from "@/filesystem"
 import { Truncate } from "@/tool/truncate"
 import { Attachment } from "./attachment"
 import { loadAssetRef } from "./attachment-ref"
+import { SessionBlob } from "./blob"
+import { SessionStored } from "./stored"
+import { Database } from "@/storage/db"
 import { decodeDataUrlBytes } from "@/util/data-url"
 import { isAssetRef } from "@opencode-ai/util/attachment-ref"
 import { Process } from "@/util/process"
@@ -1336,6 +1339,20 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               }
               const pieces = yield* attachmentPieces(part, asset.data)
               return pieces ?? [{ ...part, messageID: info.id, sessionID: input.sessionID }]
+            }
+            if (SessionStored.isRef(part.url)) {
+              const blob = Database.use((db) => SessionBlob.read(db, SessionStored.refHash(part.url as SessionStored.Ref)))
+              const pieces = blob ? yield* attachmentPieces(part, new Uint8Array(blob.data)) : undefined
+              if (pieces) return pieces
+              return [
+                {
+                  messageID: info.id,
+                  sessionID: input.sessionID,
+                  type: "text",
+                  synthetic: true,
+                  text: `The attached file ${part.filename ?? part.mime} could not be read — its stored copy is gone.`,
+                },
+              ]
             }
             const url = new URL(part.url)
             switch (url.protocol) {

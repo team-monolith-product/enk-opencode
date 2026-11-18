@@ -8,8 +8,9 @@ import { apiUrl } from "@/utils/api-url"
  * file:// reference) is handed back untouched.
  */
 export function attachmentSrc(input: { baseUrl: string; directory: string; url: string }) {
-  if (!isAssetRef(input.url)) return input.url
-  const next = apiUrl(input.baseUrl, input.url)
+  const media = /^media:([0-9a-f]{64})$/.exec(input.url)?.[1]
+  if (!media && !isAssetRef(input.url)) return input.url
+  const next = apiUrl(input.baseUrl, media ? `/experimental/media/${media}` : input.url)
   next.searchParams.set("directory", input.directory)
   return next.toString()
 }

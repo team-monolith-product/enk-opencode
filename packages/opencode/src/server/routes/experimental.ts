@@ -11,10 +11,33 @@ import { Session } from "../../session"
 import { zodToJsonSchema } from "zod-to-json-schema"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
+import { Database } from "../../storage/db"
+import { SessionBlob } from "../../session/blob"
 import { WorkspaceRoutes } from "./workspace"
 
 export const ExperimentalRoutes = lazy(() =>
   new Hono()
+    .get(
+      "/media/:hash",
+      describeRoute({
+        summary: "Get session media",
+        description: "Get the bytes of a stored session media blob that a message still references.",
+        operationId: "experimental.media.get",
+        responses: {
+          200: { description: "Media bytes" },
+          ...errors(404),
+        },
+      }),
+      validator("param", z.object({ hash: z.string().regex(/^[0-9a-f]{64}$/) })),
+      async (c) => {
+        const blob = Database.use((db) => SessionBlob.read(db, c.req.valid("param").hash))
+        if (!blob) return c.json({ name: "NotFoundError", data: { message: "Media not found" } }, 404)
+        return c.body(new Uint8Array(blob.data), 200, {
+          "Content-Type": blob.mime,
+          "Cache-Control": "private, max-age=31536000, immutable",
+        })
+      },
+    )
     .get(
       "/tool/ids",
       describeRoute({
