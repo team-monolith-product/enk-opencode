@@ -10,6 +10,7 @@ import { LSP } from "../lsp"
 import { Snapshot } from "@/snapshot"
 import { fn } from "@/util/fn"
 import { SyncEvent } from "../sync"
+import { SessionBlob } from "./blob"
 import { Database, NotFoundError, and, desc, eq, inArray, lt, or } from "@/storage/db"
 import { MessageTable, PartTable, SessionTable } from "./session.sql"
 import { ProviderError } from "@/provider/error"
@@ -584,23 +585,30 @@ export namespace MessageV2 {
       and(eq(MessageTable.time_created, row.time), lt(MessageTable.id, row.id)),
     )
 
-  async function hydrate(rows: (typeof MessageTable.$inferSelect)[]) {
+  const media = (db: Database.TxOrDb, rows: MessageV2.Part[], refs?: boolean) =>
+    refs ? SessionBlob.keepRefs(db, rows) : SessionBlob.hydrate(db, rows)
+
+  async function hydrate(rows: (typeof MessageTable.$inferSelect)[], refs?: boolean) {
     const ids = rows.map((row) => row.id)
     const partByMessage = new Map<string, MessageV2.Part[]>()
     if (ids.length > 0) {
       const partRows = Database.use((db) =>
-        db
-          .select()
-          .from(PartTable)
-          .where(inArray(PartTable.message_id, ids))
-          .orderBy(PartTable.message_id, PartTable.id)
-          .all(),
+        media(
+          db,
+          db
+            .select()
+            .from(PartTable)
+            .where(inArray(PartTable.message_id, ids))
+            .orderBy(PartTable.message_id, PartTable.id)
+            .all()
+            .map(part),
+          refs,
+        ),
       )
-      for (const row of partRows) {
-        const next = part(row)
-        const list = partByMessage.get(row.message_id)
+      for (const next of partRows) {
+        const list = partByMessage.get(next.messageID)
         if (list) list.push(next)
-        else partByMessage.set(row.message_id, [next])
+        else partByMessage.set(next.messageID, [next])
       }
     }
 
@@ -923,6 +931,7 @@ export namespace MessageV2 {
       sessionID: SessionID.zod,
       limit: z.number().int().positive(),
       before: z.string().optional(),
+      refs: z.boolean().optional(),
     }),
     async (input) => {
       const before = input.before ? cursor.decode(input.before) : undefined
@@ -951,7 +960,7 @@ export namespace MessageV2 {
 
       const more = rows.length > input.limit
       const page = more ? rows.slice(0, input.limit) : rows
-      const items = await hydrate(page)
+      const items = await hydrate(page, input.refs)
       items.reverse()
       const tail = page.at(-1)
       return {
@@ -977,25 +986,23 @@ export namespace MessageV2 {
     }
   }
 
-  export const parts = fn(MessageID.zod, async (message_id) => {
-    const rows = Database.use((db) =>
-      db.select().from(PartTable).where(eq(PartTable.message_id, message_id)).orderBy(PartTable.id).all(),
+  export const parts = fn(MessageID.zod, async (message_id) => readParts(message_id))
+
+  function readParts(message_id: MessageID, refs?: boolean) {
+    return Database.use((db) =>
+      media(
+        db,
+        db.select().from(PartTable).where(eq(PartTable.message_id, message_id)).orderBy(PartTable.id).all().map(part),
+        refs,
+      ),
     )
-    return rows.map(
-      (row) =>
-        ({
-          ...row.data,
-          id: row.id,
-          sessionID: row.session_id,
-          messageID: row.message_id,
-        }) as MessageV2.Part,
-    )
-  })
+  }
 
   export const get = fn(
     z.object({
       sessionID: SessionID.zod,
       messageID: MessageID.zod,
+      refs: z.boolean().optional(),
     }),
     async (input): Promise<WithParts> => {
       const row = Database.use((db) =>
@@ -1008,7 +1015,7 @@ export namespace MessageV2 {
       if (!row) throw new NotFoundError({ message: `Message not found: ${input.messageID}` })
       return {
         info: info(row),
-        parts: await parts(input.messageID),
+        parts: readParts(input.messageID, input.refs),
       }
     },
   )

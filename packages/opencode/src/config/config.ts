@@ -1101,6 +1101,12 @@ export namespace Config {
             .positive()
             .optional()
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
+          media_blob: z
+            .boolean()
+            .optional()
+            .describe(
+              "Store new session media once in a deduplicated blob table instead of inline in every message row.",
+            ),
         })
         .optional(),
     })

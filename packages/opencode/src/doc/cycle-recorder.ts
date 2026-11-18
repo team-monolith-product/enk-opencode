@@ -73,7 +73,7 @@ function assetsOf(parts: PartData[]) {
   const out: { assetID?: string; mime: string; filename?: string; url?: string }[] = []
   for (const p of parts) {
     if (p?.type !== "file") continue
-    const isData = typeof p.url === "string" && p.url.startsWith("data:")
+    const isData = typeof p.url === "string" && (p.url.startsWith("data:") || p.url.startsWith("media:"))
     out.push({
       mime: p.mime ?? "",
       filename: p.filename,

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, primaryKey } from "drizzle-orm/sqlite-core"
+import { sqliteTable, text, integer, index, primaryKey, blob } from "drizzle-orm/sqlite-core"
 import { ProjectTable } from "../project/project.sql"
 import type { MessageV2 } from "./message-v2"
 import type { Snapshot } from "../snapshot"
@@ -72,6 +72,38 @@ export const PartTable = sqliteTable(
   (table) => [
     index("part_message_id_id_idx").on(table.message_id, table.id),
     index("part_session_idx").on(table.session_id),
+  ],
+)
+
+export const BlobTable = sqliteTable("blob", {
+  hash: text().primaryKey(),
+  mime: text().notNull(),
+  bytes: integer().notNull(),
+  width: integer(),
+  height: integer(),
+  data: blob({ mode: "buffer" }).notNull(),
+  time_created: integer()
+    .notNull()
+    .$default(() => Date.now()),
+})
+
+export const BlobRefTable = sqliteTable(
+  "blob_ref",
+  {
+    session_id: text()
+      .$type<SessionID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    message_id: text().$type<MessageID>().notNull(),
+    hash: text()
+      .notNull()
+      .references(() => BlobTable.hash, { onDelete: "cascade" }),
+    seq: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.session_id, table.message_id, table.hash] }),
+    index("blob_ref_hash_idx").on(table.hash),
+    index("blob_ref_session_seq_idx").on(table.session_id, table.seq),
   ],
 )
 

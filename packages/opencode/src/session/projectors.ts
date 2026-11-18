@@ -3,6 +3,7 @@ import { SyncEvent } from "@/sync"
 import { Session } from "./index"
 import { MessageV2 } from "./message-v2"
 import { SessionTable, MessageTable, PartTable } from "./session.sql"
+import { SessionBlob } from "./blob"
 import { ProjectTable } from "../project/project.sql"
 import { Log } from "../util/log"
 import * as CycleRecorder from "../doc/cycle-recorder"
@@ -80,6 +81,7 @@ export default [
   }),
 
   SyncEvent.project(Session.Event.Deleted, (db, data) => {
+    SessionBlob.releaseSession(db, data.sessionID)
     db.delete(SessionTable).where(eq(SessionTable.id, data.sessionID)).run()
   }),
 
@@ -122,25 +124,35 @@ export default [
   }),
 
   SyncEvent.project(MessageV2.Event.Removed, (db, data) => {
+    SessionBlob.releaseMessage(db, data.sessionID, data.messageID)
     db.delete(MessageTable)
       .where(and(eq(MessageTable.id, data.messageID), eq(MessageTable.session_id, data.sessionID)))
       .run()
   }),
 
   SyncEvent.project(MessageV2.Event.PartRemoved, (db, data) => {
-    db.delete(PartTable)
+    const removed = db
+      .delete(PartTable)
       .where(and(eq(PartTable.id, data.partID), eq(PartTable.session_id, data.sessionID)))
-      .run()
+      .returning({ messageID: PartTable.message_id })
+      .get()
     CycleRecorder.forget(data.sessionID, data.messageID)
+    if (removed && SessionBlob.holds(db, { sessionID: data.sessionID, messageID: removed.messageID }))
+      SessionBlob.syncMessage(db, { sessionID: data.sessionID, messageID: removed.messageID })
   }),
 
   SyncEvent.project(MessageV2.Event.PartUpdated, (db, data) => {
-    const { id, messageID, sessionID, ...rest } = data.part
+    const { id, messageID, sessionID, ...part } = data.part
+    const owner = { sessionID, messageID, seq: data.time }
     // The cycle recorder caches a finished step's summary; a part written after that (a forked
     // session copies the message before its parts) must not leave it stale.
     CycleRecorder.forget(sessionID, messageID)
 
     try {
+      const rest = SessionBlob.externalize(db, part)
+      const before = SessionBlob.holds(db, owner)
+        ? db.select({ data: PartTable.data }).from(PartTable).where(eq(PartTable.id, id)).get()?.data
+        : undefined
       db.insert(PartTable)
         .values({
           id,
@@ -151,6 +163,8 @@ export default [
         })
         .onConflictDoUpdate({ target: PartTable.id, set: { data: rest } })
         .run()
+      SessionBlob.recordRefs(db, owner, rest)
+      if (before && SessionBlob.drops(before, rest)) SessionBlob.syncMessage(db, owner)
     } catch (err) {
       if (!foreign(err)) throw err
       log.warn("ignored late part update", { partID: id, messageID, sessionID })
@@ -161,7 +175,7 @@ export default [
     // complete — a fork copies the message first and its parts after — the cycle recorded at completion
     // missed it, so record again. While a step is still streaming the message is not complete and this
     // is a single lookup.
-    if (rest.type !== "step-finish") return
+    if (part.type !== "step-finish") return
     try {
       CycleRecorder.recordStored(db, sessionID, messageID)
     } catch (err) {
