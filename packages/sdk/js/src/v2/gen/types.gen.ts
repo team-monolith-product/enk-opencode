@@ -2136,6 +2136,8 @@ export type DocSubmitActor = {
   status: "pending" | "approved" | "left"
 }
 
+export type DocSubmitCancelReason = "stop"
+
 export type DocSubmit = {
   submitID: string
   sessionID: string
@@ -2147,6 +2149,7 @@ export type DocSubmit = {
   status: DocSubmitStatus
   actors: Array<DocSubmitActor>
   cancelledBy?: DocSubmitActor
+  cancelReason?: DocSubmitCancelReason
   timeoutMs: number
   expiresAt: number
   serverNow?: number

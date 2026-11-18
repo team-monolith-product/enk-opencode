@@ -1258,4 +1258,7 @@ export const dict = {
   "docSubmit.toast.requestFailed": "Could not ask for consent",
   "docSubmit.toast.stopRequestFailed": "Could not ask for consent to stop",
   "docSubmit.toast.clearRequestFailed": "Could not ask for consent to reset",
+  "docSubmit.toast.supersededByStop": "Send cancelled for a stop request",
+  "docSubmit.toast.supersededByStop.description": "What you were sending is still in the input.",
+  "docSubmit.toast.voteInProgress": "Another vote is in progress. Send again once it ends.",
 }

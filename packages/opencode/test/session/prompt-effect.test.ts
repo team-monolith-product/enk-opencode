@@ -1,6 +1,6 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { APICallError } from "ai"
-import { expect, spyOn } from "bun:test"
+import { expect, setSystemTime, spyOn } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer, ServiceMap } from "effect"
 import * as Stream from "effect/Stream"
 import z from "zod"
@@ -8,6 +8,7 @@ import type { Agent } from "../../src/agent/agent"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
 import { Command } from "../../src/command"
+import { Doc } from "../../src/doc"
 import { Config } from "../../src/config/config"
 import { FileTime } from "../../src/file/time"
 import { LSP } from "../../src/lsp"
@@ -36,6 +37,9 @@ import { Attachment } from "../../src/session/attachment"
 import { Log } from "../../src/util/log"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirInstance } from "../fixture/fixture"
+import { Database, and, eq, sql } from "../../src/storage/db"
+import { MessageTable } from "../../src/session/session.sql"
+import { PromptCycleTable } from "../../src/doc/doc.sql"
 import { testEffect } from "../lib/effect"
 
 Log.init({ print: false })
@@ -980,6 +984,335 @@ it.effect(
           const inputs = yield* test.inputs
           expect(inputs).toHaveLength(2)
           expect(JSON.stringify(inputs.at(-1)?.messages)).toContain("second")
+
+          // One AI run took both prompts, so it is one usage record with both as inputs.
+          const cycles = Doc.cycleList({ sessionID: chat.id })
+          expect(cycles).toHaveLength(1)
+          expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
+          expect(cycles[0]!.inputs[1]!.userMessageID).toBe(id)
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+// Waits until a user message with this id is stored — the second prompt joins the run only after that.
+const saved = (sessions: Session.Interface, sessionID: SessionID, id: MessageID) =>
+  Effect.promise(async () => {
+    const end = Date.now() + 5000
+    while (Date.now() < end) {
+      const msgs = await Effect.runPromise(sessions.messages({ sessionID }))
+      if (msgs.some((msg) => msg.info.role === "user" && msg.info.id === id)) return
+      await new Promise((done) => setTimeout(done, 20))
+    }
+    throw new Error("timed out waiting for second prompt to save")
+  })
+
+it.effect(
+  "a prompt that joined a run ending in an error is still answered",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const gate = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          // The first answer fails mid-stream. A failing step ends the run without re-reading the
+          // session, so the steer that arrived meanwhile used to be left unanswered.
+          yield* test.push((_input) =>
+            stream(start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+              Stream.concat(
+                Stream.fromEffect(Effect.promise(() => gate.promise)).pipe(
+                  Stream.flatMap(() => Stream.fail(new Error("boom"))),
+                ),
+              ),
+            ),
+          )
+
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "first" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+
+          const id = MessageID.ascending()
+          const b = yield* prompt
+            .prompt({
+              sessionID: chat.id,
+              messageID: id,
+              agent: "build",
+              model: ref,
+              parts: [{ type: "text", text: "second" }],
+            })
+            .pipe(Effect.forkChild)
+          yield* saved(sessions, chat.id, id)
+
+          yield* test.reply(...replyStop("second"))
+          gate.resolve()
+
+          const [ea, eb] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
+          expect(Exit.isSuccess(ea)).toBe(true)
+          expect(Exit.isSuccess(eb)).toBe(true)
+          expect(yield* test.calls).toBe(2)
+
+          const msgs = yield* sessions.messages({ sessionID: chat.id })
+          const answer = msgs.find((msg) => msg.info.role === "assistant" && msg.info.parentID === id)
+          expect(answer?.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+it.effect(
+  "two prompts that arrive during one model call both join the run's usage record",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const gate = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          yield* test.push((_input) =>
+            stream(start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+              Stream.concat(
+                Stream.fromEffect(Effect.promise(() => gate.promise)).pipe(
+                  Stream.flatMap(() =>
+                    stream(textStart("a"), textDelta("a", "first"), textEnd("a"), finishStep(), finish()),
+                  ),
+                ),
+              ),
+            ),
+          )
+
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "first" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+
+          const steer = (text: string) =>
+            Effect.gen(function* () {
+              const id = MessageID.ascending()
+              const fiber = yield* prompt
+                .prompt({ sessionID: chat.id, messageID: id, agent: "build", model: ref, parts: [{ type: "text", text }] })
+                .pipe(Effect.forkChild)
+              yield* saved(sessions, chat.id, id)
+              return fiber
+            })
+          const b = yield* steer("second")
+          const c = yield* steer("third")
+
+          yield* test.reply(...replyStop("both handled"))
+          gate.resolve()
+          yield* Effect.all([Fiber.await(a), Fiber.await(b), Fiber.await(c)])
+          expect(yield* test.calls).toBe(2)
+
+          // The model read both steers in one step and answered only the newer; the older still counts.
+          const cycles = Doc.cycleList({ sessionID: chat.id })
+          expect(cycles).toHaveLength(1)
+          expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second", "third"])
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+it.effect("prompts already waiting when a run starts all count, the oldest first", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { test, prompt, chat } = yield* boot()
+        yield* test.reply(...replyStop("both"))
+
+        // Two consented sends land back to back before the run's first read (what dispatch does:
+        // store the message, then start the loop).
+        yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "first" }] })
+        yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "second" }] })
+        yield* prompt.loop({ sessionID: chat.id })
+
+        expect(yield* test.calls).toBe(1)
+        const cycles = Doc.cycleList({ sessionID: chat.id })
+        expect(cycles).toHaveLength(1)
+        expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
+
+        // A fork clones the messages under new ids; the run keeps its grouping there too.
+        const sessions = yield* Session.Service
+        const forked = yield* sessions.fork({ sessionID: chat.id })
+        const copies = Doc.cycleList({ sessionID: forked.id })
+        expect(copies).toHaveLength(1)
+        expect(copies[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
+      }),
+    { git: true, config: cfg },
+  ),
+)
+
+it.effect("a clock stepped back between two waiting prompts does not change which run they join", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { test, prompt, chat } = yield* boot()
+        yield* test.reply(...replyStop("both"))
+        const now = Date.now()
+        try {
+          setSystemTime(new Date(now + 10_000))
+          yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "first" }] })
+          setSystemTime(new Date(now)) // NTP pulls the clock back 10s
+          yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, noReply: true, parts: [{ type: "text", text: "second" }] })
+        } finally {
+          setSystemTime()
+        }
+        yield* prompt.loop({ sessionID: chat.id })
+
+        // Stored order wins over the (now inverted) timestamps: one run, both inputs, first first.
+        const cycles = Doc.cycleList({ sessionID: chat.id })
+        expect(cycles).toHaveLength(1)
+        expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["first", "second"])
+      }),
+    { git: true, config: cfg },
+  ),
+)
+
+it.effect(
+  "a noReply message stored while a run ends does not make it run again",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const gate = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          yield* test.push((_input) =>
+            stream(start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+              Stream.concat(
+                Stream.fromEffect(Effect.promise(() => gate.promise)).pipe(
+                  Stream.flatMap(() => Stream.fail(new Error("boom"))),
+                ),
+              ),
+            ),
+          )
+
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "first" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+
+          // Context added with noReply: stored, but nobody calls loop() to have it answered.
+          const id = MessageID.ascending()
+          yield* prompt.prompt({
+            sessionID: chat.id,
+            messageID: id,
+            agent: "build",
+            model: ref,
+            noReply: true,
+            parts: [{ type: "text", text: "just so you know" }],
+          })
+          yield* saved(sessions, chat.id, id)
+
+          gate.resolve()
+          yield* Fiber.await(a)
+          expect(yield* test.calls).toBe(1)
+          const msgs = yield* sessions.messages({ sessionID: chat.id })
+          expect(msgs.some((msg) => msg.info.role === "assistant" && msg.info.parentID === id)).toBe(false)
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+it.effect(
+  "a prompt that joined a run someone stopped is not answered",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          yield* test.push((input) =>
+            hang(input, start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+            ),
+          )
+
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "first" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+
+          const id = MessageID.ascending()
+          const b = yield* prompt
+            .prompt({
+              sessionID: chat.id,
+              messageID: id,
+              agent: "build",
+              model: ref,
+              parts: [{ type: "text", text: "second" }],
+            })
+            .pipe(Effect.forkChild)
+          yield* saved(sessions, chat.id, id)
+          // Let the second prompt reach the runner and join the run before it is stopped.
+          yield* Effect.sleep(50)
+
+          yield* prompt.cancel(chat.id)
+
+          const [ea, eb] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
+          expect(Exit.isSuccess(ea)).toBe(true)
+          expect(Exit.isSuccess(eb)).toBe(true)
+          // Stopping means stopping: the joined prompt waits for the next send instead of restarting the AI.
+          expect(yield* test.calls).toBe(1)
+          const msgs = yield* sessions.messages({ sessionID: chat.id })
+          expect(msgs.some((msg) => msg.info.role === "assistant" && msg.info.parentID === id)).toBe(false)
+          yield* prompt.assertNotBusy(chat.id)
+        }),
+      { git: true, config: cfg },
+    ),
+  30_000,
+)
+
+it.effect(
+  "the next run is not dated from a prompt that was stopped before any answer",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const ready = defer<void>()
+          const { test, prompt, sessions, chat } = yield* boot()
+
+          yield* test.push((input) =>
+            hang(input, start()).pipe(
+              Stream.tap((event) => (event.type === "start" ? Effect.sync(() => ready.resolve()) : Effect.void)),
+            ),
+          )
+          const a = yield* prompt
+            .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "stopped" }] })
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => ready.promise)
+          yield* prompt.cancel(chat.id)
+          yield* Fiber.await(a)
+          // The stop landed before the step wrote anything: the run read the prompt but left no answer
+          // (and so no usage record).
+          Database.use((db) => {
+            db.delete(MessageTable)
+              .where(and(eq(MessageTable.session_id, chat.id), sql`json_extract(data, '$.role') = 'assistant'`))
+              .run()
+            db.delete(PromptCycleTable).where(eq(PromptCycleTable.session_id, chat.id)).run()
+          })
+
+          yield* test.reply(...replyStop("fresh"))
+          yield* prompt.prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "again" }] })
+
+          // The record starts at the prompt that started this run, not at the one the stopped run read.
+          const cycles = Doc.cycleList({ sessionID: chat.id })
+          expect(cycles).toHaveLength(1)
+          expect(cycles[0]!.inputs.map((item) => item.prompt)).toEqual(["again"])
+          const msgs = yield* sessions.messages({ sessionID: chat.id })
+          const again = msgs.find((msg) => msg.info.role === "user" && msg.parts.some((p) => p.type === "text" && p.text === "again"))
+          expect(cycles[0]!.inputs[0]!.userMessageID).toBe(again!.info.id)
         }),
       { git: true, config: cfg },
     ),

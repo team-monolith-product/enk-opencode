@@ -9,6 +9,7 @@ import { QuestionID } from "@/question/schema"
 import { Session } from "@/session"
 import { SessionID } from "@/session/schema"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionStatus } from "@/session/status"
 import { archiveSession } from "@/session/archive"
 import { HistorySync } from "@/enk/history-sync"
 import { Instance } from "@/project/instance"
@@ -19,6 +20,7 @@ import { fn } from "@/util/fn"
 import { Color } from "@/util/color"
 import { NamedError } from "@opencode-ai/util/error"
 import * as Room from "./room"
+import * as CycleRecorder from "./cycle-recorder"
 import { MSG_DOC, pack, unpack } from "./wire"
 import {
   DocAssetTable,
@@ -123,8 +125,8 @@ export namespace Doc {
   export type CycleInput = z.infer<typeof CycleInput>
 
   // A full AI run: the input prompt(s) through to one reply (or stop). Token/cost are the
-  // run's single total. `inputs` currently always holds exactly one item; it is an array to
-  // later support followup "steer" mode (several prompts in one run) — not implemented yet.
+  // run's single total. `inputs` holds the prompt that started the run, then every prompt that
+  // joined it while it ran (followup "steer", a consented send landing mid-run), in seq order.
   // docID lives per-input (inputs[].docID), not on the run.
   export const Cycle = z
     .object({
@@ -540,6 +542,9 @@ export namespace Doc {
     }),
   )
 
+  export const SubmitCancelReason = z.enum(["stop"]).meta({ ref: "DocSubmitCancelReason" })
+  export type SubmitCancelReason = z.infer<typeof SubmitCancelReason>
+
   export const SubmitState = z
     .object({
       submitID: SubmitID.zod,
@@ -556,6 +561,9 @@ export namespace Doc {
       status: SubmitStatus,
       actors: SubmitActorInfo.array(),
       cancelledBy: SubmitActorInfo.optional(),
+      // Why the server (not a participant) cancelled this vote, sent with the cancellation itself.
+      // 'stop': a stop vote took over a send waiting for consent while the AI ran.
+      cancelReason: SubmitCancelReason.optional(),
       timeoutMs: z.number(),
       expiresAt: z.number(),
       serverNow: z.number().optional(),
@@ -734,6 +742,7 @@ export namespace Doc {
       status: SubmitStatus.parse(row.status),
       actors,
       cancelledBy: row.cancelled_by ? actors.find((item) => item.actorID === row.cancelled_by) : undefined,
+      cancelReason: SubmitCancelReason.safeParse(row.cancel_reason).data,
       timeoutMs: row.timeout_ms,
       expiresAt: row.expires_at,
       serverNow: Date.now(),
@@ -840,7 +849,7 @@ export namespace Doc {
         rotate(row)
         // Link the produced user message back to this submit so the recorder can resolve
         // the consenting actors (doc_submit_actor) when it records the cycle.
-        if (message?.info?.id)
+        if (message?.info?.id) {
           Database.use((db) =>
             db
               .update(DocSubmitTable)
@@ -848,6 +857,15 @@ export namespace Doc {
               .where(eq(DocSubmitTable.id, row.id))
               .run(),
           )
+          // A steer joins a run that is already going, so its answer can be recorded before this link
+          // lands — re-derive the cycle so its consent is not lost. Bookkeeping only: a failure here
+          // must neither undo the link above nor keep the consented prompt from running.
+          try {
+            Database.use((db) => CycleRecorder.refresh(db, message.info.id))
+          } catch (err) {
+            Log.Default.warn("cycle refresh failed", { submitID: row.id, err: String(err) })
+          }
+        }
         if (body.noReply === true) return
         return SessionPrompt.loop({ sessionID: row.session_id })
       })
@@ -879,25 +897,11 @@ export namespace Doc {
     return kind === "clear" || kind === "rollback"
   }
 
-  /** 이 세션에서 아직 결론 나지 않은 투표. 만료된 행은 여기서 정리하며 지나간다. */
-  function pending(sessionID: SessionID) {
-    const rows = Database.use((db) =>
-      db
-        .select()
-        .from(DocSubmitTable)
-        .where(and(eq(DocSubmitTable.session_id, sessionID), eq(DocSubmitTable.status, "pending")))
-        .all(),
-    )
-    for (const row of rows) {
-      const next = expire(row)
-      if (next.status !== "pending") continue
-      if (!timers.has(next.id)) schedule(next)
-      return next
-    }
-    return undefined
-  }
-
-  function active(sessionID: SessionID, targetID: string, actorID?: ActorID, targetKind?: SubmitTargetKind) {
+  /**
+   * 이 세션에서 아직 결론 나지 않은 투표들(종류·대상으로 좁힐 수 있다). 지나가며 마감이 지난 행은 만료시키고,
+   * 남은 행은 만료 타이머가 걸려 있는지 확인한다 — 타이머는 메모리에만 있어 재시작 뒤에는 이렇게 되살린다.
+   */
+  function pendingRows(sessionID: SessionID, filter: { kind?: SubmitTargetKind; targetID?: string } = {}) {
     const rows = Database.use((db) =>
       db
         .select()
@@ -905,24 +909,136 @@ export namespace Doc {
         .where(
           and(
             eq(DocSubmitTable.session_id, sessionID),
-            eq(DocSubmitTable.target_id, targetID),
             eq(DocSubmitTable.status, "pending"),
-            ...(targetKind ? [eq(DocSubmitTable.target_kind, targetKind)] : []),
+            ...(filter.kind ? [eq(DocSubmitTable.target_kind, filter.kind)] : []),
+            ...(filter.targetID ? [eq(DocSubmitTable.target_id, filter.targetID)] : []),
           ),
         )
         .all(),
     )
-    const state = rows
+    return rows
+      .map((row) => expire(row))
+      .filter((row) => row.status === "pending")
       .map((row) => {
-        const next = expire(row)
-        if (next.status === "pending" && !timers.has(next.id)) schedule(next)
-        return read(next)
+        if (!timers.has(row.id)) schedule(row)
+        return row
       })
-      .find((item) => item.status === "pending" && (!actorID || item.actors.some((actor) => actor.actorID === actorID)))
-    return state
   }
 
-  function recent(sessionID: SessionID, targetID: string, actorID: ActorID, now = Date.now()) {
+  /** 이 세션에서 아직 결론 나지 않은 투표 하나. */
+  function pending(sessionID: SessionID) {
+    return pendingRows(sessionID)[0]
+  }
+
+  /** 이 세션에서 아직 결론 나지 않은 한 종류의 투표들. */
+  function pendingOf(sessionID: SessionID, kind: SubmitTargetKind) {
+    return pendingRows(sessionID, { kind })
+  }
+
+  /** 중지 투표에 밀려난 전송 투표를 취소한다. 취소한 사람은 중지를 요청한 사람으로 남긴다. */
+  function superseded(sessionID: SessionID, actorID: ActorID) {
+    close(pendingOf(sessionID, "doc"), actorID, "stop")
+  }
+
+  /**
+   * AI 가 스스로 끝나면 남은 중지 투표는 멈출 것이 없다. 그대로 두면 투표가 끝날 때까지(30초, 참가자가 들어올
+   * 때마다 연장) 새 전송이 막히므로 닫는다. 중지 투표는 어떻게 끝나든 창만 닫히고, 스스로 끝난 것과 중지된
+   * 것은 같은 결과라 사람이 따로 알 필요가 없다.
+   *
+   * 쉬는 상태가 되자마자 닫지는 않는다. 실행이 읽지 못한 프롬프트 때문에 곧바로 다시 도는 경우(SessionPrompt.loop
+   * 의 재실행)가 있어, 그 틈에 닫으면 팀이 멈추려던 AI 가 투표 없이 계속 돈다. 잠깐 기다려 그동안 다시 바빠지지
+   * 않았을 때만 닫는다.
+   */
+  const SETTLE_MS = 1_000
+  type Timer = { set: (fn: () => void, ms: number) => unknown; clear: (handle: unknown) => void }
+  const realTimer: Timer = {
+    set: (fn, ms) => setTimeout(fn, ms),
+    clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  }
+  let settleTimer = realTimer
+
+  /**
+   * Run `fn` with the settle window driven by `timer` (a test firing it by hand instead of sleeping
+   * through real time). The real timer always comes back afterwards, even if `fn` throws, so one test
+   * cannot leave fake timers behind for the rest of the process.
+   */
+  export async function withSettleTimer<T>(timer: Timer, fn: () => Promise<T>) {
+    settleTimer = timer
+    try {
+      return await fn()
+    } finally {
+      settleTimer = realTimer
+    }
+  }
+
+  // 지금 AI 가 도는 세션: SessionStatus 가 들고 있는 "idle 아님"을 그 상태 이벤트로 따라 적은 것이다. SessionStatus 는
+  // Effect 로만 읽혀 동기인 create() 에서 물어볼 수 없어 사본을 두되, SessionStatus 와 똑같이 인스턴스(작업 디렉터리)
+  // 상태로 둔다 — 인스턴스가 내려가면 함께 사라지므로, 종료로 idle 이벤트를 못 낸 실행이 "도는 중"으로 남지 않는다.
+  // 프로세스가 막 떴을 때는 아무것도 돌고 있지 않다.
+  const running = Instance.state(() => new Set<string>())
+  const settling = new Map<string, unknown>()
+
+  /** Whether this module currently sees the session's AI as running (it follows status events). */
+  export function isRunning(sessionID: SessionID) {
+    return running().has(sessionID)
+  }
+
+  function track(sessionID: SessionID, busy: boolean) {
+    if (settling.has(sessionID)) settleTimer.clear(settling.get(sessionID))
+    settling.delete(sessionID)
+    if (busy) {
+      running().add(sessionID)
+      return
+    }
+    running().delete(sessionID)
+    // A busy event clears this timer above, so when it fires the session has stayed idle for the whole
+    // window — nothing to re-check (the callback runs outside any instance context anyway).
+    settling.set(
+      sessionID,
+      settleTimer.set(() => {
+        settling.delete(sessionID)
+        close(pendingOf(sessionID, "stop"), null)
+      }, SETTLE_MS),
+    )
+  }
+
+  /**
+   * Cancel pending votes on the server's own initiative. `reason` travels with the cancellation so a
+   * client can tell people why their vote ended, instead of guessing from what happened around it.
+   */
+  function close(rows: SubmitRow[], actorID: ActorID | null, reason?: SubmitCancelReason) {
+    for (const row of rows) {
+      const item = Database.use((db) =>
+        db
+          .update(DocSubmitTable)
+          .set({ status: "cancelled", cancelled_by: actorID, cancel_reason: reason ?? null, time_updated: Date.now() })
+          .where(and(eq(DocSubmitTable.id, row.id), eq(DocSubmitTable.status, "pending")))
+          .returning()
+          .get(),
+      )
+      if (!item) continue
+      done(item.id)
+      cast("cancelled", read(item))
+    }
+  }
+
+  function active(sessionID: SessionID, targetID: string, actorID?: ActorID, targetKind?: SubmitTargetKind) {
+    return pendingRows(sessionID, { kind: targetKind, targetID })
+      .map((row) => read(row))
+      .find((item) => !actorID || item.actors.some((actor) => actor.actorID === actorID))
+  }
+
+  /** A send vote the server cancelled because a stop vote took it over. */
+  const droppedByStop = (row: SubmitRow) =>
+    row.target_kind === "doc" && row.status === "cancelled" && row.cancel_reason === "stop"
+
+  function recent(
+    sessionID: SessionID,
+    targetID: string,
+    actorID: ActorID,
+    match: (row: SubmitRow) => boolean = () => true,
+    now = Date.now(),
+  ) {
     const rows = Database.use((db) =>
       db
         .select()
@@ -932,7 +1048,7 @@ export namespace Doc {
         .all(),
     )
     for (const row of rows) {
-      if (row.status === "pending") continue
+      if (row.status === "pending" || !match(row)) continue
       if (row.time_updated < now - REPLAY_WINDOW) return
       const state = read(row)
       if (state.actors.some((actor) => actor.actorID === actorID)) return state
@@ -999,6 +1115,9 @@ export namespace Doc {
     Bus.subscribe(Question.Event.Rejected, async (event) => questionDraftReset(String(event.properties.requestID)))
     // 값 요청이 닫히면 초안을 즉시 지운다. 여기 남은 값이 나중에 접속한 사람에게 흘러가면 안 된다.
     Bus.subscribe(EnvRequest.Event.Resolved, async (event) => envDraftReset(String(event.properties.requestID)))
+    Bus.subscribe(SessionStatus.Event.Status, async (event) => {
+      track(event.properties.sessionID, event.properties.status.type !== "idle")
+    })
   }
 
   function actorNames(sessionID: SessionID, ids: ActorID[], names?: Record<string, string>) {
@@ -1052,8 +1171,19 @@ export namespace Doc {
     if (busy && (exclusive(input.targetKind) || exclusive(busy.target_kind))) {
       throw new VoteConflictError({ message: "Another consent vote is in progress" })
     }
+    // 중지가 전송보다 먼저다. 동의 창은 한 번에 하나만 뜨므로 둘이 함께 돌면 가려진 쪽은 아무도 답하지 못한 채
+    // 만료되고, "멈추자"와 "이것도 해 줘"가 함께 통과하는 모순도 생긴다. 중지는 급할 때 누르는 것이라 막지 않고,
+    // 대신 중지 투표가 도는 동안에는 새 전송을 받지 않는다(아래 superseded 가 반대 방향을 맡는다). AI 가 스스로
+    // 끝나면 track() 이 중지 투표를 닫으므로, 이 막힘은 실제로 멈출 것이 있는 동안에만 남는다.
+    if (input.targetKind === "doc" && pendingOf(input.sessionID, "stop").length > 0) {
+      throw new VoteConflictError({ message: "A stop vote is in progress" })
+    }
 
-    const ids = targets(input.targetID, input.actorID)
+    // 돌고 있지 않은 세션의 중지는 멈출 것이 없다. 화면만 "작업 중"으로 남은 경우(끝나지 않은 채 남은 답)에
+    // 누르는 것이라, 투표 없이 바로 보내 SessionPrompt.cancel 의 복구 경로가 화면을 풀게 한다. 투표를 열면 쉬는
+    // 세션에는 닫아 줄 상태 변화도 오지 않아, 투표가 끝날 때까지 모두의 전송이 막힌다.
+    const idleStop = input.targetKind === "stop" && !running().has(input.sessionID)
+    const ids = idleStop ? [input.actorID] : targets(input.targetID, input.actorID)
     const timeout = clamp(input.timeoutMs)
     const now = Date.now()
     const build = () =>
@@ -1070,6 +1200,7 @@ export namespace Doc {
           timeout_ms: timeout,
           expires_at: now + timeout,
           cancelled_by: null,
+          cancel_reason: null,
           user_message_id: null,
           time_created: now,
           time_updated: now,
@@ -1099,6 +1230,11 @@ export namespace Doc {
       if (winner) return winner
       throw err
     }
+
+    // 중지가 시작되면 기다리던 전송 투표는 접는다. 내용은 공유 문서에 그대로 남아 중지 뒤 다시 보낼 수 있다.
+    // 돌고 있지 않은 세션의 중지는 예외다 — 멈출 AI 도, 끼어들 실행도 없으니 그때 기다리던 전송은 스티어가
+    // 아니라 평범한 새 요청이고, 한 사람 화면이 "작업 중"으로 멈춰 누른 중지가 그것을 지우면 안 된다.
+    if (input.targetKind === "stop" && !idleStop) superseded(input.sessionID, input.actorID)
 
     const state = read(row)
     if (state.status === "sent") {
@@ -1522,12 +1658,23 @@ export namespace Doc {
     // and a peer that isn't a member yet is joined to it (dynamic membership). No membership gate —
     // that gate was how a client that blipped at create() time ended up never seeing the dialog.
     const state = join(input.sessionID, input.targetID, input.actorID)
+    // A send of this peer's that a stop vote took over while the peer was away. Its cancellation is
+    // replayed ahead of the stop vote — whether that is still pending or has already ended — so the peer
+    // closes the send's dialog with the real outcome and learns why (it carries the stored reason).
+    // Only while the stop vote is the latest thing here: a vote started after it makes the drop old news.
+    const replayDropped = (stop: SubmitState | undefined) => {
+      if (stop?.targetKind !== "stop") return
+      const dropped = recent(input.sessionID, input.targetID, input.actorID, droppedByStop)
+      if (dropped) peer.send(JSON.stringify({ type: "cancelled", state: dropped } satisfies SubmitEvent))
+    }
     if (state) {
+      replayDropped(state)
       peer.send(JSON.stringify({ type: "created", state } satisfies SubmitEvent))
     } else {
       // No live vote — but if one resolved moments ago, replay its terminal state so a
       // client that missed the cast() (e.g. reconnected just after) can update its dialog.
       const last = recent(input.sessionID, input.targetID, input.actorID)
+      replayDropped(last)
       if (last)
         peer.send(JSON.stringify({ type: last.status as SubmitEvent["type"], state: last } satisfies SubmitEvent))
     }
