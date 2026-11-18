@@ -259,10 +259,28 @@ export function refresh(db: Database.TxOrDb, userMessageID: MessageID) {
     .where(eq(MessageTable.id, anchor as MessageID))
     .get()
   if (!row) return
-  derive(db, row.session_id, anchor)
+  // Called right after a send stores its message, so usually nothing has answered it yet. Only a run
+  // already on record is known to have steps somewhere; otherwise an empty range means "not answered
+  // yet", not "stored out of order", and is no reason to read the whole session.
+  const recorded = db
+    .select({ id: PromptCycleTable.id })
+    .from(PromptCycleTable)
+    .where(eq(PromptCycleTable.user_message_id, anchor))
+    .get()
+  derive(db, row.session_id, anchor, { expectSteps: !!recorded })
 }
 
-function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
+/**
+ * `expectSteps`: the caller knows the run has a finished step (record() is called for one), so an
+ * empty range means the stored order broke — worth the whole-session fallback. Without it an empty
+ * range just means nothing has answered yet.
+ */
+function derive(
+  db: Database.TxOrDb,
+  sessionID: SessionID,
+  anchorID: string,
+  opts: { expectSteps: boolean } = { expectSteps: true },
+) {
   const links = RunLink.members(db, anchorID)
   const replays = new Set<string>(links.filter((item) => item.replay).map((item) => item.id))
   const memberIDs = [anchorID, ...links.map((item) => item.id)]
@@ -298,7 +316,7 @@ function derive(db: Database.TxOrDb, sessionID: SessionID, anchorID: string) {
     .where(and(gte(sql`rowid`, from), eq(MessageTable.session_id, sessionID)))
     .all()
     .filter(isStep)
-  if (steps.length === 0) {
+  if (steps.length === 0 && opts.expectSteps) {
     // Nothing in range although record() was called for a finished step: the stored order broke the
     // assumption above. Fall back to the whole session rather than lose the run, and say so.
     steps = db

@@ -1028,7 +1028,17 @@ export namespace Doc {
       .find((item) => !actorID || item.actors.some((actor) => actor.actorID === actorID))
   }
 
-  function recent(sessionID: SessionID, targetID: string, actorID: ActorID, now = Date.now()) {
+  /** A send vote the server cancelled because a stop vote took it over. */
+  const droppedByStop = (row: SubmitRow) =>
+    row.target_kind === "doc" && row.status === "cancelled" && row.cancel_reason === "stop"
+
+  function recent(
+    sessionID: SessionID,
+    targetID: string,
+    actorID: ActorID,
+    match: (row: SubmitRow) => boolean = () => true,
+    now = Date.now(),
+  ) {
     const rows = Database.use((db) =>
       db
         .select()
@@ -1038,7 +1048,7 @@ export namespace Doc {
         .all(),
     )
     for (const row of rows) {
-      if (row.status === "pending") continue
+      if (row.status === "pending" || !match(row)) continue
       if (row.time_updated < now - REPLAY_WINDOW) return
       const state = read(row)
       if (state.actors.some((actor) => actor.actorID === actorID)) return state
@@ -1648,18 +1658,23 @@ export namespace Doc {
     // and a peer that isn't a member yet is joined to it (dynamic membership). No membership gate —
     // that gate was how a client that blipped at create() time ended up never seeing the dialog.
     const state = join(input.sessionID, input.targetID, input.actorID)
+    // A send of this peer's that a stop vote took over while the peer was away. Its cancellation is
+    // replayed ahead of the stop vote — whether that is still pending or has already ended — so the peer
+    // closes the send's dialog with the real outcome and learns why (it carries the stored reason).
+    // Only while the stop vote is the latest thing here: a vote started after it makes the drop old news.
+    const replayDropped = (stop: SubmitState | undefined) => {
+      if (stop?.targetKind !== "stop") return
+      const dropped = recent(input.sessionID, input.targetID, input.actorID, droppedByStop)
+      if (dropped) peer.send(JSON.stringify({ type: "cancelled", state: dropped } satisfies SubmitEvent))
+    }
     if (state) {
-      // A stop vote that just took over this peer's send: the send's cancellation went out while the
-      // peer was away, and the stop vote is all that is pending now. Replay the cancellation first, so
-      // the peer still learns its send was dropped (it carries the stored reason).
-      const dropped = state.targetKind === "stop" ? recent(input.sessionID, input.targetID, input.actorID) : undefined
-      if (dropped?.targetKind === "doc" && dropped.status === "cancelled" && dropped.cancelReason === "stop")
-        peer.send(JSON.stringify({ type: "cancelled", state: dropped } satisfies SubmitEvent))
+      replayDropped(state)
       peer.send(JSON.stringify({ type: "created", state } satisfies SubmitEvent))
     } else {
       // No live vote — but if one resolved moments ago, replay its terminal state so a
       // client that missed the cast() (e.g. reconnected just after) can update its dialog.
       const last = recent(input.sessionID, input.targetID, input.actorID)
+      replayDropped(last)
       if (last)
         peer.send(JSON.stringify({ type: last.status as SubmitEvent["type"], state: last } satisfies SubmitEvent))
     }

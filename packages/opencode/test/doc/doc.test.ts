@@ -2548,6 +2548,50 @@ describe("doc", () => {
     })
   })
 
+  test("refreshing a send nothing has answered yet does not read the whole session", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        // A finished step stored BEFORE the message it answers: only a whole-session read finds it, so
+        // whether refresh records it shows whether refresh fell back to reading everything.
+        const early = assistantInfo({
+          sessionID: session.id,
+          id: "msg_a_early",
+          parentID: "msg_user_fresh",
+          cost: 0,
+          tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          created: 1100,
+          completed: 1200,
+          finish: "stop",
+        })
+        Database.use((db) => {
+          db.insert(MessageTable)
+            .values({ id: "msg_a_early" as never, session_id: session.id as never, time_created: 1100, data: early as never })
+            .run()
+          db.insert(MessageTable)
+            .values({
+              id: "msg_user_fresh" as never,
+              session_id: session.id as never,
+              time_created: 1000,
+              data: { role: "user", time: { created: 1000 } } as never,
+            })
+            .run()
+          // What a consented send does right after storing its message, before any run has read it.
+          CycleRecorder.refresh(db, "msg_user_fresh" as never)
+        })
+        expect(Doc.cycleList({ sessionID: session.id })).toHaveLength(0)
+
+        // record() is called for a finished step, so there the same layout still falls back and is kept.
+        Database.use((db) => CycleRecorder.record(db, early as never))
+        expect(Doc.cycleList({ sessionID: session.id })).toHaveLength(1)
+      },
+    })
+  })
+
   test("a run is judged by how it ended, not by a step it recovered from", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
@@ -3415,9 +3459,47 @@ describe("doc", () => {
           `created:${stop.submitID}`,
         ])
         expect(replay[0]!.state.cancelReason).toBe("stop")
-
         again()
+
+        // The stop goes through while Alice is away again. When she comes back there is no live vote, and
+        // the latest ending is the stop's — she must still hear that her send was dropped, ahead of it, or
+        // her send dialog would sit on "waiting" and then claim a timeout.
         stopA()
+        for (const actor of [alice, bob])
+          Doc.submitRespond({ sessionID: session.id, submitID: stop.submitID, actorID: actor.actorID, action: "approve" })
+        const after: Doc.SubmitEvent[] = []
+        const back = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => after.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        expect(after.map((e) => `${e.type}:${e.state.submitID}`)).toEqual([
+          `cancelled:${send.submitID}`,
+          `sent:${stop.submitID}`,
+        ])
+        expect(after[0]!.state.cancelReason).toBe("stop")
+        back()
+
+        // A vote started after the stop makes the drop old news: it is not replayed in front of it.
+        const next = Doc.submitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+          prompt,
+        })
+        const later: Doc.SubmitEvent[] = []
+        const third = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => later.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        expect(later.map((e) => `${e.type}:${e.state.submitID}`)).toEqual([`created:${next.submitID}`])
+        third()
+
+        stopB()
         stopB()
       },
     })
