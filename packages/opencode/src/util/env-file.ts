@@ -1,4 +1,5 @@
 import { chmod, readdir, stat } from "fs/promises"
+import { readdirSync, readFileSync } from "fs"
 import path from "path"
 import { Filesystem } from "@/util/filesystem"
 
@@ -63,6 +64,30 @@ export namespace EnvFile {
       const content = await read(file)
       if (content === undefined) continue
       Object.assign(out, parseValues(content))
+    }
+    return out
+  }
+
+  /**
+   * 디렉토리의 시크릿 env 파일에 정의된 키 이름 전부. 값은 읽지 않는다.
+   * 동기인 이유는 ChildEnv.maskForAgent 하나뿐이다 — LSP 런처의 spawn 이 동기라 await 을 못 건다.
+   */
+  export function keysSync(dir: string): string[] {
+    const out: string[] = []
+    let entries: string[]
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      return out
+    }
+    for (const entry of entries.filter(isSecretFile)) {
+      let content: string
+      try {
+        content = readFileSync(path.join(dir, entry), "utf8")
+      } catch {
+        continue
+      }
+      for (const name of parseNames(content)) if (!out.includes(name)) out.push(name)
     }
     return out
   }
