@@ -3555,6 +3555,56 @@ describe("doc", () => {
     })
   })
 
+  // Frozen: every row shares one timestamp, so "the newest vote the peer was in" can be the dropped send
+  // itself rather than the stop that dropped it (what CI hit). Both must keep the drop untold.
+  test.each([
+    ["a running clock", false],
+    ["a frozen clock", true],
+  ])("a reconnect does not replay an old drop when a stop passed without the peer, with %s", async (_, frozen) => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const stopA = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+        const both = [alice.actorID, bob.actorID]
+
+        // Alice steers, Bob's first stop drops the steer, and Alice rejects that stop. She has seen the drop.
+        const send = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, actorIDs: both, prompt })
+        await working(session.id)
+        if (frozen) setSystemTime(Date.now())
+        const first = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: bob.actorID, actorIDs: both })
+        Doc.submitRespond({ sessionID: session.id, submitID: send.submitID, actorID: bob.actorID, action: "approve" })
+        Doc.submitRespond({ sessionID: session.id, submitID: first.submitID, actorID: alice.actorID, action: "cancel" })
+
+        // Alice drops offline, and Bob's next stop passes on his own: Alice is not part of it.
+        stopA()
+        const second = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: bob.actorID, actorIDs: [bob.actorID] })
+        expect(second.status).toBe("sent")
+
+        // Alice comes back. The newest vote she was in is the rejected first stop, but it is no longer the
+        // latest vote here, so its drop is old news and is not told again.
+        const replay: Doc.SubmitEvent[] = []
+        const again = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => replay.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        expect(replay.map((e) => e.state.submitID)).not.toContain(send.submitID)
+        again()
+
+        stopB()
+      },
+    })
+  })
+
   test("a stop vote closes once the AI finishes on its own, so sending is open again", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
