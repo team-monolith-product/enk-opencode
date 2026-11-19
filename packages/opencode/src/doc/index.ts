@@ -1,4 +1,4 @@
-import { eq, and, desc, inArray } from "drizzle-orm"
+import { eq, and, desc, inArray, sql } from "drizzle-orm"
 import z from "zod"
 import { ulid } from "ulid"
 import { Bus } from "@/bus"
@@ -1680,9 +1680,25 @@ export namespace Doc {
     // And only a send this stop vote dropped: an earlier stop vote (rejected moments ago) dropped its own,
     // which this peer was already told about, and replaying it would repeat that news on every reload.
     // superseded() records which stop vote dropped each send, so this is an exact match, not a guess
-    // from timestamps.
+    // from timestamps. "Latest" means latest on this prompt, not just among the votes this peer was in:
+    // with no live vote, the vote replayed below is the newest one the peer took part in, and a stop
+    // that passed without it (it was offline) can sit after that. Order is insertion order (rowid).
     const replayDropped = (stop: SubmitState | undefined) => {
       if (stop?.targetKind !== "stop") return
+      const newer = Database.use((db) =>
+        db
+          .select({ id: DocSubmitTable.id })
+          .from(DocSubmitTable)
+          .where(
+            and(
+              eq(DocSubmitTable.session_id, input.sessionID),
+              eq(DocSubmitTable.target_id, input.targetID),
+              sql`rowid > (select rowid from ${DocSubmitTable} where ${DocSubmitTable.id} = ${stop.submitID})`,
+            ),
+          )
+          .get(),
+      )
+      if (newer) return
       const dropped = recent(
         input.sessionID,
         input.targetID,
