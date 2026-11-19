@@ -30,13 +30,7 @@ export namespace Viewer {
     /^\/session\/[^/]+\/question\/draft\/connect$/,
   ]
 
-  const HIDDEN = [
-    /^\/pty(\/|$)/,
-    /^\/env-file\/[^/]+\/value$/,
-    /^\/provider\/auth$/,
-    /^\/auth(\/|$)/,
-    /^\/tui(\/|$)/,
-  ]
+  const HIDDEN = [/^\/pty(\/|$)/, /^\/env-file\/[^/]+\/value$/, /^\/provider\/auth$/, /^\/auth(\/|$)/, /^\/tui(\/|$)/]
 
   const SECRET_FIELDS = new Set(["apiKey", "key", "token", "secret", "password", "authorization"])
   const SECRET_MAPS = new Set(["headers", "environment"])

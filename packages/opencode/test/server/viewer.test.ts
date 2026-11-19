@@ -29,9 +29,7 @@ afterAll(() => {
 })
 
 function app() {
-  return new Hono()
-    .use(Viewer.auth())
-    .all("/*", (c) => c.json({ viewer: Viewer.is(c.req.raw) }))
+  return new Hono().use(Viewer.auth()).all("/*", (c) => c.json({ viewer: Viewer.is(c.req.raw) }))
 }
 
 async function enter() {
@@ -174,7 +172,12 @@ describe("Viewer.auth", () => {
       if (write.status !== 403) throw new Error("viewer write expected 403, got " + write.status)
       console.log("OK")
     `
-    const proc = Bun.spawn(["bun", "-e", script], { cwd: pkgRoot, env: { ...process.env }, stdout: "pipe", stderr: "pipe" })
+    const proc = Bun.spawn(["bun", "-e", script], {
+      cwd: pkgRoot,
+      env: { ...process.env },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
     await proc.exited
     expect(stderr.includes("Error")).toBe(false)

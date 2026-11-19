@@ -84,10 +84,12 @@ export const ConfigRoutes = lazy(() =>
       async (c) => {
         using _ = log.time("providers")
         const providers = await Provider.list().then((x) => mapValues(x, (item) => item))
-        return c.json(Viewer.redact(c.req.raw, {
-          providers: Object.values(providers),
-          default: mapValues(providers, (item) => Provider.sort(Object.values(item.models))[0].id),
-        }))
+        return c.json(
+          Viewer.redact(c.req.raw, {
+            providers: Object.values(providers),
+            default: mapValues(providers, (item) => Provider.sort(Object.values(item.models))[0].id),
+          }),
+        )
       },
     ),
 )

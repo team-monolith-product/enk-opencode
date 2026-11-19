@@ -57,11 +57,13 @@ export const ProviderRoutes = lazy(() =>
           mapValues(filteredProviders, (x) => Provider.fromModelsDevProvider(x)),
           connected,
         )
-        return c.json(Viewer.redact(c.req.raw, {
-          all: Object.values(providers),
-          default: mapValues(providers, (item) => Provider.sort(Object.values(item.models))[0].id),
-          connected: Object.keys(connected),
-        }))
+        return c.json(
+          Viewer.redact(c.req.raw, {
+            all: Object.values(providers),
+            default: mapValues(providers, (item) => Provider.sort(Object.values(item.models))[0].id),
+            connected: Object.keys(connected),
+          }),
+        )
       },
     )
     .get(
