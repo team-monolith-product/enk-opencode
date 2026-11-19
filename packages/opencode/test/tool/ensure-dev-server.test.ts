@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import { createServer, type Server } from "node:net"
 import { networkInterfaces } from "node:os"
+import { join } from "node:path"
 import { probePort, reachableExternally, serveUrl } from "../../src/tool/ensure-dev-server"
 
 function listen(host = "127.0.0.1"): Promise<{ server: Server; port: number }> {
@@ -30,6 +32,32 @@ function close(server: Server): Promise<void> {
 }
 
 describe("ensure-dev-server", () => {
+  // txt 는 정적 파일이라 servePort() 와 동기화될 수 없다. 포트를 문서에 적어 두면 본행사(3000)와
+  // 튜토리얼(3001) 중 한쪽에서 반드시 틀리고, 모델이 그 숫자를 베끼면 waitForPort 가 다른 포트를
+  // 기다리다 failed 로 떨어진다. 포트의 유일한 출처는 cmd 인자의 동적 describe 다.
+  describe("description doc", () => {
+    const doc = readFileSync(join(import.meta.dir, "../../src/tool/ensure-dev-server.txt"), "utf8")
+
+    function section(heading: string): string {
+      const start = doc.indexOf(`## ${heading}`)
+      expect(start).toBeGreaterThanOrEqual(0)
+      const rest = doc.slice(start + heading.length)
+      const end = rest.indexOf("\n## ")
+      return end < 0 ? rest : rest.slice(0, end)
+    }
+
+    test("인자 목록은 스키마에 없는 port 를 문서화하지 않는다", () => {
+      const args = section("인자")
+        .split("\n")
+        .flatMap((line) => line.match(/^- `(\w+)`:/)?.[1] ?? [])
+      expect(args).toEqual(["cmd", "cwd", "ready_timeout_ms", "restart"])
+    })
+
+    test("명령 예시는 포트 숫자를 하드코딩하지 않는다", () => {
+      expect(section("명령 예시 (`cmd` 인자 값)")).not.toMatch(/\b\d{4}\b/)
+    })
+  })
+
   describe("probePort", () => {
     test("returns false for an unbound port", async () => {
       // 일단 listen 으로 OS 가 할당한 포트를 잡았다가 즉시 닫아 "확실히 비어있는" 포트 번호를 얻는다.
