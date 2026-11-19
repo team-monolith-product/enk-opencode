@@ -3555,7 +3555,12 @@ describe("doc", () => {
     })
   })
 
-  test("a reconnect does not replay an old drop when a stop passed without the peer", async () => {
+  // Frozen: every row shares one timestamp, so "the newest vote the peer was in" can be the dropped send
+  // itself rather than the stop that dropped it (what CI hit). Both must keep the drop untold.
+  test.each([
+    ["a running clock", false],
+    ["a frozen clock", true],
+  ])("a reconnect does not replay an old drop when a stop passed without the peer, with %s", async (_, frozen) => {
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -3573,6 +3578,7 @@ describe("doc", () => {
         // Alice steers, Bob's first stop drops the steer, and Alice rejects that stop. She has seen the drop.
         const send = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, actorIDs: both, prompt })
         await working(session.id)
+        if (frozen) setSystemTime(Date.now())
         const first = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: bob.actorID, actorIDs: both })
         Doc.submitRespond({ sessionID: session.id, submitID: send.submitID, actorID: bob.actorID, action: "approve" })
         Doc.submitRespond({ sessionID: session.id, submitID: first.submitID, actorID: alice.actorID, action: "cancel" })

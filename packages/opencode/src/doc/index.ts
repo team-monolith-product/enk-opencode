@@ -1010,11 +1010,7 @@ export namespace Doc {
    * client can tell people why their vote ended, instead of guessing from what happened around it;
    * `by` is the vote that caused it (the stop vote, for reason 'stop').
    */
-  function close(
-    rows: SubmitRow[],
-    actorID: ActorID | null,
-    cause?: { reason: SubmitCancelReason; by: SubmitID },
-  ) {
+  function close(rows: SubmitRow[], actorID: ActorID | null, cause?: { reason: SubmitCancelReason; by: SubmitID }) {
     for (const row of rows) {
       const item = Database.use((db) =>
         db
@@ -1683,9 +1679,9 @@ export namespace Doc {
     // from timestamps. "Latest" means latest on this prompt, not just among the votes this peer was in:
     // with no live vote, the vote replayed below is the newest one the peer took part in, and a stop
     // that passed without it (it was offline) can sit after that. Order is insertion order (rowid).
-    const replayDropped = (stop: SubmitState | undefined) => {
-      if (stop?.targetKind !== "stop") return
-      const newer = Database.use((db) =>
+    // Whether no vote was started on this prompt after the given one (insertion order, not time).
+    const latest = (submitID: SubmitID) =>
+      !Database.use((db) =>
         db
           .select({ id: DocSubmitTable.id })
           .from(DocSubmitTable)
@@ -1693,12 +1689,13 @@ export namespace Doc {
             and(
               eq(DocSubmitTable.session_id, input.sessionID),
               eq(DocSubmitTable.target_id, input.targetID),
-              sql`rowid > (select rowid from ${DocSubmitTable} where ${DocSubmitTable.id} = ${stop.submitID})`,
+              sql`rowid > (select rowid from ${DocSubmitTable} where ${DocSubmitTable.id} = ${submitID})`,
             ),
           )
           .get(),
       )
-      if (newer) return
+    const replayDropped = (stop: SubmitState | undefined) => {
+      if (stop?.targetKind !== "stop" || !latest(stop.submitID)) return
       const dropped = recent(
         input.sessionID,
         input.targetID,
@@ -1706,6 +1703,20 @@ export namespace Doc {
         (row) => droppedByStop(row) && row.cancelled_by_submit === stop.submitID,
       )
       if (dropped) peer.send(JSON.stringify({ type: "cancelled", state: dropped } satisfies SubmitEvent))
+    }
+    // The newest vote this peer was in can be a send a stop dropped (the stop passed without the peer,
+    // or the two share a timestamp). It follows the same rule as replayDropped: old news once a vote
+    // was started after the stop that dropped it.
+    const staleDrop = (last: SubmitState) => {
+      if (last.targetKind !== "doc" || last.cancelReason !== "stop") return false
+      const by = Database.use((db) =>
+        db
+          .select({ by: DocSubmitTable.cancelled_by_submit })
+          .from(DocSubmitTable)
+          .where(eq(DocSubmitTable.id, last.submitID))
+          .get(),
+      )?.by
+      return !by || !latest(by)
     }
     if (state) {
       replayDropped(state)
@@ -1715,7 +1726,7 @@ export namespace Doc {
       // client that missed the cast() (e.g. reconnected just after) can update its dialog.
       const last = recent(input.sessionID, input.targetID, input.actorID)
       replayDropped(last)
-      if (last)
+      if (last && !staleDrop(last))
         peer.send(JSON.stringify({ type: last.status as SubmitEvent["type"], state: last } satisfies SubmitEvent))
     }
     // Returns the disposer (run on socket close); `.pong` refreshes liveness on a heartbeat reply.
