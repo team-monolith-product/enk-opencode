@@ -12,7 +12,12 @@ import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 
 import FileTree from "@/components/file-tree"
-import { AssetUploadButton, AssetUploadProgress, createAssetUpload } from "@/components/session/asset-upload"
+import {
+  AssetUploadButton,
+  AssetUploadProgress,
+  createAssetUpload,
+  FileDeleteAllButton,
+} from "@/components/session/asset-upload"
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { SessionContextTab, SortableTab, FileVisual } from "@/components/session"
 import { FileSearchButton } from "@/components/session/file-search-button"
@@ -529,7 +534,10 @@ export function SessionSidePanel(props: {
                   </Show>
                   {/* 업로드는 프롬프트 첨부(10개·25MB)와 별개 경로라 눈에 보이는 버튼으로 노출한다.
                     파일은 __assets__ 로 그대로 저장되고 AI 를 거치지 않는다. */}
-                  <AssetUploadButton upload={assetUpload} class="-mx-1" />
+                  <div class="flex items-center justify-between -mx-1">
+                    <AssetUploadButton upload={assetUpload} />
+                    <FileDeleteAllButton upload={assetUpload} />
+                  </div>
                   <AssetUploadProgress upload={assetUpload} />
                 </div>
                 <Tabs

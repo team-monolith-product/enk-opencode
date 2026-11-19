@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  isProtectedPath,
   MAX_ASSET_BYTES,
   UPLOAD_CONCURRENCY,
   assetBatch,
@@ -346,5 +347,17 @@ describe("deleteAsset", () => {
       },
     } as any
     expect(await deleteAsset({ client, directory: "/p", relative: "a.txt" })).toBe(false)
+  })
+})
+
+describe("isProtectedPath", () => {
+  test("protects the workspace folders and everything under them", () => {
+    expect(isProtectedPath(".git")).toBe(true)
+    expect(isProtectedPath(".opencode/config.json")).toBe(true)
+  })
+
+  test("leaves ordinary paths deletable", () => {
+    expect(isProtectedPath("src/index.ts")).toBe(false)
+    expect(isProtectedPath("docs/.git-notes.md")).toBe(false)
   })
 })

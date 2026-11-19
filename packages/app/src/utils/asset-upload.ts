@@ -280,3 +280,29 @@ export async function deleteAsset(input: {
     return false
   }
 }
+
+export const PROTECTED_DIRS = [".git", ".opencode"]
+
+export function isProtectedPath(path: string): boolean {
+  return PROTECTED_DIRS.includes(path.split("/")[0] ?? "")
+}
+
+/**
+ * Removes one project file or folder, or every file when `path` is omitted. Returns false instead
+ * of throwing so a failed delete can be surfaced as a toast without unwinding the caller.
+ */
+export async function deleteProjectFile(input: {
+  client: OpencodeClient
+  directory: string
+  path?: string
+}): Promise<boolean> {
+  try {
+    await input.client.file.delete({
+      directory: input.directory,
+      ...(input.path ? { path: input.path } : {}),
+    })
+    return true
+  } catch {
+    return false
+  }
+}

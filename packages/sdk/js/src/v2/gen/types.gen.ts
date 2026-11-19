@@ -1945,9 +1945,43 @@ export type GitHubStatus = {
   }
 }
 
+export type GitHubRepositories = {
+  repositories: Array<{
+    owner: string
+    name: string
+    url: string
+    private?: boolean
+  }>
+}
+
 export type EnkFailure = {
   code: string
   message: string
+}
+
+export type GitHubPushed = {
+  enabled: boolean
+  connectUrl?: string
+  login?: string
+  linkedBy?: string
+  app?: boolean
+  repo?: {
+    owner: string
+    name: string
+    url: string
+    private?: boolean
+  }
+  push?: {
+    sha: string
+    time: number
+    by?: string
+  }
+  firstPush?: {
+    attempts: number
+    code: string
+    reason: string
+  }
+  pushed: boolean
 }
 
 export type HistoryEntry = {
@@ -3392,6 +3426,82 @@ export type GithubStatusResponses = {
 
 export type GithubStatusResponse = GithubStatusResponses[keyof GithubStatusResponses]
 
+export type GithubRepositoriesData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/github/repositories"
+}
+
+export type GithubRepositoriesErrors = {
+  /**
+   * Expected failure
+   */
+  404: EnkFailure | NotFoundError
+  /**
+   * Expected failure
+   */
+  409: EnkFailure
+  /**
+   * Expected failure
+   */
+  502: EnkFailure
+}
+
+export type GithubRepositoriesError = GithubRepositoriesErrors[keyof GithubRepositoriesErrors]
+
+export type GithubRepositoriesResponses = {
+  /**
+   * Repositories
+   */
+  200: GitHubRepositories
+}
+
+export type GithubRepositoriesResponse = GithubRepositoriesResponses[keyof GithubRepositoriesResponses]
+
+export type GithubRepoSelectData = {
+  body?: {
+    owner: string
+    name: string
+    locale?: PromptLocale
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/github/repository"
+}
+
+export type GithubRepoSelectErrors = {
+  /**
+   * Expected failure
+   */
+  404: EnkFailure | NotFoundError
+  /**
+   * Expected failure
+   */
+  409: EnkFailure
+  /**
+   * Expected failure
+   */
+  502: EnkFailure
+}
+
+export type GithubRepoSelectError = GithubRepoSelectErrors[keyof GithubRepoSelectErrors]
+
+export type GithubRepoSelectResponses = {
+  /**
+   * Link status
+   */
+  200: GitHubStatus
+}
+
+export type GithubRepoSelectResponse = GithubRepoSelectResponses[keyof GithubRepoSelectResponses]
+
 export type GithubRepoCreateData = {
   body?: {
     name: string
@@ -3430,6 +3540,48 @@ export type GithubRepoCreateResponses = {
 }
 
 export type GithubRepoCreateResponse = GithubRepoCreateResponses[keyof GithubRepoCreateResponses]
+
+export type GithubPushData = {
+  body?: {
+    locale?: PromptLocale
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/github/push"
+}
+
+export type GithubPushErrors = {
+  /**
+   * Expected failure
+   */
+  404: EnkFailure | NotFoundError
+  /**
+   * Expected failure
+   */
+  409: EnkFailure
+  /**
+   * Expected failure
+   */
+  422: EnkFailure
+  /**
+   * Expected failure
+   */
+  502: EnkFailure
+}
+
+export type GithubPushError = GithubPushErrors[keyof GithubPushErrors]
+
+export type GithubPushResponses = {
+  /**
+   * Link status and whether a commit was pushed
+   */
+  200: GitHubPushed
+}
+
+export type GithubPushResponse = GithubPushResponses[keyof GithubPushResponses]
 
 export type HistoryListData = {
   body?: never
@@ -6161,6 +6313,38 @@ export type FindSymbolsResponses = {
 }
 
 export type FindSymbolsResponse = FindSymbolsResponses[keyof FindSymbolsResponses]
+
+export type FileDeleteData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    /**
+     * Path relative to the project directory. Omit to delete all.
+     */
+    path?: string
+  }
+  url: "/file"
+}
+
+export type FileDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type FileDeleteError = FileDeleteErrors[keyof FileDeleteErrors]
+
+export type FileDeleteResponses = {
+  /**
+   * Deleted
+   */
+  200: boolean
+}
+
+export type FileDeleteResponse = FileDeleteResponses[keyof FileDeleteResponses]
 
 export type FileListData = {
   body?: never
