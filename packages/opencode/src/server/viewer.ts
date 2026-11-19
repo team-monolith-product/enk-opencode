@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono"
+import { createHmac, timingSafeEqual } from "node:crypto"
 import { getCookie, setCookie } from "hono/cookie"
 import z from "zod"
 import { Rails } from "../enk/rails"
@@ -6,29 +7,20 @@ import { Flag } from "../flag/flag"
 import { Log } from "../util/log"
 import { HubActivity } from "./hub-activity"
 
-/**
- * 운영자 관전(읽기 전용) 세션.
- *
- * 운영자는 팀 허브 사용자가 아니라 Hub OAuth 를 통과할 수 없다. 대신 hackathon-rails 가 발급한
- * 짧은 수명의 `?viewer_ticket=` 을 이 pod 의 팀 토큰으로 rails 에 검증받아 관전 세션을 만든다.
- * 관전 세션의 요청은 클라이언트의 `?readonly=true` 와 무관하게 서버가 읽기만 허용한다.
- */
 export namespace Viewer {
   const log = Log.create({ service: "viewer" })
 
   export const QUERY = "viewer_ticket"
   const COOKIE = "opencode-viewer-session"
   const VERIFY_ROUTE = "/api/v1/opencode/viewer_ticket/verify"
-  const IDLE_MS = 60 * 60 * 1000
-  const MAX_MS = 8 * 60 * 60 * 1000
+  export const MAX_AGE_MS = 8 * 60 * 60 * 1000
   const TIMEOUT_MS = 10_000
 
   export const Info = z.object({ id: z.string(), name: z.string() })
   export type Info = z.infer<typeof Info>
 
-  type Session = Info & { createdAt: number; seenAt: number }
+  const Payload = Info.extend({ exp: z.number() })
 
-  const sessions = new Map<string, Session>()
   const marked = new WeakSet<Request>()
 
   const SOCKETS = [
@@ -46,6 +38,9 @@ export namespace Viewer {
     /^\/tui(\/|$)/,
   ]
 
+  const SECRET_FIELDS = new Set(["apiKey", "key", "token", "secret", "password", "authorization"])
+  const SECRET_MAPS = new Set(["headers", "environment"])
+
   export function is(req: Request): boolean {
     return marked.has(req)
   }
@@ -56,6 +51,21 @@ export namespace Viewer {
     return !HIDDEN.some((rule) => rule.test(path))
   }
 
+  export function redact<T>(req: Request, value: T): T {
+    return is(req) ? (scrub(value) as T) : value
+  }
+
+  function scrub(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(scrub)
+    if (!value || typeof value !== "object") return value
+    return Object.fromEntries(
+      Object.entries(value).flatMap(([key, item]) => {
+        if (SECRET_FIELDS.has(key)) return []
+        return [[key, SECRET_MAPS.has(key) ? {} : scrub(item)]]
+      }),
+    )
+  }
+
   function prefix(): string {
     return Flag.JUPYTERHUB_SERVICE_PREFIX?.replace(/\/+$/, "") ?? ""
   }
@@ -64,6 +74,38 @@ export namespace Viewer {
     const base = prefix()
     if (base && (path === base || path.startsWith(base + "/"))) return path.slice(base.length) || "/"
     return path
+  }
+
+  function secret(): string | undefined {
+    return process.env["ENK_AI_USAGE_TOKEN"] || undefined
+  }
+
+  function sign(body: string, key: string): string {
+    return createHmac("sha256", key).update(body).digest("base64url")
+  }
+
+  export function seal(info: Info, now = Date.now()): string | undefined {
+    const key = secret()
+    if (!key) return
+    const body = Buffer.from(JSON.stringify({ ...info, exp: now + MAX_AGE_MS })).toString("base64url")
+    return `${body}.${sign(body, key)}`
+  }
+
+  export function open(value: string | undefined, now = Date.now()): Info | undefined {
+    const key = secret()
+    if (!key || !value) return
+    const [body, mac] = value.split(".")
+    if (!body || !mac) return
+    const expected = Buffer.from(sign(body, key))
+    const actual = Buffer.from(mac)
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return
+    try {
+      const parsed = Payload.safeParse(JSON.parse(Buffer.from(body, "base64url").toString()))
+      if (!parsed.success || parsed.data.exp <= now) return
+      return { id: parsed.data.id, name: parsed.data.name }
+    } catch {
+      return
+    }
   }
 
   export async function verify(ticket: string): Promise<Info | undefined> {
@@ -88,48 +130,25 @@ export namespace Viewer {
     }
   }
 
-  function current(c: Context): Session | undefined {
-    const sid = getCookie(c, COOKIE)
-    if (!sid) return
-    const session = sessions.get(sid)
-    if (!session) return
-    const now = Date.now()
-    if (now - session.seenAt > IDLE_MS || now - session.createdAt > MAX_MS) {
-      sessions.delete(sid)
-      return
-    }
-    session.seenAt = now
-    return session
-  }
-
-  function prune() {
-    const now = Date.now()
-    for (const [sid, session] of sessions) {
-      if (now - session.seenAt > IDLE_MS || now - session.createdAt > MAX_MS) sessions.delete(sid)
-    }
-  }
-
   async function enter(c: Context, ticket: string): Promise<Response> {
     const info = await verify(ticket)
-    if (!info) return c.text("Forbidden", 403)
+    const value = info && seal(info)
+    if (!info || !value) return c.text("Forbidden", 403)
 
-    prune()
-    const sid = crypto.randomUUID()
-    const now = Date.now()
-    sessions.set(sid, { ...info, createdAt: now, seenAt: now })
-    setCookie(c, COOKIE, sid, {
+    setCookie(c, COOKIE, value, {
       path: prefix() || "/",
       httpOnly: true,
       sameSite: "Lax",
       secure: c.req.url.startsWith("https"),
-      maxAge: MAX_MS / 1000,
+      maxAge: MAX_AGE_MS / 1000,
     })
     log.info("viewer entered", { viewer: info.id })
 
     const url = new URL(c.req.url)
     url.searchParams.delete(QUERY)
     url.searchParams.set("readonly", "true")
-    return c.redirect(`${prefix()}${relative(c.req.path)}${url.search}`)
+    const path = "/" + relative(c.req.path).replace(/^\/+/, "")
+    return c.redirect(`${prefix()}${path}${url.search}`)
   }
 
   export function auth(): MiddlewareHandler {
@@ -139,7 +158,7 @@ export namespace Viewer {
       const ticket = c.req.query(QUERY)
       if (ticket !== undefined) return enter(c, ticket)
 
-      if (!current(c)) return next()
+      if (!open(getCookie(c, COOKIE))) return next()
 
       marked.add(c.req.raw)
       HubActivity.untrack(c.req.raw)

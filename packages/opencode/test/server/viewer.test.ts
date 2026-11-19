@@ -109,7 +109,42 @@ describe("Viewer.auth", () => {
     expect(Viewer.allowed("GET", "/tui/next", false)).toBe(false)
   })
 
-  // JUPYTERHUB_* 는 모듈 로드 시점 상수라 hub 모드는 서브프로세스에서 검증한다.
+  test("관전 쿠키는 서명이라 pod 가 재시작돼도 유효하고, 위조·만료는 거절한다", () => {
+    const now = Date.now()
+    const value = Viewer.seal({ id: "op", name: "운영자" }, now)!
+    expect(Viewer.open(value, now + 1000)).toEqual({ id: "op", name: "운영자" })
+
+    const [body, mac] = value.split(".")
+    const forged = Buffer.from(JSON.stringify({ id: "x", name: "x", exp: now + 10_000 })).toString("base64url")
+    expect(Viewer.open(`${forged}.${mac}`, now)).toBeUndefined()
+    expect(Viewer.open(`${body}.AAAA`, now)).toBeUndefined()
+    expect(Viewer.open(value, now + Viewer.MAX_AGE_MS + 1)).toBeUndefined()
+  })
+
+  test("// 로 시작하는 경로로 들어와도 같은 호스트로만 보낸다", async () => {
+    const res = await app().request("//evil.example/x?viewer_ticket=good")
+    expect(res.status).toBe(302)
+    expect(res.headers.get("location")).toStartWith("/evil.example/x?")
+  })
+
+  test("관전 세션의 설정·프로바이더 응답에서는 키를 지운다", async () => {
+    const { cookie } = await enter()
+    const config = {
+      provider: { openai: { options: { apiKey: "sk-1", baseURL: "https://x" }, key: "sk-2" } },
+      mcp: { gh: { headers: { Authorization: "Bearer t" }, environment: { TOKEN: "t" }, url: "https://m" } },
+      share: "disabled",
+    }
+    const redacting = new Hono().use(Viewer.auth()).get("/config", (c) => c.json(Viewer.redact(c.req.raw, config)))
+
+    const viewer = await (await redacting.request("/config", { headers: { cookie } })).json()
+    expect(viewer).toEqual({
+      provider: { openai: { options: { baseURL: "https://x" } } },
+      mcp: { gh: { headers: {}, environment: {}, url: "https://m" } },
+      share: "disabled",
+    })
+    expect(await (await redacting.request("/config")).json()).toEqual(config)
+  })
+
   test("hub 모드: 관전 세션은 Hub OAuth 를 건너뛰고 서비스 경로에 쿠키를 둔다", async () => {
     const script = `
       process.env.JUPYTERHUB_API_URL = "http://hub.invalid/api"
