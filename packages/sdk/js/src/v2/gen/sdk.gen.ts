@@ -69,6 +69,8 @@ import type {
   FileAssetDeleteErrors,
   FileAssetDeleteResponses,
   FileAssetListResponses,
+  FileDeleteErrors,
+  FileDeleteResponses,
   FileListResponses,
   FilePartInput,
   FilePartSource,
@@ -78,8 +80,14 @@ import type {
   FindSymbolsResponses,
   FindTextResponses,
   FormatterStatusResponses,
+  GithubPushErrors,
+  GithubPushResponses,
   GithubRepoCreateErrors,
   GithubRepoCreateResponses,
+  GithubRepoSelectErrors,
+  GithubRepoSelectResponses,
+  GithubRepositoriesErrors,
+  GithubRepositoriesResponses,
   GithubStatusResponses,
   GlobalConfigGetResponses,
   GlobalConfigUpdateErrors,
@@ -1531,6 +1539,47 @@ export class DevServer extends HeyApiClient {
 
 export class Repo extends HeyApiClient {
   /**
+   * Choose GitHub repository
+   *
+   * Bind one of the installed repositories to this project and push it once.
+   */
+  public select<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      owner?: string
+      name?: string
+      locale?: PromptLocale
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "owner" },
+            { in: "body", key: "name" },
+            { in: "body", key: "locale" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<GithubRepoSelectResponses, GithubRepoSelectErrors, ThrowOnError>({
+      url: "/github/repository",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Create GitHub repository
    *
    * Create a public repository under the linked account and bind it to this project.
@@ -1598,6 +1647,73 @@ export class Github extends HeyApiClient {
       url: "/github",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * List installed GitHub repositories
+   *
+   * Repositories the team picked when installing the GitHub App.
+   */
+  public repositories<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<GithubRepositoriesResponses, GithubRepositoriesErrors, ThrowOnError>({
+      url: "/github/repositories",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Push to GitHub now
+   *
+   * Push the project's current files to the bound repository without waiting for a conversation to end.
+   */
+  public push<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      locale?: PromptLocale
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "locale" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GithubPushResponses, GithubPushErrors, ThrowOnError>({
+      url: "/github/push",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
@@ -4893,6 +5009,38 @@ export class Asset2 extends HeyApiClient {
 }
 
 export class File extends HeyApiClient {
+  /**
+   * Delete files
+   *
+   * Delete one file or folder in the project directory, or every file when no path is given. .git, .opencode are never deleted.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      path?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<FileDeleteResponses, FileDeleteErrors, ThrowOnError>({
+      url: "/file",
+      ...options,
+      ...params,
+    })
+  }
+
   /**
    * List files
    *
