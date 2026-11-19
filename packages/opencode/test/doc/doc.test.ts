@@ -3505,6 +3505,56 @@ describe("doc", () => {
     })
   })
 
+  test("a reconnect does not replay a send an earlier, rejected stop vote dropped", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const stopA = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+        const both = [alice.actorID, bob.actorID]
+
+        // Alice steers, Bob's first stop drops the steer, and Alice rejects that stop. She has seen the drop.
+        const send = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, actorIDs: both, prompt })
+        await working(session.id)
+        const first = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: bob.actorID, actorIDs: both })
+        const dropped = Doc.submitRespond({
+          sessionID: session.id,
+          submitID: send.submitID,
+          actorID: bob.actorID,
+          action: "approve",
+        })
+        expect(dropped.cancelReason).toBe("stop")
+        Doc.submitRespond({ sessionID: session.id, submitID: first.submitID, actorID: alice.actorID, action: "cancel" })
+
+        // Seconds later Bob asks to stop again. This stop dropped nothing.
+        await Bun.sleep(5)
+        const second = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: bob.actorID, actorIDs: both })
+        expect(second.status).toBe("pending")
+
+        // Alice reloads: she is shown the new stop vote, not the old drop a second time.
+        const replay: Doc.SubmitEvent[] = []
+        const again = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => replay.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        expect(replay.map((e) => `${e.type}:${e.state.submitID}`)).toEqual([`created:${second.submitID}`])
+        again()
+
+        stopA()
+        stopB()
+      },
+    })
+  })
+
   test("a stop vote closes once the AI finishes on its own, so sending is open again", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
