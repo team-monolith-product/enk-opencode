@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
+import { History } from "../../src/enk/history"
 import { FileRemove } from "../../src/file/remove"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
@@ -92,5 +93,30 @@ describe("FileRemove.remove / clear", () => {
     expect(await exists(path.join(tmp.path, "src"))).toBe(false)
     expect(await exists(path.join(tmp.path, ".git"))).toBe(true)
     expect(await exists(path.join(tmp.path, ".opencode/keep.json"))).toBe(true)
+  })
+})
+
+describe("FileRemove snapshot", () => {
+  test("saves work made since the last turn before deleting it, so version history can bring it back", async () => {
+    await using tmp = await tmpdir()
+    const work = path.join(tmp.path, "project-directory")
+    await fs.mkdir(path.join(work, ".git"), { recursive: true })
+    await fs.writeFile(path.join(work, ".git", "opencode"), "team-1-project")
+    await fs.writeFile(path.join(work, "draft.txt"), "unsaved")
+    await Instance.provide({
+      directory: work,
+      fn: async () => {
+        await FileRemove.clear()
+      },
+    })
+    expect(await exists(path.join(work, "draft.txt"))).toBe(false)
+    const [saved] = await History.list(work)
+    expect(saved?.subject).toBe("파일 삭제 전 자동 저장")
+    await History.restore(work, {
+      sha: saved!.sha,
+      message: (target) => `되돌리기: ${target.subject}`,
+      backup: "되돌리기 전 자동 저장",
+    })
+    expect(await fs.readFile(path.join(work, "draft.txt"), "utf8")).toBe("unsaved")
   })
 })
