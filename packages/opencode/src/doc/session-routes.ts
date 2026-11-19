@@ -6,6 +6,7 @@ import { Doc } from "./index"
 import { ActorID, DocID, SubmitID } from "./schema"
 import { SessionID } from "@/session/schema"
 import { errors } from "../server/error"
+import { Viewer } from "../server/viewer"
 import { HistorySync } from "@/enk/history-sync"
 import { failures, ok } from "../server/enk-responses"
 
@@ -283,7 +284,7 @@ export const SessionDocRoutes = () =>
               sessionID: param.sessionID,
               docID: query.docID,
               actorID: query.actorID,
-              observer: query.observer,
+              observer: query.observer || Viewer.is(c.req.raw),
               peer: {
                 send: (data) => {
                   if (socket.readyState === 1) socket.send(data)
@@ -393,7 +394,7 @@ export const SessionDocRoutes = () =>
               sessionID: param.sessionID,
               requestID: query.requestID,
               actorID: query.actorID,
-              observer: query.observer,
+              observer: query.observer || Viewer.is(c.req.raw),
               peer: { send: (data) => { if (socket.readyState === 1) socket.send(data) }, close: () => socket.close() },
             })
           },
@@ -438,6 +439,7 @@ export const SessionDocRoutes = () =>
           z.object({ type: z.literal("presence"), entry: Doc.QuestionPresenceEntry }),
         ])
 
+        const viewer = Viewer.is(c.req.raw)
         let handle: ((() => void) & { pong: () => void }) | undefined
         return {
           onOpen(_event, ws) {
@@ -459,6 +461,7 @@ export const SessionDocRoutes = () =>
               handle?.pong()
               return
             }
+            if (viewer) return
             let parsed: z.infer<typeof Inbound>
             try {
               parsed = Inbound.parse(JSON.parse(event.data))

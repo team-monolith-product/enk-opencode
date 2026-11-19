@@ -7,6 +7,7 @@ import { Doc } from "./index"
 import { AssetID, CycleID, DocID } from "./schema"
 import { errors } from "../server/error"
 import { HubActivity } from "../server/hub-activity"
+import { Viewer } from "../server/viewer"
 import { lazy } from "../util/lazy"
 import * as Room from "./room"
 
@@ -273,6 +274,7 @@ export const DocRoutes = lazy(() =>
           return typeof (value as { readyState?: unknown }).readyState === "number"
         }
 
+        const viewer = Viewer.is(c.req.raw)
         let stop: (() => void) | undefined
         let peer: Room.Peer | undefined
 
@@ -293,7 +295,7 @@ export const DocRoutes = lazy(() =>
             stop = Room.connect(docID, peer)
           },
           onMessage(event) {
-            if (!peer) return
+            if (!peer || viewer) return
             const raw =
               typeof event.data === "string"
                 ? new TextEncoder().encode(event.data)

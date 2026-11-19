@@ -3,6 +3,7 @@ import { getCookie, setCookie } from "hono/cookie"
 import { basicAuth } from "hono/basic-auth"
 import { Flag } from "../flag/flag"
 import { Log } from "../util/log"
+import { Viewer } from "./viewer"
 
 /**
  * AIDEV-NOTE: JupyterHub singleuser 서버용 OAuth2 Authorization Code 흐름의 TypeScript 구현.
@@ -207,6 +208,7 @@ export namespace HubAuth {
       if (c.req.method === "OPTIONS") return next()
       if (c.req.path === "/oauth_callback") return next()
       if (c.req.header(INTERNAL_HEADER) === INTERNAL_TOKEN) return next()
+      if (Viewer.is(c.req.raw)) return next()
 
       const password = Flag.OPENCODE_SERVER_PASSWORD
       const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"

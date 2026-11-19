@@ -8,6 +8,7 @@ import { Auth } from "../auth"
 import { Flag } from "../flag/flag"
 import { HubAuth } from "./hub-auth"
 import { HubActivity } from "./hub-activity"
+import { Viewer } from "./viewer"
 import { ProviderID } from "../provider/schema"
 import { WorkspaceRouterMiddleware } from "./router"
 import { websocket } from "hono/bun"
@@ -45,6 +46,7 @@ export namespace Server {
     const app = new Hono()
     return app
       .onError(errorHandler(log))
+      .use(Viewer.auth())
       .use(HubAuth.auth())
       .get("/oauth_callback", (c) => HubAuth.callback(c))
       .use(HubActivity.track())

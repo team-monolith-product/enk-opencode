@@ -13,6 +13,7 @@ import { Portal } from "solid-js/web"
 import { useClientEnv } from "@/context/client-env"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
+import { readonlyViewer } from "@/context/parent-params"
 import { useLayout } from "@/context/layout"
 import { usePlatform } from "@/context/platform"
 import { useServer } from "@/context/server"
@@ -135,6 +136,7 @@ export function SessionHeader() {
   const command = useCommand()
   const server = useServer()
   const platform = usePlatform()
+  const spectator = readonlyViewer()
   const language = useLanguage()
   const sync = useSync()
   const terminal = useTerminal()
@@ -396,21 +398,23 @@ export function SessionHeader() {
                 <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>
                   <StatusPopover />
                 </Tooltip>
-                <TooltipKeybind
-                  title={language.t("command.terminal.toggle")}
-                  keybind={command.keybind("terminal.toggle")}
-                >
-                  <Button
-                    variant="ghost"
-                    class="group/terminal-toggle titlebar-icon w-8 h-6 p-0 box-border shrink-0"
-                    onClick={toggleTerminal}
-                    aria-label={language.t("command.terminal.toggle")}
-                    aria-expanded={view().terminal.opened()}
-                    aria-controls="terminal-panel"
+                <Show when={!spectator}>
+                  <TooltipKeybind
+                    title={language.t("command.terminal.toggle")}
+                    keybind={command.keybind("terminal.toggle")}
                   >
-                    <Icon size="small" name={view().terminal.opened() ? "terminal-active" : "terminal"} />
-                  </Button>
-                </TooltipKeybind>
+                    <Button
+                      variant="ghost"
+                      class="group/terminal-toggle titlebar-icon w-8 h-6 p-0 box-border shrink-0"
+                      onClick={toggleTerminal}
+                      aria-label={language.t("command.terminal.toggle")}
+                      aria-expanded={view().terminal.opened()}
+                      aria-controls="terminal-panel"
+                    >
+                      <Icon size="small" name={view().terminal.opened() ? "terminal-active" : "terminal"} />
+                    </Button>
+                  </TooltipKeybind>
+                </Show>
 
                 <div class="hidden md:flex items-center gap-1 shrink-0">
                   <Show when={!env.productionLayout()}>
