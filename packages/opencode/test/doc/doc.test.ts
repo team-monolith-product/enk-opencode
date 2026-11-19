@@ -3533,8 +3533,8 @@ describe("doc", () => {
         expect(dropped.cancelReason).toBe("stop")
         Doc.submitRespond({ sessionID: session.id, submitID: first.submitID, actorID: alice.actorID, action: "cancel" })
 
-        // Seconds later Bob asks to stop again. This stop dropped nothing.
-        await Bun.sleep(5)
+        // Bob asks to stop again. This stop dropped nothing — even within the same millisecond, which
+        // a timestamp comparison could not tell apart from the first stop's drop.
         const second = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: bob.actorID, actorIDs: both })
         expect(second.status).toBe("pending")
 
