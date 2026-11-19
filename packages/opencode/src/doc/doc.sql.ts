@@ -107,6 +107,8 @@ export const DocSubmitTable = sqliteTable(
     cancelled_by: text().$type<ActorID>(),
     // Why the server itself cancelled the vote ('stop': a stop vote took over a waiting send).
     cancel_reason: text().$type<"stop">(),
+    // The stop vote that took this send over (set together with cancel_reason 'stop').
+    cancelled_by_submit: text().$type<SubmitID>(),
     // The user message this submit produced once sent — links a cycle back to its submit/actors.
     user_message_id: text(),
     ...Timestamps,

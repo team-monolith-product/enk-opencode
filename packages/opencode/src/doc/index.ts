@@ -935,9 +935,12 @@ export namespace Doc {
     return pendingRows(sessionID, { kind })
   }
 
-  /** 중지 투표에 밀려난 전송 투표를 취소한다. 취소한 사람은 중지를 요청한 사람으로 남긴다. */
-  function superseded(sessionID: SessionID, actorID: ActorID) {
-    close(pendingOf(sessionID, "doc"), actorID, "stop")
+  /**
+   * 중지 투표에 밀려난 전송 투표를 취소한다. 취소한 사람은 중지를 요청한 사람으로, 취소한 투표는 그 중지 투표로
+   * 남긴다 — 다시 접속한 사람에게 "이 중지가 밀어낸 전송"을 시각 추론 없이 그대로 찾아 주기 위해서다.
+   */
+  function superseded(sessionID: SessionID, actorID: ActorID, stopID: SubmitID) {
+    close(pendingOf(sessionID, "doc"), actorID, { reason: "stop", by: stopID })
   }
 
   /**
@@ -1004,14 +1007,25 @@ export namespace Doc {
 
   /**
    * Cancel pending votes on the server's own initiative. `reason` travels with the cancellation so a
-   * client can tell people why their vote ended, instead of guessing from what happened around it.
+   * client can tell people why their vote ended, instead of guessing from what happened around it;
+   * `by` is the vote that caused it (the stop vote, for reason 'stop').
    */
-  function close(rows: SubmitRow[], actorID: ActorID | null, reason?: SubmitCancelReason) {
+  function close(
+    rows: SubmitRow[],
+    actorID: ActorID | null,
+    cause?: { reason: SubmitCancelReason; by: SubmitID },
+  ) {
     for (const row of rows) {
       const item = Database.use((db) =>
         db
           .update(DocSubmitTable)
-          .set({ status: "cancelled", cancelled_by: actorID, cancel_reason: reason ?? null, time_updated: Date.now() })
+          .set({
+            status: "cancelled",
+            cancelled_by: actorID,
+            cancel_reason: cause?.reason ?? null,
+            cancelled_by_submit: cause?.by ?? null,
+            time_updated: Date.now(),
+          })
           .where(and(eq(DocSubmitTable.id, row.id), eq(DocSubmitTable.status, "pending")))
           .returning()
           .get(),
@@ -1201,6 +1215,7 @@ export namespace Doc {
           expires_at: now + timeout,
           cancelled_by: null,
           cancel_reason: null,
+          cancelled_by_submit: null,
           user_message_id: null,
           time_created: now,
           time_updated: now,
@@ -1234,7 +1249,7 @@ export namespace Doc {
     // 중지가 시작되면 기다리던 전송 투표는 접는다. 내용은 공유 문서에 그대로 남아 중지 뒤 다시 보낼 수 있다.
     // 돌고 있지 않은 세션의 중지는 예외다 — 멈출 AI 도, 끼어들 실행도 없으니 그때 기다리던 전송은 스티어가
     // 아니라 평범한 새 요청이고, 한 사람 화면이 "작업 중"으로 멈춰 누른 중지가 그것을 지우면 안 된다.
-    if (input.targetKind === "stop" && !idleStop) superseded(input.sessionID, input.actorID)
+    if (input.targetKind === "stop" && !idleStop) superseded(input.sessionID, input.actorID, row.id)
 
     const state = read(row)
     if (state.status === "sent") {
@@ -1664,23 +1679,15 @@ export namespace Doc {
     // Only while the stop vote is the latest thing here: a vote started after it makes the drop old news.
     // And only a send this stop vote dropped: an earlier stop vote (rejected moments ago) dropped its own,
     // which this peer was already told about, and replaying it would repeat that news on every reload.
-    // superseded() closes the sends after the stop row is written, so this stop's drops are stamped at
-    // or after its server-side creation time.
+    // superseded() records which stop vote dropped each send, so this is an exact match, not a guess
+    // from timestamps.
     const replayDropped = (stop: SubmitState | undefined) => {
       if (stop?.targetKind !== "stop") return
-      const since = Database.use((db) =>
-        db
-          .select({ time: DocSubmitTable.time_created })
-          .from(DocSubmitTable)
-          .where(eq(DocSubmitTable.id, stop.submitID))
-          .get(),
-      )?.time
-      if (since === undefined) return
       const dropped = recent(
         input.sessionID,
         input.targetID,
         input.actorID,
-        (row) => droppedByStop(row) && row.time_updated >= since,
+        (row) => droppedByStop(row) && row.cancelled_by_submit === stop.submitID,
       )
       if (dropped) peer.send(JSON.stringify({ type: "cancelled", state: dropped } satisfies SubmitEvent))
     }
