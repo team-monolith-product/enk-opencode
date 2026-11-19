@@ -1662,9 +1662,26 @@ export namespace Doc {
     // replayed ahead of the stop vote — whether that is still pending or has already ended — so the peer
     // closes the send's dialog with the real outcome and learns why (it carries the stored reason).
     // Only while the stop vote is the latest thing here: a vote started after it makes the drop old news.
+    // And only a send this stop vote dropped: an earlier stop vote (rejected moments ago) dropped its own,
+    // which this peer was already told about, and replaying it would repeat that news on every reload.
+    // superseded() closes the sends after the stop row is written, so this stop's drops are stamped at
+    // or after its server-side creation time.
     const replayDropped = (stop: SubmitState | undefined) => {
       if (stop?.targetKind !== "stop") return
-      const dropped = recent(input.sessionID, input.targetID, input.actorID, droppedByStop)
+      const since = Database.use((db) =>
+        db
+          .select({ time: DocSubmitTable.time_created })
+          .from(DocSubmitTable)
+          .where(eq(DocSubmitTable.id, stop.submitID))
+          .get(),
+      )?.time
+      if (since === undefined) return
+      const dropped = recent(
+        input.sessionID,
+        input.targetID,
+        input.actorID,
+        (row) => droppedByStop(row) && row.time_updated >= since,
+      )
       if (dropped) peer.send(JSON.stringify({ type: "cancelled", state: dropped } satisfies SubmitEvent))
     }
     if (state) {
