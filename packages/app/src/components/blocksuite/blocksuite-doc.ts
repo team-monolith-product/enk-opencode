@@ -29,6 +29,7 @@ import { patchSlashMenu } from "./slash-menu-patch"
 import { patchFormatBar } from "./format-bar-patch"
 import { LinkedDocConfig } from "./linked-doc-patch"
 import { MAX_ATTACHMENT_BYTES } from "@/constants/file-picker"
+import { hostInputActive } from "@/utils/host-input"
 
 export type { DocActor } from "./actor"
 
@@ -279,6 +280,8 @@ export async function createPage(input: DocMountInput) {
   const focus = async (ready?: Awaited<ReturnType<typeof inlineReady>>) => {
     // A readonly viewer is never focused/edited; skip so ensureEditable() can't inject a paragraph.
     if (input.readonly) return
+    // 짓다 화면에서 질문을 입력하는 중이면 커서를 가져오지 않는다.
+    if (hostInputActive() && !document.hasFocus()) return
     ensureEditable(doc)
     const root = editor.querySelector("affine-page-root")
     if (root instanceof HTMLElement) root.focus()
