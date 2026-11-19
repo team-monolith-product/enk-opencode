@@ -2,6 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
+import { History } from "../enk/history"
 import { Assets } from "./assets"
 
 export namespace FileRemove {
@@ -29,12 +30,18 @@ export namespace FileRemove {
     return target
   }
 
+  async function snapshot() {
+    await History.commit(Instance.directory, { message: "파일 삭제 전 자동 저장" })
+  }
+
   export async function remove(target: string) {
+    await snapshot()
     await fs.rm(target, { recursive: true, force: true })
     Assets.invalidate()
   }
 
   export async function clear(): Promise<number> {
+    await snapshot()
     const entries = await fs.readdir(Instance.directory)
     const targets = entries.filter((name) => !isProtected(name))
     for (const name of targets) await fs.rm(path.join(Instance.directory, name), { recursive: true, force: true })
