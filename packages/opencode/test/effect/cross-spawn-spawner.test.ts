@@ -4,7 +4,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { Effect, Exit, Layer, Stream } from "effect"
 import type * as PlatformError from "effect/PlatformError"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -109,9 +109,7 @@ describe("cross-spawn spawner", () => {
     fx.effect(
       "fails for invalid cwd",
       Effect.gen(function* () {
-        const exit = yield* Effect.exit(
-          ChildProcess.make("echo", ["test"], { cwd: "/nonexistent/directory/path" }).asEffect(),
-        )
+        const exit = yield* Effect.exit(ChildProcess.make("echo", ["test"], { cwd: "/nonexistent/directory/path" }))
         expect(Exit.isFailure(exit)).toBe(true)
       }),
     )

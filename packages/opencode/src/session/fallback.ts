@@ -1,7 +1,7 @@
 import { InstanceState } from "@/effect/instance-state"
 import { Flag } from "@/flag/flag"
 import { SessionID } from "./schema"
-import { Effect, Layer, ServiceMap } from "effect"
+import { Effect, Layer, Context } from "effect"
 
 /**
  * Tracks how many times a session has fallen back to another model.
@@ -19,7 +19,7 @@ export namespace SessionFallback {
     readonly reset: (sessionID: SessionID) => Effect.Effect<void>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionFallback") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/SessionFallback") {}
 
   export const layer = Layer.effect(
     Service,

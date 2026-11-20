@@ -1,9 +1,9 @@
 import { Effect, Layer, ManagedRuntime } from "effect"
-import * as ServiceMap from "effect/ServiceMap"
+import * as Context from "effect/Context"
 
 export const memoMap = Layer.makeMemoMapUnsafe()
 
-export function makeRuntime<I, S, E>(service: ServiceMap.Service<I, S>, layer: Layer.Layer<I, E>) {
+export function makeRuntime<I, S, E>(service: Context.Service<I, S>, layer: Layer.Layer<I, E>) {
   let rt: ManagedRuntime.ManagedRuntime<I, E> | undefined
   const getRuntime = () => (rt ??= ManagedRuntime.make(layer, { memoMap }))
 

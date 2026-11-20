@@ -26,5 +26,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# 미리보기 브릿지 사본(preview-bridge 플러그인이 루트·public·static·src 에 둔다). 압축된 한 줄 파일이라
+# 검색(grep) 결과에 섞이지 않게 뺀다.
+__preview-bridge.js
+
 # OpenCode runtime state (dev server replay 등, EFS 절대경로가 담기므로 커밋 제외)
 .opencode/

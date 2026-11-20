@@ -10,7 +10,7 @@ import { PermissionTable } from "@/session/session.sql"
 import { Database, eq } from "@/storage/db"
 import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
-import { Deferred, Effect, Layer, Schema, ServiceMap } from "effect"
+import { Deferred, Effect, Layer, Schema, Context } from "effect"
 import os from "os"
 import z from "zod"
 import { evaluate as evalRule } from "./evaluate"
@@ -80,13 +80,13 @@ export namespace Permission {
     ),
   }
 
-  export class RejectedError extends Schema.TaggedErrorClass<RejectedError>()("PermissionRejectedError", {}) {
+  export class RejectedError extends Schema.TaggedError<RejectedError>()("PermissionRejectedError", {}) {
     override get message() {
       return "The user rejected permission to use this specific tool call."
     }
   }
 
-  export class CorrectedError extends Schema.TaggedErrorClass<CorrectedError>()("PermissionCorrectedError", {
+  export class CorrectedError extends Schema.TaggedError<CorrectedError>()("PermissionCorrectedError", {
     feedback: Schema.String,
   }) {
     override get message() {
@@ -94,7 +94,7 @@ export namespace Permission {
     }
   }
 
-  export class DeniedError extends Schema.TaggedErrorClass<DeniedError>()("PermissionDeniedError", {
+  export class DeniedError extends Schema.TaggedError<DeniedError>()("PermissionDeniedError", {
     ruleset: Schema.Any,
   }) {
     override get message() {
@@ -200,7 +200,7 @@ export namespace Permission {
     { permission: "bash", pattern: "dir Env:*", action: "deny" },
   ]
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Permission") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}
 
   export const layer = Layer.effect(
     Service,

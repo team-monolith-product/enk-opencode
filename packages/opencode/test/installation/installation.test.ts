@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer, Stream } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { Installation } from "../../src/installation"
 
 const encoder = new TextEncoder()
@@ -14,12 +14,13 @@ function mockHttpClient(handler: (request: HttpClientRequest.HttpClientRequest) 
 function mockSpawner(handler: (cmd: string, args: readonly string[]) => string = () => "") {
   const spawner = ChildProcessSpawner.make((command) => {
     const std = ChildProcess.isStandardCommand(command) ? command : undefined
-    const output = handler(std?.command ?? "", std?.args ?? [])
+    const output = handler(std?.command ?? "", (std?.args ?? []).map(String))
     return Effect.succeed(
       ChildProcessSpawner.makeHandle({
         pid: ChildProcessSpawner.ProcessId(0),
         exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
         isRunning: Effect.succeed(false),
+        unref: Effect.succeed(Effect.void),
         kill: () => Effect.void,
         stdin: { [Symbol.for("effect/Sink/TypeId")]: Symbol.for("effect/Sink/TypeId") } as any,
         stdout: output ? Stream.make(encoder.encode(output)) : Stream.empty,

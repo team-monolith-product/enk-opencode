@@ -1,7 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { expect } from "bun:test"
 import { APICallError } from "ai"
-import { Cause, Effect, Exit, Fiber, Layer, ServiceMap } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Context } from "effect"
 import * as Stream from "effect/Stream"
 import path from "path"
 import type { Agent } from "../../src/agent/agent"
@@ -33,7 +33,7 @@ const ref = {
 
 type Script = Stream.Stream<LLM.Event, unknown> | ((input: LLM.StreamInput) => Stream.Stream<LLM.Event, unknown>)
 
-class TestLLM extends ServiceMap.Service<
+class TestLLM extends Context.Service<
   TestLLM,
   {
     readonly push: (stream: Script) => Effect.Effect<void>

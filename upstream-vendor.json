@@ -1,0 +1,6 @@
+{
+  "remote": "upstream",
+  "url": "https://github.com/anomalyco/opencode.git",
+  "defaultRef": "dev",
+  "packages": {}
+}

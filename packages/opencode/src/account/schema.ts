@@ -1,41 +1,21 @@
 import { Schema } from "effect"
 
-import { withStatics } from "@/util/schema"
-
-export const AccountID = Schema.String.pipe(
-  Schema.brand("AccountID"),
-  withStatics((s) => ({ make: (id: string) => s.makeUnsafe(id) })),
-)
+export const AccountID = Schema.String.pipe(Schema.brand("AccountID"))
 export type AccountID = Schema.Schema.Type<typeof AccountID>
 
-export const OrgID = Schema.String.pipe(
-  Schema.brand("OrgID"),
-  withStatics((s) => ({ make: (id: string) => s.makeUnsafe(id) })),
-)
+export const OrgID = Schema.String.pipe(Schema.brand("OrgID"))
 export type OrgID = Schema.Schema.Type<typeof OrgID>
 
-export const AccessToken = Schema.String.pipe(
-  Schema.brand("AccessToken"),
-  withStatics((s) => ({ make: (token: string) => s.makeUnsafe(token) })),
-)
+export const AccessToken = Schema.String.pipe(Schema.brand("AccessToken"))
 export type AccessToken = Schema.Schema.Type<typeof AccessToken>
 
-export const RefreshToken = Schema.String.pipe(
-  Schema.brand("RefreshToken"),
-  withStatics((s) => ({ make: (token: string) => s.makeUnsafe(token) })),
-)
+export const RefreshToken = Schema.String.pipe(Schema.brand("RefreshToken"))
 export type RefreshToken = Schema.Schema.Type<typeof RefreshToken>
 
-export const DeviceCode = Schema.String.pipe(
-  Schema.brand("DeviceCode"),
-  withStatics((s) => ({ make: (code: string) => s.makeUnsafe(code) })),
-)
+export const DeviceCode = Schema.String.pipe(Schema.brand("DeviceCode"))
 export type DeviceCode = Schema.Schema.Type<typeof DeviceCode>
 
-export const UserCode = Schema.String.pipe(
-  Schema.brand("UserCode"),
-  withStatics((s) => ({ make: (code: string) => s.makeUnsafe(code) })),
-)
+export const UserCode = Schema.String.pipe(Schema.brand("UserCode"))
 export type UserCode = Schema.Schema.Type<typeof UserCode>
 
 export class Info extends Schema.Class<Info>("Account")({
@@ -50,14 +30,14 @@ export class Org extends Schema.Class<Org>("Org")({
   name: Schema.String,
 }) {}
 
-export class AccountRepoError extends Schema.TaggedErrorClass<AccountRepoError>()("AccountRepoError", {
+export class AccountRepoError extends Schema.TaggedError<AccountRepoError>()("AccountRepoError", {
   message: Schema.String,
-  cause: Schema.optional(Schema.Defect),
+  cause: Schema.optional(Schema.Defect()),
 }) {}
 
-export class AccountServiceError extends Schema.TaggedErrorClass<AccountServiceError>()("AccountServiceError", {
+export class AccountServiceError extends Schema.TaggedError<AccountServiceError>()("AccountServiceError", {
   message: Schema.String,
-  cause: Schema.optional(Schema.Defect),
+  cause: Schema.optional(Schema.Defect()),
 }) {}
 
 export type AccountError = AccountRepoError | AccountServiceError
@@ -84,7 +64,7 @@ export class PollExpired extends Schema.TaggedClass<PollExpired>()("PollExpired"
 export class PollDenied extends Schema.TaggedClass<PollDenied>()("PollDenied", {}) {}
 
 export class PollError extends Schema.TaggedClass<PollError>()("PollError", {
-  cause: Schema.Defect,
+  cause: Schema.Defect(),
 }) {}
 
 export const PollResult = Schema.Union([PollSuccess, PollPending, PollSlow, PollExpired, PollDenied, PollError])

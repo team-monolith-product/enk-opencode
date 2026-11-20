@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { Duration, Effect, Layer, ManagedRuntime, ServiceMap } from "effect"
+import { Duration, Effect, Layer, ManagedRuntime, Context } from "effect"
 import { InstanceState } from "../../src/effect/instance-state"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
@@ -121,7 +121,7 @@ test("InstanceState.get reads the current directory lazily", async () => {
     readonly get: () => Effect.Effect<string>
   }
 
-  class Test extends ServiceMap.Service<Test, Api>()("@test/InstanceStateLazy") {
+  class Test extends Context.Service<Test, Api>()("@test/InstanceStateLazy") {
     static readonly layer = Layer.effect(
       Test,
       Effect.gen(function* () {
@@ -165,7 +165,7 @@ test("InstanceState preserves directory across async boundaries", async () => {
     readonly get: () => Effect.Effect<{ directory: string; worktree: string; project: string }>
   }
 
-  class Test extends ServiceMap.Service<Test, Api>()("@test/InstanceStateAsync") {
+  class Test extends Context.Service<Test, Api>()("@test/InstanceStateAsync") {
     static readonly layer = Layer.effect(
       Test,
       Effect.gen(function* () {
@@ -233,7 +233,7 @@ test("InstanceState survives high-contention concurrent access", async () => {
     readonly get: () => Effect.Effect<string>
   }
 
-  class Test extends ServiceMap.Service<Test, Api>()("@test/HighContention") {
+  class Test extends Context.Service<Test, Api>()("@test/HighContention") {
     static readonly layer = Layer.effect(
       Test,
       Effect.gen(function* () {
@@ -283,7 +283,7 @@ test("InstanceState correct after interleaved init and dispose", async () => {
     readonly get: () => Effect.Effect<string>
   }
 
-  class Test extends ServiceMap.Service<Test, Api>()("@test/InterleavedDispose") {
+  class Test extends Context.Service<Test, Api>()("@test/InterleavedDispose") {
     static readonly layer = Layer.effect(
       Test,
       Effect.gen(function* () {

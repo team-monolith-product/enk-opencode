@@ -16,7 +16,7 @@ import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
 import { NotFoundError } from "@/storage/db"
 import { ModelID, ProviderID } from "@/provider/schema"
-import { Effect, Layer, ServiceMap } from "effect"
+import { Effect, Layer, Context } from "effect"
 import { makeRuntime } from "@/effect/run-service"
 import { RunLink } from "./run-link"
 import { isOverflow as overflow, usable } from "./overflow"
@@ -173,7 +173,7 @@ export namespace SessionCompaction {
     }) => Effect.Effect<void>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionCompaction") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/SessionCompaction") {}
 
   export const layer: Layer.Layer<
     Service,

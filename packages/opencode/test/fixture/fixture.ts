@@ -2,8 +2,8 @@ import { $ } from "bun"
 import * as fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { Effect, FileSystem, ServiceMap } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Effect, FileSystem, Context } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import type { Config } from "../../src/config/config"
 import { Instance } from "../../src/project/instance"
 
@@ -107,7 +107,7 @@ export function tmpdirScoped(options?: { git?: boolean; config?: Partial<Config.
 export const provideInstance =
   (directory: string) =>
   <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-    Effect.servicesWith((services: ServiceMap.ServiceMap<R>) =>
+    Effect.contextWith((services: Context.Context<R>) =>
       Effect.promise<A>(async () =>
         Instance.provide({
           directory,

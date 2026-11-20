@@ -3,14 +3,14 @@ import { dirname, join, relative, resolve as pathResolve } from "path"
 import { realpathSync } from "fs"
 import * as NFS from "fs/promises"
 import { lookup } from "mime-types"
-import { Effect, FileSystem, Layer, Schema, ServiceMap } from "effect"
+import { Effect, FileSystem, Layer, Schema, Context } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { Glob } from "../util/glob"
 
 export namespace AppFileSystem {
-  export class FileSystemError extends Schema.TaggedErrorClass<FileSystemError>()("FileSystemError", {
+  export class FileSystemError extends Schema.TaggedError<FileSystemError>()("FileSystemError", {
     method: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   }) {}
 
   export type Error = PlatformError | FileSystemError
@@ -20,7 +20,7 @@ export namespace AppFileSystem {
     readonly type: "file" | "directory" | "symlink" | "other"
   }
 
-  export interface Interface extends FileSystem.FileSystem {
+  export interface Interface extends Omit<FileSystem.FileSystem, "glob" | "readDirectoryEntries"> {
     readonly isDir: (path: string) => Effect.Effect<boolean>
     readonly isFile: (path: string) => Effect.Effect<boolean>
     readonly existsSafe: (path: string) => Effect.Effect<boolean>
@@ -36,7 +36,7 @@ export namespace AppFileSystem {
     readonly globMatch: (pattern: string, filepath: string) => boolean
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/FileSystem") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/FileSystem") {}
 
   export const layer = Layer.effect(
     Service,
