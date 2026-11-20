@@ -13,7 +13,7 @@ import { DocSubmitTable, DocSubmitActorTable } from "../../src/doc/doc.sql"
 import { MessageTable, PartTable, RunLinkTable } from "../../src/session/session.sql"
 import { RunLink } from "../../src/session/run-link"
 import * as CycleRecorder from "../../src/doc/cycle-recorder"
-import { and, eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { ActorID, AssetID, CycleID, DocID } from "../../src/doc/schema"
 import type { SessionID } from "../../src/session/schema"
 import { Project } from "../../src/project/project"
@@ -2172,7 +2172,7 @@ describe("doc", () => {
           )
         // A was read by a run that was stopped before it wrote any answer.
         user("msg_user_stopped")
-        const previousRead = RunLink.lastRow(session.id as never)
+        const previousRead = RunLink.mark(session.id as never)
         // Two prompts then wait for the next run.
         user("msg_user_waiting_1")
         user("msg_user_waiting_2")
@@ -2181,8 +2181,99 @@ describe("doc", () => {
         // Without a previous read (a fresh process) every unanswered prompt still counts.
         expect(RunLink.start(session.id as never, "msg_user_waiting_2" as never).id as string).toBe("msg_user_stopped")
         // Nothing new since the previous read: the message being answered is the start.
-        const now = RunLink.lastRow(session.id as never)
+        const now = RunLink.mark(session.id as never)
         expect(RunLink.start(session.id as never, "msg_user_waiting_2" as never, now).id as string).toBe("msg_user_waiting_2")
+      },
+    })
+  })
+
+  test("a previous run's read mark is ignored once history it covered was deleted", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const user = (id: string) =>
+          Database.use((db) =>
+            db
+              .insert(MessageTable)
+              .values({
+                id: id as never,
+                session_id: session.id,
+                time_created: 0,
+                data: { role: "user", time: { created: 0 } } as never,
+              })
+              .run(),
+          )
+        user("msg_user_kept")
+        Database.use((db) =>
+          db
+            .insert(MessageTable)
+            .values({
+              id: "msg_a_kept" as never,
+              session_id: session.id,
+              time_created: 0,
+              data: { role: "assistant", parentID: "msg_user_kept", time: { created: 0 } } as never,
+            })
+            .run(),
+        )
+        user("msg_user_reverted_1")
+        user("msg_user_reverted_2")
+        const previousRead = RunLink.mark(session.id as never)
+        // A revert deletes the newest messages, so SQLite hands their rowids to the prompts stored next.
+        Database.use((db) =>
+          db
+            .delete(MessageTable)
+            .where(inArray(MessageTable.id, ["msg_user_reverted_1", "msg_user_reverted_2"] as never[]))
+            .run(),
+        )
+        user("msg_user_after_revert_1")
+        user("msg_user_after_revert_2")
+        expect(RunLink.mark(session.id as never).row).toBeLessThanOrEqual(previousRead.row)
+
+        // The mark's message is gone, so it says nothing about the new prompts: both still wait.
+        expect(
+          RunLink.start(session.id as never, "msg_user_after_revert_2" as never, previousRead).id as string,
+        ).toBe("msg_user_after_revert_1")
+      },
+    })
+  })
+
+  test("a prompt stored while a step's read was in flight is left for the step that reads it", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const add = (id: string, role: string) =>
+          Database.use((db) =>
+            db
+              .insert(MessageTable)
+              .values({ id: id as never, session_id: session.id, time_created: 0, data: { role } as never })
+              .run(),
+          )
+        add("msg_user_flight_anchor", "user")
+        const start = RunLink.lastRow(session.id as never)
+        add("msg_user_flight_steer", "user")
+        const mark = RunLink.lastRow(session.id as never)
+        // Stored after the mark, and the read did not return it.
+        add("msg_user_flight_late", "user")
+        add("msg_user_flight_later", "user")
+
+        const read = { row: mark, ids: new Set(["msg_user_flight_anchor", "msg_user_flight_steer"]) }
+        const first = RunLink.arrivals(session.id as never, start, read)
+        expect(first.ids as string[]).toEqual(["msg_user_flight_steer"])
+        expect(first.last).toBe(mark)
+        // The next step reads both and links them then.
+        const next = { row: RunLink.lastRow(session.id as never), ids: new Set(["msg_user_flight_late", "msg_user_flight_later"]) }
+        expect(RunLink.arrivals(session.id as never, first.last, next).ids as string[]).toEqual([
+          "msg_user_flight_late",
+          "msg_user_flight_later",
+        ])
       },
     })
   })
@@ -3640,6 +3731,49 @@ describe("doc", () => {
         expect(replay[0]!.state.cancelReason).toBe("stop")
         again()
 
+        stopB()
+      },
+    })
+  })
+
+  test("a peer reconnecting late into a still-open stop vote hears that its send was dropped", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const stopA = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+        const both = [alice.actorID, bob.actorID]
+
+        // Alice steers; Bob's stop opens with both of them in it and drops her steer. Her connection
+        // misses that, and she is back only after the replay window — the stop vote is still open.
+        const send = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, actorIDs: both, prompt })
+        await working(session.id)
+        const stop = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: bob.actorID, actorIDs: both })
+        expect(stop.status).toBe("pending")
+        setSystemTime(new Date(Date.now() + 20_000))
+
+        const replay: Doc.SubmitEvent[] = []
+        const again = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => replay.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        expect(replay.map((e) => `${e.type}:${e.state.submitID}`)).toEqual([
+          `cancelled:${send.submitID}`,
+          `created:${stop.submitID}`,
+        ])
+        again()
+
+        setSystemTime()
+        stopA()
         stopB()
       },
     })
