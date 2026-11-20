@@ -141,9 +141,9 @@ export namespace SessionPrompt {
           const runners = new Map<string, Runner<MessageV2.WithParts>>()
           // loop() 로 실행을 기다리는 사람들. 기다리는 동안만 남는다.
           const watches = new Map<string, Watch>()
-          // 세션마다 마지막 실행이 마지막으로 메시지를 읽은 위치(RunLink.lastRow). 다음 실행의 기준을 고를 때, 이미
+          // 세션마다 마지막 실행이 마지막으로 메시지를 읽은 위치(RunLink.mark). 다음 실행의 기준을 고를 때, 이미
           // 앞 실행이 읽고도 답하지 못한 프롬프트(답이 생기기 전에 중지·실패)를 기다리던 프롬프트로 착각하지 않게 한다.
-          const lastRead = new Map<string, number>()
+          const lastRead = new Map<string, RunLink.Mark>()
           yield* Effect.addFinalizer(
             Effect.fnUntraced(function* () {
               yield* Effect.forEach(runners.values(), (r) => r.cancel, { concurrency: "unbounded", discard: true })
@@ -1673,9 +1673,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             // Taken before the read, so a message stored while the read is in flight still counts as
             // possibly unread for loop()'s re-run check.
-            const readAt = RunLink.lastRow(sessionID)
+            const readMark = RunLink.mark(sessionID)
+            const readAt = readMark.row
             let msgs = yield* Effect.promise(() => MessageV2.filterCompacted(MessageV2.stream(sessionID)))
-            state.lastRead.set(sessionID, readAt)
+            state.lastRead.set(sessionID, readMark)
             const watch = state.watches.get(sessionID)
             if (watch) watch.readAt = readAt
 
@@ -1717,7 +1718,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const linkRun = Effect.sync(() => {
               anchor ??= RunLink.start(sessionID, lastUser.id, previousRead)
               const run = anchor
-              const found = RunLink.arrivals(sessionID, Math.max(run.row, scanned))
+              // Only what this step's read holds: a prompt stored while the read was in flight waits for the
+              // step that reads it.
+              const read = { row: readAt, ids: new Set<string>(msgs.map((msg) => msg.info.id)) }
+              const found = RunLink.arrivals(sessionID, Math.max(run.row, scanned), read)
               scanned = found.last
               for (const id of found.ids) {
                 if (id === run.id || joined.has(id)) continue

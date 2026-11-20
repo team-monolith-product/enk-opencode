@@ -44,6 +44,26 @@ export namespace RunLink {
     )
   }
 
+  /**
+   * Where a run read up to: the session's newest message, by rowid and by id. The id is what makes the
+   * mark safe to keep between runs — if that message is deleted (a revert truncates history), SQLite can
+   * hand its rowid to a later message, and a bare rowid would then call new prompts already read.
+   */
+  export type Mark = { row: number; id?: MessageID }
+
+  export function mark(sessionID: SessionID): Mark {
+    const newest = Database.use((db) =>
+      db
+        .select({ id: MessageTable.id, row: sql<number>`rowid` })
+        .from(MessageTable)
+        .where(eq(MessageTable.session_id, sessionID))
+        .orderBy(desc(sql`rowid`))
+        .limit(1)
+        .get(),
+    )
+    return newest ? { row: newest.row, id: newest.id } : { row: 0 }
+  }
+
   export function rowOf(db: Database.TxOrDb, messageID: string) {
     return db
       .select({ row: sql<number>`rowid` })
@@ -161,10 +181,12 @@ export namespace RunLink {
    * `after` is where the session's previous run last read. A prompt stored up to there was already read
    * by that run, and if it has no answer it is because that run was stopped or failed before answering
    * — not a prompt waiting for this run. Starting from it would date this run (its start time and TTFT)
-   * from that old prompt.
+   * from that old prompt. A mark whose message is gone (history truncated since) says nothing about what
+   * is stored now, so it is ignored.
    */
-  export function start(sessionID: SessionID, fallback: MessageID, after?: number) {
+  export function start(sessionID: SessionID, fallback: MessageID, read?: Mark) {
     return Database.use((db) => {
+      const after = read && (!read.id || rowOf(db, read.id) === read.row) ? read.row : undefined
       const recent = db
         .select({ id: MessageTable.id, data: MessageTable.data, row: sql<number>`rowid` })
         .from(MessageTable)
@@ -187,8 +209,18 @@ export namespace RunLink {
    * User messages of the session stored after `afterRow`, in the order they were stored, and the newest
    * rowid looked at (`last`) — pass it back as `afterRow` next time so a long run never re-reads the rows
    * it has already been through.
+   *
+   * `read`: the step's read — the mark taken just before it (`row`) and the messages it returned (`ids`).
+   * The table can gain a prompt while the read is in flight; one stored past the mark that the read did
+   * not return is not part of what the run read, so the scan stops in front of it (and `last` stays
+   * before it) — the next step that reads it links it, and if no step does, it starts a run of its own.
+   * Rows up to the mark are always taken: one missing from the read was hidden by compaction, not unread.
    */
-  export function arrivals(sessionID: SessionID, afterRow: number) {
+  export function arrivals(
+    sessionID: SessionID,
+    afterRow: number,
+    read?: { row: number; ids: ReadonlySet<string> },
+  ) {
     const rows = Database.use((db) =>
       db
         .select({ id: MessageTable.id, data: MessageTable.data, row: sql<number>`rowid` })
@@ -197,10 +229,16 @@ export namespace RunLink {
         .orderBy(sql`rowid`)
         .all(),
     )
-    return {
-      ids: rows.filter((item) => (item.data as Role).role === "user").map((item) => item.id),
-      last: rows.at(-1)?.row ?? afterRow,
+    const ids: MessageID[] = []
+    let last = afterRow
+    for (const item of rows) {
+      if ((item.data as Role).role === "user") {
+        if (read && item.row > read.row && !read.ids.has(item.id)) break
+        ids.push(item.id)
+      }
+      last = item.row
     }
+    return { ids, last }
   }
 
   /**
