@@ -2275,6 +2275,40 @@ describe("doc", () => {
     })
   })
 
+  test("a run start does not reach back past a prompt that was answered on its own", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const add = (id: string, data: object) =>
+          Database.use((db) =>
+            db
+              .insert(MessageTable)
+              .values({ id: id as never, session_id: session.id, time_created: 0, data: data as never })
+              .run(),
+          )
+        add("msg_user_own_z", { role: "user" })
+        add("msg_a_own_z", { role: "assistant", parentID: "msg_user_own_z" })
+        const readMark = RunLink.mark(session.id as never)
+        // A noReply note waits; then a shell command stores its prompt and its own answer; then a prompt.
+        add("msg_user_own_note", { role: "user" })
+        add("msg_user_own_shell", { role: "user" })
+        add("msg_a_own_shell", { role: "assistant", parentID: "msg_user_own_shell" })
+        add("msg_user_own_p", { role: "user" })
+
+        // The shell settled itself and what came before it, so the run starts at the prompt — the same
+        // start the path without a mark picks — and never takes the shell (and its record) in.
+        const next = RunLink.start(session.id as never, "msg_user_own_p" as never, readMark)
+        expect(next.id as string).toBe("msg_user_own_p")
+        expect(RunLink.start(session.id as never, "msg_user_own_p" as never).id as string).toBe("msg_user_own_p")
+        expect(RunLink.arrivals(session.id as never, next.row).ids).toEqual([])
+      },
+    })
+  })
+
   test("a prompt stored while a step's read was in flight is left for the step that reads it", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
@@ -3887,6 +3921,53 @@ describe("doc", () => {
 
         stopA()
         stopB()
+      },
+    })
+  })
+
+  test("a stop vote left open when the instance went down does not keep blocking sends", async () => {
+    await using tmp = await tmpdir()
+    let ids = { session: "", docID: "", alice: "" }
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const stopA = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+        await working(session.id)
+        const stop = Doc.stopSubmitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+        })
+        expect(stop.status).toBe("pending")
+        ids = { session: session.id, docID, alice: alice.actorID }
+        stopA()
+        stopB()
+        // The run is cut off with the instance, so no idle event will ever settle the stop vote.
+        await Instance.dispose()
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        expect(Doc.isRunning(ids.session as never)).toBe(false)
+        // Nothing runs, so there is nothing to stop: the leftover vote must not refuse the send.
+        const send = Doc.submitCreate({
+          sessionID: ids.session as never,
+          docID: ids.docID as never,
+          actorID: ids.alice as never,
+          actorIDs: [ids.alice as never],
+          prompt,
+        })
+        expect(send.targetKind).toBe("doc")
       },
     })
   })

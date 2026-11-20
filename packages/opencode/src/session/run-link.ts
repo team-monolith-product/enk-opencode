@@ -184,9 +184,10 @@ export namespace RunLink {
    * from that old prompt. With that mark the waiting prompts are exactly the ones stored after it that no
    * run took in (no link) and nothing answered — looked for past the last answer too: a prompt stored
    * while the previous run's last read was in flight sits before that run's final answer, and stopping
-   * at the answer would leave it in no run at all. A mark whose message is gone (history truncated
-   * since) says nothing about what is stored now, so it is ignored, and the last answer bounds the
-   * search instead.
+   * at the answer would leave it in no run at all. The search still stops at a prompt that was answered
+   * after the mark (a shell command): that one settled itself and everything before it. A mark whose
+   * message is gone (history truncated since) says nothing about what is stored now, so it is ignored,
+   * and the last answer bounds the search instead.
    */
   export function start(sessionID: SessionID, fallback: MessageID, read?: Mark) {
     return Database.use((db) => {
@@ -205,11 +206,22 @@ export namespace RunLink {
           if ((item.data as Role).role === "user") first = { id: item.id, row: item.row }
         }
       } else {
-        const unread = recent.filter((item) => item.row > after)
-        const answered = new Set(
-          unread.flatMap((item) => ((item.data as Role).role === "assistant" ? [(item.data as Role).parentID] : [])),
-        )
-        const users = unread.filter((item) => (item.data as Role).role === "user" && !answered.has(item.id))
+        // Newest first. A prompt that got its own answer after the mark (a shell command) was settled on its
+        // own, and so was everything stored before it — the search stops there, as the path without a mark
+        // stops at the last answer; otherwise this run would take that prompt in and swallow its record.
+        const answered = new Set<string>()
+        const users: typeof recent = []
+        for (const item of recent) {
+          if (item.row <= after) break
+          const data = item.data as Role
+          if (data.role === "assistant") {
+            if (data.parentID) answered.add(data.parentID)
+            continue
+          }
+          if (data.role !== "user") continue
+          if (answered.has(item.id)) break
+          users.push(item)
+        }
         const linked = new Set<string>(
           users.length === 0
             ? []

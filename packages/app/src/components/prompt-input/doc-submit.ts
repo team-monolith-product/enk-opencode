@@ -246,6 +246,15 @@ export function droppedForStop(state: DocSubmitState) {
   return state.targetKind === "doc" && state.status === "cancelled" && state.cancelReason === "stop"
 }
 
+/**
+ * Whether this viewer should be told a send was dropped for a stop vote: only someone who was in that
+ * send. A read-only spectator watches every vote but sent nothing, and "what you were sending is still in
+ * the input" is not true for it.
+ */
+export function dropNotice(state: DocSubmitState, viewer: { actorID: string; readonly: boolean }) {
+  return droppedForStop(state) && !viewer.readonly && state.actors.some((actor) => actor.actorID === viewer.actorID)
+}
+
 export const onLocalClock = (value: DocSubmitState): DocSubmitState => {
   if (typeof value.serverNow !== "number") return value
   return { ...value, expiresAt: Date.now() + (value.expiresAt - value.serverNow), serverNow: undefined }

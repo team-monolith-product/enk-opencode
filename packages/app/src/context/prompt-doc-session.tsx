@@ -29,7 +29,7 @@ import {
   startClearSubmit,
   startRollbackSubmit,
   startStopSubmit,
-  droppedForStop,
+  dropNotice,
   type DocSubmitState,
 } from "@/components/prompt-input/doc-submit"
 import { DialogDocSubmit } from "@/components/doc-submit/dialog-doc-submit"
@@ -363,8 +363,9 @@ export function createPromptDocSession(): PromptDocSession {
         return
       }
       // A send dropped because a stop vote took over: the stop dialog is about to cover this outcome,
-      // so say it in a toast — to every member, whichever of the two messages reached them first.
-      if (droppedForStop(state)) {
+      // so say it in a toast — to every member of that send, whichever of the two messages reached them
+      // first (not to a read-only spectator, who sent nothing).
+      if (dropNotice(state, { actorID, readonly })) {
         showToast({
           title: language.t("docSubmit.toast.supersededByStop"),
           description: language.t("docSubmit.toast.supersededByStop.description"),

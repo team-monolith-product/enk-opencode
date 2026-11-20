@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
+  dropNotice,
   droppedForStop,
   liveSocket,
   onLocalClock,
@@ -199,5 +200,25 @@ describe("droppedForStop", () => {
     expect(droppedForStop(state("doc", "pending"))).toBe(false)
     // A stop vote itself is never "dropped for a stop".
     expect(droppedForStop(state("stop", "cancelled", "stop"))).toBe(false)
+  })
+})
+
+describe("dropNotice", () => {
+  const dropped = {
+    submitID: "sub_1",
+    targetKind: "doc",
+    status: "cancelled",
+    cancelReason: "stop",
+    actors: [{ actorID: "act_alice" }, { actorID: "act_bob" }],
+  } as unknown as DocSubmitState
+
+  test("every member of the dropped send is told", () => {
+    expect(dropNotice(dropped, { actorID: "act_alice", readonly: false })).toBe(true)
+    expect(dropNotice(dropped, { actorID: "act_bob", readonly: false })).toBe(true)
+  })
+
+  test("a read-only spectator or anyone outside the send is not", () => {
+    expect(dropNotice(dropped, { actorID: "act_alice", readonly: true })).toBe(false)
+    expect(dropNotice(dropped, { actorID: "act_carol", readonly: false })).toBe(false)
   })
 })
