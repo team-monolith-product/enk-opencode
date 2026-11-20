@@ -1191,6 +1191,12 @@ export namespace Doc {
     promptBlob: string
     timeoutMs?: number
   }) {
+    // 멈출 AI 가 없는데 남은 중지 투표는 닫는다. 보통은 track() 이 AI 가 쉰 뒤 닫지만, 서버가 재시작하거나
+    // 인스턴스가 내려가면 그 쉼 이벤트가 다시 오지 않아 투표가 만료될 때까지 모두의 전송을 막는다. 돌고 있지도,
+    // 막 쉬어 정리를 기다리는 중(settling)도 아니면 그 투표는 멈출 것이 없다.
+    if (!running().has(input.sessionID) && !settling.has(input.sessionID)) {
+      close(pendingOf(input.sessionID, "stop"), null)
+    }
     const found = active(input.sessionID, input.targetID, undefined, input.targetKind)
     if (found && found.rollback && found.rollback.sha !== rollbackSha(input.promptBlob)) {
       throw new VoteConflictError({ message: "Another consent vote is in progress" })
@@ -1207,7 +1213,8 @@ export namespace Doc {
     // 중지가 전송보다 먼저다. 동의 창은 한 번에 하나만 뜨므로 둘이 함께 돌면 가려진 쪽은 아무도 답하지 못한 채
     // 만료되고, "멈추자"와 "이것도 해 줘"가 함께 통과하는 모순도 생긴다. 중지는 급할 때 누르는 것이라 막지 않고,
     // 대신 중지 투표가 도는 동안에는 새 전송을 받지 않는다(아래 superseded 가 반대 방향을 맡는다). AI 가 스스로
-    // 끝나면 track() 이 중지 투표를 닫으므로, 이 막힘은 실제로 멈출 것이 있는 동안에만 남는다.
+    // 끝나면 track() 이 중지 투표를 닫고, 그 신호를 놓친 투표는 위에서 닫으므로, 이 막힘은 실제로 멈출 것이
+    // 있는 동안에만 남는다.
     if (input.targetKind === "doc" && pendingOf(input.sessionID, "stop").length > 0) {
       throw new VoteConflictError({ message: "A stop vote is in progress" })
     }
