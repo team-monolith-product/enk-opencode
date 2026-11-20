@@ -3925,6 +3925,65 @@ describe("doc", () => {
     })
   })
 
+  test("a send in the moment after the AI goes idle still waits for the open stop vote", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const events: Doc.SubmitEvent[] = []
+        const stopA = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => events.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+        // Hold the settle window open: the session is idle but may start again right away.
+        const timers = new Map<number, () => void>()
+        let next = 0
+        const manual = {
+          set: (fn: () => void) => {
+            timers.set(++next, fn)
+            return next
+          },
+          clear: (handle: unknown) => void timers.delete(handle as number),
+        }
+        await Doc.withSettleTimer(manual, async () => {
+          await working(session.id)
+          const stop = Doc.stopSubmitCreate({
+            sessionID: session.id,
+            docID,
+            actorID: bob.actorID,
+            actorIDs: [alice.actorID, bob.actorID],
+          })
+          expect(stop.status).toBe("pending")
+          await idle(session.id)
+          expect(timers.size).toBe(1)
+
+          // A run can restart inside this window (loop() answering an unread prompt), so the stop vote is
+          // still needed: the send waits, and neither the send nor a reconnect closes the vote.
+          expect(() =>
+            Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, actorIDs: [alice.actorID], prompt }),
+          ).toThrow()
+          const again = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
+          again()
+          expect(events.some((e) => e.type === "cancelled" && e.state.submitID === stop.submitID)).toBe(false)
+
+          for (const fn of timers.values()) fn()
+          timers.clear()
+        })
+        stopA()
+        stopB()
+      },
+    })
+  })
+
   test("a stop vote left open when the instance went down does not keep blocking sends", async () => {
     await using tmp = await tmpdir()
     let ids = { session: "", docID: "", alice: "" }
@@ -3959,6 +4018,16 @@ describe("doc", () => {
       init: InstanceBootstrap,
       fn: async () => {
         expect(Doc.isRunning(ids.session as never)).toBe(false)
+        // Coming back, Alice is not joined to the leftover vote (no stop dialog for nothing to stop).
+        const events: Doc.SubmitEvent[] = []
+        const again = Doc.submitConnect({
+          sessionID: ids.session as never,
+          docID: ids.docID as never,
+          actorID: ids.alice as never,
+          peer: { send: (data) => events.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        expect(events.some((e) => e.type === "created" && e.state.targetKind === "stop")).toBe(false)
+        again()
         // Nothing runs, so there is nothing to stop: the leftover vote must not refuse the send.
         const send = Doc.submitCreate({
           sessionID: ids.session as never,

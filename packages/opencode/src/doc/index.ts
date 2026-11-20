@@ -1006,6 +1006,18 @@ export namespace Doc {
   }
 
   /**
+   * 멈출 AI 가 없는데 남은 중지 투표를 닫는다. 보통은 track() 이 AI 가 쉰 뒤 닫지만, 서버가 재시작하거나 인스턴스가
+   * 내려가면 그 쉼 이벤트가 다시 오지 않아, 투표가 만료될 때까지 모두의 전송을 막고 다시 접속하는 사람마다 멈출
+   * 것 없는 중지 창을 띄운다. 돌고 있지도, 막 쉬어 정리를 기다리는 중(settling)도 아니면 그 투표는 멈출 것이 없다
+   * — 정리 중인 세션은 곧바로 다시 돌 수 있어(SessionPrompt.loop 의 재실행) 그 투표가 아직 필요하다.
+   * "돌고 있는가"는 인스턴스 상태라 인스턴스 컨텍스트 안에서만 물을 수 있다.
+   */
+  function closeStaleStops(sessionID: SessionID) {
+    if (running().has(sessionID) || settling.has(sessionID)) return
+    close(pendingOf(sessionID, "stop"), null)
+  }
+
+  /**
    * Cancel pending votes on the server's own initiative. `reason` travels with the cancellation so a
    * client can tell people why their vote ended, instead of guessing from what happened around it;
    * `by` is the vote that caused it (the stop vote, for reason 'stop').
@@ -1191,12 +1203,7 @@ export namespace Doc {
     promptBlob: string
     timeoutMs?: number
   }) {
-    // 멈출 AI 가 없는데 남은 중지 투표는 닫는다. 보통은 track() 이 AI 가 쉰 뒤 닫지만, 서버가 재시작하거나
-    // 인스턴스가 내려가면 그 쉼 이벤트가 다시 오지 않아 투표가 만료될 때까지 모두의 전송을 막는다. 돌고 있지도,
-    // 막 쉬어 정리를 기다리는 중(settling)도 아니면 그 투표는 멈출 것이 없다.
-    if (!running().has(input.sessionID) && !settling.has(input.sessionID)) {
-      close(pendingOf(input.sessionID, "stop"), null)
-    }
+    closeStaleStops(input.sessionID)
     const found = active(input.sessionID, input.targetID, undefined, input.targetKind)
     if (found && found.rollback && found.rollback.sha !== rollbackSha(input.promptBlob)) {
       throw new VoteConflictError({ message: "Another consent vote is in progress" })
@@ -1767,6 +1774,16 @@ export namespace Doc {
     (input) => {
       Session.get(input.sessionID)
       get(input.docID)
+      // Before joining: a peer coming back after a restart must not be joined to a stop vote that has
+      // nothing left to stop (and shown its dialog). Without an instance context (the socket opened outside
+      // the request's), close it from the session's own instance instead — the peer is then told it closed.
+      if (bound()) closeStaleStops(input.sessionID)
+      else
+        void Session.get(input.sessionID)
+          .then((session) =>
+            Instance.provide({ directory: session.directory, fn: () => closeStaleStops(input.sessionID) }),
+          )
+          .catch((err) => Log.Default.warn("stale stop close", { err: String(err) }))
       return connect({
         sessionID: input.sessionID,
         targetID: input.docID,
