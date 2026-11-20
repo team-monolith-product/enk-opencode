@@ -1071,13 +1071,7 @@ export namespace Doc {
     !!row.cancelled_by_submit &&
     latest(row.session_id, row.target_id, row.cancelled_by_submit)
 
-  function recent(
-    sessionID: SessionID,
-    targetID: string,
-    actorID: ActorID,
-    match: (row: SubmitRow) => boolean = () => true,
-    now = Date.now(),
-  ) {
+  function recent(sessionID: SessionID, targetID: string, actorID: ActorID, now = Date.now()) {
     const rows = Database.use((db) =>
       db
         .select()
@@ -1087,7 +1081,7 @@ export namespace Doc {
         .all(),
     )
     for (const row of rows) {
-      if (row.status === "pending" || !match(row)) continue
+      if (row.status === "pending") continue
       if (row.time_updated < now - REPLAY_WINDOW) return
       const state = read(row)
       if (state.actors.some((actor) => actor.actorID === actorID)) return { row, state }
@@ -1703,16 +1697,28 @@ export namespace Doc {
     // closes the send's dialog with the real outcome and learns why (it carries the stored reason).
     // Only a send this stop vote dropped (superseded() records which one, so this is an exact match, not
     // a guess from timestamps): an earlier, rejected stop vote dropped its own, which this peer was
-    // already told about. And only while it is still news (dropIsNews).
+    // already told about. And only while it is still news (dropIsNews). Looked up by that stop's id, not
+    // through recent()'s time window: the stop vote can stay open (30s, topped up on every join) well past
+    // that window, and the send was dropped the moment it opened.
     const replayDropped = (stop: SubmitState | undefined) => {
       if (stop?.targetKind !== "stop") return
-      const dropped = recent(
-        input.sessionID,
-        input.targetID,
-        input.actorID,
-        (row) => row.cancelled_by_submit === stop.submitID && dropIsNews(row),
+      const dropped = Database.use((db) =>
+        db
+          .select()
+          .from(DocSubmitTable)
+          .where(
+            and(
+              eq(DocSubmitTable.session_id, input.sessionID),
+              eq(DocSubmitTable.target_id, input.targetID),
+              eq(DocSubmitTable.cancelled_by_submit, stop.submitID),
+            ),
+          )
+          .all(),
       )
-      if (dropped) peer.send(JSON.stringify({ type: "cancelled", state: dropped.state } satisfies SubmitEvent))
+        .filter(dropIsNews)
+        .map((row) => read(row))
+        .find((item) => item.actors.some((actor) => actor.actorID === input.actorID))
+      if (dropped) peer.send(JSON.stringify({ type: "cancelled", state: dropped } satisfies SubmitEvent))
     }
     if (state) {
       replayDropped(state)

@@ -3645,6 +3645,49 @@ describe("doc", () => {
     })
   })
 
+  test("a peer reconnecting late into a still-open stop vote hears that its send was dropped", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const stopA = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+        const both = [alice.actorID, bob.actorID]
+
+        // Alice steers; Bob's stop opens with both of them in it and drops her steer. Her connection
+        // misses that, and she is back only after the replay window — the stop vote is still open.
+        const send = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, actorIDs: both, prompt })
+        await working(session.id)
+        const stop = Doc.stopSubmitCreate({ sessionID: session.id, docID, actorID: bob.actorID, actorIDs: both })
+        expect(stop.status).toBe("pending")
+        setSystemTime(new Date(Date.now() + 20_000))
+
+        const replay: Doc.SubmitEvent[] = []
+        const again = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => replay.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        expect(replay.map((e) => `${e.type}:${e.state.submitID}`)).toEqual([
+          `cancelled:${send.submitID}`,
+          `created:${stop.submitID}`,
+        ])
+        again()
+
+        setSystemTime()
+        stopA()
+        stopB()
+      },
+    })
+  })
+
   test("a stop vote closes once the AI finishes on its own, so sending is open again", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
