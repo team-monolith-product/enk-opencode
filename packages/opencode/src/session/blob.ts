@@ -279,7 +279,11 @@ export namespace SessionBlob {
       .where(and(...where))
       .returning({ hash: BlobRefTable.hash })
       .all()
-    for (const batch of batches([...new Set(released.map((ref) => ref.hash))]))
+    drop(db, new Set(released.map((ref) => ref.hash)))
+  }
+
+  function drop(db: Db, hashes: ReadonlySet<string>) {
+    for (const batch of batches([...hashes]))
       db.delete(BlobTable)
         .where(
           and(
@@ -294,6 +298,8 @@ export namespace SessionBlob {
         )
         .run()
   }
+
+  export const prune = (db: Db, part: Stored) => drop(db, hashesOf([part]))
 
   export const releaseMessage = (db: Db, sessionID: SessionID, messageID: MessageID) =>
     release(db, eq(BlobRefTable.session_id, sessionID), eq(BlobRefTable.message_id, messageID))

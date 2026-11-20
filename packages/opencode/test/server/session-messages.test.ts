@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { Session } from "../../src/session"
+import { SessionBlob } from "../../src/session/blob"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { Log } from "../../src/util/log"
@@ -97,6 +98,33 @@ describe("session messages endpoint", () => {
           expect(body.map((item) => item.info.id)).toEqual(ids)
 
           await Session.remove(session.id)
+        },
+      }),
+    )
+  })
+
+  test("keeps full history and missing-session errors when media refs are requested", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await withoutWatcher(() =>
+      Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          SessionBlob.configure(tmp.path, true)
+          const session = await Session.create({})
+          const ids = await fill(session.id, 3)
+          const app = Server.Default()
+          const headers = { "x-opencode-capabilities": "experimental-media-uri" }
+
+          const res = await app.request(`/session/${session.id}/message`, { headers })
+          expect(res.status).toBe(200)
+          const body = (await res.json()) as MessageV2.WithParts[]
+          expect(body.map((item) => item.info.id)).toEqual(ids)
+
+          const miss = await app.request(`/session/ses_missing/message`, { headers })
+          expect(miss.status).toBe(404)
+
+          await Session.remove(session.id)
+          SessionBlob.configure(tmp.path, undefined)
         },
       }),
     )

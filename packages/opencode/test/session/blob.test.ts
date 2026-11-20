@@ -160,6 +160,22 @@ describe("session media blobs", () => {
     })
   })
 
+  test("drops the blob of a part update that lands after its message is gone", async () => {
+    await Instance.provide({
+      directory: root,
+      fn: async () => {
+        SessionBlob.configure(root, true)
+        const session = await Session.create({})
+        const bytes = png()
+        await screenshot(session.id, MessageID.ascending(), bytes)
+
+        expect(blobExists(hashOf(bytes))).toBe(false)
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+
   test("reads a ref whose blob is gone as an unavailable placeholder", async () => {
     await Instance.provide({
       directory: root,

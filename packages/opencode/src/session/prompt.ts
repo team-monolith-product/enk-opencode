@@ -1341,7 +1341,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               return pieces ?? [{ ...part, messageID: info.id, sessionID: input.sessionID }]
             }
             if (SessionStored.isRef(part.url)) {
-              const blob = Database.use((db) => SessionBlob.read(db, SessionStored.refHash(part.url as SessionStored.Ref)))
+              const blob = Database.use((db) =>
+                SessionBlob.read(db, SessionStored.refHash(part.url as SessionStored.Ref)),
+              )
               const pieces = blob ? yield* attachmentPieces(part, new Uint8Array(blob.data)) : undefined
               if (pieces) return pieces
               return [
@@ -1350,7 +1352,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   sessionID: input.sessionID,
                   type: "text",
                   synthetic: true,
-                  text: `The attached file ${part.filename ?? part.mime} could not be read — its stored copy is gone.`,
+                  text: `The attached file ${part.filename ?? part.mime} could not be read because its stored copy is gone.`,
                 },
               ]
             }

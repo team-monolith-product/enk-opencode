@@ -144,8 +144,8 @@ export default [
     const { id, messageID, sessionID, ...part } = data.part
     const owner = { sessionID, messageID, seq: data.time }
 
+    const rest = SessionBlob.externalize(db, part)
     try {
-      const rest = SessionBlob.externalize(db, part)
       const before = SessionBlob.holds(db, owner)
         ? db.select({ data: PartTable.data }).from(PartTable).where(eq(PartTable.id, id)).get()?.data
         : undefined
@@ -163,6 +163,7 @@ export default [
       if (before && SessionBlob.drops(before, rest)) SessionBlob.syncMessage(db, owner)
     } catch (err) {
       if (!foreign(err)) throw err
+      SessionBlob.prune(db, rest)
       log.warn("ignored late part update", { partID: id, messageID, sessionID })
     }
   }),

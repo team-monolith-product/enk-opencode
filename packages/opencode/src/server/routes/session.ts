@@ -619,6 +619,7 @@ export const SessionRoutes = lazy(() =>
         const sessionID = c.req.valid("param").sessionID
         const refs = mediaRefs(c.req.header("x-opencode-capabilities"))
         if (refs && !query.limit) {
+          await Session.get(sessionID)
           const messages = [] as MessageV2.WithParts[]
           let before: string | undefined
           while (true) {
