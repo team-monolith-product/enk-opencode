@@ -1709,7 +1709,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       // display names — vote membership itself is decided server-side from connected submit peers.
       const list = doc.actors()
       const ids = Array.from(new Set([actorID, ...list.map((item) => item.actorID)]))
-      if (ids.length <= 1) return false
+      if (ids.length <= 1 && !session.teamWide()) return false
       const names: Record<string, string> = {}
       for (const item of list) {
         const name = item.name?.trim()
