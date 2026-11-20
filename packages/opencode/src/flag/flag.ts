@@ -91,15 +91,15 @@ export namespace Flag {
 
   // Experimental
   export const OPENCODE_EXPERIMENTAL = truthy("OPENCODE_EXPERIMENTAL")
-  export const OPENCODE_EXPERIMENTAL_FILEWATCHER = Config.boolean("OPENCODE_EXPERIMENTAL_FILEWATCHER").pipe(
+  export const OPENCODE_EXPERIMENTAL_FILEWATCHER = Config.Boolean("OPENCODE_EXPERIMENTAL_FILEWATCHER").pipe(
     Config.withDefault(false),
   )
-  export const OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER = Config.boolean(
+  export const OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER = Config.Boolean(
     "OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER",
   ).pipe(Config.withDefault(false))
   // 워처 구독(초기 재귀 크롤)을 부팅 창 밖으로 미루는 지연(ms). cold EFS 에서 크롤이
   // 부트스트랩 I/O 와 경쟁해 첫 응답을 밀어내는 것을 막는다. 테스트는 0 으로 끈다.
-  export const OPENCODE_FILEWATCHER_DEFER_MS = Config.number("OPENCODE_FILEWATCHER_DEFER_MS").pipe(
+  export const OPENCODE_FILEWATCHER_DEFER_MS = Config.Number("OPENCODE_FILEWATCHER_DEFER_MS").pipe(
     Config.withDefault(5_000),
   )
   export const OPENCODE_EXPERIMENTAL_ICON_DISCOVERY =
@@ -115,7 +115,7 @@ export namespace Flag {
   export const OPENCODE_EXPERIMENTAL_OXFMT = OPENCODE_EXPERIMENTAL || truthy("OPENCODE_EXPERIMENTAL_OXFMT")
   export const OPENCODE_EXPERIMENTAL_LSP_TY = truthy("OPENCODE_EXPERIMENTAL_LSP_TY")
   export const OPENCODE_EXPERIMENTAL_LSP_TOOL = OPENCODE_EXPERIMENTAL || truthy("OPENCODE_EXPERIMENTAL_LSP_TOOL")
-  export const OPENCODE_DISABLE_FILETIME_CHECK = Config.boolean("OPENCODE_DISABLE_FILETIME_CHECK").pipe(
+  export const OPENCODE_DISABLE_FILETIME_CHECK = Config.Boolean("OPENCODE_DISABLE_FILETIME_CHECK").pipe(
     Config.withDefault(false),
   )
   export const OPENCODE_EXPERIMENTAL_PLAN_MODE = OPENCODE_EXPERIMENTAL || truthy("OPENCODE_EXPERIMENTAL_PLAN_MODE")

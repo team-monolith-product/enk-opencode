@@ -1,5 +1,5 @@
-import { Effect, Layer, ServiceMap } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Effect, Layer, Context } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
@@ -31,7 +31,7 @@ export namespace Format {
     readonly file: (filepath: string) => Effect.Effect<void>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Format") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Format") {}
 
   export const layer = Layer.effect(
     Service,

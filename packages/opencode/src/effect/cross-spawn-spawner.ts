@@ -9,18 +9,19 @@ import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
 import * as Predicate from "effect/Predicate"
+import * as Redacted from "effect/Redacted"
 import type * as Scope from "effect/Scope"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import type { ChildProcessHandle } from "effect/process/ChildProcessSpawner"
 import {
   ChildProcessSpawner,
   ExitCode,
   make as makeSpawner,
   makeHandle,
   ProcessId,
-} from "effect/unstable/process/ChildProcessSpawner"
+} from "effect/process/ChildProcessSpawner"
 import * as NodeChildProcess from "node:child_process"
 import { PassThrough } from "node:stream"
 import launch from "cross-spawn"
@@ -104,8 +105,15 @@ export const make = Effect.gen(function* () {
     return path.resolve(opts.cwd)
   })
 
-  const env = (opts: ChildProcess.CommandOptions) =>
-    opts.extendEnv ? { ...globalThis.process.env, ...opts.env } : opts.env
+  const unwrap = (value: string | Redacted.Redacted<string>) =>
+    Redacted.isRedacted(value) ? Redacted.value(value) : value
+
+  const env = (opts: ChildProcess.CommandOptions) => {
+    const own = Object.fromEntries(
+      Object.entries(opts.env ?? {}).map(([key, value]) => [key, value === undefined ? undefined : unwrap(value)]),
+    )
+    return opts.extendEnv ? { ...globalThis.process.env, ...own } : opts.env === undefined ? undefined : own
+  }
 
   const input = (x: ChildProcess.CommandInput | undefined): NodeChildProcess.IOType | undefined =>
     Stream.isStream(x) ? "pipe" : x
@@ -265,7 +273,7 @@ export const make = Effect.gen(function* () {
   const spawn = (command: ChildProcess.StandardCommand, opts: NodeChildProcess.SpawnOptions) =>
     Effect.callback<readonly [NodeChildProcess.ChildProcess, ExitSignal], PlatformError.PlatformError>((resume) => {
       const signal = Deferred.makeUnsafe<readonly [code: number | null, signal: NodeJS.Signals | null]>()
-      const proc = launch(command.command, command.args, opts)
+      const proc = launch(command.command, command.args.map(unwrap), opts)
       let end = false
       let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
       proc.on("error", (err) => {
@@ -403,6 +411,12 @@ export const make = Effect.gen(function* () {
             getInputFd: fd.getInputFd,
             getOutputFd: fd.getOutputFd,
             isRunning: Effect.map(Deferred.isDone(signal), (done) => !done),
+            unref: Effect.sync(() => {
+              proc.unref()
+              return Effect.sync(() => {
+                proc.ref()
+              })
+            }),
             exitCode: Effect.flatMap(Deferred.await(signal), ([code, signal]) => {
               if (Predicate.isNotNull(code)) return Effect.succeed(ExitCode(code))
               return Effect.fail(

@@ -3,7 +3,7 @@ import { Bus } from "@/bus"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { SessionID } from "./schema"
-import { Effect, Layer, ServiceMap } from "effect"
+import { Effect, Layer, Context } from "effect"
 import z from "zod"
 
 export namespace SessionStatus {
@@ -50,7 +50,7 @@ export namespace SessionStatus {
     readonly set: (sessionID: SessionID, status: Info) => Effect.Effect<void>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionStatus") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/SessionStatus") {}
 
   export const layer = Layer.effect(
     Service,

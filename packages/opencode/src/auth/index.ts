@@ -1,5 +1,5 @@
 import path from "path"
-import { Effect, Layer, Record, Result, Schema, ServiceMap } from "effect"
+import { Effect, Layer, Record, Result, Schema, Context } from "effect"
 import { makeRuntime } from "@/effect/run-service"
 import { zod } from "@/util/effect-zod"
 import { Global } from "../global"
@@ -36,9 +36,9 @@ export namespace Auth {
   export const Info = Object.assign(_Info, { zod: zod(_Info) })
   export type Info = Schema.Schema.Type<typeof _Info>
 
-  export class AuthError extends Schema.TaggedErrorClass<AuthError>()("AuthError", {
+  export class AuthError extends Schema.TaggedError<AuthError>()("AuthError", {
     message: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   }) {}
 
   export interface Interface {
@@ -48,7 +48,7 @@ export namespace Auth {
     readonly remove: (key: string) => Effect.Effect<void, AuthError>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Auth") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Auth") {}
 
   export const layer = Layer.effect(
     Service,
