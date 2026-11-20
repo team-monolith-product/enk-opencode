@@ -51,6 +51,7 @@ import { LLM } from "./llm"
 import { Shell } from "@/shell/shell"
 import { AppFileSystem } from "@/filesystem"
 import { Truncate } from "@/tool/truncate"
+import { CodeModeTool } from "@/tool/codemode"
 import { Attachment } from "./attachment"
 import { loadAssetRef } from "./attachment-ref"
 import { decodeDataUrlBytes } from "@/util/data-url"
@@ -519,10 +520,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             ),
         })
 
-        for (const item of yield* registry.tools(
+        const registered = yield* registry.tools(
           { modelID: ModelID.make(input.model.api.id), providerID: input.model.providerID },
           input.agent,
-        )) {
+        )
+        for (const item of registered) {
           const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
           tools[item.id] = tool({
             id: item.id as any,
@@ -561,6 +563,70 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
             },
           })
+        }
+
+        if (Flag.ENK_CODEMODE) {
+          const inner = registered.filter((item) => CodeModeTool.INNER.includes(item.id as never) && tools[item.id])
+          if (inner.length > 0) {
+            const direct = Object.fromEntries(inner.map((item) => [item.id, tools[item.id]]))
+            for (const item of inner) delete tools[item.id]
+            const bind = (options: ToolExecutionOptions): CodeModeTool.Inner[] =>
+              inner.map((item) => ({
+                id: item.id,
+                description: item.description,
+                parameters: item.parameters,
+                run: async (args, index) => {
+                  const result: any = await direct[item.id].execute!(args as never, {
+                    ...options,
+                    toolCallId: `${options.toolCallId}:${index}`,
+                  })
+                  return {
+                    output: result.output,
+                    title: result.title,
+                    metadata: result.metadata,
+                    attachments: result.attachments,
+                  }
+                },
+              }))
+            tools[CodeModeTool.ID] = tool({
+              id: CodeModeTool.ID as any,
+              description: CodeModeTool.description(bind({ toolCallId: "", messages: [] })),
+              inputSchema: jsonSchema({
+                type: "object",
+                properties: {
+                  code: { type: "string", description: "JavaScript source to run in the Code Mode runtime" },
+                },
+                required: ["code"],
+              }),
+              execute(args: any, options) {
+                return Effect.runPromise(
+                  Effect.gen(function* () {
+                    const ctx = context(args, options)
+                    yield* plugin.trigger(
+                      "tool.execute.before",
+                      { tool: CodeModeTool.ID, sessionID: ctx.sessionID, callID: ctx.callID },
+                      { args },
+                    )
+                    const run = yield* Effect.promise(() =>
+                      CodeModeTool.run(String(args.code ?? ""), bind(options), options.abortSignal),
+                    )
+                    const output = {
+                      title: CodeModeTool.ID,
+                      metadata: { toolCalls: run.calls, ...(run.error ? { error: true } : {}) },
+                      output: yield* Effect.promise(() => Secret.redact(run.output, Instance.directory)),
+                      attachments: run.attachments as MessageV2.FilePart[],
+                    }
+                    yield* plugin.trigger(
+                      "tool.execute.after",
+                      { tool: CodeModeTool.ID, sessionID: ctx.sessionID, callID: ctx.callID, args },
+                      output,
+                    )
+                    return output
+                  }),
+                )
+              },
+            })
+          }
         }
 
         for (const [key, item] of Object.entries(yield* mcp.tools())) {
