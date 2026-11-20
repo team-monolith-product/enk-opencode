@@ -1,4 +1,4 @@
-import { Cause, Duration, Effect, Layer, Schedule, ServiceMap } from "effect"
+import { Cause, Duration, Effect, Layer, Schedule, Context } from "effect"
 import mime from "mime-types"
 import path from "path"
 import { AppFileSystem } from "@/filesystem"
@@ -42,7 +42,7 @@ export namespace Attachment {
     }) => Effect.Effect<string | undefined>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Attachment") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Attachment") {}
 
   export const layer = Layer.effect(
     Service,

@@ -1,5 +1,5 @@
 import { NodePath } from "@effect/platform-node"
-import { Cause, Duration, Effect, Layer, Option, Schedule, ServiceMap } from "effect"
+import { Cause, Duration, Effect, Layer, Option, Schedule, Context } from "effect"
 import path from "path"
 import type { Agent } from "../agent/agent"
 import { makeRuntime } from "@/effect/run-service"
@@ -56,7 +56,7 @@ export namespace Truncate {
     readonly limits: () => Effect.Effect<{ maxLines: number; maxBytes: number }>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Truncate") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Truncate") {}
 
   export const layer = Layer.effect(
     Service,

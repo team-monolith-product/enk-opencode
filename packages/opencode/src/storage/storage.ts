@@ -6,7 +6,7 @@ import z from "zod"
 import { git } from "@/util/git"
 import { AppFileSystem } from "@/filesystem"
 import { makeRuntime } from "@/effect/run-service"
-import { Effect, Exit, Layer, Option, RcMap, Schema, ServiceMap, TxReentrantLock } from "effect"
+import { Effect, Exit, Layer, Option, RcMap, Schema, Context, TxReentrantLock } from "effect"
 
 export namespace Storage {
   const log = Log.create({ service: "storage" })
@@ -62,7 +62,7 @@ export namespace Storage {
     readonly list: (prefix: string[]) => Effect.Effect<string[][], AppFileSystem.Error>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Storage") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Storage") {}
 
   function file(dir: string, key: string[]) {
     return path.join(dir, ...key) + ".json"
@@ -102,7 +102,7 @@ export namespace Storage {
             cwd: full,
             absolute: true,
           })) {
-            const json = decodeRoot(yield* fs.readJson(msgFile), { onExcessProperty: "preserve" })
+            const json = decodeRoot(yield* fs.readJson(msgFile))
             const root = Option.isSome(json) ? json.value.path?.root : undefined
             if (!root) continue
             worktree = root
@@ -149,7 +149,7 @@ export namespace Storage {
             const dest = path.join(dir, "session", projectID, path.basename(sessionFile))
             log.info("copying", { sessionFile, dest })
             const session = yield* fs.readJson(sessionFile)
-            const info = decodeSession(session, { onExcessProperty: "preserve" })
+            const info = decodeSession(session)
             yield* fs.writeWithDirs(dest, JSON.stringify(session, null, 2))
             if (Option.isNone(info)) continue
             log.info(`migrating messages for session ${info.value.id}`)
@@ -163,7 +163,7 @@ export namespace Storage {
                 dest: next,
               })
               const message = yield* fs.readJson(msgFile)
-              const item = decodeMessage(message, { onExcessProperty: "preserve" })
+              const item = decodeMessage(message)
               yield* fs.writeWithDirs(next, JSON.stringify(message, null, 2))
               if (Option.isNone(item)) continue
 
@@ -191,7 +191,7 @@ export namespace Storage {
         absolute: true,
       })) {
         const raw = yield* fs.readJson(item)
-        const session = decodeSummary(raw, { onExcessProperty: "preserve" })
+        const session = decodeSummary(raw)
         if (Option.isNone(session)) continue
         const diffs = session.value.summary.diffs
         yield* fs.writeWithDirs(

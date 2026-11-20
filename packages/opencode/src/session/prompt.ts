@@ -60,7 +60,7 @@ import { decodeDataUrlBytes } from "@/util/data-url"
 import { isAssetRef } from "@opencode-ai/util/attachment-ref"
 import { Process } from "@/util/process"
 import { Secret } from "@/util/secret"
-import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Scope, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { RunLink } from "./run-link"
@@ -116,7 +116,7 @@ export namespace SessionPrompt {
     readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionPrompt") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
 
   export const layer = Layer.effect(
     Service,
