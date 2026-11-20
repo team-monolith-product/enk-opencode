@@ -2241,6 +2241,40 @@ describe("doc", () => {
     })
   })
 
+  test("a prompt stored during a run's last read starts the next run, though that run's answer came after it", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const add = (id: string, data: object) =>
+          Database.use((db) =>
+            db
+              .insert(MessageTable)
+              .values({ id: id as never, session_id: session.id, time_created: 0, data: data as never })
+              .run(),
+          )
+        // The run reads P1. P2 (sent with noReply, so nothing re-runs for it) lands while that read is in
+        // flight, so the run leaves it unlinked — then answers P1 and ends.
+        add("msg_user_last_p1", { role: "user" })
+        const readMark = RunLink.mark(session.id as never)
+        const run = RunLink.start(session.id as never, "msg_user_last_p1" as never)
+        add("msg_user_last_p2", { role: "user" })
+        const read = { row: readMark.row, ids: new Set(["msg_user_last_p1"]) }
+        expect(RunLink.arrivals(session.id as never, run.row, read).ids).toEqual([])
+        add("msg_a_last_1", { role: "assistant", parentID: "msg_user_last_p1" })
+
+        // P3 starts the next run, which reads P2 as well: P2 is where it starts, not lost behind P1's answer.
+        add("msg_user_last_p3", { role: "user" })
+        const next = RunLink.start(session.id as never, "msg_user_last_p3" as never, readMark)
+        expect(next.id as string).toBe("msg_user_last_p2")
+        expect(RunLink.arrivals(session.id as never, next.row).ids as string[]).toEqual(["msg_user_last_p3"])
+      },
+    })
+  })
+
   test("a prompt stored while a step's read was in flight is left for the step that reads it", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

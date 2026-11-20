@@ -1,4 +1,4 @@
-import { Database, and, desc, eq, gt, sql } from "@/storage/db"
+import { Database, and, desc, eq, gt, inArray, sql } from "@/storage/db"
 import { Log } from "@/util/log"
 import { MessageTable, RunLinkTable } from "./session.sql"
 import type { MessageID, SessionID } from "./schema"
@@ -178,11 +178,15 @@ export namespace RunLink {
    * answer — anchoring on the newest would drop the others from the record). Falls back to
    * `fallback`, the message the loop is about to answer.
    *
-   * `after` is where the session's previous run last read. A prompt stored up to there was already read
+   * `read` is where the session's previous run last read. A prompt stored up to there was already read
    * by that run, and if it has no answer it is because that run was stopped or failed before answering
    * — not a prompt waiting for this run. Starting from it would date this run (its start time and TTFT)
-   * from that old prompt. A mark whose message is gone (history truncated since) says nothing about what
-   * is stored now, so it is ignored.
+   * from that old prompt. With that mark the waiting prompts are exactly the ones stored after it that no
+   * run took in (no link) and nothing answered — looked for past the last answer too: a prompt stored
+   * while the previous run's last read was in flight sits before that run's final answer, and stopping
+   * at the answer would leave it in no run at all. A mark whose message is gone (history truncated
+   * since) says nothing about what is stored now, so it is ignored, and the last answer bounds the
+   * search instead.
    */
   export function start(sessionID: SessionID, fallback: MessageID, read?: Mark) {
     return Database.use((db) => {
@@ -195,10 +199,28 @@ export namespace RunLink {
         .limit(START_WINDOW)
         .all()
       let first: { id: MessageID; row: number } | undefined
-      for (const item of recent) {
-        if ((item.data as Role).role === "assistant") break
-        if (after !== undefined && item.row <= after) break
-        if ((item.data as Role).role === "user") first = { id: item.id, row: item.row }
+      if (after === undefined) {
+        for (const item of recent) {
+          if ((item.data as Role).role === "assistant") break
+          if ((item.data as Role).role === "user") first = { id: item.id, row: item.row }
+        }
+      } else {
+        const unread = recent.filter((item) => item.row > after)
+        const answered = new Set(
+          unread.flatMap((item) => ((item.data as Role).role === "assistant" ? [(item.data as Role).parentID] : [])),
+        )
+        const users = unread.filter((item) => (item.data as Role).role === "user" && !answered.has(item.id))
+        const linked = new Set<string>(
+          users.length === 0
+            ? []
+            : db
+                .select({ id: RunLinkTable.user_message_id })
+                .from(RunLinkTable)
+                .where(inArray(RunLinkTable.user_message_id, users.map((item) => item.id)))
+                .all()
+                .map((item) => item.id),
+        )
+        for (const item of users) if (!linked.has(item.id)) first = { id: item.id, row: item.row }
       }
       if (first) return first
       return { id: fallback, row: rowOf(db, fallback) ?? lastRow(sessionID) }
