@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer, ServiceMap } from "effect"
+import { Deferred, Effect, Layer, Context } from "effect"
 import z from "zod"
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
@@ -102,7 +102,7 @@ export namespace EnvRequest {
     readonly list: () => Effect.Effect<Request[]>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/EnvRequest") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/EnvRequest") {}
 
   export const layer = Layer.effect(
     Service,

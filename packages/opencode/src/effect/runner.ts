@@ -9,7 +9,7 @@ export interface Runner<A, E = never> {
 }
 
 export namespace Runner {
-  export class Cancelled extends Schema.TaggedErrorClass<Cancelled>()("RunnerCancelled", {}) {}
+  export class Cancelled extends Schema.TaggedError<Cancelled>()("RunnerCancelled", {}) {}
 
   interface RunHandle<A, E> {
     id: number

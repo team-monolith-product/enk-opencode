@@ -1,6 +1,6 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
-import { Cause, Duration, Effect, Layer, Schedule, Semaphore, ServiceMap, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Cause, Duration, Effect, Layer, Schedule, Semaphore, Context, Stream } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
 import z from "zod"
@@ -80,7 +80,7 @@ export namespace Snapshot {
     readonly diffFull: (from: string, to: string) => Effect.Effect<Snapshot.FileDiff[]>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Snapshot") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Snapshot") {}
 
   export const layer: Layer.Layer<
     Service,
