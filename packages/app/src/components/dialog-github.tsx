@@ -13,6 +13,7 @@ import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { connectUrlFor } from "@/utils/connect-url"
+import { manageLink, refetchOnReturn, statusSync, type ManageAction } from "./dialog-github-manage"
 import { promptLocale } from "@/utils/prompt-locale"
 import { getRelativeTime } from "@/utils/time"
 import {
@@ -38,6 +39,7 @@ const ERRORS = {
   forbidden: "github.error.forbidden",
   revoked: "github.error.revoked",
   app: "github.error.app",
+  selected: "github.error.selected",
   missing: "github.error.missing",
   empty: "github.error.empty",
   remote: "github.error.remote",
@@ -67,7 +69,16 @@ export function DialogGitHub() {
     reposFailed: boolean
     reposLoading: boolean
     picked?: string
-  }>({ failed: false, busy: false, waiting: false, name: "", reposFailed: false, reposLoading: false })
+    managing: boolean
+  }>({
+    failed: false,
+    busy: false,
+    waiting: false,
+    name: "",
+    reposFailed: false,
+    reposLoading: false,
+    managing: false,
+  })
 
   const fail = (err: unknown) => {
     const code = githubCode(err)
@@ -75,14 +86,17 @@ export function DialogGitHub() {
     showToast({ title: key ? language.t(key) : language.t("common.requestFailed") })
   }
 
-  const refetch = async () => {
-    const o = opts()
-    if (!o) return
-    await getGitHubStatus(o).then(
-      (status) => setState({ status, failed: false }),
-      () => setState("failed", true),
-    )
-  }
+  const refetch = statusSync({
+    load: async () => {
+      const o = opts()
+      if (!o) return state.status
+      return getGitHubStatus(o).catch(() => undefined)
+    },
+    current: () => state.status,
+    managing: () => state.managing,
+    apply: (status) => (status ? setState({ status, failed: false }) : setState("failed", !state.status)),
+    push: () => push(),
+  })
   onMount(() => void refetch())
 
   const loadRepos = async () => {
@@ -98,7 +112,7 @@ export function DialogGitHub() {
   const back = () => {
     if (document.visibilityState !== "visible") return
     if (view() === "choose" && state.status?.app) void loadRepos()
-    if (!state.waiting) return
+    if (!refetchOnReturn({ waiting: state.waiting, managing: state.managing })) return
     setState("waiting", false)
     void refetch()
   }
@@ -119,6 +133,13 @@ export function DialogGitHub() {
     if (!url || spectator) return
     setState("waiting", true)
     window.open(connectUrlFor(url), "_blank", "noopener")
+  }
+
+  const manage = (action: ManageAction) => {
+    const url = state.status?.manageUrl
+    if (!url || spectator) return
+    setState({ waiting: true, managing: true })
+    window.open(manageLink(url, action), "_blank", "noopener")
   }
 
   const run = async <T,>(fn: () => Promise<T>) => {
@@ -156,7 +177,7 @@ export function DialogGitHub() {
     const status = await run(() =>
       selectGitHubRepo(o, { owner: repo.owner, name: repo.name, locale: promptLocale(language.locale()) }),
     )
-    if (!status) return
+    if (!status) return void refetch()
     setState("status", status)
     const first = status.firstPush
     if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
@@ -263,6 +284,22 @@ export function DialogGitHub() {
                   </Show>
                 </div>
               </div>
+
+              <Show when={state.status?.manageUrl && !spectator}>
+                <div class="flex flex-col gap-1">
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <Show when={state.status?.app && state.status?.repo}>
+                      <button type="button" class="github-link text-12-regular" onClick={() => manage("change")}>
+                        {language.t("github.repo.change")}
+                      </button>
+                    </Show>
+                    <button type="button" class="github-link text-12-regular" onClick={() => manage("unlink")}>
+                      {language.t("github.unlink")}
+                    </button>
+                  </div>
+                  <span class="github-hint">{language.t("github.manage.hint")}</span>
+                </div>
+              </Show>
 
               <Show when={view() === "choose" && state.status?.app}>
                 <Branch>
