@@ -450,6 +450,84 @@ describe("GitHub.publish with changes made on GitHub", () => {
     expect(await ws.log()).toEqual(["theirs", "first"])
   })
 
+  test("after a conflict, a file the AI edited is pushed as Jitda's and GitHub's other edits still come in", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "app.js": "a\n", "readme.md": "r" })
+    await ws.publish("first")
+    await onGitHub(tmp.path, ws.remote, { "app.js": "github\n", "readme.md": "from github" })
+    await put(ws.work, { "app.js": "jitda\n" })
+    const err = await ws.publish("mine").catch((err) => err)
+    expect(err.code).toBe("conflict")
+    const settled = { theirs: err.conflict.theirs, files: err.conflict.ours }
+
+    const prompt = await GitHub.mergePrompt(WorkspaceRepo.open(ws.work), err.files, err.conflict, "ko")
+    await put(ws.work, { "app.js": "jitda and github\n" })
+    await History.commit(ws.work, { message: "merged by ai" })
+    const result = await GitHub.publish({
+      repo: WorkspaceRepo.open(ws.work),
+      remote: ws.remote,
+      branch: "main",
+      locale: "en",
+      author,
+      settled,
+    })
+
+    expect(prompt).toContain("app.js")
+    expect(prompt).toContain("+github")
+    expect(prompt).not.toContain("readme.md (GitHub")
+    expect(result.sha).toBeDefined()
+    expect(await $`git --git-dir=${ws.remote} show main:app.js`.quiet().text()).toBe("jitda and github\n")
+    expect(await read(path.join(ws.work, "readme.md"))).toBe("from github")
+  })
+
+  test("after a conflict, a file the AI left untouched still stops the push", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "app.js": "a\n" })
+    await ws.publish("first")
+    await onGitHub(tmp.path, ws.remote, { "app.js": "github\n" })
+    await put(ws.work, { "app.js": "jitda\n" })
+    const err = await ws.publish("mine").catch((err) => err)
+
+    const again = await GitHub.publish({
+      repo: WorkspaceRepo.open(ws.work),
+      remote: ws.remote,
+      branch: "main",
+      locale: "en",
+      author,
+      settled: { theirs: err.conflict.theirs, files: err.conflict.ours },
+    }).catch((err) => err)
+
+    expect(again.code).toBe("conflict")
+    expect(await ws.log()).toEqual(["theirs", "first"])
+  })
+
+  test("after a conflict, a new GitHub edit to the same file stops the push even if the AI edited it", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "app.js": "a\n" })
+    await ws.publish("first")
+    await onGitHub(tmp.path, ws.remote, { "app.js": "github\n" })
+    await put(ws.work, { "app.js": "jitda\n" })
+    const err = await ws.publish("mine").catch((err) => err)
+    await onGitHub(tmp.path, ws.remote, { "app.js": "github again\n" }, "theirs again")
+    await put(ws.work, { "app.js": "jitda and github\n" })
+    await History.commit(ws.work, { message: "merged by ai" })
+
+    const again = await GitHub.publish({
+      repo: WorkspaceRepo.open(ws.work),
+      remote: ws.remote,
+      branch: "main",
+      locale: "en",
+      author,
+      settled: { theirs: err.conflict.theirs, files: err.conflict.ours },
+    }).catch((err) => err)
+
+    expect(again.code).toBe("conflict")
+    expect(await ws.log()).toEqual(["theirs again", "theirs", "first"])
+  })
+
   test("a GitHub edit to a page keeps the preview bridge tag in the workspace", async () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)
@@ -460,8 +538,26 @@ describe("GitHub.publish with changes made on GitHub", () => {
 
     await ws.publish("again")
 
-    expect(await read(path.join(ws.work, "index.html"))).toBe(`<html><head>${tag}<title>b</title></head></html>`)
+    expect(await read(path.join(ws.work, "index.html"))).toBe(`<html><head>${tag}\n<title>b</title></head></html>`)
     expect(await ws.files()).toEqual(["index.html"])
+  })
+
+  test("a page brought in from GitHub goes back up byte for byte, so the next push sees no change", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    const tag = `<script src="/__preview-bridge.js" data-preview-bridge></script>`
+    await put(ws.work, { "index.html": `<html>\n<head>${tag}<title>a</title>\n</head>\n</html>\n`, "a.js": "1" })
+    await ws.publish("first")
+    const page = "<!doctype html>\n<html>\n<head>\n<title>b</title>\n</head>\n<body></body>\n</html>\n"
+    await onGitHub(tmp.path, ws.remote, { "index.html": page })
+
+    const brought = await ws.publish("again")
+    const after = await ws.publish("next")
+
+    expect(brought.absorbed).toBe(1)
+    expect(after.sha).toBeUndefined()
+    expect(await $`git --git-dir=${ws.remote} show main:index.html`.quiet().text()).toBe(page)
+    expect(await ws.log()).toEqual(["theirs", "first"])
   })
 
   test("the last push the backend remembers serves as the base when the pod has no record of it", async () => {

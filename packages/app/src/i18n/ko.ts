@@ -182,6 +182,12 @@ export const dict = {
   "github.blocked.ours.hint":
     "짓다 내용으로 올리기: 짓다 파일을 새 커밋으로 올려요. GitHub의 이전 내용은 커밋 기록에 남아요.",
   "github.blocked.done": "GitHub와 맞췄어요",
+  "github.blocked.ai": "AI에게 합쳐 달라고 하기",
+  "github.blocked.ai.hint":
+    "AI에게 합쳐 달라고 하기: AI가 두 쪽 변경을 모두 살려 파일을 고치고, 답변이 끝나면 자동으로 올라가요.",
+  "github.blocked.ai.sent": "AI에게 충돌한 파일을 합쳐 달라고 했어요",
+  "github.blocked.ai.working": "AI가 충돌한 파일을 합치고 있어요. 답변이 끝나면 자동으로 올라가요.",
+  "github.error.stale": "이미 풀린 충돌이에요. 창을 다시 열어 주세요",
   "github.readonly": "관전 중에는 GitHub 설정을 바꿀 수 없어요.",
   "command.history": "버전 기록",
   "command.history.description": "저장된 버전을 보고 원하는 시점으로 되돌리기",

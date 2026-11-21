@@ -21,6 +21,7 @@ import {
   getGitHubRepositories,
   getGitHubStatus,
   githubCode,
+  mergeGitHubWithAI,
   pushGitHub,
   resolveGitHub,
   selectGitHubRepo,
@@ -47,11 +48,12 @@ const ERRORS = {
   diverged: "github.error.diverged",
   conflict: "github.error.conflict",
   busy: "github.error.busy",
+  stale: "github.error.stale",
 } as const
 
 const SHOWN = 8
 
-export function DialogGitHub() {
+export function DialogGitHub(props: { sessionID?: string }) {
   const dialog = useDialog()
   const language = useLanguage()
   const server = useServer()
@@ -209,6 +211,18 @@ export function DialogGitHub() {
     if (status.enabled) setState("status", status)
     else void refetch()
     if (!status.blocked) showToast({ title: language.t("github.blocked.done") })
+  }
+
+  const mergeWithAI = async () => {
+    const o = opts()
+    if (!o || spectator || !props.sessionID) return
+    const status = await run(() =>
+      mergeGitHubWithAI(o, { sessionID: props.sessionID!, locale: promptLocale(language.locale()) }),
+    )
+    if (!status) return void refetch()
+    setState("status", status)
+    showToast({ title: language.t("github.blocked.ai.sent") })
+    dialog.close()
   }
 
   const firstFailure = createMemo(() => {
@@ -418,7 +432,22 @@ export function DialogGitHub() {
                           </Show>
                         </ul>
                       </Show>
+                      <Show when={blocked().resolving}>
+                        <span class="text-12-regular text-text-strong">{language.t("github.blocked.ai.working")}</span>
+                      </Show>
                       <div class="flex flex-wrap gap-2 pt-1">
+                        <Show when={blocked().code === "conflict" && props.sessionID}>
+                          <Button
+                            type="button"
+                            size="small"
+                            variant="primary"
+                            icon="brain"
+                            disabled={spectator || state.busy}
+                            onClick={() => void mergeWithAI()}
+                          >
+                            {language.t("github.blocked.ai")}
+                          </Button>
+                        </Show>
                         <Button
                           type="button"
                           size="small"
@@ -438,6 +467,9 @@ export function DialogGitHub() {
                           {language.t("github.blocked.ours")}
                         </Button>
                       </div>
+                      <Show when={blocked().code === "conflict" && props.sessionID}>
+                        <span class="github-hint">{language.t("github.blocked.ai.hint")}</span>
+                      </Show>
                       <span class="github-hint">{language.t("github.blocked.theirs.hint")}</span>
                       <span class="github-hint">{language.t("github.blocked.ours.hint")}</span>
                     </div>

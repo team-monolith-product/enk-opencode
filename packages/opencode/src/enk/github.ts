@@ -8,6 +8,8 @@ import { Hash } from "../util/hash"
 import { Log } from "../util/log"
 import { SentryReporter } from "../util/sentry"
 import { EnkFailure } from "./failure"
+import { SessionPrompt } from "../session/prompt"
+import type { SessionID } from "../session/schema"
 import { SessionStatus } from "../session/status"
 import { History } from "./history"
 import { Rails } from "./rails"
@@ -33,7 +35,9 @@ export namespace GitHub {
   export type Repo = { owner: string; name: string; url: string; private?: boolean }
   export type Push = { sha: string; time: number; by?: string }
   export type FirstPush = { attempts: number; code: Code; reason: string }
-  export type Blocked = { code: "diverged" | "conflict"; files: string[] }
+  export type Blocked = { code: "diverged" | "conflict"; files: string[]; resolving?: boolean }
+  /** 충돌이 난 순간의 기준·GitHub 트리와, 충돌한 파일의 짓다 쪽 blob. AI 에게 합치기를 맡길 때 쓴다. */
+  export type Conflict = { base: string; theirs: string; ours: Record<string, string> }
   export type Prefer = "ours" | "theirs"
   export type Status = {
     enabled: boolean
@@ -63,6 +67,7 @@ export namespace GitHub {
     | "diverged"
     | "conflict"
     | "busy"
+    | "stale"
 
   export const notify: Code[] = ["forbidden", "revoked", "missing", "remote"]
 
@@ -142,13 +147,14 @@ export namespace GitHub {
       message?: string,
       readonly response?: Response,
       readonly files?: string[],
+      readonly conflict?: Conflict,
     ) {
       super(code, status, message)
     }
   }
 
   const failed = new Map<string, FirstPush & { repo?: string }>()
-  const blocked = new Map<string, Blocked & { repo?: string }>()
+  const blocked = new Map<string, Blocked & { repo?: string; conflict?: Conflict; session?: string }>()
 
   const repoKey = (repo?: Repo) => (repo ? `${repo.owner}/${repo.name}` : undefined)
 
@@ -170,8 +176,7 @@ export namespace GitHub {
       blocked.delete(dir)
       return
     }
-    const { repo: _, ...block } = hit
-    return block
+    return shown(hit)
   }
 
   async function link(): Promise<Link | undefined> {
@@ -450,6 +455,70 @@ export namespace GitHub {
     await push(dir, { locale }, hit)
   }
 
+  function shown(entry?: Blocked): Blocked | undefined {
+    if (!entry) return
+    return { code: entry.code, files: entry.files, ...(entry.resolving ? { resolving: true } : {}) }
+  }
+
+  const MERGE = {
+    ko: {
+      intro: (files: string) =>
+        `GitHub와 짓다에서 같은 파일을 고쳐서 GitHub에 올리기가 멈췄어요. 충돌한 파일: ${files}\n\n작업 폴더의 파일에는 짓다에서 고친 내용이 들어 있어요. 아래는 마지막으로 올린 뒤 GitHub에서 바뀐 내용(diff)이에요. 두 쪽 변경을 모두 살리도록 작업 폴더의 해당 파일만 고쳐 주세요. 서로 부딪히는 부분은 두 의도를 모두 살리는 쪽으로 합치고, 다른 파일은 건드리지 마세요. 다 고치면 무엇을 어떻게 합쳤는지 짧게 알려 주세요.`,
+      file: (file: string) => `### ${file} (GitHub에서 바뀐 내용)`,
+      cut: "(길어서 뒷부분을 생략했어요)",
+    },
+    en: {
+      intro: (files: string) =>
+        `Pushing to GitHub stopped because the same files changed on GitHub and in Jitda. Conflicting files: ${files}\n\nThe files in the project folder hold Jitda's edits. Below is what changed on GitHub since the last push (diff). Edit only those files in the project folder so both sides' changes are kept. Where they collide, combine them so both intents survive, and leave other files alone. When done, briefly say how you combined them.`,
+      file: (file: string) => `### ${file} (changes on GitHub)`,
+      cut: "(trimmed because it is long)",
+    },
+  } as const
+  const MARKER = "enkGitHubMerge"
+  const shownFiles = 5
+  const diffCap = 6000
+
+  export async function mergePrompt(
+    repo: WorkspaceRepo.Repo,
+    files: string[],
+    conflict: Conflict,
+    locale?: Locale.Value,
+  ) {
+    const text = MERGE[locale ?? "ko"]
+    const sections = await Promise.all(
+      files.slice(0, shownFiles).map(async (file) => {
+        const diff = (await repo.run(["diff", "--no-color", conflict.base, conflict.theirs, "--", file])).text()
+        const body = diff.length > diffCap ? `${diff.slice(0, diffCap)}\n${text.cut}` : diff
+        return `${text.file(file)}\n\n\`\`\`diff\n${body.trimEnd()}\n\`\`\``
+      }),
+    )
+    return [text.intro(files.join(", ")), ...sections].join("\n\n")
+  }
+
+  /**
+   * 충돌한 파일을 AI 에게 합치도록 맡긴다. 대화에 GitHub 쪽 변경(diff)을 붙여 보내고, 그 답변이 끝나 올릴 때는 AI 가
+   * 고친 충돌 파일만 짓다 쪽으로 인정한다. AI 가 파일을 고치지 않았거나 그사이 GitHub 가 또 바뀌었으면 다시 멈춘다.
+   */
+  export async function mergeWithAI(dir: string, input: { sessionID: SessionID; locale?: Locale.Value }) {
+    if (!(await status(dir)).enabled) throw new Failure("disabled", 409)
+    const entry = blocked.get(dir)
+    if (entry?.code !== "conflict" || !entry.conflict) throw new Failure("stale", 409)
+    await SessionPrompt.assertNotBusy(input.sessionID).catch(() => {
+      throw new Failure("busy", 409)
+    })
+    const prompt = await mergePrompt(WorkspaceRepo.open(dir), entry.files, entry.conflict, input.locale)
+    await SessionPrompt.prompt({
+      sessionID: input.sessionID,
+      noReply: true,
+      parts: [{ type: "text", text: prompt, metadata: { [MARKER]: true } }],
+    })
+    blocked.set(dir, { ...entry, resolving: true, session: input.sessionID })
+    SessionPrompt.loop({ sessionID: input.sessionID }).catch((err) =>
+      log.error("merge with ai failed", { sessionID: input.sessionID, error: errorData(err) }),
+    )
+    return status(dir)
+  }
+
   const ABSORB = {
     ko: { message: "GitHub에서 바뀐 내용 가져오기", backup: "GitHub 내용 가져오기 전 자동 저장" },
     en: { message: "Brought in changes from GitHub", backup: "Saved before bringing in GitHub changes" },
@@ -472,6 +541,7 @@ export namespace GitHub {
       await report({ repo_private: remote.private }).catch(() => undefined)
     }
     const label = ABSORB[input.locale ?? "ko"]
+    const pending = blocked.get(dir)
     const result = await publish({
       repo: WorkspaceRepo.open(dir),
       remote: `${web}/${hit.repo.owner}/${hit.repo.name}.git`,
@@ -485,13 +555,22 @@ export namespace GitHub {
       env: auth(hit.token!),
       base: hit.push?.sha,
       prefer: input.prefer,
+      settled:
+        pending?.resolving && pending.conflict
+          ? { theirs: pending.conflict.theirs, files: pending.conflict.ours }
+          : undefined,
       absorb: async (source, files) => {
         if (await working()) throw new Failure("busy", 409)
         await History.absorb(dir, { source, files, ...label })
       },
     }).catch((err) => {
       if (err instanceof Failure && (err.code === "diverged" || err.code === "conflict")) {
-        blocked.set(dir, { code: err.code, files: (err.files ?? []).slice(0, 50), repo: repoKey(hit.repo) })
+        blocked.set(dir, {
+          code: err.code,
+          files: (err.files ?? []).slice(0, 50),
+          repo: repoKey(hit.repo),
+          conflict: err.conflict,
+        })
       }
       throw err
     })
@@ -581,7 +660,8 @@ export namespace GitHub {
     return { mode: ours.mode, oid }
   }
 
-  export type Merged = { tree: string; incoming: string[]; conflicts: string[] }
+  export type Merged = { tree: string; incoming: string[]; conflicts: string[]; ours: Record<string, string> }
+  export type Settled = { theirs: string; files: Record<string, string> }
 
   /**
    * 마지막으로 올린 트리(base)를 기준으로 짓다(ours)와 GitHub(theirs)를 합친다. 한쪽만 고친 파일은 고친 쪽을 따르고,
@@ -590,7 +670,7 @@ export namespace GitHub {
    */
   export async function merge(
     repo: WorkspaceRepo.Repo,
-    input: { base: string; ours: string; theirs: string; prefer?: Prefer },
+    input: { base: string; ours: string; theirs: string; prefer?: Prefer; settled?: Settled },
   ): Promise<Merged> {
     const [b, o, t] = await Promise.all([
       entries(repo, input.base),
@@ -604,6 +684,8 @@ export namespace GitHub {
     const result = new Map(o)
     const incoming: string[] = []
     const conflicts: string[] = []
+    const marks: Record<string, string> = {}
+    const settled = input.settled?.theirs === input.theirs ? input.settled.files : undefined
     const take = (file: string, entry?: Entry) => {
       if (entry) result.set(file, entry)
       else result.delete(file)
@@ -629,14 +711,16 @@ export namespace GitHub {
         continue
       }
       if (input.prefer === "ours") continue
+      if (settled && file in settled && (ours?.oid ?? "") !== settled[file]) continue
       if (input.prefer === "theirs") {
         take(file, theirs)
         incoming.push(file)
         continue
       }
       conflicts.push(file)
+      marks[file] = ours?.oid ?? ""
     }
-    if (conflicts.length) return { tree: input.ours, incoming, conflicts: conflicts.sort() }
+    if (conflicts.length) return { tree: input.ours, incoming, conflicts: conflicts.sort(), ours: marks }
     const env = { GIT_INDEX_FILE: path.join(repo.root, "merge-index") }
     await repo.must(["read-tree", "--empty"], { env })
     const items = [...result].map(([file, entry]) => `${entry.mode},${entry.oid},${file}`)
@@ -645,7 +729,12 @@ export namespace GitHub {
         env,
       })
     }
-    return { tree: (await repo.must(["write-tree"], { env })).trim(), incoming: incoming.sort(), conflicts }
+    return {
+      tree: (await repo.must(["write-tree"], { env })).trim(),
+      incoming: incoming.sort(),
+      conflicts,
+      ours: marks,
+    }
   }
 
   const EMPTY = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -691,6 +780,7 @@ export namespace GitHub {
     env?: Record<string, string>
     base?: string
     prefer?: Prefer
+    settled?: Settled
     absorb?: (source: string, files: string[]) => Promise<void>
   }): Promise<Result> {
     const { repo } = input
@@ -742,7 +832,13 @@ export namespace GitHub {
             const files = (await WorkspaceRepo.diff(repo, tree, theirs)).map((change) => change.file)
             throw new Failure("diverged", 409, "repository already has other files", undefined, files)
           }
-          const merged = await merge(repo, { base: baseTree, ours: tree, theirs, prefer: input.prefer })
+          const merged = await merge(repo, {
+            base: baseTree,
+            ours: tree,
+            theirs,
+            prefer: input.prefer,
+            settled: input.settled,
+          })
           if (merged.conflicts.length) {
             throw new Failure(
               "conflict",
@@ -750,6 +846,7 @@ export namespace GitHub {
               merged.conflicts.join(", ").slice(0, detail),
               undefined,
               merged.conflicts,
+              { base: baseTree, theirs, ours: merged.ours },
             )
           }
           if (merged.incoming.length) {

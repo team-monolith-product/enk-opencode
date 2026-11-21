@@ -178,7 +178,7 @@ export namespace History {
       const full = path.join(repo.dir, file)
       const text = await readFile(full, "utf8").catch(() => undefined)
       if (text === undefined || bridge.test(text)) continue
-      const next = text.replace(/<head\b[^>]*>/i, (head) => head + bridgeTag)
+      const next = text.replace(/<head\b[^>]*>/i, (head) => `${head}${bridgeTag}\n`)
       if (next === text) continue
       await writeFile(full, next)
       done.push(file)

@@ -105,7 +105,7 @@ export function createChromeActions() {
             open: () =>
               void show(
                 () => import("@/components/dialog-github"),
-                (x) => <x.DialogGitHub />,
+                (x) => <x.DialogGitHub sessionID={params.id} />,
               ),
           },
         ]
