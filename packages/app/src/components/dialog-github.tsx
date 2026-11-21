@@ -20,6 +20,7 @@ import {
   getGitHubRepositories,
   getGitHubStatus,
   githubCode,
+  mergeGitHub,
   pushGitHub,
   selectGitHubRepo,
   type GitHubRepo,
@@ -41,9 +42,11 @@ const ERRORS = {
   missing: "github.error.missing",
   empty: "github.error.empty",
   remote: "github.error.remote",
+  clean: "github.error.clean",
+  busy: "github.error.busy",
 } as const
 
-export function DialogGitHub() {
+export function DialogGitHub(props: { sessionID?: string; onChange?: (status: GitHubStatus) => void }) {
   const dialog = useDialog()
   const language = useLanguage()
   const server = useServer()
@@ -83,6 +86,11 @@ export function DialogGitHub() {
       () => setState("failed", true),
     )
   }
+
+  createEffect(() => {
+    const status = state.status
+    if (status) props.onChange?.(status)
+  })
   onMount(() => void refetch())
 
   const loadRepos = async () => {
@@ -170,8 +178,24 @@ export function DialogGitHub() {
     const { pushed, ...status } = result
     if (status.enabled) setState("status", status)
     else void refetch()
+    if (!pushed && status.conflict && !status.conflict.resolving) return
     showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
   }
+
+  const merge = async () => {
+    const o = opts()
+    if (!o || spectator || !props.sessionID) return
+    const result = await run(() =>
+      mergeGitHub(o, { sessionID: props.sessionID!, locale: promptLocale(language.locale()) }),
+    )
+    if (!result) return void refetch()
+    const { files, kept: _, ...status } = result
+    setState("status", status)
+    showToast({ title: language.t(files.length ? "github.merge.sent" : "github.merge.done") })
+    if (files.length) dialog.close()
+  }
+
+  const conflict = createMemo(() => state.status?.conflict)
 
   const firstFailure = createMemo(() => {
     const first = state.status?.firstPush
@@ -345,6 +369,58 @@ export function DialogGitHub() {
                   </Show>
                   <span class="text-12-regular text-text-weak">{pushed()}</span>
                 </div>
+                <Show when={conflict()}>
+                  {(item) => (
+                    <div class="github-panel flex flex-col gap-2">
+                      <span class="text-12-medium text-text-diff-remove-base">
+                        {language.t("github.conflict.title")}
+                      </span>
+                      <Show
+                        when={!item().resolving}
+                        fallback={
+                          <span class="text-12-regular text-text-weak">
+                            {language.t("github.conflict.resolving", { target: item().target })}
+                          </span>
+                        }
+                      >
+                        <span class="text-12-regular text-text-weak">
+                          {language.t("github.conflict.body", { target: item().target, branch: item().branch })}
+                        </span>
+                        <span class="text-12-medium text-text-strong">{language.t("github.conflict.files")}</span>
+                        <ul class="flex flex-col gap-0.5">
+                          <For each={item().files}>
+                            {(file) => <li class="text-12-regular text-text-weak font-mono break-all">{file}</li>}
+                          </For>
+                        </ul>
+                        <Show when={props.sessionID}>
+                          <span class="github-hint">
+                            {language.t("github.conflict.merge.hint", { target: item().target })}
+                          </span>
+                        </Show>
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <Show when={props.sessionID}>
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="primary"
+                              disabled={spectator || state.busy}
+                              onClick={() => void merge()}
+                            >
+                              {language.t("github.conflict.merge")}
+                            </Button>
+                          </Show>
+                          <Show when={item().compare}>
+                            {(href) => (
+                              <Link class="github-link text-12-regular" href={href()}>
+                                {language.t("github.conflict.compare")}
+                              </Link>
+                            )}
+                          </Show>
+                        </div>
+                      </Show>
+                    </div>
+                  )}
+                </Show>
                 <Show when={firstFailure()}>
                   {(failure) => (
                     <div class="github-panel flex flex-col gap-1">

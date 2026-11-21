@@ -3,6 +3,8 @@ import { describeRoute, validator } from "hono-openapi"
 import { failures, ok } from "../enk-responses"
 import z from "zod"
 import { GitHub } from "../../enk/github"
+import { HistorySync } from "../../enk/history-sync"
+import { SessionID } from "../../session/schema"
 import { Locale } from "../../enk/locale"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
@@ -29,9 +31,21 @@ const Status = z
         reason: z.string(),
       })
       .optional(),
+    conflict: z
+      .object({
+        branch: z.string(),
+        target: z.string(),
+        files: z.array(z.string()),
+        resolving: z.boolean(),
+        compare: z.string().optional(),
+      })
+      .optional(),
   })
   .meta({ ref: "GitHubStatus" })
 const Pushed = Status.extend({ pushed: z.boolean() }).meta({ ref: "GitHubPushed" })
+const Merged = Status.extend({ files: z.array(z.string()), kept: z.array(z.string()) }).meta({
+  ref: "GitHubMerged",
+})
 const Repositories = z.object({ repositories: z.array(Repo) }).meta({ ref: "GitHubRepositories" })
 const RepoName = z
   .string()
@@ -105,5 +119,21 @@ export const GitHubRoutes = lazy(() =>
       }),
       validator("json", z.object({ locale: Locale.Schema.optional() })),
       async (c) => c.json(await alerting(c, () => GitHub.manual(Instance.directory, c.req.valid("json").locale))),
+    )
+    .post(
+      "/merge",
+      describeRoute({
+        summary: "Merge GitHub changes with AI",
+        description:
+          "Bring changes made separately on GitHub into the workspace, leave conflict markers where both sides changed the same place, and ask the AI in the given session to resolve them.",
+        operationId: "github.merge",
+        responses: { ...ok("Link status and the files handed to the AI", Merged), ...failures(404, 409, 422, 502) },
+      }),
+      validator("json", z.object({ sessionID: SessionID.zod, locale: Locale.Schema.optional() })),
+      async (c) => {
+        const input = c.req.valid("json")
+        const result = await alerting(c, () => HistorySync.merge(input))
+        return c.json({ ...(await GitHub.status(Instance.directory)), ...result })
+      },
     ),
 )

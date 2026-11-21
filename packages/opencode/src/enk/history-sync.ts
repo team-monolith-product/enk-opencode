@@ -35,6 +35,76 @@ export namespace HistorySync {
     en: { revert: (subject) => `${REVERT.en}${plain(subject)}`, backup: "Saved before rolling back" },
   }
 
+  const MERGE: Record<
+    Locale.Value,
+    { backup: string; merged: string; prompt: (files: string[]) => string; kept: (files: string[]) => string }
+  > = {
+    ko: {
+      backup: "GitHub 변경 합치기 전 자동 저장",
+      merged: "GitHub에서 바뀐 내용 합치기",
+      prompt: (files) =>
+        [
+          "GitHub 저장소에서 따로 바뀐 내용을 작업 폴더에 합쳤어요. 아래 파일은 같은 곳이 양쪽에서 바뀌어 충돌 표시가 남아 있어요.",
+          files.map((file) => `- ${file}`).join("\n"),
+          "충돌은 `<<<<<<<` 줄부터 `>>>>>>>` 줄까지예요. `=======` 위는 짓다에서 만든 내용이고, 아래는 GitHub에서 바뀐 내용이에요. 양쪽의 의도를 모두 살려 하나로 합치고, 충돌 표시 줄(`<<<<<<<`, `=======`, `>>>>>>>`)은 모두 지워 주세요. 목록에 없는 파일은 고치지 말고, 다 합친 뒤 무엇을 어떻게 합쳤는지 짧게 알려 주세요.",
+        ].join("\n\n"),
+      kept: (files) =>
+        [
+          "다음 파일은 자동으로 합칠 수 없어 한쪽 내용을 그대로 뒀어요. 고치지 않아도 돼요.",
+          files.map((file) => `- ${file}`).join("\n"),
+        ].join("\n"),
+    },
+    en: {
+      backup: "Saved before merging GitHub changes",
+      merged: "Merge changes from GitHub",
+      prompt: (files) =>
+        [
+          "Changes made separately in the GitHub repository were merged into the workspace. The files below were changed in the same places on both sides, so they still have conflict markers.",
+          files.map((file) => `- ${file}`).join("\n"),
+          "Each conflict runs from the `<<<<<<<` line to the `>>>>>>>` line. Above `=======` is what was made in Jitda, and below it is what changed on GitHub. Combine them so both sides' intent is kept, and remove every marker line (`<<<<<<<`, `=======`, `>>>>>>>`). Do not edit files outside this list. When you are done, briefly explain how you combined them.",
+        ].join("\n\n"),
+      kept: (files) =>
+        [
+          "These files could not be merged automatically, so one side was kept as is. They need no edits.",
+          files.map((file) => `- ${file}`).join("\n"),
+        ].join("\n"),
+    },
+  }
+
+  /**
+   * GitHub 과 겹친 변경을 AI 로 합친다. 세션을 붙잡은 채 GitHub 쪽 변경을 작업 폴더에 들이고(충돌 표시 포함), 충돌 표시를
+   * 정리해 달라는 요청을 보낸다. 답변이 끝나면 평소처럼 기록되고 올라간다. 충돌 표시가 남은 파일이 없으면 바로 올린다.
+   */
+  export async function merge(input: { sessionID: SessionID; locale?: Locale.Value }) {
+    const session = await Session.get(input.sessionID)
+    await SessionPrompt.assertNotBusy(input.sessionID).catch(busy)
+    const locale = input.locale ?? Locale.DEFAULT
+    const label = MERGE[locale]
+    const outcome: { result?: GitHub.Absorbed; error?: unknown } = {}
+    await SessionPrompt.exclusive(input.sessionID, async () => {
+      await GitHub.absorb(session.directory, { backup: label.backup }).then(
+        (result) => (outcome.result = result),
+        (error) => (outcome.error = error),
+      )
+    }).catch(busy)
+    if (outcome.error) throw outcome.error
+    const result = outcome.result!
+    if (result.files.length === 0) {
+      await History.commit(session.directory, { message: label.merged })
+      await GitHub.sync(session.directory, locale)
+      return result
+    }
+    const text = [label.prompt(result.files), ...(result.kept.length ? [label.kept(result.kept)] : [])].join("\n\n")
+    await SessionPrompt.prompt({ sessionID: input.sessionID, locale, noReply: true, parts: [{ type: "text", text }] })
+    SessionPrompt.loop({ sessionID: input.sessionID }).catch((err) =>
+      log.error("merge loop failed", {
+        sessionID: input.sessionID,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    )
+    return result
+  }
+
   const MANIFESTS = new Set([
     "package.json",
     "package-lock.json",
