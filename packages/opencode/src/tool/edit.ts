@@ -62,7 +62,11 @@ export const EditTool = Tool.define("edit", {
     await FileTime.withLock(filePath, async () => {
       if (params.oldString === "") {
         const existed = await Filesystem.exists(filePath)
-        contentNew = params.newString
+        if (existed) contentOld = await Filesystem.readText(filePath)
+        contentNew = existed
+          ? await FileMerge.resolve(ctx.sessionID, filePath, contentOld, params.newString)
+          : params.newString
+        merged = existed && contentNew !== params.newString
         diff = trimDiff(createTwoFilesPatch(filePath, filePath, contentOld, contentNew))
         await ctx.ask({
           permission: "edit",
@@ -73,7 +77,7 @@ export const EditTool = Tool.define("edit", {
             diff,
           },
         })
-        await Filesystem.write(filePath, params.newString)
+        await Filesystem.write(filePath, contentNew)
         await Format.file(filePath)
         Bus.publish(File.Event.Edited, { file: filePath })
         await Bus.publish(FileWatcher.Event.Updated, {

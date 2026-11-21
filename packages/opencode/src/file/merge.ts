@@ -44,7 +44,8 @@ export namespace FileMerge {
       ])
       const out = await git(["merge-file", "-p", ours, base, theirs], { cwd: dir })
       if (out.exitCode === 0) return { clean: true, content: out.stdout.toString("utf-8") }
-      if (out.exitCode > 0 && out.exitCode < 128) return { clean: false, conflicts: out.exitCode }
+      if (out.exitCode > 0 && out.exitCode < 128 && out.stdout.toString("utf-8").includes("<<<<<<<"))
+        return { clean: false, conflicts: out.exitCode }
       throw new Error(`git merge-file failed: ${out.stderr.toString().trim()}`)
     } finally {
       await rm(dir, { recursive: true, force: true })

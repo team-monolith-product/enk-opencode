@@ -255,6 +255,28 @@ describe("tool.edit", () => {
       })
     })
 
+    test("merges a whole-file rewrite with changes made after the read", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "file.txt")
+      await fs.writeFile(filepath, "a\nb\nc\n", "utf-8")
+      await touch(filepath, 1_000)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await FileTime.read(ctx.sessionID, filepath)
+          await fs.writeFile(filepath, "A\nb\nc\n", "utf-8")
+          await touch(filepath, 2_000)
+
+          const edit = await EditTool.init()
+          const result = await edit.execute({ filePath: filepath, oldString: "", newString: "a\nb\nC\n" }, ctx)
+
+          expect(await fs.readFile(filepath, "utf-8")).toBe("A\nb\nC\n")
+          expect(result.output).toContain("changed by someone else")
+        },
+      })
+    })
+
     test("asks for a re-read when the text it edits was changed after the read", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")

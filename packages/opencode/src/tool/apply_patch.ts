@@ -47,256 +47,263 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       throw new Error("apply_patch verification failed: no hunks found")
     }
 
-    // Validate file paths and check permissions
-    const fileChanges: Array<{
-      filePath: string
-      oldContent: string
-      newContent: string
-      type: "add" | "update" | "delete" | "move"
-      movePath?: string
-      diff: string
-      exact?: boolean
-      additions: number
-      deletions: number
-    }> = []
-
-    let totalDiff = ""
-    const merged: string[] = []
-
-    for (const hunk of hunks) {
-      const filePath = path.resolve(Instance.directory, hunk.path)
-      await assertExternalDirectory(ctx, filePath)
-
-      switch (hunk.type) {
-        case "add": {
-          const existing = await fs.readFile(filePath, "utf-8").catch(() => undefined)
-          const oldContent = existing ?? ""
-          const added =
-            hunk.contents.length === 0 || hunk.contents.endsWith("\n") ? hunk.contents : `${hunk.contents}\n`
-          const newContent =
-            existing === undefined ? added : await FileMerge.resolve(ctx.sessionID, filePath, existing, added)
-          if (existing !== undefined && newContent !== added) merged.push(filePath)
-          const raw = createTwoFilesPatch(filePath, filePath, oldContent, newContent)
-          const diff = trimDiff(raw)
-
-          let additions = 0
-          let deletions = 0
-          for (const change of diffLines(oldContent, newContent)) {
-            if (change.added) additions += change.count || 0
-            if (change.removed) deletions += change.count || 0
-          }
-
-          fileChanges.push({
-            filePath,
-            oldContent,
-            newContent,
-            type: "add",
-            diff,
-            exact: diff === raw && !newContent.startsWith("\uFEFF"),
-            additions,
-            deletions,
-          })
-
-          totalDiff += diff + "\n"
-          break
-        }
-
-        case "update": {
-          // Check if file exists for update
-          const stats = await fs.stat(filePath).catch(() => null)
-          if (!stats || stats.isDirectory()) {
-            throw new Error(`apply_patch verification failed: Failed to read file to update: ${filePath}`)
-          }
-
-          const seen = await FileTime.check(ctx.sessionID, filePath)
-          const oldContent = await fs.readFile(filePath, "utf-8")
-          let newContent = oldContent
-
-          // Apply the update chunks to get new content
-          try {
-            const fileUpdate = Patch.deriveNewContentsFromChunks(filePath, hunk.chunks)
-            newContent = fileUpdate.content
-          } catch (error) {
-            if (seen.status === "changed") throw FileMerge.conflict(filePath)
-            throw new Error(`apply_patch verification failed: ${error}`)
-          }
-          if (seen.status === "changed") merged.push(filePath)
-
-          const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
-
-          let additions = 0
-          let deletions = 0
-          for (const change of diffLines(oldContent, newContent)) {
-            if (change.added) additions += change.count || 0
-            if (change.removed) deletions += change.count || 0
-          }
-
-          const movePath = hunk.move_path ? path.resolve(Instance.directory, hunk.move_path) : undefined
-          await assertExternalDirectory(ctx, movePath)
-
-          fileChanges.push({
-            filePath,
-            oldContent,
-            newContent,
-            type: hunk.move_path ? "move" : "update",
-            movePath,
-            diff,
-            additions,
-            deletions,
-          })
-
-          totalDiff += diff + "\n"
-          break
-        }
-
-        case "delete": {
-          if ((await FileTime.check(ctx.sessionID, filePath)).status === "changed") throw FileMerge.conflict(filePath)
-          const contentToDelete = await fs.readFile(filePath, "utf-8").catch((error) => {
-            throw new Error(`apply_patch verification failed: ${error}`)
-          })
-          const raw = createTwoFilesPatch(filePath, filePath, contentToDelete, "")
-          const deleteDiff = trimDiff(raw)
-
-          const deletions = contentToDelete.split("\n").length
-
-          fileChanges.push({
-            filePath,
-            oldContent: contentToDelete,
-            newContent: "",
-            type: "delete",
-            diff: deleteDiff,
-            exact: deleteDiff === raw && !contentToDelete.startsWith("\uFEFF"),
-            additions: 0,
-            deletions,
-          })
-
-          totalDiff += deleteDiff + "\n"
-          break
-        }
-      }
-    }
-
-    // Build per-file metadata for UI rendering (used for both permission and result)
-    const files = fileChanges.map((change) => ({
-      filePath: change.filePath,
-      relativePath: path.relative(Instance.worktree, change.movePath ?? change.filePath).replaceAll("\\", "/"),
-      type: change.type,
-      diff: change.diff,
-      patch: change.exact
-        ? undefined
-        : Snapshot.unifiedPatch(change.movePath ?? change.filePath, change.oldContent, change.newContent),
-      additions: change.additions,
-      deletions: change.deletions,
-      movePath: change.movePath,
-    }))
-
-    // Check permissions if needed
-    const relativePaths = fileChanges.map((c) => path.relative(Instance.worktree, c.filePath).replaceAll("\\", "/"))
-    await ctx.ask({
-      permission: "edit",
-      patterns: relativePaths,
-      always: ["*"],
-      metadata: {
-        filepath: relativePaths.join(", "),
-        diff: totalDiff,
-        files,
-      },
-    })
-
-    // Apply the changes
-    const updates: Array<{ file: string; event: "add" | "change" | "unlink" }> = []
-
-    for (const change of fileChanges) {
-      const edited = change.type === "delete" ? undefined : (change.movePath ?? change.filePath)
-      switch (change.type) {
-        case "add":
-          // Create parent directories (recursive: true is safe on existing/root dirs)
-          await fs.mkdir(path.dirname(change.filePath), { recursive: true })
-          await fs.writeFile(change.filePath, change.newContent, "utf-8")
-          updates.push({ file: change.filePath, event: "add" })
-          break
-
-        case "update":
-          await fs.writeFile(change.filePath, change.newContent, "utf-8")
-          updates.push({ file: change.filePath, event: "change" })
-          break
-
-        case "move":
-          if (change.movePath) {
-            // Create parent directories (recursive: true is safe on existing/root dirs)
-            await fs.mkdir(path.dirname(change.movePath), { recursive: true })
-            await fs.writeFile(change.movePath, change.newContent, "utf-8")
-            await fs.unlink(change.filePath)
-            updates.push({ file: change.filePath, event: "unlink" })
-            updates.push({ file: change.movePath, event: "add" })
-          }
-          break
-
-        case "delete":
-          await fs.unlink(change.filePath)
-          updates.push({ file: change.filePath, event: "unlink" })
-          break
-      }
-
-      if (edited) {
-        await Format.file(edited)
-        Bus.publish(File.Event.Edited, { file: edited })
-        await FileTime.read(ctx.sessionID, edited)
-      }
-    }
-
-    // Publish file change events
-    for (const update of updates) {
-      await Bus.publish(FileWatcher.Event.Updated, update)
-    }
-
-    // Notify LSP of file changes and collect diagnostics
-    for (const change of fileChanges) {
-      if (change.type === "delete") continue
-      const target = change.movePath ?? change.filePath
-      await LSP.touchFile(target, true)
-    }
-    const diagnostics = await LSP.diagnostics()
-
-    // Generate output summary
-    const summaryLines = fileChanges.map((change) => {
-      if (change.type === "add") {
-        return `A ${path.relative(Instance.worktree, change.filePath).replaceAll("\\", "/")}`
-      }
-      if (change.type === "delete") {
-        return `D ${path.relative(Instance.worktree, change.filePath).replaceAll("\\", "/")}`
-      }
-      const target = change.movePath ?? change.filePath
-      return `M ${path.relative(Instance.worktree, target).replaceAll("\\", "/")}`
-    })
-    let output = `Success. Updated the following files:\n${summaryLines.join("\n")}`
-    if (merged.length > 0)
-      output += `\n\n${merged.map((file) => path.relative(Instance.worktree, file).replaceAll("\\", "/")).join(", ")}: ${FileMerge.NOTE}`
-
-    // Report LSP errors for changed files
-    const MAX_DIAGNOSTICS_PER_FILE = 20
-    for (const change of fileChanges) {
-      if (change.type === "delete") continue
-      const target = change.movePath ?? change.filePath
-      const normalized = Filesystem.normalizePath(target)
-      const issues = diagnostics[normalized] ?? []
-      const errors = issues.filter((item) => item.severity === 1)
-      if (errors.length > 0) {
-        const limited = errors.slice(0, MAX_DIAGNOSTICS_PER_FILE)
-        const suffix =
-          errors.length > MAX_DIAGNOSTICS_PER_FILE ? `\n... and ${errors.length - MAX_DIAGNOSTICS_PER_FILE} more` : ""
-        output += `\n\nLSP errors detected in ${path.relative(Instance.worktree, target).replaceAll("\\", "/")}, please fix:\n<diagnostics file="${target}">\n${limited.map(LSP.Diagnostic.pretty).join("\n")}${suffix}\n</diagnostics>`
-      }
-    }
-
-    return {
-      title: output,
-      metadata: {
-        diff: totalDiff,
-        files,
-        diagnostics,
-      },
-      output,
-    }
+    const targets = hunks.flatMap((hunk) => [
+      path.resolve(Instance.directory, hunk.path),
+      ...(hunk.type === "update" && hunk.move_path ? [path.resolve(Instance.directory, hunk.move_path)] : []),
+    ])
+    return FileTime.withLocks(targets, () => apply(hunks, ctx))
   },
 })
+
+async function apply(hunks: Patch.Hunk[], ctx: Tool.Context) {
+  // Validate file paths and check permissions
+  const fileChanges: Array<{
+    filePath: string
+    oldContent: string
+    newContent: string
+    type: "add" | "update" | "delete" | "move"
+    movePath?: string
+    diff: string
+    exact?: boolean
+    additions: number
+    deletions: number
+  }> = []
+
+  let totalDiff = ""
+  const merged: string[] = []
+
+  for (const hunk of hunks) {
+    const filePath = path.resolve(Instance.directory, hunk.path)
+    await assertExternalDirectory(ctx, filePath)
+
+    switch (hunk.type) {
+      case "add": {
+        const existing = await fs.readFile(filePath, "utf-8").catch(() => undefined)
+        const oldContent = existing ?? ""
+        const added = hunk.contents.length === 0 || hunk.contents.endsWith("\n") ? hunk.contents : `${hunk.contents}\n`
+        const newContent =
+          existing === undefined ? added : await FileMerge.resolve(ctx.sessionID, filePath, existing, added)
+        if (existing !== undefined && newContent !== added) merged.push(filePath)
+        const raw = createTwoFilesPatch(filePath, filePath, oldContent, newContent)
+        const diff = trimDiff(raw)
+
+        let additions = 0
+        let deletions = 0
+        for (const change of diffLines(oldContent, newContent)) {
+          if (change.added) additions += change.count || 0
+          if (change.removed) deletions += change.count || 0
+        }
+
+        fileChanges.push({
+          filePath,
+          oldContent,
+          newContent,
+          type: "add",
+          diff,
+          exact: diff === raw && !newContent.startsWith("\uFEFF"),
+          additions,
+          deletions,
+        })
+
+        totalDiff += diff + "\n"
+        break
+      }
+
+      case "update": {
+        // Check if file exists for update
+        const stats = await fs.stat(filePath).catch(() => null)
+        if (!stats || stats.isDirectory()) {
+          throw new Error(`apply_patch verification failed: Failed to read file to update: ${filePath}`)
+        }
+
+        const seen = await FileTime.check(ctx.sessionID, filePath)
+        const oldContent = await fs.readFile(filePath, "utf-8")
+        let newContent = oldContent
+
+        // Apply the update chunks to get new content
+        try {
+          const fileUpdate = Patch.deriveNewContentsFromChunks(filePath, hunk.chunks)
+          newContent = fileUpdate.content
+        } catch (error) {
+          if (seen.status === "changed") throw FileMerge.conflict(filePath)
+          throw new Error(`apply_patch verification failed: ${error}`)
+        }
+        if (seen.status === "changed") merged.push(filePath)
+
+        const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
+
+        let additions = 0
+        let deletions = 0
+        for (const change of diffLines(oldContent, newContent)) {
+          if (change.added) additions += change.count || 0
+          if (change.removed) deletions += change.count || 0
+        }
+
+        const movePath = hunk.move_path ? path.resolve(Instance.directory, hunk.move_path) : undefined
+        await assertExternalDirectory(ctx, movePath)
+
+        fileChanges.push({
+          filePath,
+          oldContent,
+          newContent,
+          type: hunk.move_path ? "move" : "update",
+          movePath,
+          diff,
+          additions,
+          deletions,
+        })
+
+        totalDiff += diff + "\n"
+        break
+      }
+
+      case "delete": {
+        if ((await FileTime.check(ctx.sessionID, filePath)).status === "changed") throw FileMerge.conflict(filePath)
+        const contentToDelete = await fs.readFile(filePath, "utf-8").catch((error) => {
+          throw new Error(`apply_patch verification failed: ${error}`)
+        })
+        const raw = createTwoFilesPatch(filePath, filePath, contentToDelete, "")
+        const deleteDiff = trimDiff(raw)
+
+        const deletions = contentToDelete.split("\n").length
+
+        fileChanges.push({
+          filePath,
+          oldContent: contentToDelete,
+          newContent: "",
+          type: "delete",
+          diff: deleteDiff,
+          exact: deleteDiff === raw && !contentToDelete.startsWith("\uFEFF"),
+          additions: 0,
+          deletions,
+        })
+
+        totalDiff += deleteDiff + "\n"
+        break
+      }
+    }
+  }
+
+  // Build per-file metadata for UI rendering (used for both permission and result)
+  const files = fileChanges.map((change) => ({
+    filePath: change.filePath,
+    relativePath: path.relative(Instance.worktree, change.movePath ?? change.filePath).replaceAll("\\", "/"),
+    type: change.type,
+    diff: change.diff,
+    patch: change.exact
+      ? undefined
+      : Snapshot.unifiedPatch(change.movePath ?? change.filePath, change.oldContent, change.newContent),
+    additions: change.additions,
+    deletions: change.deletions,
+    movePath: change.movePath,
+  }))
+
+  // Check permissions if needed
+  const relativePaths = fileChanges.map((c) => path.relative(Instance.worktree, c.filePath).replaceAll("\\", "/"))
+  await ctx.ask({
+    permission: "edit",
+    patterns: relativePaths,
+    always: ["*"],
+    metadata: {
+      filepath: relativePaths.join(", "),
+      diff: totalDiff,
+      files,
+    },
+  })
+
+  // Apply the changes
+  const updates: Array<{ file: string; event: "add" | "change" | "unlink" }> = []
+
+  for (const change of fileChanges) {
+    const edited = change.type === "delete" ? undefined : (change.movePath ?? change.filePath)
+    switch (change.type) {
+      case "add":
+        // Create parent directories (recursive: true is safe on existing/root dirs)
+        await fs.mkdir(path.dirname(change.filePath), { recursive: true })
+        await fs.writeFile(change.filePath, change.newContent, "utf-8")
+        updates.push({ file: change.filePath, event: "add" })
+        break
+
+      case "update":
+        await fs.writeFile(change.filePath, change.newContent, "utf-8")
+        updates.push({ file: change.filePath, event: "change" })
+        break
+
+      case "move":
+        if (change.movePath) {
+          // Create parent directories (recursive: true is safe on existing/root dirs)
+          await fs.mkdir(path.dirname(change.movePath), { recursive: true })
+          await fs.writeFile(change.movePath, change.newContent, "utf-8")
+          await fs.unlink(change.filePath)
+          updates.push({ file: change.filePath, event: "unlink" })
+          updates.push({ file: change.movePath, event: "add" })
+        }
+        break
+
+      case "delete":
+        await fs.unlink(change.filePath)
+        updates.push({ file: change.filePath, event: "unlink" })
+        break
+    }
+
+    if (edited) {
+      await Format.file(edited)
+      Bus.publish(File.Event.Edited, { file: edited })
+      await FileTime.read(ctx.sessionID, edited)
+    }
+  }
+
+  // Publish file change events
+  for (const update of updates) {
+    await Bus.publish(FileWatcher.Event.Updated, update)
+  }
+
+  // Notify LSP of file changes and collect diagnostics
+  for (const change of fileChanges) {
+    if (change.type === "delete") continue
+    const target = change.movePath ?? change.filePath
+    await LSP.touchFile(target, true)
+  }
+  const diagnostics = await LSP.diagnostics()
+
+  // Generate output summary
+  const summaryLines = fileChanges.map((change) => {
+    if (change.type === "add") {
+      return `A ${path.relative(Instance.worktree, change.filePath).replaceAll("\\", "/")}`
+    }
+    if (change.type === "delete") {
+      return `D ${path.relative(Instance.worktree, change.filePath).replaceAll("\\", "/")}`
+    }
+    const target = change.movePath ?? change.filePath
+    return `M ${path.relative(Instance.worktree, target).replaceAll("\\", "/")}`
+  })
+  let output = `Success. Updated the following files:\n${summaryLines.join("\n")}`
+  if (merged.length > 0)
+    output += `\n\n${merged.map((file) => path.relative(Instance.worktree, file).replaceAll("\\", "/")).join(", ")}: ${FileMerge.NOTE}`
+
+  // Report LSP errors for changed files
+  const MAX_DIAGNOSTICS_PER_FILE = 20
+  for (const change of fileChanges) {
+    if (change.type === "delete") continue
+    const target = change.movePath ?? change.filePath
+    const normalized = Filesystem.normalizePath(target)
+    const issues = diagnostics[normalized] ?? []
+    const errors = issues.filter((item) => item.severity === 1)
+    if (errors.length > 0) {
+      const limited = errors.slice(0, MAX_DIAGNOSTICS_PER_FILE)
+      const suffix =
+        errors.length > MAX_DIAGNOSTICS_PER_FILE ? `\n... and ${errors.length - MAX_DIAGNOSTICS_PER_FILE} more` : ""
+      output += `\n\nLSP errors detected in ${path.relative(Instance.worktree, target).replaceAll("\\", "/")}, please fix:\n<diagnostics file="${target}">\n${limited.map(LSP.Diagnostic.pretty).join("\n")}${suffix}\n</diagnostics>`
+    }
+  }
+
+  return {
+    title: output,
+    metadata: {
+      diff: totalDiff,
+      files,
+      diagnostics,
+    },
+    output,
+  }
+}

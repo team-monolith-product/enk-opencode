@@ -22,6 +22,16 @@ export namespace FileTime {
     | { readonly status: "changed"; readonly base: string | undefined }
 
   const MAX_BASE_BYTES = 512 * 1024
+  const MAX_SESSION_BASE_BYTES = 8 * 1024 * 1024
+
+  function trim(seen: Map<string, Stamp>) {
+    let total = 0
+    for (const [file, value] of [...seen].reverse()) {
+      if (value.content === undefined) continue
+      total += value.content.length
+      if (total > MAX_SESSION_BASE_BYTES) seen.set(file, { ...value, content: undefined })
+    }
+  }
 
   const session = (reads: Map<SessionID, Map<string, Stamp>>, sessionID: SessionID) => {
     const value = reads.get(sessionID)
@@ -54,12 +64,13 @@ export namespace FileTime {
       const disableCheck = yield* Flag.OPENCODE_DISABLE_FILETIME_CHECK
 
       const stamp = Effect.fnUntraced(function* (file: string, keep = false) {
-        const info = yield* fsys.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined)))
-        const size = info ? Number(info.size) : undefined
+        const before = keep ? yield* fsys.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined))) : undefined
         const content =
-          keep && size !== undefined && size <= MAX_BASE_BYTES
+          before && Number(before.size) <= MAX_BASE_BYTES
             ? yield* fsys.readFileString(file).pipe(Effect.catch(() => Effect.succeed(undefined)))
             : undefined
+        const info = yield* fsys.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        const size = info ? Number(info.size) : undefined
         return {
           read: yield* DateTime.nowAsDate,
           mtime: info ? Option.getOrUndefined(info.mtime)?.getTime() : undefined,
@@ -89,7 +100,11 @@ export namespace FileTime {
       const read = Effect.fn("FileTime.read")(function* (sessionID: SessionID, file: string) {
         const reads = (yield* InstanceState.get(state)).reads
         log.info("read", { sessionID, file })
-        session(reads, sessionID).set(file, yield* stamp(file, true))
+        const value = yield* stamp(file, true)
+        const seen = session(reads, sessionID)
+        seen.delete(file)
+        seen.set(file, value)
+        trim(seen)
       })
 
       const get = Effect.fn("FileTime.get")(function* (sessionID: SessionID, file: string) {
@@ -152,5 +167,11 @@ export namespace FileTime {
 
   export async function withLock<T>(filepath: string, fn: () => Promise<T>): Promise<T> {
     return runPromise((s) => s.withLock(filepath, fn))
+  }
+
+  export function withLocks<T>(filepaths: string[], fn: () => Promise<T>): Promise<T> {
+    const [head, ...rest] = [...new Set(filepaths)].sort()
+    if (!head) return fn()
+    return withLock(head, () => withLocks(rest, fn))
   }
 }
