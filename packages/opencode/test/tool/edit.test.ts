@@ -232,7 +232,30 @@ describe("tool.edit", () => {
       })
     })
 
-    test("throws error when file has been modified since read", async () => {
+    test("applies the edit on top of changes made after the read", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "file.txt")
+      await fs.writeFile(filepath, "title\nbody\n", "utf-8")
+      await touch(filepath, 1_000)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await FileTime.read(ctx.sessionID, filepath)
+
+          await fs.writeFile(filepath, "title\nbody\nfooter\n", "utf-8")
+          await touch(filepath, 2_000)
+
+          const edit = await EditTool.init()
+          const result = await edit.execute({ filePath: filepath, oldString: "title", newString: "TITLE" }, ctx)
+
+          expect(await fs.readFile(filepath, "utf-8")).toBe("TITLE\nbody\nfooter\n")
+          expect(result.output).toContain("changed by someone else")
+        },
+      })
+    })
+
+    test("asks for a re-read when the text it edits was changed after the read", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "original content", "utf-8")
@@ -241,25 +264,16 @@ describe("tool.edit", () => {
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
-          // Read first
           await FileTime.read(ctx.sessionID, filepath)
 
-          // Simulate external modification
           await fs.writeFile(filepath, "modified externally", "utf-8")
           await touch(filepath, 2_000)
 
-          // Try to edit with the new content
           const edit = await EditTool.init()
           await expect(
-            edit.execute(
-              {
-                filePath: filepath,
-                oldString: "modified externally",
-                newString: "edited",
-              },
-              ctx,
-            ),
-          ).rejects.toThrow("modified since it was last read")
+            edit.execute({ filePath: filepath, oldString: "original content", newString: "edited" }, ctx),
+          ).rejects.toThrow("Read the file again")
+          expect(await fs.readFile(filepath, "utf-8")).toBe("modified externally")
         },
       })
     })

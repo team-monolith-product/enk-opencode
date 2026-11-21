@@ -15,6 +15,8 @@ import { Filesystem } from "../util/filesystem"
 import DESCRIPTION from "./apply_patch.txt"
 import { File } from "../file"
 import { Format } from "../format"
+import { FileTime } from "../file/time"
+import { FileMerge } from "../file/merge"
 
 const PatchParams = z.object({
   patchText: z.string().describe("The full patch text that describes all changes to be made"),
@@ -59,6 +61,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
     }> = []
 
     let totalDiff = ""
+    const merged: string[] = []
 
     for (const hunk of hunks) {
       const filePath = path.resolve(Instance.directory, hunk.path)
@@ -66,9 +69,13 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
 
       switch (hunk.type) {
         case "add": {
-          const oldContent = ""
-          const newContent =
+          const existing = await fs.readFile(filePath, "utf-8").catch(() => undefined)
+          const oldContent = existing ?? ""
+          const added =
             hunk.contents.length === 0 || hunk.contents.endsWith("\n") ? hunk.contents : `${hunk.contents}\n`
+          const newContent =
+            existing === undefined ? added : await FileMerge.resolve(ctx.sessionID, filePath, existing, added)
+          if (existing !== undefined && newContent !== added) merged.push(filePath)
           const raw = createTwoFilesPatch(filePath, filePath, oldContent, newContent)
           const diff = trimDiff(raw)
 
@@ -101,6 +108,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
             throw new Error(`apply_patch verification failed: Failed to read file to update: ${filePath}`)
           }
 
+          const seen = await FileTime.check(ctx.sessionID, filePath)
           const oldContent = await fs.readFile(filePath, "utf-8")
           let newContent = oldContent
 
@@ -109,8 +117,10 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
             const fileUpdate = Patch.deriveNewContentsFromChunks(filePath, hunk.chunks)
             newContent = fileUpdate.content
           } catch (error) {
+            if (seen.status === "changed") throw FileMerge.conflict(filePath)
             throw new Error(`apply_patch verification failed: ${error}`)
           }
+          if (seen.status === "changed") merged.push(filePath)
 
           const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
 
@@ -140,6 +150,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
         }
 
         case "delete": {
+          if ((await FileTime.check(ctx.sessionID, filePath)).status === "changed") throw FileMerge.conflict(filePath)
           const contentToDelete = await fs.readFile(filePath, "utf-8").catch((error) => {
             throw new Error(`apply_patch verification failed: ${error}`)
           })
@@ -230,6 +241,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       if (edited) {
         await Format.file(edited)
         Bus.publish(File.Event.Edited, { file: edited })
+        await FileTime.read(ctx.sessionID, edited)
       }
     }
 
@@ -258,6 +270,8 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       return `M ${path.relative(Instance.worktree, target).replaceAll("\\", "/")}`
     })
     let output = `Success. Updated the following files:\n${summaryLines.join("\n")}`
+    if (merged.length > 0)
+      output += `\n\n${merged.map((file) => path.relative(Instance.worktree, file).replaceAll("\\", "/")).join(", ")}: ${FileMerge.NOTE}`
 
     // Report LSP errors for changed files
     const MAX_DIAGNOSTICS_PER_FILE = 20
