@@ -14,6 +14,7 @@ import { FileWatcher } from "../file/watcher"
 import { Bus } from "../bus"
 import { Format } from "../format"
 import { FileTime } from "../file/time"
+import { FileMerge } from "../file/merge"
 import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Snapshot } from "@/snapshot"
@@ -57,10 +58,15 @@ export const EditTool = Tool.define("edit", {
     let diff = ""
     let contentOld = ""
     let contentNew = ""
+    let merged = false
     await FileTime.withLock(filePath, async () => {
       if (params.oldString === "") {
         const existed = await Filesystem.exists(filePath)
-        contentNew = params.newString
+        if (existed) contentOld = await Filesystem.readText(filePath)
+        contentNew = existed
+          ? await FileMerge.resolve(ctx.sessionID, filePath, contentOld, params.newString)
+          : params.newString
+        merged = existed && contentNew !== params.newString
         diff = trimDiff(createTwoFilesPatch(filePath, filePath, contentOld, contentNew))
         await ctx.ask({
           permission: "edit",
@@ -71,7 +77,7 @@ export const EditTool = Tool.define("edit", {
             diff,
           },
         })
-        await Filesystem.write(filePath, params.newString)
+        await Filesystem.write(filePath, contentNew)
         await Format.file(filePath)
         Bus.publish(File.Event.Edited, { file: filePath })
         await Bus.publish(FileWatcher.Event.Updated, {
@@ -85,14 +91,21 @@ export const EditTool = Tool.define("edit", {
       const stats = Filesystem.stat(filePath)
       if (!stats) throw new Error(`File ${filePath} not found`)
       if (stats.isDirectory()) throw new Error(`Path is a directory, not a file: ${filePath}`)
-      await FileTime.assert(ctx.sessionID, filePath)
+      const seen = await FileTime.check(ctx.sessionID, filePath)
+      if (seen.status === "unread") await FileTime.assert(ctx.sessionID, filePath)
+      merged = seen.status === "changed"
       contentOld = await Filesystem.readText(filePath)
 
       const ending = detectLineEnding(contentOld)
       const old = convertToLineEnding(normalizeLineEndings(params.oldString), ending)
       const next = convertToLineEnding(normalizeLineEndings(params.newString), ending)
 
-      contentNew = replace(contentOld, old, next, params.replaceAll)
+      try {
+        contentNew = replace(contentOld, old, next, params.replaceAll)
+      } catch (err) {
+        if (merged) throw FileMerge.conflict(filePath)
+        throw err
+      }
 
       diff = trimDiff(
         createTwoFilesPatch(filePath, filePath, normalizeLineEndings(contentOld), normalizeLineEndings(contentNew)),
@@ -140,7 +153,7 @@ export const EditTool = Tool.define("edit", {
       },
     })
 
-    let output = "Edit applied successfully."
+    let output = merged ? `Edit applied successfully. ${FileMerge.NOTE}` : "Edit applied successfully."
     await LSP.touchFile(filePath, true)
     const diagnostics = await LSP.diagnostics()
     const normalizedFilePath = Filesystem.normalizePath(filePath)
