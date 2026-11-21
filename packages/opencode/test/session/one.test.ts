@@ -166,9 +166,11 @@ describe("team session limit", () => {
     })
   })
 
-  test("an out-of-range limit falls back to between 1 and 3", async () => {
+  test("an out-of-range limit falls back to between 1 and 5", async () => {
+    process.env["ENK_SESSION_LIMIT"] = "5"
+    expect(sessionLimit()).toBe(5)
     process.env["ENK_SESSION_LIMIT"] = "9"
-    expect(sessionLimit()).toBe(3)
+    expect(sessionLimit()).toBe(5)
     process.env["ENK_SESSION_LIMIT"] = "0"
     expect(sessionLimit()).toBe(1)
     delete process.env["ENK_SESSION_LIMIT"]
