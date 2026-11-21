@@ -3,6 +3,7 @@ import path from "path"
 import fs from "fs/promises"
 import { WriteTool } from "../../src/tool/write"
 import { Instance } from "../../src/project/instance"
+import { FileTime } from "../../src/file/time"
 import { tmpdir } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
 
@@ -346,6 +347,55 @@ describe("tool.write", () => {
           )
 
           expect(result.title).toEndWith(path.join("src", "components", "Button.tsx"))
+        },
+      })
+    })
+  })
+
+  describe("changes made by someone else after the read", () => {
+    test("merges with them when the edits do not overlap", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "page.html")
+      await fs.writeFile(filepath, "<h1>title</h1>\n<p>body</p>\n<footer>v1</footer>\n", "utf-8")
+      await fs.utimes(filepath, 1, 1)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await FileTime.read(ctx.sessionID, filepath)
+          await fs.writeFile(filepath, "<h1>Team title</h1>\n<p>body</p>\n<footer>v1</footer>\n", "utf-8")
+          await fs.utimes(filepath, 2, 2)
+
+          const write = await WriteTool.init()
+          const result = await write.execute(
+            { filePath: filepath, content: "<h1>title</h1>\n<p>body</p>\n<footer>v2</footer>\n" },
+            ctx,
+          )
+
+          expect(await fs.readFile(filepath, "utf-8")).toBe("<h1>Team title</h1>\n<p>body</p>\n<footer>v2</footer>\n")
+          expect(result.output).toContain("changed by someone else")
+        },
+      })
+    })
+
+    test("writes nothing and asks for a re-read when the edits overlap", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "page.html")
+      await fs.writeFile(filepath, "<h1>title</h1>\n", "utf-8")
+      await fs.utimes(filepath, 1, 1)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await FileTime.read(ctx.sessionID, filepath)
+          await fs.writeFile(filepath, "<h1>Theirs</h1>\n", "utf-8")
+          await fs.utimes(filepath, 2, 2)
+
+          const write = await WriteTool.init()
+          await expect(write.execute({ filePath: filepath, content: "<h1>Ours</h1>\n" }, ctx)).rejects.toThrow(
+            "Read the file again",
+          )
+          expect(await fs.readFile(filepath, "utf-8")).toBe("<h1>Theirs</h1>\n")
         },
       })
     })
