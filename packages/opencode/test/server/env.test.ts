@@ -4,12 +4,15 @@ import { EnvRoutes } from "../../src/server/routes/env"
 describe("EnvRoutes", () => {
   const prevModel = process.env["ENK_AI_MODEL"]
   const prevVariant = process.env["ENK_AI_MODEL_VARIANT"]
+  const prevConsent = process.env["ENK_CONSENT_REQUIRED"]
 
   afterEach(() => {
     if (prevModel === undefined) delete process.env["ENK_AI_MODEL"]
     else process.env["ENK_AI_MODEL"] = prevModel
     if (prevVariant === undefined) delete process.env["ENK_AI_MODEL_VARIANT"]
     else process.env["ENK_AI_MODEL_VARIANT"] = prevVariant
+    if (prevConsent === undefined) delete process.env["ENK_CONSENT_REQUIRED"]
+    else process.env["ENK_CONSENT_REQUIRED"] = prevConsent
   })
 
   test("returns ENK ai model fields", async () => {
@@ -33,5 +36,15 @@ describe("EnvRoutes", () => {
     const body = await res.json()
     expect(body.aiModel).toBeUndefined()
     expect(body.aiModelVariant).toBeUndefined()
+  })
+
+  test("exposes consentRequired false only when consent is turned off", async () => {
+    process.env["ENK_CONSENT_REQUIRED"] = "0"
+    const off = await (await EnvRoutes().request("/")).json()
+    expect(off.consentRequired).toBe(false)
+
+    delete process.env["ENK_CONSENT_REQUIRED"]
+    const on = await (await EnvRoutes().request("/")).json()
+    expect(on.consentRequired).toBeUndefined()
   })
 })
