@@ -15,6 +15,7 @@ import { useServer } from "@/context/server"
 import { connectUrlFor } from "@/utils/connect-url"
 import { promptLocale } from "@/utils/prompt-locale"
 import { getRelativeTime } from "@/utils/time"
+import { filterRepos, type RepoSort } from "@/utils/github-repos"
 import {
   createGitHubRepo,
   getGitHubRepositories,
@@ -67,7 +68,20 @@ export function DialogGitHub() {
     reposFailed: boolean
     reposLoading: boolean
     picked?: string
-  }>({ failed: false, busy: false, waiting: false, name: "", reposFailed: false, reposLoading: false })
+    query: string
+    sort: RepoSort
+  }>({
+    failed: false,
+    busy: false,
+    waiting: false,
+    name: "",
+    reposFailed: false,
+    reposLoading: false,
+    query: "",
+    sort: "recent",
+  })
+
+  const shownRepos = createMemo(() => filterRepos(state.repos ?? [], state.query, state.sort))
 
   const fail = (err: unknown) => {
     const code = githubCode(err)
@@ -282,8 +296,39 @@ export function DialogGitHub() {
                   </Match>
                   <Match when={state.repos}>
                     <span class="github-hint">{language.t("github.repo.select.hint")}</span>
+                    <div class="github-repo-toolbar">
+                      <input
+                        type="search"
+                        class="github-repo-search"
+                        value={state.query}
+                        onInput={(e) => setState("query", e.currentTarget.value)}
+                        placeholder={language.t("github.repo.search.placeholder")}
+                        aria-label={language.t("github.repo.search.placeholder")}
+                        autocomplete="off"
+                        spellcheck={false}
+                      />
+                      <div class="github-repo-sort" role="radiogroup" aria-label={language.t("github.repo.sort.label")}>
+                        <For each={["recent", "name"] as const}>
+                          {(sort) => (
+                            <button
+                              type="button"
+                              role="radio"
+                              aria-checked={state.sort === sort}
+                              onClick={() => setState("sort", sort)}
+                            >
+                              {language.t(sort === "recent" ? "github.repo.sort.recent" : "github.repo.sort.name")}
+                            </button>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                    <Show when={shownRepos().length === 0}>
+                      <div class="github-panel text-12-regular text-text-weak">
+                        {language.t("github.repo.search.empty")}
+                      </div>
+                    </Show>
                     <div class="github-repos" role="radiogroup" aria-label={language.t("github.repo.select.title")}>
-                      <For each={state.repos}>
+                      <For each={shownRepos()}>
                         {(repo) => {
                           const key = `${repo.owner}/${repo.name}`
                           return (
