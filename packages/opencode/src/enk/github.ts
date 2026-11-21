@@ -607,6 +607,26 @@ export namespace GitHub {
   }
 
   /** 양쪽에서 고친 텍스트 파일을 줄 단위로 합친다. 겹치는 곳이 있거나 바이너리면 undefined. */
+  async function lines(repo: WorkspaceRepo.Repo, entry?: Entry) {
+    if (!entry || entry.mode === "160000") return new Set<string>()
+    const out = await repo.run(["cat-file", "blob", entry.oid])
+    if (out.exitCode !== 0 || out.stdout.includes(0)) return
+    return new Set(
+      out
+        .text()
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter(Boolean),
+    )
+  }
+
+  /** GitHub 쪽에서 새로 생긴 줄이 짓다 파일에 모두 들어 있는지. AI 가 손대지 않았어도 이미 합쳐진 파일을 알아본다. */
+  async function covers(repo: WorkspaceRepo.Repo, base: Entry | undefined, ours: Entry, theirs: Entry) {
+    const [had, mine, added] = await Promise.all([lines(repo, base), lines(repo, ours), lines(repo, theirs)])
+    if (!had || !mine || !added) return false
+    return [...added].every((line) => had.has(line) || mine.has(line))
+  }
+
   async function text3(repo: WorkspaceRepo.Repo, base: Entry, ours: Entry, theirs: Entry) {
     if (base.mode === "160000" || ours.mode === "160000" || theirs.mode === "160000") return
     if (ours.mode !== theirs.mode) return
@@ -671,7 +691,9 @@ export namespace GitHub {
         continue
       }
       if (input.prefer === "ours") continue
-      if (settled && file in settled && (ours?.oid ?? "") !== settled[file]) continue
+      if (settled && file in settled && ours && theirs) {
+        if (ours.oid !== settled[file] || (await covers(repo, base, ours, theirs))) continue
+      }
       if (input.prefer === "theirs") {
         take(file, theirs)
         incoming.push(file)
