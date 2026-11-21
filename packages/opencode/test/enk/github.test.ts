@@ -503,6 +503,29 @@ describe("GitHub.publish with changes made on GitHub", () => {
     expect(await ws.log()).toEqual(["theirs", "first"])
   })
 
+  test("after a conflict, a file that already holds GitHub's new lines is accepted even if the AI left it as is", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { ".gitignore": ".playwright-mcp/\n" })
+    await ws.publish("first")
+    await onGitHub(tmp.path, ws.remote, { ".gitignore": "dist\n" })
+    await put(ws.work, { ".gitignore": "dist\n.playwright-mcp/\n" })
+    const err = await ws.publish("mine").catch((err) => err)
+    expect(err.code).toBe("conflict")
+
+    const result = await GitHub.publish({
+      repo: WorkspaceRepo.open(ws.work),
+      remote: ws.remote,
+      branch: "main",
+      locale: "en",
+      author,
+      settled: { theirs: err.conflict.theirs, files: err.conflict.ours },
+    })
+
+    expect(result.sha).toBeDefined()
+    expect(await $`git --git-dir=${ws.remote} show main:.gitignore`.quiet().text()).toBe("dist\n.playwright-mcp/\n")
+  })
+
   test("after a conflict, a new GitHub edit to the same file stops the push even if the AI edited it", async () => {
     await using tmp = await tmpdir()
     const ws = await workspace(tmp.path)
