@@ -212,6 +212,16 @@
     background-size: var(--app-canvas-grid-size);
   }
 
+  /* 사이드 채팅 — 사이드 패널의 불투명 배경 위에 메인 대화와 같은 캔버스·격자를 다시 깐다. */
+  [data-component="side-chat"] {
+    background-color: var(--app-canvas);
+  }
+
+  :root[data-theme="jitda"] [data-component="side-chat"] {
+    background-image: var(--app-canvas-grid-image);
+    background-size: var(--app-canvas-grid-size);
+  }
+
   [data-component="codle-session-panel"] {
     background: transparent;
   }
@@ -1315,7 +1325,8 @@
 }
 
 /* C-3 액션 바 — 본문(흰색)보다 살짝 따뜻한 회백색(paper) 톤으로 분리 (디자인 --c-paper) */
-[data-component="prompt-doc-actions"] {
+[data-component="prompt-doc-actions"],
+[data-component="side-chat-actions"] {
   background: color-mix(in srgb, var(--app-canvas) 46%, var(--app-paper)) !important;
 }
 

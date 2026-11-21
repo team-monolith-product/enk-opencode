@@ -1,0 +1,16 @@
+Hand content from this side chat to the user's main session.
+
+The content is placed in the main session's prompt editor as text, file references, and attachments. Nothing is sent: the user reviews it there and sends it when ready. The main agent cannot see this side chat, so everything it needs must be in what you hand over.
+
+WHEN TO USE
+- Only when the user asks you to pass something to the main session ("hand this over", "send this to main", "메인에 넘겨").
+- Never on your own initiative.
+
+ARGUMENTS
+- `text`: the request the user would send to the main agent, in the user's voice and language. Include the conclusions from this side chat that the main agent needs.
+- `files`: workspace files the main agent should look at. Add `start`/`end` (1-based lines) and a `comment` when a specific range matters.
+- `attachments`: images or files that appeared in this conversation, by the exact name in their `attachment://<name>` link.
+
+RESULT
+- On success the content is waiting in the main input. Tell the user so; do not claim the main agent received it.
+- If an attachment name or a file path is wrong, nothing is placed and the error lists what to fix. Correct it and call again.

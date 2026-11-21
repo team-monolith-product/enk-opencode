@@ -354,11 +354,33 @@ export const SessionRoutes = lazy(() =>
           sessionID: Session.fork.schema.shape.sessionID,
         }),
       ),
-      validator("json", Session.fork.schema.omit({ sessionID: true })),
+      validator(
+        "json",
+        z.object({
+          messageID: Session.ForkInput.shape.messageID,
+          side: z
+            .boolean()
+            .optional()
+            .describe("Fork as a read-only side chat: a hidden child session limited to the side agent's tools."),
+        }),
+      ),
       async (c) => {
         const sessionID = c.req.valid("param").sessionID
         const body = c.req.valid("json")
-        const result = await Session.fork({ ...body, sessionID })
+        if (!body.side) return c.json(await Session.fork({ sessionID, messageID: body.messageID }))
+        // 사이드 채팅: 원본의 자식으로 만들어 세션 목록·메인 세션 선택에서 빼고, 세션 permission 에도
+        // 읽기 전용 규칙을 넣는다(세션 규칙이 마지막에 적용돼 다른 에이전트로 불러도 안 풀린다).
+        const original = await Session.get(sessionID)
+        const result = await Session.fork({
+          sessionID,
+          messageID: body.messageID,
+          title: `${original.title} (side)`,
+          parentID: sessionID,
+          // 에이전트와 같은 최종 규칙(설정의 제한 포함)을 세션에도 넣는다. 세션 규칙은 실행 때 마지막에
+          // 붙으므로, 사이드 규칙만 넣으면 설정이 막은 읽기·네트워크가 다시 열린다.
+          permission: (await Agent.get(Agent.SIDE)).permission,
+          inert: true,
+        })
         return c.json(result)
       },
     )

@@ -15,14 +15,19 @@ type TabsInput = {
   normalizeTab: (tab: string) => string
   review?: Accessor<boolean>
   preview?: Accessor<boolean>
+  side?: Accessor<boolean>
   hasReview?: Accessor<boolean>
 }
+
+/** 사이드 채팅 탭. preview/review 처럼 파일 탭 목록에 들어가지 않는 고정 탭이다. */
+export const SIDE_CHAT_TAB = "side-chat"
 
 export const getSessionKey = (dir: string | undefined, id: string | undefined) => `${dir ?? ""}${id ? `/${id}` : ""}`
 
 export const createSessionTabs = (input: TabsInput) => {
   const review = input.review ?? (() => false)
   const preview = input.preview ?? (() => false)
+  const side = input.side ?? (() => false)
   const hasReview = input.hasReview ?? (() => false)
   const contextOpen = createMemo(() => input.tabs().active() === "context" || input.tabs().all().includes("context"))
   const openedTabs = createMemo(
@@ -32,7 +37,7 @@ export const createSessionTabs = (input: TabsInput) => {
         .tabs()
         .all()
         .flatMap((tab) => {
-          if (tab === "context" || tab === "review" || tab === "preview") return []
+          if (tab === "context" || tab === "review" || tab === "preview" || tab === SIDE_CHAT_TAB) return []
           const value = input.pathFromTab(tab) ? input.normalizeTab(tab) : tab
           if (seen.has(value)) return []
           seen.add(value)
@@ -47,6 +52,7 @@ export const createSessionTabs = (input: TabsInput) => {
     if (active === "context") return active
     if (active === "preview" && preview()) return active
     if (active === "review" && review()) return active
+    if (active === SIDE_CHAT_TAB && side()) return active
     if (active && input.pathFromTab(active)) return input.normalizeTab(active)
 
     const first = openedTabs()[0]
@@ -106,7 +112,7 @@ export const shouldFocusTerminalOnKeyDown = (event: Pick<KeyboardEvent, "key" | 
 
 export const isDiffTab = (tab: string) => tab.startsWith("diff://")
 
-const pseudoTab = (tab: string) => tab === "preview" || tab === "review"
+const pseudoTab = (tab: string) => tab === "preview" || tab === "review" || tab === SIDE_CHAT_TAB
 
 let suppressPseudo = 0
 
