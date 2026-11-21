@@ -2039,7 +2039,7 @@ const execOptions = () => ({ toolCallId: "call-1", messages: [], abortSignal: ne
 it.effect("code mode off keeps the direct tools and adds no execute tool", () =>
   provideTmpdirInstance(
     () =>
-      withFallbackEnv({ ENK_CODEMODE: undefined }, () =>
+      withFallbackEnv({ ENK_CODEMODE: "0" }, () =>
         Effect.gen(function* () {
           const { test, prompt, chat } = yield* boot()
           yield* test.reply(...replyStop("ok"))
@@ -2057,10 +2057,10 @@ it.effect("code mode off keeps the direct tools and adds no execute tool", () =>
   ),
 )
 
-it.effect("code mode on moves the file and shell tools behind execute and keeps the others direct", () =>
+it.effect("code mode is on by default: file and shell tools move behind execute and the others stay direct", () =>
   provideTmpdirInstance(
     () =>
-      withFallbackEnv({ ENK_CODEMODE: "1" }, () =>
+      withFallbackEnv({ ENK_CODEMODE: undefined }, () =>
         Effect.gen(function* () {
           const { test, prompt, chat } = yield* boot()
           yield* test.reply(...replyStop("ok"))
@@ -2143,5 +2143,88 @@ it.effect("execute reports a failing inner tool as an error result", () =>
         }),
       ),
     { git: true, config: cfg },
+  ),
+)
+
+it.effect("execute records each inner call as its own tool part", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { test, prompt, chat, sessions } = yield* boot()
+        const root = yield* Effect.promise(() => fsp.realpath(dir))
+        const file = `${root}/note.txt`
+        yield* Effect.promise(() => Bun.write(file, "alpha\n"))
+        yield* test.reply(...replyStop("ok"))
+        yield* user(chat.id, "hello")
+        yield* prompt.loop({ sessionID: chat.id })
+
+        const tools = (yield* test.inputs)[0].tools
+        yield* Effect.promise(() =>
+          (tools["execute"].execute as any)(
+            {
+              code: `
+                await tools.read({ filePath: ${JSON.stringify(file)} })
+                await tools.edit({ filePath: ${JSON.stringify(file)}, oldString: "alpha", newString: "beta" })
+              `,
+            },
+            execOptions(),
+          ),
+        )
+
+        const parts = (yield* sessions.messages({ sessionID: chat.id })).flatMap((msg) => msg.parts)
+        const inner = parts.filter(
+          (part): part is MessageV2.ToolPart => part.type === "tool" && part.metadata?.["codemode"] === true,
+        )
+        expect(inner.map((part) => part.tool)).toEqual(["read", "edit"])
+        expect(inner.every((part) => part.state.status === "completed")).toBe(true)
+        expect(inner[0].callID).toBe("call-1:0")
+        expect(inner[1].callID).toBe("call-1:1")
+        const completed = inner[0].state.status === "completed" ? inner[0].state : undefined
+        expect(completed?.output).toContain("alpha")
+      }),
+    { git: true, config: cfg },
+  ),
+)
+
+it.effect("a rejected permission inside execute stops the script and fails the call", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { test, prompt, chat } = yield* boot()
+        const root = yield* Effect.promise(() => fsp.realpath(dir))
+        yield* test.reply(...replyStop("ok"))
+        yield* user(chat.id, "hello")
+        yield* prompt.loop({ sessionID: chat.id })
+
+        const tools = (yield* test.inputs)[0].tools
+        const run = (tools["execute"].execute as any)(
+          {
+            code: `
+              try { await tools.write({ filePath: ${JSON.stringify(`${root}/first.txt`)}, content: "1" }) } catch (error) {}
+              await tools.write({ filePath: ${JSON.stringify(`${root}/second.txt`)}, content: "2" })
+            `,
+          },
+          execOptions(),
+        )
+        const permission = yield* Permission.Service
+        const settled = run.then(
+          () => "resolved",
+          (error: unknown) => (error instanceof Permission.RejectedError ? "rejected" : `other: ${error}`),
+        )
+        for (let i = 0; i < 300; i++) {
+          const pending = yield* permission.list()
+          if (pending.length > 0) {
+            yield* permission.reply({ requestID: pending[0].id, reply: "reject" })
+            break
+          }
+          yield* Effect.sleep(10)
+        }
+        const outcome = yield* Effect.promise(() => settled)
+
+        expect(outcome).toBe("rejected")
+        expect(yield* Effect.promise(() => Bun.file(`${root}/first.txt`).exists())).toBe(false)
+        expect(yield* Effect.promise(() => Bun.file(`${root}/second.txt`).exists())).toBe(false)
+      }),
+    { git: true, config: { ...cfg, permission: { edit: "ask" } } },
   ),
 )

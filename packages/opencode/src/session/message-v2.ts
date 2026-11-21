@@ -801,7 +801,7 @@ export namespace MessageV2 {
             assistantMessage.parts.push({
               type: "step-start",
             })
-          if (part.type === "tool") {
+          if (part.type === "tool" && part.metadata?.["codemode"] !== true) {
             toolNames.add(part.tool)
             if (part.state.status === "completed") {
               const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
