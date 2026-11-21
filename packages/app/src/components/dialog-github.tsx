@@ -5,7 +5,7 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
 import { createEffect, createMemo, For, Match, onCleanup, onMount, Show, Switch as Branch } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createStore, reconcile } from "solid-js/store"
 import { Link } from "@/components/link"
 import { useLanguage } from "@/context/language"
 import { readonlyViewer } from "@/context/parent-params"
@@ -173,7 +173,7 @@ export function DialogGitHub(props: { sessionID?: string }) {
       createGitHubRepo(o, { name: state.name.trim(), locale: promptLocale(language.locale()) }),
     )
     if (!status) return
-    setState("status", status)
+    setState("status", reconcile(status))
     const first = status.firstPush
     if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
   }
@@ -186,7 +186,7 @@ export function DialogGitHub(props: { sessionID?: string }) {
       selectGitHubRepo(o, { owner: repo.owner, name: repo.name, locale: promptLocale(language.locale()) }),
     )
     if (!status) return void refetch()
-    setState("status", status)
+    setState("status", reconcile(status))
     const first = status.firstPush
     if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
   }
@@ -197,7 +197,7 @@ export function DialogGitHub(props: { sessionID?: string }) {
     const result = await run(() => pushGitHub(o, { locale: promptLocale(language.locale()) }))
     if (!result) return void refetch()
     const { pushed, ...status } = result
-    if (status.enabled) setState("status", status)
+    if (status.enabled) setState("status", reconcile(status))
     else void refetch()
     showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
   }
@@ -208,7 +208,7 @@ export function DialogGitHub(props: { sessionID?: string }) {
     const result = await run(() => resolveGitHub(o, { prefer, locale: promptLocale(language.locale()) }))
     if (!result) return void refetch()
     const { pushed: _, ...status } = result
-    if (status.enabled) setState("status", status)
+    if (status.enabled) setState("status", reconcile(status))
     else void refetch()
     if (!status.blocked) showToast({ title: language.t("github.blocked.done") })
   }
@@ -220,7 +220,7 @@ export function DialogGitHub(props: { sessionID?: string }) {
       mergeGitHubWithAI(o, { sessionID: props.sessionID!, locale: promptLocale(language.locale()) }),
     )
     if (!status) return void refetch()
-    setState("status", status)
+    setState("status", reconcile(status))
     showToast({ title: language.t("github.blocked.ai.sent") })
     dialog.close()
   }
