@@ -157,6 +157,7 @@ export const dict = {
   "github.error.forbidden": "이 저장소에 올릴 권한이 없어요",
   "github.error.revoked": "GitHub 권한이 사라졌어요. 짓다에서 다시 연결해 주세요",
   "github.error.app": "GitHub에서 저장소를 먼저 만든 뒤 짓다에서 선택해 주세요",
+  "github.error.selected": "다른 팀원이 먼저 저장소를 골랐어요",
   "github.error.missing": "저장소를 찾을 수 없어요",
   "github.error.empty": "올릴 파일이 없어요",
   "github.error.remote": "GitHub에 연결하지 못했어요. 잠시 후 다시 시도해 주세요",

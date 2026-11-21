@@ -13,6 +13,7 @@ import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { connectUrlFor } from "@/utils/connect-url"
+import { manageLink, pushAfterChange, repoKey, type ManageAction } from "./dialog-github-manage"
 import { promptLocale } from "@/utils/prompt-locale"
 import { getRelativeTime } from "@/utils/time"
 import {
@@ -38,6 +39,7 @@ const ERRORS = {
   forbidden: "github.error.forbidden",
   revoked: "github.error.revoked",
   app: "github.error.app",
+  selected: "github.error.selected",
   missing: "github.error.missing",
   empty: "github.error.empty",
   remote: "github.error.remote",
@@ -67,7 +69,16 @@ export function DialogGitHub() {
     reposFailed: boolean
     reposLoading: boolean
     picked?: string
-  }>({ failed: false, busy: false, waiting: false, name: "", reposFailed: false, reposLoading: false })
+    managing: boolean
+  }>({
+    failed: false,
+    busy: false,
+    waiting: false,
+    name: "",
+    reposFailed: false,
+    reposLoading: false,
+    managing: false,
+  })
 
   const fail = (err: unknown) => {
     const code = githubCode(err)
@@ -78,10 +89,13 @@ export function DialogGitHub() {
   const refetch = async () => {
     const o = opts()
     if (!o) return
-    await getGitHubStatus(o).then(
-      (status) => setState({ status, failed: false }),
-      () => setState("failed", true),
-    )
+    const before = repoKey(state.status?.repo)
+    const status = await getGitHubStatus(o).catch(() => undefined)
+    if (!status) return setState("failed", !state.status)
+    setState({ status, failed: false })
+    if (pushAfterChange({ managing: state.managing, before, after: repoKey(status.repo), pushed: !!status.push })) {
+      void push()
+    }
   }
   onMount(() => void refetch())
 
@@ -98,7 +112,7 @@ export function DialogGitHub() {
   const back = () => {
     if (document.visibilityState !== "visible") return
     if (view() === "choose" && state.status?.app) void loadRepos()
-    if (!state.waiting && !state.status?.manageUrl) return
+    if (!state.waiting && !state.managing) return
     setState("waiting", false)
     void refetch()
   }
@@ -121,13 +135,11 @@ export function DialogGitHub() {
     window.open(connectUrlFor(url), "_blank", "noopener")
   }
 
-  const manage = (action: "change" | "unlink") => {
+  const manage = (action: ManageAction) => {
     const url = state.status?.manageUrl
     if (!url || spectator) return
-    const target = new URL(connectUrlFor(url))
-    target.searchParams.set("action", action)
-    setState("waiting", true)
-    window.open(target.toString(), "_blank", "noopener")
+    setState({ waiting: true, managing: true })
+    window.open(manageLink(url, action), "_blank", "noopener")
   }
 
   const run = async <T,>(fn: () => Promise<T>) => {
@@ -165,7 +177,7 @@ export function DialogGitHub() {
     const status = await run(() =>
       selectGitHubRepo(o, { owner: repo.owner, name: repo.name, locale: promptLocale(language.locale()) }),
     )
-    if (!status) return
+    if (!status) return void refetch()
     setState("status", status)
     const first = status.firstPush
     if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })

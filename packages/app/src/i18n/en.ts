@@ -160,6 +160,7 @@ export const dict = {
   "github.error.forbidden": "You can't push to this repository",
   "github.error.revoked": "GitHub access was revoked. Link again in Jitda",
   "github.error.app": "Create the repository on GitHub, then choose it in Jitda",
+  "github.error.selected": "A teammate already chose the repository",
   "github.error.missing": "Couldn't find the repository",
   "github.error.empty": "There are no files to push",
   "github.error.remote": "Couldn't reach GitHub. Try again in a moment",

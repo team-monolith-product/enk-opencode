@@ -616,6 +616,19 @@ describe("GitHub.create", () => {
     expect(await origin.subjects()).toEqual(["later"])
   })
 
+  test("a first push failure is not shown once the team switches to another repository", async () => {
+    await using tmp = await tmpdir()
+    const current = { ...link }
+    await using _rails = serve(current)
+    using _github = mockGitHub(() => Response.json({ message: "Server Error" }, { status: 500 }))
+    const created = await create(tmp.path, { name: "jitda-app" })
+    expect(created.firstPush).toMatchObject({ code: "remote" })
+
+    current.repo = { owner: "octocat", name: "other", url: "https://github.com/octocat/other" }
+
+    expect((await GitHub.status(tmp.path)).firstPush).toBeUndefined()
+  })
+
   test("stops retrying once the first push has used up its time budget", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)
@@ -683,6 +696,22 @@ describe("GitHub.create", () => {
       { owner: "octocat", name: "demo", url: "https://github.com/octocat/demo", private: true },
       { owner: "octocat", name: "blog", url: "https://github.com/octocat/blog", private: false },
     ])
+  })
+
+  test("choosing after a teammate already chose is reported as selected, not unlinked", async () => {
+    await using tmp = await tmpdir()
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => Response.json({ errors: [{ status: "409", title: "AlreadySelected" }] }, { status: 409 }),
+    })
+    process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
+    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
+
+    const failure = await select(tmp.path, { owner: "octocat", name: "demo" }).catch((err) => err)
+    await server.stop(true)
+
+    expect(failure).toBeInstanceOf(GitHub.Failure)
+    expect(failure.code).toBe("selected")
   })
 
   test("listing without a link is refused", async () => {
