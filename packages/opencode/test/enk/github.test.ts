@@ -625,7 +625,9 @@ describe("GitHub.create", () => {
     expect(created.firstPush).toMatchObject({ code: "remote" })
 
     current.repo = { owner: "octocat", name: "other", url: "https://github.com/octocat/other" }
+    expect((await GitHub.status(tmp.path)).firstPush).toBeUndefined()
 
+    current.repo = link.repo
     expect((await GitHub.status(tmp.path)).firstPush).toBeUndefined()
   })
 

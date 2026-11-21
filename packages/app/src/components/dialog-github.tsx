@@ -13,7 +13,7 @@ import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
 import { connectUrlFor } from "@/utils/connect-url"
-import { manageLink, pushAfterChange, repoKey, type ManageAction } from "./dialog-github-manage"
+import { manageLink, refetchOnReturn, statusSync, type ManageAction } from "./dialog-github-manage"
 import { promptLocale } from "@/utils/prompt-locale"
 import { getRelativeTime } from "@/utils/time"
 import {
@@ -86,17 +86,17 @@ export function DialogGitHub() {
     showToast({ title: key ? language.t(key) : language.t("common.requestFailed") })
   }
 
-  const refetch = async () => {
-    const o = opts()
-    if (!o) return
-    const before = repoKey(state.status?.repo)
-    const status = await getGitHubStatus(o).catch(() => undefined)
-    if (!status) return setState("failed", !state.status)
-    setState({ status, failed: false })
-    if (pushAfterChange({ managing: state.managing, before, after: repoKey(status.repo), pushed: !!status.push })) {
-      void push()
-    }
-  }
+  const refetch = statusSync({
+    load: async () => {
+      const o = opts()
+      if (!o) return state.status
+      return getGitHubStatus(o).catch(() => undefined)
+    },
+    current: () => state.status,
+    managing: () => state.managing,
+    apply: (status) => (status ? setState({ status, failed: false }) : setState("failed", !state.status)),
+    push: () => push(),
+  })
   onMount(() => void refetch())
 
   const loadRepos = async () => {
@@ -112,7 +112,7 @@ export function DialogGitHub() {
   const back = () => {
     if (document.visibilityState !== "visible") return
     if (view() === "choose" && state.status?.app) void loadRepos()
-    if (!state.waiting && !state.managing) return
+    if (!refetchOnReturn({ waiting: state.waiting, managing: state.managing })) return
     setState("waiting", false)
     void refetch()
   }

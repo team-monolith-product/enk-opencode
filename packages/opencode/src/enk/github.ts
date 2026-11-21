@@ -144,7 +144,11 @@ export namespace GitHub {
 
   function lastFailure(dir: string, repo?: Repo): FirstPush | undefined {
     const hit = failed.get(dir)
-    if (!hit || hit.repo !== repoKey(repo)) return
+    if (!hit) return
+    if (hit.repo !== repoKey(repo)) {
+      failed.delete(dir)
+      return
+    }
     const { repo: _, ...first } = hit
     return first
   }
