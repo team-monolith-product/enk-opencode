@@ -349,8 +349,9 @@ export function createPromptDocSession(): PromptDocSession {
     const elsewhere = state.sessionID !== params.id
     if (state.status !== "pending" && elsewhere) {
       if (!opts?.local) {
-        if (finalizedID === state.submitID) return
-        finalizedID = state.submitID
+        if (finalized.includes(state.submitID)) return
+        finalized.push(state.submitID)
+        if (finalized.length > 8) finalized.shift()
       }
       if (state.status === "sent" || state.targetKind === "stop") {
         if (dialogOpen(state.submitID)) closeApproval()

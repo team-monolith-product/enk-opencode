@@ -790,7 +790,7 @@ export namespace Doc {
     return routeOf(row.session_id, row.target_kind, row.target_id)
   }
 
-  function pendingRows(route: string) {
+  function teamPending(route: string) {
     if (!route.startsWith(TEAM)) {
       return Database.use((db) =>
         db
@@ -1303,7 +1303,7 @@ export namespace Doc {
     }
 
     if (input.targetKind !== "question") {
-      const other = pendingRows(teamRoute(input.sessionID))
+      const other = teamPending(teamRoute(input.sessionID))
         .filter((row) => row.session_id !== input.sessionID)
         .some((row) => expire(row).status === "pending")
       if (other) throw new VoteConflictError({ message: "Another consent vote is in progress" })
@@ -1575,7 +1575,7 @@ export namespace Doc {
   // 참여 인원 기준 판단, 퇴장 쪽: 나간 사람들은 결론 나지 않은 모든 투표에서 표와 함께 빠지고, 남은 인원으로
   // 한 번만 다시 판단한다. 요청자도 예외가 아니다. 아무도 남지 않으면 보내지 않는다.
   function leave(route: string, actorIDs: ActorID[]) {
-    for (const row of pendingRows(route)) {
+    for (const row of teamPending(route)) {
       const next = expire(row)
       if (next.status !== "pending") continue
       const gone = read(next).actors.filter((item) => actorIDs.includes(item.actorID))
@@ -1606,7 +1606,7 @@ export namespace Doc {
   // pending state so connect() can replay it to the joining peer.
   function join(route: string, actorID: ActorID) {
     let first: SubmitState | undefined
-    for (const row of pendingRows(route)) {
+    for (const row of teamPending(route)) {
       const next = expire(row)
       if (next.status !== "pending") continue
       if (!timers.has(next.id)) schedule(next)
