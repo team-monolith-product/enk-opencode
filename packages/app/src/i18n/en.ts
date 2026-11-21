@@ -146,7 +146,7 @@ export const dict = {
   "github.repo.select.hint": "Only the repositories you selected when installing the GitHub app are shown.",
   "github.repo.change": "Change repository",
   "github.unlink": "Unlink",
-  "github.manage.hint": "Only the teammate who linked GitHub can change the repository or unlink it. Finish in the new window and come back to see the change.",
+  "github.manage.hint": "Only the teammate who linked GitHub can change the repository, and anyone on the team can unlink. Finish in the new window and come back to see the change.",
   "github.push.last": "Last pushed {{time}}",
   "github.push.lastBy": "Last pushed {{time}} by {{name}}",
   "github.push.never": "Not pushed yet",

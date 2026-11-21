@@ -143,7 +143,7 @@ export const dict = {
   "github.repo.select.hint": "GitHub 앱을 설치할 때 선택한 저장소만 보여요.",
   "github.repo.change": "저장소 변경",
   "github.unlink": "연동 해제",
-  "github.manage.hint": "저장소 변경과 연동 해제는 연동한 팀원만 할 수 있어요. 새 창에서 마치고 돌아오면 바로 반영돼요.",
+  "github.manage.hint": "저장소 변경은 연동한 팀원만, 연동 해제는 팀원 누구나 할 수 있어요. 새 창에서 마치고 돌아오면 바로 반영돼요.",
   "github.push.last": "{{time}}에 올림",
   "github.push.lastBy": "{{time}}에 {{name}}님이 올림",
   "github.push.never": "아직 올린 적이 없어요",
