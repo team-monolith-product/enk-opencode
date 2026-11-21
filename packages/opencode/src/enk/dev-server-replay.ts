@@ -52,6 +52,17 @@ export namespace DevServerReplay {
   /** 로그 tail 로 읽어 올 최대 바이트. 파일이 아무리 커져도 이 뒤쪽만 읽는다. */
   const LOG_TAIL_BYTES = 64 * 1024
 
+  const LAUNCH_GRACE_MS = 60_000
+  const pending = new Map<number, { pid: number; at: number }>()
+
+  export function launching(port: number): boolean {
+    const entry = pending.get(port)
+    if (!entry) return false
+    if (Date.now() - entry.at < LAUNCH_GRACE_MS && alive(entry.pid)) return true
+    pending.delete(port)
+    return false
+  }
+
   const State = z.object({
     cmd: z.string(),
     cwd: z.string(),
@@ -98,7 +109,7 @@ export namespace DevServerReplay {
    * 참가자가 나중에 UI(env_request)로 저장한 시크릿은 앱에 도달하지 못한다. dotenv 를 안 쓰는
    * 런타임(파이썬, 순수 node 서버)에서도 이제 같은 값을 본다.
    */
-  export async function launch(cmd: string, cwd: string, opts?: { dir?: string }) {
+  export async function launch(cmd: string, cwd: string, opts?: { dir?: string; port?: number }) {
     const file = logFile(cwd, opts?.dir ?? cwd)
     const script = `mkdir -p ${sq(dirname(file))} 2>/dev/null; : > ${sq(file)} 2>/dev/null; {\n${cmd}\n} >> ${sq(file)} 2>&1`
     const child = spawn("/bin/sh", ["-lc", script], {
@@ -109,6 +120,14 @@ export namespace DevServerReplay {
     })
     child.on("error", (err) => log.warn("dev server spawn failed", { cwd, err: String(err) }))
     child.unref()
+    const port = opts?.port
+    if (port && child.pid) {
+      const entry = { pid: child.pid, at: Date.now() }
+      pending.set(port, entry)
+      child.once("exit", () => {
+        if (pending.get(port) === entry) pending.delete(port)
+      })
+    }
     return child
   }
 
@@ -216,7 +235,14 @@ export namespace DevServerReplay {
    * 성공 판정 기준은 "포트가 실제로 닫혔는가" 하나 — 시그널 전달 여부가 아니다.
    */
   export async function stop(port: number, pid?: number, timeoutMs = 5000): Promise<boolean> {
-    if (!(await probePort(port))) return true
+    if (!(await probePort(port))) {
+      const inflight = pending.get(port)
+      if (inflight) {
+        pending.delete(port)
+        killGroup(inflight.pid, "SIGKILL")
+      }
+      return true
+    }
 
     const holders = await pidsListeningOn(port)
     const recorded = pid && pid !== process.pid && alive(pid) ? pid : undefined
@@ -278,12 +304,12 @@ export namespace DevServerReplay {
       log.warn("recorded cwd no longer exists, skipping replay", { cwd: state.cwd })
       return
     }
-    if (await probePort(state.port)) {
+    if ((await probePort(state.port)) || launching(state.port)) {
       log.info("dev server already listening, skipping replay", { port: state.port })
       return
     }
 
-    const child = await launch(state.cmd, state.cwd, { dir: target.dir })
+    const child = await launch(state.cmd, state.cwd, { dir: target.dir, port: state.port })
     log.info("replayed dev server", { pid: child.pid, port: state.port, cwd: state.cwd })
     // 기록의 pid 는 항상 "지금 포트를 잡고 있는 프로세스" 여야 한다. 여기서 갱신하지 않으면
     // 재스폰 뒤 stop() 이 죽은 옛 pid 를 들고 폴백으로 새는 일이 생긴다.
