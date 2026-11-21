@@ -8,6 +8,7 @@ import { SessionPrompt } from "@/session/prompt"
 import { SessionID } from "@/session/schema"
 import { SessionStatus } from "@/session/status"
 import { Log } from "@/util/log"
+import { Question } from "@/question"
 import { EnkFailure } from "./failure"
 import { GitHub } from "./github"
 import { History } from "./history"
@@ -154,8 +155,84 @@ export namespace HistorySync {
         message: (changes) => TurnSummary.describe(turn, changes),
         turn: turn.user.id,
       }).catch((err) => log.warn("save failed", { error: err instanceof Error ? err.message : String(err) }))
-      await GitHub.sync(dir, turn.user.locale).catch((err) => failed(err, evt.properties.sessionID))
+      const result = await GitHub.sync(dir, turn.user.locale).catch((err) => {
+        failed(err, evt.properties.sessionID)
+        return undefined
+      })
+      if (result?.conflict && !result.conflict.resolving) {
+        void ask({ sessionID: evt.properties.sessionID, dir, conflict: result.conflict, locale: turn.user.locale })
+      }
     })
+  }
+
+  const CHOICE: Record<
+    Locale.Value,
+    {
+      header: string
+      question: (files: string[], linking?: boolean) => string
+      ai: GitHub.Choice
+      theirs: GitHub.Choice
+      ours: GitHub.Choice
+    }
+  > = {
+    ko: {
+      header: "GitHub 충돌",
+      question: (files, linking) =>
+        `${linking ? "연결한 GitHub 저장소에 있던 파일" : "GitHub에서 따로 바뀐 내용"}과 짓다에서 바뀐 내용이 같은 곳에서 겹쳐요. 어떻게 맞출까요? 고르기 전까지 짓다 내용은 따로 만든 브랜치에만 올라가 있어요.\n\n겹친 파일: ${files.join(", ")}`,
+      ai: { label: "AI가 합치기", description: "양쪽 내용을 모두 살려 AI가 합친 뒤 올려요" },
+      theirs: { label: "GitHub 기준", description: "겹친 곳은 GitHub 내용을 따르고, 나머지는 양쪽을 합쳐 올려요" },
+      ours: { label: "짓다 기준", description: "겹친 곳은 짓다 내용을 따르고, 나머지는 양쪽을 합쳐 올려요" },
+    },
+    en: {
+      header: "GitHub conflict",
+      question: (files, linking) =>
+        `${linking ? "Files already in the linked GitHub repository" : "Changes made separately on GitHub"} overlap with changes made in Jitda. How should they be lined up? Until you choose, Jitda's work is only on a separate branch.\n\nOverlapping files: ${files.join(", ")}`,
+      ai: { label: "Let the AI merge", description: "The AI combines both sides, then it is pushed" },
+      theirs: {
+        label: "GitHub's side",
+        description: "Overlaps follow GitHub; everything else from both sides is kept",
+      },
+      ours: { label: "Jitda's side", description: "Overlaps follow Jitda; everything else from both sides is kept" },
+    },
+  }
+
+  const asking = new Set<string>()
+
+  /**
+   * 대화가 끝나 올리다 GitHub 와 겹치면 바로 대화창에 고를 거리를 띄운다. 질문 창이 떠 있는 동안 다음 대화는 시작되지
+   * 않는다. 같은 폴더에 이미 떠 있으면 다시 띄우지 않는다.
+   */
+  export async function ask(input: {
+    sessionID: SessionID
+    dir: string
+    conflict: GitHub.Conflict
+    locale?: Locale.Value
+  }) {
+    if (asking.has(input.dir)) return
+    asking.add(input.dir)
+    const locale = input.locale ?? Locale.DEFAULT
+    const text = CHOICE[locale]
+    const options = [text.ai, text.theirs, text.ours]
+    const answers = await Question.ask({
+      sessionID: input.sessionID,
+      questions: [
+        {
+          header: text.header,
+          question: text.question(input.conflict.files, input.conflict.linking),
+          options,
+          custom: false,
+        },
+      ],
+    })
+      .catch(() => undefined)
+      .finally(() => asking.delete(input.dir))
+    const picked = answers?.[0]?.[0]
+    if (picked === text.ai.label) {
+      return merge({ sessionID: input.sessionID, locale }).catch((err) => failed(err, input.sessionID))
+    }
+    const prefer = picked === text.theirs.label ? "theirs" : picked === text.ours.label ? "ours" : undefined
+    if (!prefer) return
+    return GitHub.resolve(input.dir, { prefer, locale }).catch((err) => failed(err, input.sessionID))
   }
 
   export function failed(err: unknown, sessionID: SessionID) {

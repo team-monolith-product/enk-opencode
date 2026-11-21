@@ -204,7 +204,7 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
     const { pushed: _, ...status } = result
     if (status.enabled) setState("status", reconcile(status))
     else void refetch()
-    if (!status.conflict) showToast({ title: language.t("github.linking.done") })
+    showToast({ title: language.t(status.conflict ? "github.linking.pending" : "github.linking.done") })
   }
 
   const conflict = createMemo(() => state.status?.conflict)
@@ -424,7 +424,7 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
                               {language.t("github.conflict.merge")}
                             </Button>
                           </Show>
-                          <Show when={item().linking}>
+                          <Show when={!item().resolving}>
                             <Button
                               type="button"
                               size="small"
@@ -452,7 +452,7 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
                             )}
                           </Show>
                         </div>
-                        <Show when={item().linking}>
+                        <Show when={!item().resolving}>
                           <span class="github-hint">{language.t("github.linking.theirs.hint")}</span>
                           <span class="github-hint">
                             {language.t("github.linking.ours.hint", { target: item().target })}

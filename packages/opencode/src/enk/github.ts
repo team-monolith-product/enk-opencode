@@ -1,4 +1,4 @@
-import { writeFile } from "fs/promises"
+import { readFile, writeFile } from "fs/promises"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import path from "path"
 import { setTimeout as sleep } from "node:timers/promises"
@@ -51,6 +51,7 @@ export namespace GitHub {
   export type Conflict = { branch: string; target: string; files: string[]; resolving: boolean; linking?: boolean }
   export type Result = { sha?: string; conflict?: Conflict; absorbed?: number }
   export type Prefer = "ours" | "theirs"
+  export type Choice = { label: string; description: string }
   export type Code =
     | "disabled"
     | "unlinked"
@@ -378,16 +379,111 @@ export namespace GitHub {
   }
 
   /**
-   * 연결 직후 이미 다른 내용이 있던 저장소를 팀이 고른 쪽으로 맞춘다. `theirs` 는 작업 폴더를 GitHub 내용으로
-   * 맞추고(지금 파일은 버전 기록에 남는다), `ours` 는 짓다 내용을 GitHub 커밋 위에 새 커밋으로 올린다.
+   * 충돌 표시의 한쪽만 남긴다. merge-tree 는 `<<<<<<<` 아래에 짓다(ours), `=======` 아래에 GitHub(theirs)를 둔다.
+   * diff3 형식이면 `|||||||` 아래 기준 내용은 버린다.
+   */
+  export function pick(text: string, prefer: Prefer) {
+    return text.replace(
+      /^<{7}(?: [^\n]*)?\r?\n([\s\S]*?)(?:^\|{7}(?: [^\n]*)?\r?\n[\s\S]*?)?^={7}\r?\n([\s\S]*?)^>{7}(?: [^\n]*)?(?:\r?\n|$)/gm,
+      (_, ours: string, theirs: string) => (prefer === "ours" ? ours : theirs),
+    )
+  }
+
+  const RESOLVE = {
+    ko: {
+      ours: "충돌을 짓다 기준으로 맞춤",
+      theirs: "충돌을 GitHub 기준으로 맞춤",
+      backup: "충돌 맞추기 전 자동 저장",
+    },
+    en: {
+      ours: "Resolved the conflict with Jitda's side",
+      theirs: "Resolved the conflict with GitHub's side",
+      backup: "Saved before resolving the conflict",
+    },
+  } as const
+
+  /**
+   * GitHub 와 겹친 곳을 팀이 고른 쪽으로 맞추고 올린다. 겹치지 않은 변경은 양쪽 모두 살린다. GitHub 변경을 작업
+   * 폴더에 들인 뒤 충돌 표시를 고른 쪽만 남기고, 표시를 남길 수 없는 바이너리는 고른 쪽 파일을 쓴다.
    */
   export async function resolve(dir: string, input: { prefer: Prefer; locale?: Locale.Value }) {
     if (!(await status(dir)).enabled) throw new Failure("disabled", 409)
-    if (!conflicts.get(dir)?.linking) throw new Failure("clean", 409)
-    const subject = TurnSummary.manual(input.locale)
-    await snapshot(dir, subject)
-    const result = await push(dir, { locale: input.locale, subject, prefer: input.prefer })
-    return { ...(await status(dir)), pushed: !!result.sha }
+    if (!conflicts.get(dir)) throw new Failure("clean", 409)
+    if (await working()) throw new Failure("busy", 409)
+    const label = RESOLVE[input.locale ?? "ko"]
+    const result = await absorb(dir, { backup: label.backup })
+    const repo = WorkspaceRepo.open(dir)
+    const side = input.prefer === "theirs" ? result.theirs : result.ours
+    for (const file of result.files) {
+      const full = path.join(dir, file)
+      const text = await readFile(full, "utf8").catch(() => undefined)
+      if (text === undefined) continue
+      const picked = pick(text, input.prefer)
+      const original = side ? (await repo.run(["cat-file", "blob", `${side}:${file}`])).text() : undefined
+      await writeFile(full, original !== undefined && picked === `${original}\n` ? original : picked)
+    }
+    if (input.prefer === "theirs") {
+      for (const file of result.kept) {
+        const out = await repo.run(["cat-file", "blob", `${result.theirs}:${file}`])
+        if (out.exitCode === 0) await writeFile(path.join(dir, file), out.stdout)
+      }
+    }
+    await History.commit(dir, { message: label[input.prefer] })
+    const pushed = await push(dir, { locale: input.locale, subject: label[input.prefer] })
+    return { ...(await status(dir)), pushed: !!pushed.sha }
+  }
+
+  async function working(except?: string) {
+    return [...(await SessionStatus.list()).entries()].some(([id, item]) => id !== except && item.type !== "idle")
+  }
+
+  const PULL = {
+    ko: { message: "GitHub에서 바뀐 내용 가져오기", backup: "GitHub 내용 가져오기 전 자동 저장" },
+    en: { message: "Brought in changes from GitHub", backup: "Saved before bringing in GitHub changes" },
+  } as const
+
+  /**
+   * GitHub 기본 브랜치에서 마지막으로 맞춘 뒤 바뀐 내용을 작업 폴더로 가져온다. 대화를 시작할 때와 끝나 올리기 전에
+   * 부른다. 짓다 변경과 겹치면 건드리지 않고 올리기에서 충돌로 다룬다. 다른 대화가 답하는 중이면 건너뛴다.
+   */
+  export async function pull(dir: string, input: { locale?: Locale.Value; except?: string; known?: Link } = {}) {
+    if (!ServeTargets.isProject(dir)) return
+    if (conflicts.get(dir)) return
+    const hit = input.known ?? (await link())
+    if (!hit?.enabled || !hit.connected || !hit.token || !hit.repo) return
+    if (await working(input.except)) return
+    const repo = WorkspaceRepo.open(dir)
+    const lane: Lane = { repo, remote: `${web}/${hit.repo.owner}/${hit.repo.name}.git`, env: auth(hit.token) }
+    return repo.lock(async () => {
+      const head = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
+      if (!head) return
+      const branch = await defaultBranch(lane)
+      const theirs = branch && (await tip(lane, branch))
+      if (!branch || !theirs) return
+      const base = await baseOf(lane, branch, theirs, hit.push?.sha)
+      if (!base) return
+      const tree = await publishable(repo, `${head}^{tree}`)
+      const merged = await merge(repo, base, theirs, tree)
+      if (merged.conflicts.length) return
+      const files = (await WorkspaceRepo.diff(repo, tree, merged.tree)).map((change) => change.file)
+      if (files.length === 0) return
+      const source = (
+        await repo.must(["commit-tree", "--no-gpg-sign", merged.tree, "-p", theirs, "-m", "jitda"], { env: who })
+      ).trim()
+      await History.absorb(dir, { source, files, ...PULL[input.locale ?? "ko"] })
+      await repo.must(["update-ref", baseRef(lane.remote, branch), theirs])
+      log.info("pulled", { files: files.length })
+      return files
+    }, "github")
+  }
+
+  async function defaultBranch(lane: Lane) {
+    const out = await lane.repo.run(["ls-remote", "--symref", lane.remote, "HEAD"], { env: lane.env })
+    const line = out
+      .text()
+      .split("\n")
+      .find((item) => item.startsWith("ref: "))
+    return line?.match(/^ref: refs\/heads\/(\S+)\tHEAD/)?.[1]
   }
 
   const ABSORB = {
@@ -420,14 +516,11 @@ export namespace GitHub {
     if (!ServeTargets.isProject(dir)) return
     const hit = await link()
     if (!hit?.enabled || !hit.connected || !hit.token || !hit.repo) return
-    await push(dir, { locale }, hit)
+    await pull(dir, { locale, known: hit }).catch((err) => log.warn("pull skipped", { error: lean(err) }))
+    return push(dir, { locale }, hit)
   }
 
-  export async function push(
-    dir: string,
-    input: { locale?: Locale.Value; subject?: string; prefer?: Prefer },
-    known?: Link,
-  ) {
+  export async function push(dir: string, input: { locale?: Locale.Value; subject?: string }, known?: Link) {
     const hit = known ?? (await linked())
     if (!hit.repo) throw new Failure("norepo", 409)
     const remote = await request<Remote>(
@@ -451,11 +544,9 @@ export namespace GitHub {
       },
       env: auth(hit.token!),
       known: hit.push?.sha,
-      prefer: input.prefer,
-      absorb: async (source) => {
-        const busy = [...(await SessionStatus.list()).values()].some((item) => item.type !== "idle")
-        if (busy) throw new Failure("busy", 409)
-        return (await History.absorb(dir, { source, ...ABSORB[input.locale ?? "ko"] })).length
+      absorb: async (source, files) => {
+        if (await working()) throw new Failure("busy", 409)
+        return (await History.absorb(dir, { source, files, ...ABSORB[input.locale ?? "ko"] })).length
       },
     })
     failed.delete(dir)
@@ -576,7 +667,7 @@ export namespace GitHub {
     return (await repo.must(["commit-tree", "--no-gpg-sign", tree, "-m", "jitda"], { env: who })).trim()
   }
 
-  export type Absorbed = { files: string[]; kept: string[] }
+  export type Absorbed = { files: string[]; kept: string[]; theirs: string; ours?: string }
 
   /**
    * AI 로 합치기 전 단계. GitHub 쪽 변경을 작업 폴더에 들이고, 양쪽이 같은 곳을 고친 파일에는 충돌 표시를 남긴다.
@@ -604,7 +695,7 @@ export namespace GitHub {
       const tree = await publishable(repo, `${head}^{tree}`)
       const base = (await baseOf(lane, conflict.target, theirs, hit.push?.sha)) || (await empty(repo))
       const merged = await merge(repo, base, theirs, tree)
-      if (merged.conflicts.length === 0 && !conflict.linking) {
+      if (merged.conflicts.length === 0) {
         conflicts.delete(dir)
         throw new Failure("clean", 409)
       }
@@ -627,7 +718,7 @@ export namespace GitHub {
       const files = merged.conflicts.filter((file) => !kept.includes(file))
       conflicts.set(dir, { ...conflict, files, resolving: true })
       log.info("absorbed", { files: files.length, kept: kept.length, changes: changes.length })
-      return { files, kept }
+      return { files, kept, theirs, ours: merged.ours }
     }, "github")
   }
 
@@ -660,8 +751,7 @@ export namespace GitHub {
     author: { name: string; email: string }
     env?: Record<string, string>
     known?: string
-    prefer?: Prefer
-    absorb?: (source: string) => Promise<number>
+    absorb?: (source: string, files?: string[]) => Promise<number>
   }): Promise<Result> {
     const { repo } = input
     const lane: Lane = { repo, remote: input.remote, env: input.env }
@@ -682,7 +772,8 @@ export namespace GitHub {
     }
     const absorb =
       input.absorb ??
-      (async (source: string) => (await History.absorb(repo.dir, { source, ...ABSORB[input.locale ?? "ko"] })).length)
+      (async (source: string, files?: string[]) =>
+        (await History.absorb(repo.dir, { source, files, ...ABSORB[input.locale ?? "ko"] })).length)
     const send = async (sha: string, branch: string) =>
       await repo.run(["push", "--quiet", input.remote, `${sha}:refs/heads/${branch}`], { env: input.env })
 
@@ -744,21 +835,27 @@ export namespace GitHub {
             await settle(theirs)
             return {}
           }
-          const choice = input.prefer ?? ((await blank(repo, tree)) ? "theirs" : undefined)
-          if (choice === "theirs") {
+          if (await blank(repo, tree)) {
             const absorbed = await absorb(theirs)
             await settle(theirs)
             return { absorbed }
           }
-          if (choice !== "ours") {
-            const files = (await WorkspaceRepo.diff(repo, theirsTree, tree)).map((change) => change.file)
-            return diverged(theirs, files, true, true)
+          const linked = await merge(repo, await empty(repo), theirs, tree)
+          if (linked.conflicts.length > 0) return diverged(theirs, linked.conflicts, true, true)
+          const pulled = (await WorkspaceRepo.diff(repo, tree, linked.tree)).map((change) => change.file)
+          const source = (
+            await repo.must(["commit-tree", "--no-gpg-sign", linked.tree, "-p", theirs, "-m", "jitda"], { env: who })
+          ).trim()
+          const absorbed = pulled.length ? await absorb(source, pulled) : 0
+          if (linked.tree === theirsTree) {
+            await settle(theirs)
+            return { absorbed }
           }
-          const sha = await write(tree, theirs, theirsTree, subject)
+          const sha = await write(linked.tree, theirs, theirsTree, subject)
           const out = await send(sha, input.branch)
           if (out.exitCode !== 0) return again(out)
           await settle(sha)
-          return { sha }
+          return { sha, absorbed }
         }
         if (base === null) {
           const files = (await WorkspaceRepo.diff(repo, theirsTree, tree)).map((change) => change.file)

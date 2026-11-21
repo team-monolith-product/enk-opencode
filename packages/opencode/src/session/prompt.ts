@@ -33,6 +33,7 @@ import { ModelFallback } from "../enk/model-fallback"
 import { Locale } from "../enk/locale"
 import { HistoryNote } from "../enk/history-note"
 import { MemoryNote } from "../enk/memory-note"
+import { GitHub } from "../enk/github"
 import { SessionFallback } from "./fallback"
 import { ulid } from "ulid"
 import { spawn } from "child_process"
@@ -1697,6 +1698,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
 
             step++
+            // 연결한 GitHub 저장소에서 따로 바뀐 내용을 모델이 파일을 읽기 전에 작업 폴더로 가져온다.
+            if (step === 1)
+              yield* Effect.promise(() =>
+                GitHub.pull(session.directory, { locale: lastUser!.locale, except: sessionID }).catch(() => undefined),
+              )
             if (step === 1)
               yield* title({
                 session,
@@ -1920,7 +1926,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // 모델을 부르지 않는 작업(되돌리기 등)을 셸 명령과 같은 자리에서 돌린다. 도는 동안 세션은 바쁨으로 보이고, 그
       // 사이 들어온 프롬프트는 끝난 뒤 이어서 돈다. 이미 답이 도는 중이면 BusyError. 셸 결과 자리는 러너도 호출자도
       // 읽지 않아 빈 값을 둔다.
-      const exclusive = Effect.fn("SessionPrompt.exclusive")(function* (sessionID: SessionID, work: () => Promise<void>) {
+      const exclusive = Effect.fn("SessionPrompt.exclusive")(function* (
+        sessionID: SessionID,
+        work: () => Promise<void>,
+      ) {
         const s = yield* InstanceState.get(cache)
         const runner = getRunner(s.runners, sessionID)
         yield* runner.startShell(() => Effect.promise(work).pipe(Effect.as(undefined as never)))

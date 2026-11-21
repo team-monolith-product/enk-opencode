@@ -172,14 +172,15 @@ export const dict = {
   "github.error.busy": "The AI is still answering. Try again once it finishes",
   "github.linking.title": "This repository already has other files",
   "github.linking.body":
-    "The linked repository has files that differ from the Jitda project, so {{target}} was left as is and the project went to {{branch}} instead. Choose how to line them up.",
-  "github.linking.theirs": "Bring in GitHub's files",
-  "github.linking.ours": "Push Jitda's files",
+    "Files already in the linked repository overlap with the Jitda project, so {{target}} was left as is and the project went to {{branch}} instead. Choose how to line them up.",
+  "github.linking.theirs": "Use GitHub's side",
+  "github.linking.ours": "Use Jitda's side",
   "github.linking.theirs.hint":
-    "Bring in GitHub's files: the project folder follows GitHub. Your current files stay in the version history.",
+    "Use GitHub's side: overlaps follow GitHub, and everything else from both sides is kept and pushed. Your current files stay in the version history.",
   "github.linking.ours.hint":
-    "Push Jitda's files: Jitda's files go up to {{target}} as a new commit. GitHub's earlier files stay in the commit history.",
+    "Use Jitda's side: overlaps follow Jitda, and everything else from both sides is kept and pushed to {{target}}. GitHub's earlier files stay in the commit history.",
   "github.linking.done": "Synced with GitHub",
+  "github.linking.pending": "Some overlaps are still left",
   "github.conflict.title": "Your changes overlap with changes on GitHub",
   "github.conflict.body":
     "Someone changed the same places on GitHub, so {{target}} was left as it is and your work was pushed to the {{branch}} branch. Nothing was lost on either side.",
