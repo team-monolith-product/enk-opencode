@@ -79,6 +79,7 @@ export const dict = {
   "envRequest.notice.docs": "값은 {{url}} 에서 받아요",
   "envRequest.editing": "{{names}}님이 입력 중",
   "envRequest.readonly": "관전 중에는 값을 넣을 수 없어요.",
+  "permission.readonly": "관전 중에는 승인하거나 거절할 수 없어요.",
   "envRequest.cancel": "취소",
   "envRequest.save": "안전하게 저장",
   "envKeys.title": "외부 연동 관리",

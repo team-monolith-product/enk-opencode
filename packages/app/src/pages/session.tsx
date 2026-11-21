@@ -36,6 +36,7 @@ import { useComments } from "@/context/comments"
 import { getSessionPrefetch, SESSION_PREFETCH_TTL } from "@/context/global-sync/session-prefetch"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
+import { readonlyViewer } from "@/context/parent-params"
 import { useLayout } from "@/context/layout"
 import { usePrompt } from "@/context/prompt"
 import { usePromptDocBridge } from "@/context/prompt-doc-bridge"
@@ -1592,6 +1593,7 @@ export default function Page() {
 
   const revertMutation = useMutation(() => ({
     mutationFn: async (input: { sessionID: string; messageID: string }) => {
+      if (readonlyViewer()) return
       const prev = prompt.current().slice()
       const last = info()?.revert
       const value = draft(input.messageID)
@@ -1617,7 +1619,7 @@ export default function Page() {
   const restoreMutation = useMutation(() => ({
     mutationFn: async (id: string) => {
       const sessionID = params.id
-      if (!sessionID) return
+      if (!sessionID || readonlyViewer()) return
 
       const next = userMessages().find((item) => item.id > id)
       const prev = prompt.current().slice()
@@ -1995,7 +1997,9 @@ export default function Page() {
           />
         </div>
 
-        <TerminalPanel />
+        <Show when={!readonlyViewer()}>
+          <TerminalPanel />
+        </Show>
       </div>
     </PromptDocSessionProvider>
   )

@@ -7,6 +7,7 @@ import { mapValues } from "remeda"
 import { errors } from "../error"
 import { Log } from "../../util/log"
 import { lazy } from "../../util/lazy"
+import { Viewer } from "../viewer"
 
 const log = Log.create({ service: "server" })
 
@@ -30,7 +31,7 @@ export const ConfigRoutes = lazy(() =>
         },
       }),
       async (c) => {
-        return c.json(await Config.get())
+        return c.json(Viewer.redact(c.req.raw, await Config.get()))
       },
     )
     .patch(
@@ -83,10 +84,12 @@ export const ConfigRoutes = lazy(() =>
       async (c) => {
         using _ = log.time("providers")
         const providers = await Provider.list().then((x) => mapValues(x, (item) => item))
-        return c.json({
-          providers: Object.values(providers),
-          default: mapValues(providers, (item) => Provider.sort(Object.values(item.models))[0].id),
-        })
+        return c.json(
+          Viewer.redact(c.req.raw, {
+            providers: Object.values(providers),
+            default: mapValues(providers, (item) => Provider.sort(Object.values(item.models))[0].id),
+          }),
+        )
       },
     ),
 )

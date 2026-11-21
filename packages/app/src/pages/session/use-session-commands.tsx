@@ -5,6 +5,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { previewSelectedLines } from "@opencode-ai/ui/pierre/selection-bridge"
 import { useFile, selectionFromLines, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { useLanguage } from "@/context/language"
+import { readonlyViewer } from "@/context/parent-params"
 import { useLayout } from "@/context/layout"
 import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
@@ -41,6 +42,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const env = useClientEnv()
   const dialog = useDialog()
   const file = useFile()
+  const spectator = readonlyViewer()
   const language = useLanguage()
   const local = useLocal()
   const permission = usePermission()
@@ -580,19 +582,28 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     }),
   ]
 
-  command.register("session", () => [
-    ...sessionCmds(),
-    ...shareCmds(),
-    ...fileCmds(),
-    ...contextCmds(),
-    ...viewCmds(),
-    ...terminalCmds(),
-    ...messageCmds(),
-    // ENT-69 운영 빌드에서는 모델 피커 진입(`mod+'`, `/model`, `shift+mod+d`)을 차단 (로컬 vite dev에서만 유지).
-    ...(import.meta.env.DEV ? modelCmds() : []),
-    ...mcpCmds(),
-    ...envCmds(),
-    ...agentCmds(),
-    ...(import.meta.env.VITE_DISABLE_PROMPT_PERMISSIONS === "true" ? [] : permissionsCmds()),
-  ])
+  command.register("session", () =>
+    spectator
+      ? [
+          ...fileCmds(),
+          ...viewCmds().filter((item) => item.id !== "terminal.toggle" && item.id !== "input.focus"),
+          ...messageCmds(),
+          ...envCmds(),
+        ]
+      : [
+          ...sessionCmds(),
+          ...shareCmds(),
+          ...fileCmds(),
+          ...contextCmds(),
+          ...viewCmds(),
+          ...terminalCmds(),
+          ...messageCmds(),
+          // ENT-69 운영 빌드에서는 모델 피커 진입(`mod+'`, `/model`, `shift+mod+d`)을 차단 (로컬 vite dev에서만 유지).
+          ...(import.meta.env.DEV ? modelCmds() : []),
+          ...mcpCmds(),
+          ...envCmds(),
+          ...agentCmds(),
+          ...(import.meta.env.VITE_DISABLE_PROMPT_PERMISSIONS === "true" ? [] : permissionsCmds()),
+        ],
+  )
 }
