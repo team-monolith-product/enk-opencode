@@ -52,9 +52,9 @@ async function workspace(root: string) {
   return {
     work,
     remote,
-    publish: async (message: string) => {
+    publish: async (message: string, prefer?: GitHub.Prefer) => {
       await History.commit(work, { message })
-      return GitHub.publish({ repo: WorkspaceRepo.open(work), remote, branch: "main", locale: "en", author })
+      return GitHub.publish({ repo: WorkspaceRepo.open(work), remote, branch: "main", locale: "en", author, prefer })
     },
     files: () =>
       $`git --git-dir=${remote} ls-tree -r --name-only main`
@@ -67,6 +67,21 @@ async function workspace(root: string) {
         .text()
         .then((text) => text.split("\n").filter(Boolean)),
   }
+}
+
+async function seed(remote: string, root: string, files: Record<string, string>) {
+  const other = path.join(root, "seed")
+  await $`git init --quiet --initial-branch=main ${other}`.quiet()
+  await put(other, files)
+  await $`git -C ${other} add -A -f`.quiet()
+  await $`git -C ${other} -c user.name=o -c user.email=o@o commit --quiet -m existing`.quiet()
+  await $`git -C ${other} push --quiet ${remote} HEAD:main`.quiet()
+}
+
+async function read(file: string) {
+  return Bun.file(file)
+    .text()
+    .catch(() => undefined)
 }
 
 async function put(root: string, files: Record<string, string>) {
@@ -458,6 +473,114 @@ describe("GitHub.publish with changes made on GitHub", () => {
   })
 })
 
+describe("GitHub.publish when linking a repository that already has files", () => {
+  const branches = (remote: string) =>
+    $`git --git-dir=${remote} for-each-ref ${"--format=%(refname:short)"} refs/heads`
+      .quiet()
+      .text()
+      .then((text) => text.split("\n").filter(Boolean).sort())
+
+  test("leaves the default branch alone and puts the workspace on a side branch", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await seed(ws.remote, tmp.path, { "README.md": "mine on github", "main.py": "print(1)" })
+    await put(ws.work, { "index.html": "jitda" })
+
+    const result = await ws.publish("first")
+
+    expect(result.sha).toBeUndefined()
+    expect(result.conflict).toMatchObject({ target: "main", linking: true, resolving: false })
+    expect(result.conflict!.files).toEqual(expect.arrayContaining(["README.md", "main.py", "index.html"]))
+    expect(await ws.log()).toEqual(["existing"])
+    const side = (await branches(ws.remote)).find((name) => name.startsWith("jitda/"))!
+    expect(side).toBe(result.conflict!.branch)
+    expect(
+      (await $`git --git-dir=${ws.remote} ls-tree -r --name-only ${side}`.quiet().text()).split("\n").filter(Boolean),
+    ).toEqual(["index.html"])
+  })
+
+  test("the next push keeps going to the side branch until the team chooses", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await seed(ws.remote, tmp.path, { "README.md": "mine on github" })
+    await put(ws.work, { "index.html": "jitda" })
+    const first = await ws.publish("first")
+    await put(ws.work, { "index.html": "jitda 2" })
+
+    const again = await ws.publish("second")
+
+    expect(again.conflict?.branch).toBe(first.conflict!.branch)
+    expect(await ws.log()).toEqual(["existing"])
+  })
+
+  test("a blank workspace takes the repository as it is", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await seed(ws.remote, tmp.path, { "README.md": "mine on github", "src/main.js": "go()" })
+    await WorkspaceRepo.ignore(ws.work)
+
+    const result = await ws.publish("first")
+
+    expect(result.conflict).toBeUndefined()
+    expect(result.absorbed).toBeGreaterThan(0)
+    expect(await read(path.join(ws.work, "README.md"))).toBe("mine on github")
+    expect(await read(path.join(ws.work, "src/main.js"))).toBe("go()")
+    expect(await ws.log()).toEqual(["existing"])
+  })
+
+  test("choosing GitHub matches the workspace to the repository, and later pushes merge instead of replacing", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await seed(ws.remote, tmp.path, { "README.md": "mine on github", "app.py": "print(1)\n" })
+    await put(ws.work, { "index.html": "jitda" })
+    await ws.publish("first")
+
+    const result = await ws.publish("again", "theirs")
+    await put(ws.work, { "app.py": "print(2)\n" })
+    const next = await ws.publish("edit")
+
+    expect(result.absorbed).toBeGreaterThan(0)
+    expect(await read(path.join(ws.work, "README.md"))).toBe("mine on github")
+    expect(await read(path.join(ws.work, "index.html"))).toBeUndefined()
+    const old = (await History.list(ws.work)).find((item) => item.subject === "first")!
+    expect((await History.changes(ws.work, old.sha)).map((item) => item.file)).toContain("index.html")
+    expect(next.sha).toBeDefined()
+    expect(await ws.files()).toEqual(["README.md", "app.py"])
+    expect(await ws.log()).toEqual(["edit", "existing"])
+  })
+
+  test("a page brought in from GitHub keeps the preview bridge and goes back up byte for byte", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    const tag = `<script src="/__preview-bridge.js" data-preview-bridge></script>`
+    const page = "<!doctype html>\n<html>\n<head>\n<title>b</title>\n</head>\n<body></body>\n</html>\n"
+    await seed(ws.remote, tmp.path, { "index.html": page })
+    await put(ws.work, { "index.html": `<html><head>${tag}<title>a</title></head></html>`, "__preview-bridge.js": "b" })
+
+    await ws.publish("first", "theirs")
+    const after = await ws.publish("next")
+
+    expect(await read(path.join(ws.work, "index.html"))).toBe(page.replace("<head>", `<head>${tag}\n`))
+    expect(after.sha).toBeUndefined()
+    expect(await ws.log()).toEqual(["existing"])
+  })
+
+  test("choosing Jitda pushes the workspace on top of the default branch", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await seed(ws.remote, tmp.path, { "README.md": "mine on github" })
+    await put(ws.work, { "index.html": "jitda" })
+    await ws.publish("first")
+
+    const result = await ws.publish("mine", "ours")
+
+    expect(result.sha).toBeDefined()
+    expect(result.conflict).toBeUndefined()
+    expect(await ws.files()).toEqual(["index.html"])
+    expect(await ws.log()).toEqual(["first", "existing"])
+  })
+})
+
 describe("GitHub.absorb", () => {
   const link = {
     enabled: true,
@@ -497,6 +620,45 @@ describe("GitHub.absorb", () => {
 
   const absorb = (dir: string) =>
     Instance.provide({ directory: dir, fn: () => GitHub.absorb(dir, { backup: "backup" }) })
+
+  test("for a repository that already had files, brings in GitHub-only files and marks files that differ", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    await seed(bare, tmp.path, { "README.md": "from github", "app.py": "print('github')\n" })
+    const work = path.join(tmp.path, "work")
+    await put(work, { "app.py": "print('jitda')\n", "jitda.txt": "j" })
+    const publish = async (message: string) => {
+      await History.commit(work, { message })
+      return GitHub.publish({
+        repo: WorkspaceRepo.open(work),
+        remote: "https://github.com/octocat/jitda-app.git",
+        branch: "main",
+        locale: "en",
+        author,
+      })
+    }
+    const first = await publish("first")
+    expect(first.conflict?.linking).toBe(true)
+
+    const result = await absorb(work)
+    await put(work, { "app.py": "print('jitda')\nprint('github')\n" })
+    const pushed = await publish("merged")
+
+    expect(result.files).toEqual(["app.py"])
+    expect(await read(path.join(work, "README.md"))).toBe("from github")
+    expect(pushed.sha).toBeDefined()
+    expect(await $`git --git-dir=${bare} show main:app.py`.quiet().text()).toBe("print('jitda')\nprint('github')\n")
+    expect(
+      (await $`git --git-dir=${bare} ls-tree -r --name-only main`.quiet().text()).split("\n").filter(Boolean),
+    ).toEqual(["README.md", "app.py", "jitda.txt"])
+  })
 
   test("brings GitHub's changes into the workspace and marks the conflicting lines", async () => {
     await using tmp = await tmpdir()
@@ -957,6 +1119,35 @@ describe("GitHub.create", () => {
     expect(status.firstPush).toBeUndefined()
     expect(await origin.files()).toEqual([".gitignore", "index.html"])
     expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
+  })
+
+  test("choosing a repository that already has other files leaves it alone and offers to line them up", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    await hub(tmp.path)
+    await seed(path.join(tmp.path, "hub", "octocat", "jitda-app.git"), tmp.path, { "README.md": "on github" })
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    const status = await select(work, { owner: "octocat", name: "jitda-app" })
+
+    expect(status.firstPush).toBeUndefined()
+    expect(status.conflict?.linking).toBe(true)
+    expect(rails.reports).toHaveLength(1)
+
+    const resolved = await Instance.provide({
+      directory: work,
+      fn: () => GitHub.resolve(work, { prefer: "theirs" }),
+    })
+
+    expect(resolved.conflict).toBeUndefined()
+    expect(await read(path.join(work, "README.md"))).toBe("on github")
+    expect(await read(path.join(work, "index.html"))).toBeUndefined()
   })
 
   test("a GitHub App link pushes even though the installation token reports no push permission", async () => {

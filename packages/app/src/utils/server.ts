@@ -150,6 +150,7 @@ export type GitHubConflict = {
   target: string
   files: string[]
   resolving: boolean
+  linking?: boolean
   compare?: string
 }
 
@@ -180,6 +181,15 @@ export function mergeGitHub(
   return devServerClient(opts)
     .post({ url: "/github/merge", body: input })
     .then((res) => res.data as GitHubStatus & { files: string[]; kept: string[] })
+}
+
+export function resolveGitHub(
+  opts: GitHubOpts,
+  input: { prefer: "ours" | "theirs"; locale?: PromptLocale },
+): Promise<GitHubStatus & { pushed: boolean }> {
+  return devServerClient(opts)
+    .post({ url: "/github/resolve", body: input })
+    .then((res) => res.data as GitHubStatus & { pushed: boolean })
 }
 
 export function getGitHubRepositories(opts: GitHubOpts): Promise<GitHubRepo[]> {

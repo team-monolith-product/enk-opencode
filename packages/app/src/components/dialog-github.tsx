@@ -5,7 +5,7 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { showToast } from "@opencode-ai/ui/toast"
 import { createEffect, createMemo, For, Match, onCleanup, onMount, Show, Switch as Branch } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createStore, reconcile } from "solid-js/store"
 import { Link } from "@/components/link"
 import { useLanguage } from "@/context/language"
 import { readonlyViewer } from "@/context/parent-params"
@@ -21,6 +21,7 @@ import {
   getGitHubStatus,
   githubCode,
   mergeGitHub,
+  resolveGitHub,
   pushGitHub,
   selectGitHubRepo,
   type GitHubRepo,
@@ -152,7 +153,7 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
       createGitHubRepo(o, { name: state.name.trim(), locale: promptLocale(language.locale()) }),
     )
     if (!status) return
-    setState("status", status)
+    setState("status", reconcile(status))
     const first = status.firstPush
     if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
   }
@@ -165,7 +166,7 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
       selectGitHubRepo(o, { owner: repo.owner, name: repo.name, locale: promptLocale(language.locale()) }),
     )
     if (!status) return
-    setState("status", status)
+    setState("status", reconcile(status))
     const first = status.firstPush
     if (first) showToast({ title: language.t("github.firstPush.failed", { count: first.attempts }) })
   }
@@ -176,7 +177,7 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
     const result = await run(() => pushGitHub(o, { locale: promptLocale(language.locale()) }))
     if (!result) return void refetch()
     const { pushed, ...status } = result
-    if (status.enabled) setState("status", status)
+    if (status.enabled) setState("status", reconcile(status))
     else void refetch()
     if (!pushed && status.conflict && !status.conflict.resolving) return
     showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
@@ -190,9 +191,20 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
     )
     if (!result) return void refetch()
     const { files, kept: _, ...status } = result
-    setState("status", status)
+    setState("status", reconcile(status))
     showToast({ title: language.t(files.length ? "github.merge.sent" : "github.merge.done") })
     if (files.length) dialog.close()
+  }
+
+  const resolve = async (prefer: "ours" | "theirs") => {
+    const o = opts()
+    if (!o || spectator) return
+    const result = await run(() => resolveGitHub(o, { prefer, locale: promptLocale(language.locale()) }))
+    if (!result) return void refetch()
+    const { pushed: _, ...status } = result
+    if (status.enabled) setState("status", reconcile(status))
+    else void refetch()
+    if (!status.conflict) showToast({ title: language.t("github.linking.done") })
   }
 
   const conflict = createMemo(() => state.status?.conflict)
@@ -373,7 +385,7 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
                   {(item) => (
                     <div class="github-panel flex flex-col gap-2">
                       <span class="text-12-medium text-text-diff-remove-base">
-                        {language.t("github.conflict.title")}
+                        {language.t(item().linking ? "github.linking.title" : "github.conflict.title")}
                       </span>
                       <Show
                         when={!item().resolving}
@@ -384,7 +396,10 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
                         }
                       >
                         <span class="text-12-regular text-text-weak">
-                          {language.t("github.conflict.body", { target: item().target, branch: item().branch })}
+                          {language.t(item().linking ? "github.linking.body" : "github.conflict.body", {
+                            target: item().target,
+                            branch: item().branch,
+                          })}
                         </span>
                         <span class="text-12-medium text-text-strong">{language.t("github.conflict.files")}</span>
                         <ul class="flex flex-col gap-0.5">
@@ -409,6 +424,26 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
                               {language.t("github.conflict.merge")}
                             </Button>
                           </Show>
+                          <Show when={item().linking}>
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="secondary"
+                              disabled={spectator || state.busy}
+                              onClick={() => void resolve("theirs")}
+                            >
+                              {language.t("github.linking.theirs")}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="secondary"
+                              disabled={spectator || state.busy}
+                              onClick={() => void resolve("ours")}
+                            >
+                              {language.t("github.linking.ours")}
+                            </Button>
+                          </Show>
                           <Show when={item().compare}>
                             {(href) => (
                               <Link class="github-link text-12-regular" href={href()}>
@@ -417,6 +452,12 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
                             )}
                           </Show>
                         </div>
+                        <Show when={item().linking}>
+                          <span class="github-hint">{language.t("github.linking.theirs.hint")}</span>
+                          <span class="github-hint">
+                            {language.t("github.linking.ours.hint", { target: item().target })}
+                          </span>
+                        </Show>
                       </Show>
                     </div>
                   )}

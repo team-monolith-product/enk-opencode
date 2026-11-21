@@ -135,7 +135,8 @@ export const dict = {
   "github.repo.new": "GitHub에서 새 저장소 만들기",
   "github.repo.reload": "목록 다시 불러오기",
   "github.repo.installations": "GitHub 앱 설치 설정 열기",
-  "github.repo.new.hint": "만든 뒤 목록을 다시 불러오세요. 설치할 때 \"선택한 저장소만\"을 골랐다면 GitHub 앱 설치 설정에서 새 저장소를 추가해야 보여요.",
+  "github.repo.new.hint":
+    '만든 뒤 목록을 다시 불러오세요. 설치할 때 "선택한 저장소만"을 골랐다면 GitHub 앱 설치 설정에서 새 저장소를 추가해야 보여요.',
   "github.repo.empty": "올릴 수 있는 저장소가 없어요. GitHub에서 저장소를 만든 뒤 목록을 다시 불러오세요.",
   "github.repo.private": "비공개",
   "github.error.repos": "저장소 목록을 불러오지 못했어요",
@@ -163,6 +164,16 @@ export const dict = {
   "github.error.disabled": "이 작업 공간에서는 GitHub를 쓸 수 없어요",
   "github.error.clean": "이제 겹치는 변경이 없어요. 다음 올리기에 그대로 올라가요",
   "github.error.busy": "AI가 답하는 중이에요. 답변이 끝난 뒤 다시 눌러 주세요",
+  "github.linking.title": "이 저장소에는 이미 다른 파일이 있어요",
+  "github.linking.body":
+    "연결한 저장소에 짓다 작업 폴더와 다른 파일이 있어서, 덮어쓰지 않도록 {{target}} 브랜치는 그대로 두고 {{branch}} 브랜치에 올렸어요. 어떻게 맞출지 골라 주세요.",
+  "github.linking.theirs": "GitHub 내용 가져오기",
+  "github.linking.ours": "짓다 내용으로 올리기",
+  "github.linking.theirs.hint":
+    "GitHub 내용 가져오기: 작업 폴더를 GitHub 쪽으로 맞춰요. 지금 파일은 버전 기록에 남아요.",
+  "github.linking.ours.hint":
+    "짓다 내용으로 올리기: 짓다 파일을 {{target}} 브랜치에 새 커밋으로 올려요. GitHub의 이전 내용은 커밋 기록에 남아요.",
+  "github.linking.done": "GitHub와 맞췄어요",
   "github.conflict.title": "GitHub에서 바뀐 내용과 겹쳤어요",
   "github.conflict.body":
     "GitHub에서 따로 고친 곳과 짓다에서 고친 곳이 겹쳐서, {{target}} 브랜치는 그대로 두고 {{branch}} 브랜치에 올렸어요. 어느 쪽 작업도 사라지지 않았어요.",

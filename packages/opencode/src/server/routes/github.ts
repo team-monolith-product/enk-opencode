@@ -37,6 +37,7 @@ const Status = z
         target: z.string(),
         files: z.array(z.string()),
         resolving: z.boolean(),
+        linking: z.boolean().optional(),
         compare: z.string().optional(),
       })
       .optional(),
@@ -107,6 +108,18 @@ export const GitHubRoutes = lazy(() =>
       }),
       validator("json", z.object({ name: RepoName, locale: Locale.Schema.optional() })),
       async (c) => c.json(await alerting(c, () => GitHub.create(Instance.directory, c.req.valid("json")))),
+    )
+    .post(
+      "/resolve",
+      describeRoute({
+        summary: "Line up a repository that already had files when linked",
+        description:
+          "The linked repository already had other files, so the push went to a side branch. `theirs` brings the repository's files into the project, `ours` pushes the project's files on top of the repository's default branch.",
+        operationId: "github.resolve",
+        responses: { ...ok("Link status and whether a commit was pushed", Pushed), ...failures(404, 409, 422, 502) },
+      }),
+      validator("json", z.object({ prefer: z.enum(["ours", "theirs"]), locale: Locale.Schema.optional() })),
+      async (c) => c.json(await alerting(c, () => GitHub.resolve(Instance.directory, c.req.valid("json")))),
     )
     .post(
       "/push",

@@ -122,10 +122,13 @@ export const dict = {
   "command.github.description": "Push this project to a GitHub repository",
   "github.title": "Push to GitHub",
   "github.description.unlinked": "Link a GitHub account to push this project to a repository.",
-  "github.description.choose": "Name the repository to push this project to. It is pushed once right after the repository is created.",
+  "github.description.choose":
+    "Name the repository to push this project to. It is pushed once right after the repository is created.",
   "github.description.select": "Choose the repository to push to. It is pushed once right after you choose.",
-  "github.description.linked": "Each time a conversation with the AI finishes, changes are pushed to this repository automatically.",
-  "github.intro.team": "Only one person per team links GitHub in Jitda. Repositories are created in that person's account, and anyone on the team can push.",
+  "github.description.linked":
+    "Each time a conversation with the AI finishes, changes are pushed to this repository automatically.",
+  "github.intro.team":
+    "Only one person per team links GitHub in Jitda. Repositories are created in that person's account, and anyone on the team can push.",
   "github.intro.secret": "Values saved in External services (.env) and folders like node_modules are never pushed.",
   "github.connect": "Link GitHub in Jitda",
   "github.waiting": "Finish linking in the Jitda tab, then come back — this updates on its own.",
@@ -138,7 +141,8 @@ export const dict = {
   "github.repo.new": "Create a new repository on GitHub",
   "github.repo.reload": "Reload list",
   "github.repo.installations": "Open the GitHub app installation settings",
-  "github.repo.new.hint": "Reload the list after creating it. If you chose \"Only select repositories\" when installing, add the new repository in the GitHub app installation settings first.",
+  "github.repo.new.hint":
+    'Reload the list after creating it. If you chose "Only select repositories" when installing, add the new repository in the GitHub app installation settings first.',
   "github.repo.empty": "No repository to push to. Create one on GitHub, then reload the list.",
   "github.repo.private": "Private",
   "github.error.repos": "Couldn't load the repository list",
@@ -166,13 +170,26 @@ export const dict = {
   "github.error.disabled": "GitHub isn't available in this workspace",
   "github.error.clean": "Nothing overlaps anymore. Your changes go up with the next push",
   "github.error.busy": "The AI is still answering. Try again once it finishes",
+  "github.linking.title": "This repository already has other files",
+  "github.linking.body":
+    "The linked repository has files that differ from the Jitda project, so {{target}} was left as is and the project went to {{branch}} instead. Choose how to line them up.",
+  "github.linking.theirs": "Bring in GitHub's files",
+  "github.linking.ours": "Push Jitda's files",
+  "github.linking.theirs.hint":
+    "Bring in GitHub's files: the project folder follows GitHub. Your current files stay in the version history.",
+  "github.linking.ours.hint":
+    "Push Jitda's files: Jitda's files go up to {{target}} as a new commit. GitHub's earlier files stay in the commit history.",
+  "github.linking.done": "Synced with GitHub",
   "github.conflict.title": "Your changes overlap with changes on GitHub",
-  "github.conflict.body": "Someone changed the same places on GitHub, so {{target}} was left as it is and your work was pushed to the {{branch}} branch. Nothing was lost on either side.",
+  "github.conflict.body":
+    "Someone changed the same places on GitHub, so {{target}} was left as it is and your work was pushed to the {{branch}} branch. Nothing was lost on either side.",
   "github.conflict.files": "Overlapping files",
   "github.conflict.merge": "Merge with AI",
-  "github.conflict.merge.hint": "Brings the GitHub changes into your workspace and has the AI combine the overlapping parts, keeping both sides. The result goes to {{target}} once the answer finishes.",
+  "github.conflict.merge.hint":
+    "Brings the GitHub changes into your workspace and has the AI combine the overlapping parts, keeping both sides. The result goes to {{target}} once the answer finishes.",
   "github.conflict.compare": "View on GitHub",
-  "github.conflict.resolving": "The AI is combining the overlapping parts. The result goes to {{target}} once the answer finishes.",
+  "github.conflict.resolving":
+    "The AI is combining the overlapping parts. The result goes to {{target}} once the answer finishes.",
   "github.conflict.toast": "Your changes overlap with GitHub, so they went to the {{branch}} branch",
   "github.conflict.badge": "{{count}} files overlap with GitHub",
   "github.merge.sent": "Asked the AI to merge",
