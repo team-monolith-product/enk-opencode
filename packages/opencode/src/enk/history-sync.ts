@@ -38,10 +38,17 @@ export namespace HistorySync {
 
   const MERGE: Record<
     Locale.Value,
-    { backup: string; merged: string; prompt: (files: string[]) => string; kept: (files: string[]) => string }
+    {
+      backup: string
+      marked: string
+      merged: string
+      prompt: (files: string[]) => string
+      kept: (files: string[]) => string
+    }
   > = {
     ko: {
       backup: "GitHub 변경 합치기 전 자동 저장",
+      marked: "GitHub 변경을 가져와 겹친 곳 표시",
       merged: "GitHub에서 바뀐 내용 합치기",
       prompt: (files) =>
         [
@@ -57,6 +64,7 @@ export namespace HistorySync {
     },
     en: {
       backup: "Saved before merging GitHub changes",
+      marked: "Brought in GitHub changes and marked the overlaps",
       merged: "Merge changes from GitHub",
       prompt: (files) =>
         [
@@ -83,7 +91,7 @@ export namespace HistorySync {
     const label = MERGE[locale]
     const outcome: { result?: GitHub.Absorbed; error?: unknown } = {}
     await SessionPrompt.exclusive(input.sessionID, async () => {
-      await GitHub.absorb(session.directory, { backup: label.backup }).then(
+      await GitHub.absorb(session.directory, { backup: label.backup, marked: label.marked }).then(
         (result) => (outcome.result = result),
         (error) => (outcome.error = error),
       )

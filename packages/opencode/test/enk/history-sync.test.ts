@@ -464,7 +464,10 @@ describe("merging GitHub changes with AI", () => {
         const result = await HistorySync.merge({ sessionID: session.id, locale: "en" })
 
         expect(result).toEqual({ files: ["index.html"], kept: ["logo.png"], theirs: "abc" })
-        expect(absorb).toHaveBeenCalledWith(tmp.path, { backup: "Saved before merging GitHub changes" })
+        expect(absorb).toHaveBeenCalledWith(tmp.path, {
+          backup: "Saved before merging GitHub changes",
+          marked: "Brought in GitHub changes and marked the overlaps",
+        })
         expect(loop).toHaveBeenCalledWith({ sessionID: session.id })
         const [message] = await Session.messages({ sessionID: session.id })
         const text = message!.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
