@@ -29,6 +29,7 @@ import {
   startClearSubmit,
   startRollbackSubmit,
   startStopSubmit,
+  dropNotice,
   type DocSubmitState,
 } from "@/components/prompt-input/doc-submit"
 import { DialogDocSubmit } from "@/components/doc-submit/dialog-doc-submit"
@@ -304,7 +305,10 @@ export function createPromptDocSession(): PromptDocSession {
   // and then every later cast for that vote is swallowed as "already shown". Comparing handles is
   // what makes a consent dialog come back after something else (a question vote, a picker) stole it.
   let approvalDialog: unknown
-  let finalizedID: string | undefined
+  // Submits whose server-sent ending was already handled. More than the last one: a reconnect can
+  // replay a send dropped by a stop vote ahead of that stop vote's own ending. Only the newest few
+  // matter — the server replays nothing older than a few seconds.
+  const finalized: string[] = []
 
   // 투표가 도는 동안에는 다른 합의를 시작할 수 없다(서버도 지우기 합의에 대해 같은 규칙을 건다).
   const votePending = createMemo(() => approval()?.status === "pending")
@@ -335,8 +339,9 @@ export function createPromptDocSession(): PromptDocSession {
       // A server-sent ending is handled exactly once per submit: a replay on reconnect (or a
       // duplicate cast) must not re-clear context or re-open a dialog.
       if (!opts?.local) {
-        if (finalizedID === state.submitID) return
-        finalizedID = state.submitID
+        if (finalized.includes(state.submitID)) return
+        finalized.push(state.submitID)
+        if (finalized.length > 8) finalized.shift()
       }
       // A 'stop' vote shows no terminal screen — any resolution just closes. Stopping the response
       // and the response finishing on its own are the same end state, so there's nothing to show:
@@ -356,6 +361,15 @@ export function createPromptDocSession(): PromptDocSession {
         clearComposer()
         if (dialogOpen(state.submitID)) closeApproval()
         return
+      }
+      // A send dropped because a stop vote took over: the stop dialog is about to cover this outcome,
+      // so say it in a toast — to every member of that send, whichever of the two messages reached them
+      // first (not to a read-only spectator, who sent nothing).
+      if (dropNotice(state, { actorID, readonly })) {
+        showToast({
+          title: language.t("docSubmit.toast.supersededByStop"),
+          description: language.t("docSubmit.toast.supersededByStop.description"),
+        })
       }
       // Cancelled/expired/left: show the outcome to whoever is looking at this vote. With no dialog
       // on screen there is nothing to resolve — opening one now would announce the end of a vote the

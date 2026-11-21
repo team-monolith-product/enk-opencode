@@ -60,6 +60,15 @@ import { Secret } from "@/util/secret"
 import { Cause, Effect, Exit, Layer, Option, Scope, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
+import { RunLink } from "./run-link"
+
+// One loop() call waiting on a session's run. `stopped` flips when someone cancels the session
+// while it waits, so the caller does not restart what was just stopped.
+type Waiter = { stopped: boolean }
+// Everyone currently waiting on a session's run, how far the message table was (RunLink.lastRow)
+// when that run last read the session, and how far it was when someone last called loop() to have
+// the session answered. Lives only while someone waits, so nothing accumulates per session.
+type Watch = { waiters: Set<Waiter>; readAt: number; wantedAt: number }
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -131,13 +140,18 @@ export namespace SessionPrompt {
       const cache = yield* InstanceState.make(
         Effect.fn("SessionPrompt.state")(function* () {
           const runners = new Map<string, Runner<MessageV2.WithParts>>()
+          // loop() 로 실행을 기다리는 사람들. 기다리는 동안만 남는다.
+          const watches = new Map<string, Watch>()
+          // 세션마다 마지막 실행이 마지막으로 메시지를 읽은 위치(RunLink.mark). 다음 실행의 기준을 고를 때, 이미
+          // 앞 실행이 읽고도 답하지 못한 프롬프트(답이 생기기 전에 중지·실패)를 기다리던 프롬프트로 착각하지 않게 한다.
+          const lastRead = new Map<string, RunLink.Mark>()
           yield* Effect.addFinalizer(
             Effect.fnUntraced(function* () {
               yield* Effect.forEach(runners.values(), (r) => r.cancel, { concurrency: "unbounded", discard: true })
               runners.clear()
             }),
           )
-          return { runners }
+          return { runners, watches, lastRead }
         }),
       )
 
@@ -204,6 +218,7 @@ export namespace SessionPrompt {
       const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
         log.info("cancel", { sessionID })
         const s = yield* InstanceState.get(cache)
+        for (const waiter of s.watches.get(sessionID)?.waiters ?? []) waiter.stopped = true
         const runner = s.runners.get(sessionID)
         if (!runner || !runner.busy) {
           // Recovery path: no live/busy runner. Finalize any dangling message so the
@@ -1650,13 +1665,29 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           let step = 0
           // Position in the model chain. Turn-scoped: every turn starts back at the primary model.
           let modelIndex = 0
+          // The user message this run started from, and the later ones it has already linked to it.
+          let anchor: { id: MessageID; row: number } | undefined
+          // How far linkRun has already looked for joined messages (rowid), so each step scans only new rows.
+          let scanned = 0
+          const joined = new Set<MessageID>()
           const session = yield* sessions.get(sessionID)
+          const state = yield* InstanceState.get(cache)
+          // Where the previous run of this session last read. Prompts stored up to there were already read
+          // by that run; if it stopped or failed before answering them, they are not this run's start.
+          const previousRead = state.lastRead.get(sessionID)
 
           while (true) {
             yield* status.set(sessionID, { type: "busy" })
             log.info("loop", { step, sessionID })
 
+            // Taken before the read, so a message stored while the read is in flight still counts as
+            // possibly unread for loop()'s re-run check.
+            const readMark = RunLink.mark(sessionID)
+            const readAt = readMark.row
             let msgs = yield* Effect.promise(() => MessageV2.filterCompacted(MessageV2.stream(sessionID)))
+            state.lastRead.set(sessionID, readMark)
+            const watch = state.watches.get(sessionID)
+            if (watch) watch.readAt = readAt
 
             let lastUser: MessageV2.User | undefined
             let lastAssistant: MessageV2.Assistant | undefined
@@ -1687,6 +1718,29 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               log.info("exiting loop", { sessionID })
               break
             }
+
+            // 사용 기록(prompt cycle)은 실행 하나에 하나다. 이 실행이 시작한 user 메시지가 기준이고, 그 뒤 저장된
+            // user 메시지(스티어, 실행 중 통과한 동의 전송, 자동 압축·하위 작업 요약)는 모두 이 실행에 합류한 것이다 —
+            // 한 스텝 사이에 여럿이 들어와도 모델은 전부 읽는다. 답이 생기기 전인 지금 남겨야 기록기가 그 답을 이
+            // 실행의 기록에 합친다. 순서는 저장 순서(rowid)로만 판단한다(RunLink 참고 — 시각은 시계가 뒤로 가면
+            // 뒤집힌다). 기록은 부수 작업이라 실패해도 실행은 계속한다.
+            const linkRun = Effect.sync(() => {
+              anchor ??= RunLink.start(sessionID, lastUser.id, previousRead)
+              const run = anchor
+              // Only what this step's read holds: a prompt stored while the read was in flight waits for the
+              // step that reads it.
+              const read = { row: readAt, ids: new Set<string>(msgs.map((msg) => msg.info.id)) }
+              const found = RunLink.arrivals(sessionID, Math.max(run.row, scanned), read)
+              scanned = found.last
+              for (const id of found.ids) {
+                if (id === run.id || joined.has(id)) continue
+                joined.add(id)
+                RunLink.link({ sessionID, messageID: id, anchorID: run.id })
+              }
+            })
+            yield* linkRun.pipe(
+              Effect.catchCause((cause) => Effect.sync(() => log.warn("run link failed", { sessionID, cause }))),
+            )
 
             // 팀의 주·월 비용 한도(rails)가 바닥났으면 모델을 부르지 않는다. 제목 생성·압축보다 앞에 두어 한 번의
             // 모델 호출도 새지 않게 한다. 스텝마다 묻되 캐시로 받으므로 긴 에이전트 턴도 한도에 닿은 스텝에서 멈춘다.
@@ -1905,8 +1959,40 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         "SessionPrompt.loop",
       )(function* (input: z.infer<typeof LoopInput>) {
         const s = yield* InstanceState.get(cache)
-        const runner = getRunner(s.runners, input.sessionID)
-        return yield* runner.ensureRunning(runLoop(input.sessionID))
+        const id = input.sessionID
+        // A run is always started by a loop() call that waits for it, so the watch exists before the run's
+        // first read; readAt stays infinite (no re-run check) only until that first read.
+        const watch = s.watches.get(id) ?? {
+          waiters: new Set<Waiter>(),
+          readAt: Number.POSITIVE_INFINITY,
+          wantedAt: 0,
+        }
+        s.watches.set(id, watch)
+        // Everything stored up to now is something this caller wants answered (prompt() stores its
+        // message, then calls loop()). A noReply message stored later, with no loop() of its own,
+        // asked for no answer and must not trigger a re-run.
+        watch.wantedAt = RunLink.lastRow(id)
+        const me: Waiter = { stopped: false }
+        watch.waiters.add(me)
+        return yield* Effect.gen(function* () {
+          const result = yield* getRunner(s.runners, id).ensureRunning(runLoop(id))
+          // 실행 중에 들어온 프롬프트(스티어, 동의를 통과한 전송)는 돌고 있는 실행에 합류해 다음 스텝에서 읽힌다.
+          // 그런데 그 실행이 오류·차단으로 끝나거나, 메시지를 마지막으로 읽은 직후 끝나 버리면 합류한 프롬프트는
+          // 아무도 읽지 않은 채 남는다. 그때 한 번 더 돈다. 기다리는 사이 누가 중지했으면 다시 돌리지 않는다 —
+          // 중지는 답이 생기기 전에 걸릴 수도 있어서, 결과 메시지의 오류만으로는 중지를 알아볼 수 없다.
+          // unread() 는 동기라 그 사이에 중지가 끼어들 틈은 없다.
+          // RunLink.unread() is synchronous, so no stop can slip in between this check and the re-run.
+          if (me.stopped || !RunLink.unread(id, watch.readAt, watch.wantedAt)) return result
+          log.info("answering a prompt the finished run never read", { sessionID: id })
+          return yield* getRunner(s.runners, id).ensureRunning(runLoop(id))
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              watch.waiters.delete(me)
+              if (watch.waiters.size === 0 && s.watches.get(id) === watch) s.watches.delete(id)
+            }),
+          ),
+        )
       })
 
       const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.shell")(

@@ -131,10 +131,14 @@ export default [
     db.delete(PartTable)
       .where(and(eq(PartTable.id, data.partID), eq(PartTable.session_id, data.sessionID)))
       .run()
+    CycleRecorder.forget(data.sessionID, data.messageID)
   }),
 
   SyncEvent.project(MessageV2.Event.PartUpdated, (db, data) => {
     const { id, messageID, sessionID, ...rest } = data.part
+    // The cycle recorder caches a finished step's summary; a part written after that (a forked
+    // session copies the message before its parts) must not leave it stale.
+    CycleRecorder.forget(sessionID, messageID)
 
     try {
       db.insert(PartTable)
@@ -150,6 +154,18 @@ export default [
     } catch (err) {
       if (!foreign(err)) throw err
       log.warn("ignored late part update", { partID: id, messageID, sessionID })
+      return
+    }
+
+    // A step's usage lives in its step-finish parts. When one lands on a message that is already
+    // complete — a fork copies the message first and its parts after — the cycle recorded at completion
+    // missed it, so record again. While a step is still streaming the message is not complete and this
+    // is a single lookup.
+    if (rest.type !== "step-finish") return
+    try {
+      CycleRecorder.recordStored(db, sessionID, messageID)
+    } catch (err) {
+      log.warn("cycle record failed", { messageID, sessionID, err: String(err) })
     }
   }),
 ]

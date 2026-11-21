@@ -91,7 +91,7 @@ import {
 import { createOpenSessionFile } from "./prompt-input/open-session-file"
 import { lineRefToSelection } from "@/components/blocksuite/line-reference-url"
 import { createPromptContextSync } from "./prompt-input/context-sync"
-import { startSubmit } from "./prompt-input/doc-submit"
+import { startSubmit, voteConflict } from "./prompt-input/doc-submit"
 import { usePromptDocSession, type PromptMode } from "@/context/prompt-doc-session"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
 
@@ -1736,11 +1736,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         session.setApprovalSession(input.sessionID)
         session.showApproval(state)
         return true
-      } catch {
+      } catch (err) {
         session.setApprovalSession(input.sessionID)
+        // A vote already running (a stop vote above all) is not a failure to retry: say to wait for it.
         showToast({
           title: language.t("docSubmit.toast.requestFailed"),
-          description: language.t("common.requestFailed"),
+          description: language.t(voteConflict(err) ? "docSubmit.toast.voteInProgress" : "common.requestFailed"),
         })
         return true
       }

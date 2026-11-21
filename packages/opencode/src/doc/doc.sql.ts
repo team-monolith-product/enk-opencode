@@ -105,6 +105,10 @@ export const DocSubmitTable = sqliteTable(
     timeout_ms: integer().notNull(),
     expires_at: integer().notNull(),
     cancelled_by: text().$type<ActorID>(),
+    // Why the server itself cancelled the vote ('stop': a stop vote took over a waiting send).
+    cancel_reason: text().$type<"stop">(),
+    // The stop vote that took this send over (set together with cancel_reason 'stop').
+    cancelled_by_submit: text().$type<SubmitID>(),
     // The user message this submit produced once sent — links a cycle back to its submit/actors.
     user_message_id: text(),
     ...Timestamps,
@@ -121,10 +125,9 @@ export const DocSubmitTable = sqliteTable(
 )
 
 // One row per AI run: the prompt that starts the run through to the AI's reply (or the user
-// stopping it). Token/cost are the run's single usage total. The feeding prompt lives in
-// prompt_cycle_input as a child row. Today exactly one input is recorded per run; the child
-// table (with `seq`) is shaped to later hold multiple inputs for followup "steer" mode — where
-// one run absorbs several prompts — which is NOT implemented yet.
+// stopping it). Token/cost are the run's single usage total. The feeding prompts live in
+// prompt_cycle_input as child rows, ordered by `seq`: the prompt that started the run, then every
+// prompt that joined it while it was running (followup "steer", a consented send landing mid-run).
 export const PromptCycleTable = sqliteTable(
   "prompt_cycle",
   {
@@ -136,8 +139,9 @@ export const PromptCycleTable = sqliteTable(
     // docID is a per-input property (where the prompt was authored), so it lives on
     // prompt_cycle_input — not duplicated here.
 
-    // One cycle per user prompt (turn). A turn may produce several assistant messages
-    // (multi-step agent loop); they are all aggregated into this single cycle.
+    // The user message that STARTED the run (its anchor). Every assistant step of the run is
+    // aggregated into this cycle — including steps answering messages that joined the run later
+    // (see prompt_cycle_link).
     user_message_id: text().notNull(),
 
     // Session working directory the cycle ran in (= assistant message info.path.cwd).
@@ -173,7 +177,7 @@ export const PromptCycleTable = sqliteTable(
     index("prompt_cycle_session_idx").on(table.session_id),
     index("prompt_cycle_status_idx").on(table.status),
     index("prompt_cycle_created_idx").on(table.time_created),
-    // One cycle per user prompt (turn) — idempotent upsert key for the recorder.
+    // One cycle per run anchor — idempotent upsert key for the recorder.
     uniqueIndex("prompt_cycle_user_message_unique").on(table.user_message_id),
   ],
 )
@@ -195,7 +199,7 @@ export const PromptCycleInputTable = sqliteTable(
     actor_ids: text({ mode: "json" }).$type<ActorID[]>(),
     // Who initiated the send: the submit's creator (multi-party), or the lone sender (solo).
     initiator_actor_id: text().$type<ActorID>(),
-    seq: integer().notNull().default(0), // input order within a run; always 0 today (see steer TODO)
+    seq: integer().notNull().default(0), // input order within the run: 0 = the prompt that started it
 
     prompt: text().notNull(), // full prompt text, never summarized
     assets: text({ mode: "json" }).$type<{ assetID?: string; mime: string; filename?: string; url?: string }[]>(),
