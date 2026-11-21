@@ -3,9 +3,10 @@ import { describeRoute, validator } from "hono-openapi"
 import { failures, ok } from "../enk-responses"
 import z from "zod"
 import { GitHub } from "../../enk/github"
+import { HistorySync } from "../../enk/history-sync"
+import { SessionID } from "../../session/schema"
 import { Locale } from "../../enk/locale"
 import { Instance } from "../../project/instance"
-import { SessionID } from "../../session/schema"
 import { lazy } from "../../util/lazy"
 
 const Repo = z.object({
@@ -31,16 +32,22 @@ const Status = z
         reason: z.string(),
       })
       .optional(),
-    blocked: z
+    conflict: z
       .object({
-        code: z.enum(["diverged", "conflict"]),
+        branch: z.string(),
+        target: z.string(),
         files: z.array(z.string()),
-        resolving: z.boolean().optional(),
+        resolving: z.boolean(),
+        linking: z.boolean().optional(),
+        compare: z.string().optional(),
       })
       .optional(),
   })
   .meta({ ref: "GitHubStatus" })
 const Pushed = Status.extend({ pushed: z.boolean() }).meta({ ref: "GitHubPushed" })
+const Merged = Status.extend({ files: z.array(z.string()), kept: z.array(z.string()) }).meta({
+  ref: "GitHubMerged",
+})
 const Repositories = z.object({ repositories: z.array(Repo) }).meta({ ref: "GitHubRepositories" })
 const RepoName = z
   .string()
@@ -106,26 +113,14 @@ export const GitHubRoutes = lazy(() =>
     .post(
       "/resolve",
       describeRoute({
-        summary: "Resolve a stopped GitHub push",
+        summary: "Line up a repository that already had files when linked",
         description:
-          "When the repository already had other files or the same file changed on both sides, push again following the side the team chose. `theirs` brings GitHub's files into the project, `ours` keeps the project's files.",
+          "The linked repository already had other files, so the push went to a side branch. `theirs` brings the repository's files into the project, `ours` pushes the project's files on top of the repository's default branch.",
         operationId: "github.resolve",
         responses: { ...ok("Link status and whether a commit was pushed", Pushed), ...failures(404, 409, 422, 502) },
       }),
       validator("json", z.object({ prefer: z.enum(["ours", "theirs"]), locale: Locale.Schema.optional() })),
       async (c) => c.json(await alerting(c, () => GitHub.resolve(Instance.directory, c.req.valid("json")))),
-    )
-    .post(
-      "/merge-ai",
-      describeRoute({
-        summary: "Let the AI merge a GitHub conflict",
-        description:
-          "Send the files that changed on both GitHub and Jitda to the session's AI with GitHub's side of the change, so it edits them to keep both. The next push accepts the files the AI edited.",
-        operationId: "github.mergeWithAI",
-        responses: { ...ok("Link status", Status), ...failures(409, 502) },
-      }),
-      validator("json", z.object({ sessionID: SessionID.zod, locale: Locale.Schema.optional() })),
-      async (c) => c.json(await alerting(c, () => GitHub.mergeWithAI(Instance.directory, c.req.valid("json")))),
     )
     .post(
       "/push",
@@ -138,5 +133,21 @@ export const GitHubRoutes = lazy(() =>
       }),
       validator("json", z.object({ locale: Locale.Schema.optional() })),
       async (c) => c.json(await alerting(c, () => GitHub.manual(Instance.directory, c.req.valid("json").locale))),
+    )
+    .post(
+      "/merge",
+      describeRoute({
+        summary: "Merge GitHub changes with AI",
+        description:
+          "Bring changes made separately on GitHub into the workspace, leave conflict markers where both sides changed the same place, and ask the AI in the given session to resolve them.",
+        operationId: "github.merge",
+        responses: { ...ok("Link status and the files handed to the AI", Merged), ...failures(404, 409, 422, 502) },
+      }),
+      validator("json", z.object({ sessionID: SessionID.zod, locale: Locale.Schema.optional() })),
+      async (c) => {
+        const input = c.req.valid("json")
+        const result = await alerting(c, () => HistorySync.merge(input))
+        return c.json({ ...(await GitHub.status(Instance.directory)), ...result })
+      },
     ),
 )

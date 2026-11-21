@@ -1,14 +1,15 @@
-import { Index, Show, createSignal, onMount, type JSX } from "solid-js"
+import { Index, Show, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { useParams } from "@solidjs/router"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Icon, type IconProps } from "@opencode-ai/ui/icon"
 import { showToast } from "@opencode-ai/ui/toast"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
+import { useGlobalSDK } from "@/context/global-sdk"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useServer } from "@/context/server"
-import { getGitHubStatus, listEnvKeys } from "@/utils/server"
+import { getGitHubStatus, listEnvKeys, type GitHubStatus } from "@/utils/server"
 import { isTutorialDirectory } from "@/utils/workspace"
 
 type ChromeAction = {
@@ -57,16 +58,44 @@ export function createChromeActions() {
   const history = () => !isTutorialDirectory(sdk.directory)
   const historyDialog = () => import("@/components/dialog-history")
 
-  const [github, setGithub] = createSignal(false)
-  onMount(() => {
-    refreshEnvCount()
-    if (history()) void historyDialog().catch(() => undefined)
+  const [github, setGithub] = createSignal<GitHubStatus>()
+  let announced: string | undefined
+  const track = (status: GitHubStatus) => {
+    const first = github() === undefined
+    setGithub(status)
+    const conflict = status.conflict
+    if (!conflict || conflict.resolving) {
+      announced = undefined
+      return
+    }
+    if (announced === conflict.branch) return
+    announced = conflict.branch
+    if (!first) showToast({ title: language.t("github.conflict.toast", { branch: conflict.branch }) })
+  }
+  const refreshGithub = () => {
     const o = opts()
     if (!o) return
     void getGitHubStatus(o)
-      .then((status) => setGithub(status.enabled))
-      .catch(() => setGithub(false))
+      .then(track)
+      .catch(() => undefined)
+  }
+  const globalSDK = useGlobalSDK()
+  onMount(() => {
+    refreshEnvCount()
+    if (history()) void historyDialog().catch(() => undefined)
+    refreshGithub()
+    void globalSDK.event.start()
+    const unsub = globalSDK.event.on(sdk.directory, (event) => {
+      if ((event as { type?: string }).type !== "session.idle" || !github()?.enabled) return
+      for (const delay of [3_000, 10_000]) setTimeout(refreshGithub, delay)
+    })
+    onCleanup(unsub)
   })
+  const conflicted = () => {
+    const conflict = github()?.conflict
+    if (!conflict || conflict.resolving) return
+    return conflict
+  }
 
   return (): ChromeAction[] => [
     {
@@ -96,16 +125,22 @@ export function createChromeActions() {
           },
         ]
       : []),
-    ...(github()
+    ...(github()?.enabled
       ? [
           {
             icon: "github" as const,
             label: language.t("command.github"),
             title: language.t("command.github.description"),
+            badge: conflicted()
+              ? {
+                  count: conflicted()!.files.length,
+                  label: language.t("github.conflict.badge", { count: conflicted()!.files.length }),
+                }
+              : undefined,
             open: () =>
               void show(
                 () => import("@/components/dialog-github"),
-                (x) => <x.DialogGitHub sessionID={params.id} />,
+                (x) => <x.DialogGitHub sessionID={params.id} onChange={track} />,
               ),
           },
         ]

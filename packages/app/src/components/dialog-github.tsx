@@ -21,9 +21,9 @@ import {
   getGitHubRepositories,
   getGitHubStatus,
   githubCode,
-  mergeGitHubWithAI,
-  pushGitHub,
+  mergeGitHub,
   resolveGitHub,
+  pushGitHub,
   selectGitHubRepo,
   type GitHubRepo,
   type GitHubStatus,
@@ -45,15 +45,11 @@ const ERRORS = {
   missing: "github.error.missing",
   empty: "github.error.empty",
   remote: "github.error.remote",
-  diverged: "github.error.diverged",
-  conflict: "github.error.conflict",
+  clean: "github.error.clean",
   busy: "github.error.busy",
-  stale: "github.error.stale",
 } as const
 
-const SHOWN = 8
-
-export function DialogGitHub(props: { sessionID?: string }) {
+export function DialogGitHub(props: { sessionID?: string; onChange?: (status: GitHubStatus) => void }) {
   const dialog = useDialog()
   const language = useLanguage()
   const server = useServer()
@@ -104,6 +100,11 @@ export function DialogGitHub(props: { sessionID?: string }) {
     managing: () => state.managing,
     apply: (status) => (status ? setState({ status, failed: false }) : setState("failed", !state.status)),
     push: () => push(),
+  })
+
+  createEffect(() => {
+    const status = state.status
+    if (status) props.onChange?.(status)
   })
   onMount(() => void refetch())
 
@@ -199,7 +200,21 @@ export function DialogGitHub(props: { sessionID?: string }) {
     const { pushed, ...status } = result
     if (status.enabled) setState("status", reconcile(status))
     else void refetch()
+    if (!pushed && status.conflict && !status.conflict.resolving) return
     showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
+  }
+
+  const merge = async () => {
+    const o = opts()
+    if (!o || spectator || !props.sessionID) return
+    const result = await run(() =>
+      mergeGitHub(o, { sessionID: props.sessionID!, locale: promptLocale(language.locale()) }),
+    )
+    if (!result) return void refetch()
+    const { files, kept: _, ...status } = result
+    setState("status", reconcile(status))
+    showToast({ title: language.t(files.length ? "github.merge.sent" : "github.merge.done") })
+    if (files.length) dialog.close()
   }
 
   const resolve = async (prefer: "ours" | "theirs") => {
@@ -210,20 +225,10 @@ export function DialogGitHub(props: { sessionID?: string }) {
     const { pushed: _, ...status } = result
     if (status.enabled) setState("status", reconcile(status))
     else void refetch()
-    if (!status.blocked) showToast({ title: language.t("github.blocked.done") })
+    showToast({ title: language.t(status.conflict ? "github.linking.pending" : "github.linking.done") })
   }
 
-  const mergeWithAI = async () => {
-    const o = opts()
-    if (!o || spectator || !props.sessionID) return
-    const status = await run(() =>
-      mergeGitHubWithAI(o, { sessionID: props.sessionID!, locale: promptLocale(language.locale()) }),
-    )
-    if (!status) return void refetch()
-    setState("status", reconcile(status))
-    showToast({ title: language.t("github.blocked.ai.sent") })
-    dialog.close()
-  }
+  const conflict = createMemo(() => state.status?.conflict)
 
   const firstFailure = createMemo(() => {
     const first = state.status?.firstPush
@@ -413,65 +418,84 @@ export function DialogGitHub(props: { sessionID?: string }) {
                   </Show>
                   <span class="text-12-regular text-text-weak">{pushed()}</span>
                 </div>
-                <Show when={state.status?.blocked}>
-                  {(blocked) => (
-                    <div class="github-panel flex flex-col gap-1.5">
+                <Show when={conflict()}>
+                  {(item) => (
+                    <div class="github-panel flex flex-col gap-2">
                       <span class="text-12-medium text-text-diff-remove-base">
-                        {language.t(`github.blocked.${blocked().code}.title`)}
+                        {language.t(item().linking ? "github.linking.title" : "github.conflict.title")}
                       </span>
-                      <span class="text-12-regular text-text-weak">
-                        {language.t(`github.blocked.${blocked().code}.body`)}
-                      </span>
-                      <Show when={blocked().files.length > 0}>
-                        <ul class="github-files">
-                          <For each={blocked().files.slice(0, SHOWN)}>
-                            {(file) => <li class="font-mono truncate">{file}</li>}
+                      <Show
+                        when={!item().resolving}
+                        fallback={
+                          <span class="text-12-regular text-text-weak">
+                            {language.t("github.conflict.resolving", { target: item().target })}
+                          </span>
+                        }
+                      >
+                        <span class="text-12-regular text-text-weak">
+                          {language.t(item().linking ? "github.linking.body" : "github.conflict.body", {
+                            target: item().target,
+                            branch: item().branch,
+                          })}
+                        </span>
+                        <span class="text-12-medium text-text-strong">{language.t("github.conflict.files")}</span>
+                        <ul class="flex flex-col gap-0.5">
+                          <For each={item().files}>
+                            {(file) => <li class="text-12-regular text-text-weak font-mono break-all">{file}</li>}
                           </For>
-                          <Show when={blocked().files.length > SHOWN}>
-                            <li>{language.t("github.blocked.more", { count: blocked().files.length - SHOWN })}</li>
-                          </Show>
                         </ul>
-                      </Show>
-                      <Show when={blocked().resolving}>
-                        <span class="text-12-regular text-text-strong">{language.t("github.blocked.ai.working")}</span>
-                      </Show>
-                      <div class="flex flex-wrap gap-2 pt-1">
-                        <Show when={blocked().code === "conflict" && props.sessionID}>
-                          <Button
-                            type="button"
-                            size="small"
-                            variant="primary"
-                            icon="brain"
-                            disabled={spectator || state.busy}
-                            onClick={() => void mergeWithAI()}
-                          >
-                            {language.t("github.blocked.ai")}
-                          </Button>
+                        <Show when={props.sessionID}>
+                          <span class="github-hint">
+                            {language.t("github.conflict.merge.hint", { target: item().target })}
+                          </span>
                         </Show>
-                        <Button
-                          type="button"
-                          size="small"
-                          variant="secondary"
-                          disabled={spectator || state.busy}
-                          onClick={() => void resolve("theirs")}
-                        >
-                          {language.t("github.blocked.theirs")}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="small"
-                          variant="secondary"
-                          disabled={spectator || state.busy}
-                          onClick={() => void resolve("ours")}
-                        >
-                          {language.t("github.blocked.ours")}
-                        </Button>
-                      </div>
-                      <Show when={blocked().code === "conflict" && props.sessionID}>
-                        <span class="github-hint">{language.t("github.blocked.ai.hint")}</span>
+                        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <Show when={props.sessionID}>
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="primary"
+                              disabled={spectator || state.busy}
+                              onClick={() => void merge()}
+                            >
+                              {language.t("github.conflict.merge")}
+                            </Button>
+                          </Show>
+                          <Show when={!item().resolving}>
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="secondary"
+                              disabled={spectator || state.busy}
+                              onClick={() => void resolve("theirs")}
+                            >
+                              {language.t("github.linking.theirs")}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="small"
+                              variant="secondary"
+                              disabled={spectator || state.busy}
+                              onClick={() => void resolve("ours")}
+                            >
+                              {language.t("github.linking.ours")}
+                            </Button>
+                          </Show>
+                          <Show when={item().compare}>
+                            {(href) => (
+                              <Link class="github-link text-12-regular" href={href()}>
+                                {language.t("github.conflict.compare")}
+                              </Link>
+                            )}
+                          </Show>
+                        </div>
+                        <Show when={!item().resolving}>
+                          <span class="github-hint">{language.t("github.linking.theirs.hint")}</span>
+                          <span class="github-hint">
+                            {language.t("github.linking.ours.hint", { target: item().target })}
+                          </span>
+                        </Show>
                       </Show>
-                      <span class="github-hint">{language.t("github.blocked.theirs.hint")}</span>
-                      <span class="github-hint">{language.t("github.blocked.ours.hint")}</span>
                     </div>
                   )}
                 </Show>
@@ -535,7 +559,7 @@ export function DialogGitHub(props: { sessionID?: string }) {
                 size="normal"
                 variant="primary"
                 icon="github"
-                disabled={spectator || state.busy || !!state.status?.blocked}
+                disabled={spectator || state.busy}
                 onClick={() => void push()}
               >
                 {language.t("github.push.now")}

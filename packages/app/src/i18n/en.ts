@@ -172,28 +172,33 @@ export const dict = {
   "github.firstPush.reason": "Reason: {{reason}}",
   "github.firstPush.retry": "It will be pushed again when the next conversation finishes.",
   "github.error.disabled": "GitHub isn't available in this workspace",
-  "github.error.diverged": "The repository already has other files, so nothing was pushed",
-  "github.error.conflict": "The same file changed on GitHub and in Jitda, so nothing was pushed",
+  "github.error.clean": "Nothing overlaps anymore. Your changes go up with the next push",
   "github.error.busy": "The AI is still answering. Try again once it finishes",
-  "github.blocked.diverged.title": "This repository already has other files",
-  "github.blocked.diverged.body": "Pushing stopped so nothing gets overwritten. Choose which side to keep.",
-  "github.blocked.conflict.title": "The same file changed on GitHub and in Jitda",
-  "github.blocked.conflict.body":
-    "These files could not be combined automatically, so pushing stopped. Choose which side to keep. Other changes from GitHub are brought in as they are.",
-  "github.blocked.more": "and {{count}} more",
-  "github.blocked.theirs": "Bring in GitHub's files",
-  "github.blocked.ours": "Push Jitda's files",
-  "github.blocked.theirs.hint":
-    "Bring in GitHub's files: the project folder follows GitHub. Your current files stay in the version history.",
-  "github.blocked.ours.hint":
-    "Push Jitda's files: Jitda's files go up as a new commit. GitHub's earlier files stay in the commit history.",
-  "github.blocked.done": "Synced with GitHub",
-  "github.blocked.ai": "Ask the AI to merge",
-  "github.blocked.ai.hint":
-    "Ask the AI to merge: the AI edits the files to keep both sides' changes, and they are pushed once it finishes.",
-  "github.blocked.ai.sent": "Asked the AI to merge the conflicting files",
-  "github.blocked.ai.working": "The AI is merging the conflicting files. They are pushed once it finishes.",
-  "github.error.stale": "This conflict is already resolved. Open the window again",
+  "github.linking.title": "This repository already has other files",
+  "github.linking.body":
+    "Files already in the linked repository overlap with the Jitda project, so {{target}} was left as is and the project went to {{branch}} instead. Choose how to line them up.",
+  "github.linking.theirs": "Use GitHub's side",
+  "github.linking.ours": "Use Jitda's side",
+  "github.linking.theirs.hint":
+    "Use GitHub's side: overlaps follow GitHub, and everything else from both sides is kept and pushed. Your current files stay in the version history.",
+  "github.linking.ours.hint":
+    "Use Jitda's side: overlaps follow Jitda, and everything else from both sides is kept and pushed to {{target}}. GitHub's earlier files stay in the commit history.",
+  "github.linking.done": "Synced with GitHub",
+  "github.linking.pending": "Some overlaps are still left",
+  "github.conflict.title": "Your changes overlap with changes on GitHub",
+  "github.conflict.body":
+    "Someone changed the same places on GitHub, so {{target}} was left as it is and your work was pushed to the {{branch}} branch. Nothing was lost on either side.",
+  "github.conflict.files": "Overlapping files",
+  "github.conflict.merge": "Merge with AI",
+  "github.conflict.merge.hint":
+    "Brings the GitHub changes into your workspace and has the AI combine the overlapping parts, keeping both sides. The result goes to {{target}} once the answer finishes.",
+  "github.conflict.compare": "View on GitHub",
+  "github.conflict.resolving":
+    "The AI is combining the overlapping parts. The result goes to {{target}} once the answer finishes.",
+  "github.conflict.toast": "Your changes overlap with GitHub, so they went to the {{branch}} branch",
+  "github.conflict.badge": "{{count}} files overlap with GitHub",
+  "github.merge.sent": "Asked the AI to merge",
+  "github.merge.done": "Merged the GitHub changes and pushed",
   "github.readonly": "Spectators can't change GitHub settings.",
   "command.history": "History",
   "command.history.description": "See saved versions and roll back to one",
