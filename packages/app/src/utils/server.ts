@@ -143,6 +143,7 @@ export type GitHubStatus = {
   repo?: GitHubRepo
   push?: { sha: string; time: number; by?: string }
   firstPush?: { attempts: number; code: string; reason: string }
+  blocked?: { code: "diverged" | "conflict"; files: string[] }
 }
 
 export function githubCode(err: unknown) {
@@ -162,6 +163,15 @@ export function pushGitHub(
 ): Promise<GitHubStatus & { pushed: boolean }> {
   return devServerClient(opts)
     .post({ url: "/github/push", body: input })
+    .then((res) => res.data as GitHubStatus & { pushed: boolean })
+}
+
+export function resolveGitHub(
+  opts: GitHubOpts,
+  input: { prefer: "ours" | "theirs"; locale?: PromptLocale },
+): Promise<GitHubStatus & { pushed: boolean }> {
+  return devServerClient(opts)
+    .post({ url: "/github/resolve", body: input })
     .then((res) => res.data as GitHubStatus & { pushed: boolean })
 }
 

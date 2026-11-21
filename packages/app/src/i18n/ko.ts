@@ -135,7 +135,8 @@ export const dict = {
   "github.repo.new": "GitHub에서 새 저장소 만들기",
   "github.repo.reload": "목록 다시 불러오기",
   "github.repo.installations": "GitHub 앱 설치 설정 열기",
-  "github.repo.new.hint": "만든 뒤 목록을 다시 불러오세요. 설치할 때 \"선택한 저장소만\"을 골랐다면 GitHub 앱 설치 설정에서 새 저장소를 추가해야 보여요.",
+  "github.repo.new.hint":
+    '만든 뒤 목록을 다시 불러오세요. 설치할 때 "선택한 저장소만"을 골랐다면 GitHub 앱 설치 설정에서 새 저장소를 추가해야 보여요.',
   "github.repo.empty": "올릴 수 있는 저장소가 없어요. GitHub에서 저장소를 만든 뒤 목록을 다시 불러오세요.",
   "github.repo.private": "비공개",
   "github.error.repos": "저장소 목록을 불러오지 못했어요",
@@ -161,6 +162,22 @@ export const dict = {
   "github.firstPush.reason": "사유: {{reason}}",
   "github.firstPush.retry": "다음 대화가 끝나면 다시 올라가요.",
   "github.error.disabled": "이 작업 공간에서는 GitHub를 쓸 수 없어요",
+  "github.error.diverged": "저장소에 이미 다른 파일이 있어 올리지 않았어요",
+  "github.error.conflict": "GitHub와 짓다에서 같은 파일을 고쳐 올리지 않았어요",
+  "github.error.busy": "AI가 답하는 중이에요. 답이 끝난 뒤 다시 시도해 주세요",
+  "github.blocked.diverged.title": "이 저장소에는 이미 다른 파일이 있어요",
+  "github.blocked.diverged.body": "덮어쓰지 않도록 올리기를 멈췄어요. 어느 쪽 내용으로 맞출지 골라 주세요.",
+  "github.blocked.conflict.title": "GitHub와 짓다에서 같은 파일을 고쳤어요",
+  "github.blocked.conflict.body":
+    "아래 파일은 자동으로 합칠 수 없어 올리기를 멈췄어요. 어느 쪽으로 맞출지 골라 주세요. 다른 파일의 GitHub 변경은 그대로 가져와요.",
+  "github.blocked.more": "외 {{count}}개",
+  "github.blocked.theirs": "GitHub 내용 가져오기",
+  "github.blocked.ours": "짓다 내용으로 올리기",
+  "github.blocked.theirs.hint":
+    "GitHub 내용 가져오기: 작업 폴더를 GitHub 쪽으로 맞춰요. 지금 파일은 버전 기록에 남아요.",
+  "github.blocked.ours.hint":
+    "짓다 내용으로 올리기: 짓다 파일을 새 커밋으로 올려요. GitHub의 이전 내용은 커밋 기록에 남아요.",
+  "github.blocked.done": "GitHub와 맞췄어요",
   "github.readonly": "관전 중에는 GitHub 설정을 바꿀 수 없어요.",
   "command.history": "버전 기록",
   "command.history.description": "저장된 버전을 보고 원하는 시점으로 되돌리기",

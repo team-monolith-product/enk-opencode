@@ -29,6 +29,7 @@ const Status = z
         reason: z.string(),
       })
       .optional(),
+    blocked: z.object({ code: z.enum(["diverged", "conflict"]), files: z.array(z.string()) }).optional(),
   })
   .meta({ ref: "GitHubStatus" })
 const Pushed = Status.extend({ pushed: z.boolean() }).meta({ ref: "GitHubPushed" })
@@ -93,6 +94,18 @@ export const GitHubRoutes = lazy(() =>
       }),
       validator("json", z.object({ name: RepoName, locale: Locale.Schema.optional() })),
       async (c) => c.json(await alerting(c, () => GitHub.create(Instance.directory, c.req.valid("json")))),
+    )
+    .post(
+      "/resolve",
+      describeRoute({
+        summary: "Resolve a stopped GitHub push",
+        description:
+          "When the repository already had other files or the same file changed on both sides, push again following the side the team chose. `theirs` brings GitHub's files into the project, `ours` keeps the project's files.",
+        operationId: "github.resolve",
+        responses: { ...ok("Link status and whether a commit was pushed", Pushed), ...failures(404, 409, 422, 502) },
+      }),
+      validator("json", z.object({ prefer: z.enum(["ours", "theirs"]), locale: Locale.Schema.optional() })),
+      async (c) => c.json(await alerting(c, () => GitHub.resolve(Instance.directory, c.req.valid("json")))),
     )
     .post(
       "/push",
