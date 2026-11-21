@@ -57,6 +57,9 @@ export namespace Flag {
   // enk-hackathon-rails AI usage reporting (ai_usages API)
   export const ENK_HACKATHON_RAILS_URL = process.env["ENK_HACKATHON_RAILS_URL"]
   export const ENK_AI_USAGE_TOKEN = process.env["ENK_AI_USAGE_TOKEN"]
+  // Runs read/glob/grep/edit/write/apply_patch/bash only as scripts inside the `execute` tool (Code Mode).
+  // On by default; ENK_CODEMODE=0 turns it off.
+  export declare const ENK_CODEMODE: boolean
   export declare const ENK_AI_MODEL: string | undefined
   export declare const ENK_AI_MODEL_VARIANT: string | undefined
   // The vision partner of ENK_AI_MODEL ("provider/model"): the model that image-carrying
@@ -209,6 +212,14 @@ Object.defineProperty(Flag, "OPENCODE_PLUGIN_META_FILE", {
 Object.defineProperty(Flag, "OPENCODE_CLIENT", {
   get() {
     return process.env["OPENCODE_CLIENT"] ?? "cli"
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_CODEMODE", {
+  get() {
+    return !falsy("ENK_CODEMODE")
   },
   enumerable: true,
   configurable: false,
