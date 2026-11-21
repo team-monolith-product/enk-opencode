@@ -787,6 +787,26 @@ describe("GitHub.absorb", () => {
     expect(await Bun.file(path.join(work, "index.html")).text()).toBe("<h1>jitda</h1>\n")
   })
 
+  test("a push that slips in before the AI answers never lands on main", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    const before = await $`git --git-dir=${ws.bare} rev-parse main`.quiet().text()
+
+    await absorb(ws.work)
+    const stray = await GitHub.publish({
+      repo: WorkspaceRepo.open(ws.work),
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+
+    expect(stray.sha).toBeUndefined()
+    expect(stray.conflict).toBeDefined()
+    expect(await $`git --git-dir=${ws.bare} rev-parse main`.quiet().text()).toBe(before)
+  })
+
   test("once the AI clears the markers, the next push lands on main with both sides", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)

@@ -674,7 +674,7 @@ export namespace GitHub {
    * 기준점을 GitHub 끝으로 옮겨 두므로, AI 가 충돌 표시를 정리한 뒤의 올리기는 그 위에 그대로 얹힌다.
    * AI 가 답하지 않는 동안에만 부른다.
    */
-  export async function absorb(dir: string, input: { backup: string }): Promise<Absorbed> {
+  export async function absorb(dir: string, input: { backup: string; marked?: string }): Promise<Absorbed> {
     if (!ServeTargets.isProject(dir)) throw new Failure("disabled", 409)
     const conflict = conflicts.get(dir)
     if (!conflict) throw new Failure("clean", 409)
@@ -687,7 +687,7 @@ export namespace GitHub {
       remote: `${web}/${hit.repo.owner}/${hit.repo.name}.git`,
       env: auth(hit.token!),
     }
-    return repo.lock(async () => {
+    const result = await repo.lock(async () => {
       const theirs = await tip(lane, conflict.target)
       if (!theirs) throw new Failure("clean", 409)
       const head = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
@@ -720,6 +720,10 @@ export namespace GitHub {
       log.info("absorbed", { files: files.length, kept: kept.length, changes: changes.length })
       return { files, kept, theirs, ours: merged.ours }
     }, "github")
+    // 충돌 표시가 든 지금 상태를 바로 기록해 둔다. AI 가 답하기 전에 끼어든 올리기가 표시 전 기록을 GitHub 끝 위에
+    // 올리면 GitHub 쪽 변경이 빠진 채 기본 브랜치에 올라간다. 표시가 든 기록은 올리기가 별도 브랜치로 보낸다.
+    await History.commit(dir, { message: input.marked ?? input.backup })
+    return result
   }
 
   const EMPTY = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
