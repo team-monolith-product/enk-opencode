@@ -1,4 +1,4 @@
-import { createEffect, createMemo, Match, on, onCleanup, Switch } from "solid-js"
+import { createEffect, createMemo, Match, on, onCleanup, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import type { FileSearchHandle } from "@opencode-ai/ui/file"
@@ -8,13 +8,17 @@ import { mediaKindFromPath, type MediaKind } from "@opencode-ai/ui/pierre/media"
 import { createLineCommentController } from "@opencode-ai/ui/line-comment-annotations"
 import { sampledChecksum } from "@opencode-ai/util/encode"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
+import { Button } from "@opencode-ai/ui/button"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { showToast } from "@opencode-ai/ui/toast"
+import { canEditImage, openPhotocraftWindow } from "@/components/photocraft-window"
 import { selectionFromLines, useFile, type FileSelection, type SelectedLineRange } from "@/context/file"
 import { useComments } from "@/context/comments"
 import { useLanguage } from "@/context/language"
+import { useSDK } from "@/context/sdk"
+import { useGlobalSDK } from "@/context/global-sdk"
 import { usePrompt } from "@/context/prompt"
 import { usePromptDocBridge } from "@/context/prompt-doc-bridge"
 import { addLineContext } from "@/utils/doc-line-reference"
@@ -188,6 +192,8 @@ export function FileTabContent(props: { tab: string }) {
   const prompt = usePrompt()
   const bridge = usePromptDocBridge()
   const fileComponent = useFileComponent()
+  const sdk = useSDK()
+  const globalSDK = useGlobalSDK()
   const { sessionKey, tabs, view } = useSessionLayout()
   const activeFileTab = createSessionTabs({
     tabs,
@@ -421,8 +427,78 @@ export function FileTabContent(props: { tab: string }) {
     scrollSync.queueRestore()
   })
 
+  // 서버가 이미지를 base64 로 주므로 바이트로 되돌려 PhotoCraft 편집기에 넘길 File 로 만든다.
+  const toImageFile = (p: string, content: { content?: string; encoding?: string; mimeType?: string } | undefined) => {
+    if (content?.encoding !== "base64" || !content.content) return
+    const bytes = Uint8Array.from(atob(content.content), (char) => char.charCodeAt(0))
+    return new File([bytes], p.split("/").pop() ?? p, { type: content.mimeType ?? "" })
+  }
+  const imageFile = createMemo(() => {
+    const p = path()
+    if (!p || mediaKindFromPath(p) !== "image" || !canEditImage(p)) return
+    return toImageFile(p, state()?.content)
+  })
+
+  // 편집기에서 저장한 이미지로 원본을 덮어쓰고, 탭이 새 바이트를 보이게 다시 읽는다(파일 감시 이벤트를
+  // 기다리지 않는다).
+  const saveImage = async (
+    client: typeof sdk.client,
+    directory: string,
+    target: string,
+    image: Blob,
+    expected: string,
+  ) => {
+    // 생성된 메서드는 바이트 본문과 Content-Type 을 버린다(asset-upload.ts 와 같은 사정). 그래서 본문은
+    // 요청 옵션으로 직접 싣고, 그 headers 가 클라이언트 기본 헤더(x-opencode-directory)를 덮어쓰므로
+    // directory 도 쿼리로 넘긴다. 빼면 서버가 프로젝트가 아닌 자기 cwd 에서 파일을 찾는다.
+    await client.file.write({ path: target, directory, expected, body: image }, {
+      body: image,
+      bodySerializer: null,
+      headers: { "content-type": "application/octet-stream" },
+    } as unknown as Parameters<typeof client.file.write>[1])
+    // 다른 프로젝트로 옮겨 간 뒤의 저장이면 이 화면은 이미 없으니 다시 읽지 않는다.
+    if (directory === sdk.directory) await file.load(target, { force: true })
+  }
+
   const renderFile = (source: string) => (
     <div class="relative overflow-hidden" classList={{ "pb-40": mediaKindFromPath(path()) !== "pdf" }}>
+      <Show when={imageFile()}>
+        {(image) => (
+          <Button
+            icon="edit"
+            size="small"
+            class="absolute right-3 top-3 z-10"
+            onClick={() => {
+              const target = path()
+              if (!target) return
+              // 편집 창은 다른 프로젝트로 옮겨 가도 살아 있다. 그때 이 프로젝트의 SDK 컨텍스트가 정리돼도
+              // 잠금 알림·조회가 끊기지 않게, 앱 전체에 걸린 이벤트 흐름과 이 시점의 클라이언트를 쓴다.
+              const directory = sdk.directory
+              const client = sdk.client
+              const opened = openPhotocraftWindow({
+                // 같은 상대 경로라도 서버·프로젝트가 다르면 다른 파일이다.
+                key: `${sdk.url}\n${sdk.directory}\n${target}`,
+                file: image(),
+                onSave: (edited, expected) => saveImage(client, directory, target, edited, expected),
+                onError: () => showToast({ variant: "error", title: language.t("file.imageEditor.failed") }),
+                readCurrent: () =>
+                  client.file.read({ path: target }).then((x) => toImageFile(target, x.data ?? undefined)),
+                // AI 가 이 이미지를 편집하는 동안(image_edit) 편집 창은 보기만 된다.
+                watchLock: (listener) =>
+                  globalSDK.event.on(directory, (event) => {
+                    if (event.type === "image.edit.lock" && event.properties.path === target)
+                      listener(event.properties.locked)
+                  }),
+                isLocked: () => client.file.lock().then((x) => (x.data ?? []).some((lock) => lock.path === target)),
+                t: (key, params) => language.t(key as Parameters<typeof language.t>[0], params),
+              })
+              if (!opened) showToast({ variant: "error", title: language.t("file.imageEditor.popupBlocked") })
+            }}
+          >
+            {language.t("file.imageEditor.open")}
+          </Button>
+        )}
+      </Show>
       <Dynamic
         component={fileComponent}
         mode="text"

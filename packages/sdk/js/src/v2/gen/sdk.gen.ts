@@ -70,10 +70,13 @@ import type {
   FileAssetDeleteResponses,
   FileAssetListResponses,
   FileListResponses,
+  FileLockResponses,
   FilePartInput,
   FilePartSource,
   FileReadResponses,
   FileStatusResponses,
+  FileWriteErrors,
+  FileWriteResponses,
   FindFilesResponses,
   FindSymbolsResponses,
   FindTextResponses,
@@ -4952,6 +4955,78 @@ export class File extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<FileReadResponses, unknown, ThrowOnError>({
       url: "/file/content",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Overwrite file
+   *
+   * Replace the bytes of an existing file in the project, such as an image saved from the image editor. The body is the raw bytes; the file comes from the `path` query parameter. Only existing files are written.
+   */
+  public write<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      path: string
+      expected?: string
+      body: Blob | File
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "path" },
+            { in: "query", key: "expected" },
+            { key: "body", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<FileWriteResponses, FileWriteErrors, ThrowOnError>({
+      bodySerializer: null,
+      url: "/file/content",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List AI-locked images
+   *
+   * Images the AI is editing with PhotoCraft right now. Their editor windows are view-only until the edit ends.
+   */
+  public lock<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<FileLockResponses, unknown, ThrowOnError>({
+      url: "/file/lock",
       ...options,
       ...params,
     })
