@@ -3,6 +3,7 @@ import { SyncEvent } from "@/sync"
 import { Session } from "./index"
 import { MessageV2 } from "./message-v2"
 import { SessionTable, MessageTable, PartTable } from "./session.sql"
+import { SessionBlob } from "./blob"
 import { ProjectTable } from "../project/project.sql"
 import { Log } from "../util/log"
 import * as CycleRecorder from "../doc/cycle-recorder"
@@ -80,6 +81,7 @@ export default [
   }),
 
   SyncEvent.project(Session.Event.Deleted, (db, data) => {
+    SessionBlob.releaseSession(db, data.sessionID)
     db.delete(SessionTable).where(eq(SessionTable.id, data.sessionID)).run()
   }),
 
@@ -122,21 +124,31 @@ export default [
   }),
 
   SyncEvent.project(MessageV2.Event.Removed, (db, data) => {
+    SessionBlob.releaseMessage(db, data.sessionID, data.messageID)
     db.delete(MessageTable)
       .where(and(eq(MessageTable.id, data.messageID), eq(MessageTable.session_id, data.sessionID)))
       .run()
   }),
 
   SyncEvent.project(MessageV2.Event.PartRemoved, (db, data) => {
-    db.delete(PartTable)
+    const removed = db
+      .delete(PartTable)
       .where(and(eq(PartTable.id, data.partID), eq(PartTable.session_id, data.sessionID)))
-      .run()
+      .returning({ messageID: PartTable.message_id })
+      .get()
+    if (removed && SessionBlob.holds(db, { sessionID: data.sessionID, messageID: removed.messageID }))
+      SessionBlob.syncMessage(db, { sessionID: data.sessionID, messageID: removed.messageID })
   }),
 
   SyncEvent.project(MessageV2.Event.PartUpdated, (db, data) => {
-    const { id, messageID, sessionID, ...rest } = data.part
+    const { id, messageID, sessionID, ...part } = data.part
+    const owner = { sessionID, messageID, seq: data.time }
 
+    const rest = SessionBlob.externalize(db, part)
     try {
+      const before = SessionBlob.holds(db, owner)
+        ? db.select({ data: PartTable.data }).from(PartTable).where(eq(PartTable.id, id)).get()?.data
+        : undefined
       db.insert(PartTable)
         .values({
           id,
@@ -147,8 +159,11 @@ export default [
         })
         .onConflictDoUpdate({ target: PartTable.id, set: { data: rest } })
         .run()
+      SessionBlob.recordRefs(db, owner, rest)
+      if (before && SessionBlob.drops(before, rest)) SessionBlob.syncMessage(db, owner)
     } catch (err) {
       if (!foreign(err)) throw err
+      SessionBlob.prune(db, rest)
       log.warn("ignored late part update", { partID: id, messageID, sessionID })
     }
   }),

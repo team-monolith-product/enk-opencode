@@ -14,9 +14,12 @@ import { Log } from "@/util/log"
 import { ShareNext } from "@/share/share-next"
 import { ensureSession } from "../session/ensure"
 import { HistorySync } from "../enk/history-sync"
+import { Config } from "../config/config"
+import { SessionBlob } from "../session/blob"
 
 export async function InstanceBootstrap() {
   Log.Default.info("bootstrapping", { directory: Instance.directory })
+  SessionBlob.configure(Instance.directory, (await Config.get()).experimental?.media_blob)
   await Plugin.init()
   ShareNext.init()
   Format.init()

@@ -35,3 +35,13 @@ export function parseAssetRef(url: string | undefined): AssetRef | undefined {
 export function isAssetRef(url: string | undefined): boolean {
   return !!parseAssetRef(url)
 }
+
+const MEDIA = /^media:([0-9a-f]{64})$/
+
+export function mediaRefHash(url: string | undefined): string | undefined {
+  return url ? MEDIA.exec(url)?.[1] : undefined
+}
+
+export function isMediaRef(url: string | undefined): boolean {
+  return !!mediaRefHash(url)
+}

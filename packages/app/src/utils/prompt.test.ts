@@ -3,6 +3,23 @@ import type { Part } from "@opencode-ai/sdk/v2"
 import { extractPromptFromParts } from "./prompt"
 
 describe("extractPromptFromParts", () => {
+  test("restores a stored media reference as an attachment", () => {
+    const url = `media:${"a".repeat(64)}`
+    const parts = [
+      {
+        id: "file_1",
+        type: "file",
+        mime: "image/png",
+        url,
+        filename: "shot.png",
+        sessionID: "ses_1",
+        messageID: "msg_1",
+      },
+    ] satisfies Part[]
+
+    expect(extractPromptFromParts(parts).slice(1)).toMatchObject([{ type: "image", filename: "shot.png", url }])
+  })
+
   test("restores multiple uploaded attachments", () => {
     const parts = [
       {
