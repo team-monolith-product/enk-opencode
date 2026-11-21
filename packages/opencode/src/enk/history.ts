@@ -1,4 +1,4 @@
-import { writeFile } from "fs/promises"
+import { readFile, writeFile } from "fs/promises"
 import path from "path"
 import { Log } from "../util/log"
 import { EnkFailure } from "./failure"
@@ -151,9 +151,81 @@ export namespace History {
     const changes = await WorkspaceRepo.diff(repo, parent && `${parent}^{tree}`, `${sha}^{tree}`)
     const raw = await repo.must(["log", "-1", `--format=%(trailers:key=${Trailer.skipped},valueonly,separator=)`, sha])
     const skipped = new Set<string>(skippedFiles(raw))
-    return changes.map(
-      (change): Listed => (change.status === "D" && skipped.has(change.file) ? { ...change, status: "L" } : change),
+    return changes.map((change): Listed =>
+      change.status === "D" && skipped.has(change.file) ? { ...change, status: "L" } : change,
     )
+  }
+
+  const bridge = /<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>/i
+  const bridgeTag = `<script src="/__preview-bridge.js" data-preview-bridge></script>`
+
+  async function tagged(repo: WorkspaceRepo.Repo, files: string[]) {
+    const html = files.filter((file) => /\.html?$/i.test(file))
+    const flags = await Promise.all(
+      html.map((file) =>
+        readFile(path.join(repo.dir, file), "utf8").then(
+          (text) => bridge.test(text),
+          () => false,
+        ),
+      ),
+    )
+    return html.filter((_, i) => flags[i])
+  }
+
+  async function retag(repo: WorkspaceRepo.Repo, files: string[]) {
+    const done: string[] = []
+    for (const file of files) {
+      const full = path.join(repo.dir, file)
+      const text = await readFile(full, "utf8").catch(() => undefined)
+      if (text === undefined || bridge.test(text)) continue
+      const next = text.replace(/<head\b[^>]*>/i, (head) => head + bridgeTag)
+      if (next === text) continue
+      await writeFile(full, next)
+      done.push(file)
+    }
+    if (done.length) await WorkspaceRepo.each(repo, ["update-index", "--add", "--"], done)
+  }
+
+  /**
+   * GitHub 에서 받은 커밋 `source` 의 파일로 작업 폴더를 맞추고 한 커밋으로 남긴다. `files` 를 주면 그 파일만, 없으면
+   * 전부 맞춘다. 되돌리기처럼 먼저 지금 상태를 기록하고, 기록에서 빠진 파일은 건드리지 않는다. 미리보기 브릿지 태그가
+   * 있던 HTML 은 받은 내용에 태그를 다시 넣는다.
+   */
+  export async function absorb(
+    dir: string,
+    input: { source: string; files?: string[]; message: string; backup: string },
+  ): Promise<Change[]> {
+    if (!ServeTargets.isProject(dir)) throw new Failure("disabled", 404)
+    const repo = WorkspaceRepo.open(dir)
+    return repo.lock(async () => {
+      await save(repo, { message: input.backup })
+      const parent = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
+      const goal = (await WorkspaceRepo.rev(repo, `${input.source}^{tree}`))!
+      const wanted = input.files && new Set(input.files)
+      const changes = (await WorkspaceRepo.diff(repo, parent && `${parent}^{tree}`, goal)).filter(
+        (change) => !wanted || wanted.has(change.file),
+      )
+      if (changes.length === 0) return []
+      const added = changes.filter((change) => change.status === "A").map((change) => change.file)
+      const kept = new Set(await WorkspaceRepo.unrecorded(repo, added))
+      const files = changes.map((change) => change.file).filter((file) => !kept.has(file))
+      if (files.length === 0) return []
+      const html = await tagged(repo, files)
+      const spec = path.join(repo.root, "absorb-pathspec")
+      await writeFile(spec, files.map((file) => `:(literal)${file}`).join("\0"))
+      await repo.must([
+        "restore",
+        `--source=${input.source}`,
+        "--staged",
+        "--worktree",
+        `--pathspec-from-file=${spec}`,
+        "--pathspec-file-nul",
+      ])
+      await retag(repo, html)
+      const sha = await commitIndex(repo, input.message)
+      log.info("absorbed", { sha, source: input.source, files: files.length })
+      return changes.filter((change) => !kept.has(change.file))
+    })
   }
 
   const reverts = new Map<string, Revert | null>()

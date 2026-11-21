@@ -22,6 +22,7 @@ import {
   getGitHubStatus,
   githubCode,
   pushGitHub,
+  resolveGitHub,
   selectGitHubRepo,
   type GitHubRepo,
   type GitHubStatus,
@@ -43,7 +44,12 @@ const ERRORS = {
   missing: "github.error.missing",
   empty: "github.error.empty",
   remote: "github.error.remote",
+  diverged: "github.error.diverged",
+  conflict: "github.error.conflict",
+  busy: "github.error.busy",
 } as const
+
+const SHOWN = 8
 
 export function DialogGitHub() {
   const dialog = useDialog()
@@ -192,6 +198,17 @@ export function DialogGitHub() {
     if (status.enabled) setState("status", status)
     else void refetch()
     showToast({ title: language.t(pushed ? "github.push.done" : "github.push.nothing") })
+  }
+
+  const resolve = async (prefer: "ours" | "theirs") => {
+    const o = opts()
+    if (!o || spectator) return
+    const result = await run(() => resolveGitHub(o, { prefer, locale: promptLocale(language.locale()) }))
+    if (!result) return void refetch()
+    const { pushed: _, ...status } = result
+    if (status.enabled) setState("status", status)
+    else void refetch()
+    if (!status.blocked) showToast({ title: language.t("github.blocked.done") })
   }
 
   const firstFailure = createMemo(() => {
@@ -382,6 +399,50 @@ export function DialogGitHub() {
                   </Show>
                   <span class="text-12-regular text-text-weak">{pushed()}</span>
                 </div>
+                <Show when={state.status?.blocked}>
+                  {(blocked) => (
+                    <div class="github-panel flex flex-col gap-1.5">
+                      <span class="text-12-medium text-text-diff-remove-base">
+                        {language.t(`github.blocked.${blocked().code}.title`)}
+                      </span>
+                      <span class="text-12-regular text-text-weak">
+                        {language.t(`github.blocked.${blocked().code}.body`)}
+                      </span>
+                      <Show when={blocked().files.length > 0}>
+                        <ul class="github-files">
+                          <For each={blocked().files.slice(0, SHOWN)}>
+                            {(file) => <li class="font-mono truncate">{file}</li>}
+                          </For>
+                          <Show when={blocked().files.length > SHOWN}>
+                            <li>{language.t("github.blocked.more", { count: blocked().files.length - SHOWN })}</li>
+                          </Show>
+                        </ul>
+                      </Show>
+                      <div class="flex flex-wrap gap-2 pt-1">
+                        <Button
+                          type="button"
+                          size="small"
+                          variant="secondary"
+                          disabled={spectator || state.busy}
+                          onClick={() => void resolve("theirs")}
+                        >
+                          {language.t("github.blocked.theirs")}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="small"
+                          variant="secondary"
+                          disabled={spectator || state.busy}
+                          onClick={() => void resolve("ours")}
+                        >
+                          {language.t("github.blocked.ours")}
+                        </Button>
+                      </div>
+                      <span class="github-hint">{language.t("github.blocked.theirs.hint")}</span>
+                      <span class="github-hint">{language.t("github.blocked.ours.hint")}</span>
+                    </div>
+                  )}
+                </Show>
                 <Show when={firstFailure()}>
                   {(failure) => (
                     <div class="github-panel flex flex-col gap-1">
@@ -442,7 +503,7 @@ export function DialogGitHub() {
                 size="normal"
                 variant="primary"
                 icon="github"
-                disabled={spectator || state.busy}
+                disabled={spectator || state.busy || !!state.status?.blocked}
                 onClick={() => void push()}
               >
                 {language.t("github.push.now")}
