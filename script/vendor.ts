@@ -6,7 +6,7 @@
  * upstream is a folder replacement and `check` fails when someone edits it in place. Local changes
  * belong in adapter code outside the vendored folder.
  *
- *   bun script/vendor.ts add <name> <source> <dest> [ref]
+ *   bun script/vendor.ts add <name> <source> <dest> [ref] [--exclude <path>]...
  *   bun script/vendor.ts sync <name> [ref]
  *   bun script/vendor.ts check [name]
  *   bun script/vendor.ts list
@@ -19,7 +19,7 @@ import path from "path"
 const root = path.resolve(import.meta.dirname, "..")
 const manifestPath = path.join(root, "upstream-vendor.json")
 
-type Entry = { source: string; dest: string; sha: string }
+type Entry = { source: string; dest: string; sha: string; exclude?: string[] }
 type Manifest = { remote: string; url: string; defaultRef: string; packages: Record<string, Entry> }
 
 const load = (): Manifest => JSON.parse(fs.readFileSync(manifestPath, "utf8"))
@@ -43,10 +43,11 @@ async function resolve(manifest: Manifest, ref: string) {
   return (await git("rev-parse", "FETCH_HEAD")).text().trim()
 }
 
-async function extract(sha: string, source: string, into: string) {
+async function extract(sha: string, source: string, into: string, exclude: string[] = []) {
   const depth = source.split("/").length
   fs.mkdirSync(into, { recursive: true })
   await $`git -C ${root} archive ${sha} ${source} | tar -x -C ${into} --strip-components=${depth}`.quiet()
+  for (const item of exclude) fs.rmSync(path.join(into, item), { recursive: true, force: true })
 }
 
 function entryOf(manifest: Manifest, name: string) {
@@ -55,19 +56,26 @@ function entryOf(manifest: Manifest, name: string) {
   return entry
 }
 
-async function install(manifest: Manifest, name: string, source: string, dest: string, ref: string) {
+async function install(
+  manifest: Manifest,
+  name: string,
+  source: string,
+  dest: string,
+  ref: string,
+  exclude: string[] = [],
+) {
   const sha = await resolve(manifest, ref)
   const target = path.join(root, dest)
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "vendor-"))
   try {
-    await extract(sha, source, staging)
+    await extract(sha, source, staging, exclude)
     fs.rmSync(target, { recursive: true, force: true })
     fs.mkdirSync(path.dirname(target), { recursive: true })
     fs.cpSync(staging, target, { recursive: true })
   } finally {
     fs.rmSync(staging, { recursive: true, force: true })
   }
-  manifest.packages[name] = { source, dest, sha }
+  manifest.packages[name] = exclude.length ? { source, dest, sha, exclude } : { source, dest, sha }
   save(manifest)
   console.log(`${name}: ${source} @ ${sha.slice(0, 10)} -> ${dest}`)
 }
@@ -76,7 +84,7 @@ async function verify(manifest: Manifest, name: string) {
   const entry = entryOf(manifest, name)
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "vendor-"))
   try {
-    await extract(entry.sha, entry.source, staging)
+    await extract(entry.sha, entry.source, staging, entry.exclude)
     const ignored = ["node_modules", "dist", ".turbo"].flatMap((item) => ["-x", item])
     const result = await $`diff -r ${ignored} ${staging} ${path.join(root, entry.dest)}`.quiet().nothrow()
     if (result.exitCode === 0) {
@@ -94,15 +102,21 @@ const [command, ...args] = process.argv.slice(2)
 const manifest = load()
 
 if (command === "add") {
-  const [name, source, dest, ref] = args
-  if (!name || !source || !dest) throw new Error("usage: add <name> <source> <dest> [ref]")
+  const exclude: string[] = []
+  const positional: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--exclude") exclude.push(args[++i] ?? "")
+    else positional.push(args[i])
+  }
+  const [name, source, dest, ref] = positional
+  if (!name || !source || !dest) throw new Error("usage: add <name> <source> <dest> [ref] [--exclude <path>]...")
   if (manifest.packages[name]) throw new Error(`${name} is already vendored; use sync`)
-  await install(manifest, name, source, dest, ref ?? manifest.defaultRef)
+  await install(manifest, name, source, dest, ref ?? manifest.defaultRef, exclude)
 } else if (command === "sync") {
   const [name, ref] = args
   if (!name) throw new Error("usage: sync <name> [ref]")
   const entry = entryOf(manifest, name)
-  await install(manifest, name, entry.source, entry.dest, ref ?? manifest.defaultRef)
+  await install(manifest, name, entry.source, entry.dest, ref ?? manifest.defaultRef, entry.exclude)
 } else if (command === "check") {
   const names = args[0] ? [args[0]] : Object.keys(manifest.packages)
   const results = await Promise.all(names.map((name) => verify(manifest, name)))

@@ -46,11 +46,13 @@ import { SessionProcessor } from "./processor"
 import { TaskTool } from "@/tool/task"
 import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
+import { Question } from "@/question"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { Shell } from "@/shell/shell"
 import { AppFileSystem } from "@/filesystem"
 import { Truncate } from "@/tool/truncate"
+import { CodeModeTool } from "@/tool/codemode"
 import { Attachment } from "./attachment"
 import { loadAssetRef } from "./attachment-ref"
 import { decodeDataUrlBytes } from "@/util/data-url"
@@ -482,6 +484,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       }) {
         using _ = log.time("resolveTools")
         const tools: Record<string, AITool> = {}
+        const codemodeParts = new Map<string, MessageV2.ToolPart>()
 
         const context = (args: any, options: ToolExecutionOptions): Tool.Context => ({
           sessionID: input.session.id,
@@ -494,7 +497,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           metadata: (val) =>
             Effect.runPromise(
               Effect.gen(function* () {
-                const match = input.processor.partFromToolCall(options.toolCallId)
+                const match =
+                  input.processor.partFromToolCall(options.toolCallId) ?? codemodeParts.get(options.toolCallId)
                 if (!match || match.state.status !== "running") return
                 yield* sessions.updatePart({
                   ...match,
@@ -519,10 +523,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             ),
         })
 
-        for (const item of yield* registry.tools(
+        const registered = yield* registry.tools(
           { modelID: ModelID.make(input.model.api.id), providerID: input.model.providerID },
           input.agent,
-        )) {
+        )
+        for (const item of registered) {
           const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
           tools[item.id] = tool({
             id: item.id as any,
@@ -561,6 +566,148 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
             },
           })
+        }
+
+        if (Flag.ENK_CODEMODE) {
+          const inner = registered.filter((item) => CodeModeTool.INNER.includes(item.id as never) && tools[item.id])
+          if (inner.length > 0) {
+            const direct = Object.fromEntries(inner.map((item) => [item.id, tools[item.id]]))
+            for (const item of inner) delete tools[item.id]
+            const bind = (
+              options: ToolExecutionOptions,
+              state: { rejected?: unknown; open: Map<string, MessageV2.ToolPart> },
+            ): CodeModeTool.Inner[] =>
+              inner.map((item) => ({
+                id: item.id,
+                description: item.description,
+                parameters: item.parameters,
+                run: async (args, index) => {
+                  if (state.rejected) throw state.rejected
+                  const callID = `${options.toolCallId}:${index}`
+                  const started = Date.now()
+                  const params = args as Record<string, any>
+                  const part = await Effect.runPromise(
+                    sessions.updatePart({
+                      id: PartID.ascending(),
+                      messageID: input.processor.message.id,
+                      sessionID: input.session.id,
+                      type: "tool",
+                      tool: item.id,
+                      callID,
+                      metadata: { codemode: true },
+                      state: { status: "running", input: params, time: { start: started } },
+                    } satisfies MessageV2.ToolPart),
+                  )
+                  state.open.set(callID, part)
+                  codemodeParts.set(callID, part)
+                  try {
+                    const result: any = await direct[item.id].execute!(args as never, {
+                      ...options,
+                      toolCallId: callID,
+                    })
+                    await Effect.runPromise(
+                      sessions.updatePart({
+                        ...state.open.get(callID)!,
+                        state: {
+                          status: "completed",
+                          input: params,
+                          output: result.output,
+                          metadata: result.metadata ?? {},
+                          title: result.title ?? "",
+                          time: { start: started, end: Date.now() },
+                          attachments: result.attachments,
+                        },
+                      }),
+                    )
+                    state.open.delete(callID)
+                    codemodeParts.delete(callID)
+                    return {
+                      output: result.output,
+                      title: result.title,
+                      metadata: result.metadata,
+                      attachments: result.attachments,
+                    }
+                  } catch (error) {
+                    if (error instanceof Permission.RejectedError || error instanceof Question.RejectedError)
+                      state.rejected = error
+                    await Effect.runPromise(
+                      sessions.updatePart({
+                        ...state.open.get(callID)!,
+                        state: {
+                          status: "error",
+                          input: params,
+                          error: error instanceof Error ? error.message : String(error),
+                          time: { start: started, end: Date.now() },
+                        },
+                      }),
+                    )
+                    state.open.delete(callID)
+                    codemodeParts.delete(callID)
+                    throw error
+                  }
+                },
+              }))
+            tools[CodeModeTool.ID] = tool({
+              id: CodeModeTool.ID as any,
+              description: CodeModeTool.description(bind({ toolCallId: "", messages: [] }, { open: new Map() })),
+              inputSchema: jsonSchema({
+                type: "object",
+                properties: {
+                  code: { type: "string", description: "JavaScript source to run in the Code Mode runtime" },
+                },
+                required: ["code"],
+              }),
+              execute(args: any, options) {
+                const state: { rejected?: unknown; open: Map<string, MessageV2.ToolPart> } = { open: new Map() }
+                return Effect.runPromise(
+                  Effect.gen(function* () {
+                    const ctx = context(args, options)
+                    yield* plugin.trigger(
+                      "tool.execute.before",
+                      { tool: CodeModeTool.ID, sessionID: ctx.sessionID, callID: ctx.callID },
+                      { args },
+                    )
+                    const run = yield* Effect.promise(() =>
+                      CodeModeTool.run(String(args.code ?? ""), bind(options, state), options.abortSignal),
+                    ).pipe(
+                      Effect.ensuring(
+                        Effect.forEach(
+                          [...state.open.values()],
+                          (part) =>
+                            sessions.updatePart({
+                              ...part,
+                              state: {
+                                status: "error",
+                                input: part.state.status === "running" ? part.state.input : {},
+                                error: "[Tool execution was interrupted]",
+                                time: {
+                                  start: part.state.status === "running" ? part.state.time.start : Date.now(),
+                                  end: Date.now(),
+                                },
+                              },
+                            }),
+                          { discard: true },
+                        ),
+                      ),
+                    )
+                    if (state.rejected) return yield* Effect.fail(state.rejected)
+                    const output = {
+                      title: CodeModeTool.ID,
+                      metadata: { toolCalls: run.calls, ...(run.error ? { error: true } : {}) },
+                      output: yield* Effect.promise(() => Secret.redact(run.output, Instance.directory)),
+                      attachments: run.attachments as MessageV2.FilePart[],
+                    }
+                    yield* plugin.trigger(
+                      "tool.execute.after",
+                      { tool: CodeModeTool.ID, sessionID: ctx.sessionID, callID: ctx.callID, args },
+                      output,
+                    )
+                    return output
+                  }),
+                )
+              },
+            })
+          }
         }
 
         for (const [key, item] of Object.entries(yield* mcp.tools())) {
