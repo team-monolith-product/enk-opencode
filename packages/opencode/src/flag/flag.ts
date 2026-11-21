@@ -275,7 +275,7 @@ Object.defineProperty(Flag, "ENK_SESSION_LIMIT", {
   get() {
     const value = Flag.nonNegativeNumber("ENK_SESSION_LIMIT")
     if (value === undefined || value < 1) return 1
-    return Math.min(3, Math.floor(value))
+    return Math.min(10, Math.floor(value))
   },
   enumerable: true,
   configurable: false,

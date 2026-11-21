@@ -3,13 +3,19 @@
   align-items: stretch;
   flex-shrink: 0;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
   border-bottom: 1px solid var(--border-weak-base);
   background: var(--background-base);
 }
 
+[data-component="session-tabs"]::-webkit-scrollbar {
+  display: none;
+}
+
 [data-component="session-tabs"] .session-tab {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 88px;
   padding: 11px 12px;
   background: transparent;
   border: none;
@@ -66,8 +72,12 @@
 }
 
 [data-component="session-tabs"] .session-tab--add {
+  position: sticky;
+  right: 0;
   flex: 0 0 auto;
+  min-width: 0;
   padding: 11px 14px;
+  background: var(--background-base);
 }
 
 [data-component="session-tabs"] .session-tab--add:disabled {

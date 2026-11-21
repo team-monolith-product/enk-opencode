@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { Icon } from "@opencode-ai/ui/icon"
 import { showToast } from "@opencode-ai/ui/toast"
@@ -73,6 +73,11 @@ export function SessionTabs() {
               type="button"
               role="tab"
               class="session-tab"
+              ref={(el) =>
+                createEffect(() => {
+                  if (item.id === params.id) el.scrollIntoView({ block: "nearest", inline: "nearest" })
+                })
+              }
               classList={{ "is-active": item.id === params.id }}
               aria-selected={item.id === params.id}
               onClick={() => open(item.id)}
