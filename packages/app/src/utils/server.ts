@@ -137,6 +137,7 @@ export type GitHubRepo = { owner: string; name: string; url: string; private?: b
 export type GitHubStatus = {
   enabled: boolean
   connectUrl?: string
+  manageUrl?: string
   login?: string
   linkedBy?: string
   app?: boolean
