@@ -16,7 +16,9 @@ import {
   assetRelativePath,
   assetSubtree,
   deleteAsset,
+  deleteProjectFile,
   isAssetPath,
+  isProtectedPath,
   pickedFromDataTransfer,
   pickedFromInput,
   uploadAssets,
@@ -163,10 +165,19 @@ export function createAssetUpload() {
   }
 
   /**
-   * Only the upload folder gets a delete affordance. The file tree renders the whole project, and
-   * nothing else in it should be deletable from here — code is git's to restore, not ours.
+   * Every node except the folders the workspace itself depends on (`.git`, `.opencode`) can be
+   * deleted from the tree. Upload-folder nodes go through the asset API, everything else through
+   * the project file API.
    */
-  const deletable = (node: FileNode) => isAssetPath(node.path)
+  const deletable = (node: FileNode) => !isProtectedPath(node.path)
+
+  const refreshParent = (nodePath: string) => {
+    const parts = nodePath.split("/")
+    parts.pop()
+    const parent = parts.join("/")
+    if (parent && !file.tree.state(parent)?.loaded) return
+    void file.tree.refresh(parent)
+  }
 
   const removeNow = async (relative: string, label: string) => {
     const ok = await deleteAsset({ client: sdk.client, directory: sdk.directory, relative })
@@ -183,9 +194,49 @@ export function createAssetUpload() {
    * the upload folder itself, which is "delete everything") asks first, because the row gives no
    * hint of how much is underneath it.
    */
+  const removeProject = async (node: FileNode) => {
+    const ok = await deleteProjectFile({ client: sdk.client, directory: sdk.directory, path: node.path })
+    refreshParent(node.path)
+    showToast(
+      ok
+        ? { title: language.t("session.files.delete.done", { name: node.name }) }
+        : { title: language.t("common.requestFailed") },
+    )
+  }
+
+  const removeEverything = async () => {
+    const ok = await deleteProjectFile({ client: sdk.client, directory: sdk.directory })
+    // Re-listing the root drops every removed folder, and the entries cached under it, from the tree.
+    void file.tree.refresh("")
+    showToast(
+      ok
+        ? { title: language.t("session.files.deleteAll.done") }
+        : { title: language.t("common.requestFailed") },
+    )
+  }
+
+  const confirmAll = () => {
+    dialog.show(() => (
+      <AssetDeleteDialog
+        title={language.t("session.files.deleteAll.confirm.title")}
+        description={language.t("session.files.deleteAll.confirm.body")}
+        onConfirm={removeEverything}
+      />
+    ))
+  }
+
   const remove = async (node: FileNode) => {
     const relative = assetRelativePath(node.path)
-    if (relative === undefined) return
+    if (relative === undefined) {
+      dialog.show(() => (
+        <AssetDeleteDialog
+          title={language.t("session.files.delete.confirm.title", { name: node.name })}
+          description={language.t("session.files.delete.confirm.body.project")}
+          onConfirm={() => removeProject(node)}
+        />
+      ))
+      return
+    }
 
     if (node.type === "file") {
       await removeNow(relative, node.name)
@@ -197,43 +248,38 @@ export function createAssetUpload() {
       <AssetDeleteDialog
         // Deleting the upload folder is "delete everything"; naming the folder there would make the
         // user translate an internal name into what is about to happen.
-        name={node.path === ASSETS_DIR ? undefined : node.name}
-        subtree={subtree}
+        title={
+          node.path === ASSETS_DIR
+            ? language.t("session.files.delete.confirm.title.all")
+            : language.t("session.files.delete.confirm.title", { name: node.name })
+        }
+        description={language.t("session.files.delete.confirm.body", {
+          count: subtree.count.toLocaleString(),
+          size: formatBytes(subtree.bytes),
+        })}
         onConfirm={() => removeNow(relative, node.name)}
       />
     ))
   }
 
-  return { run, progress, uploading, dragging, drop, deletable, remove }
+  return { run, progress, uploading, dragging, drop, deletable, remove, confirmAll }
 }
 
 /**
- * Confirmation for a folder delete. The count and size are the whole point — the row the user
- * clicked shows neither, so a generic "are you sure" would tell them nothing they did not know.
+ * Confirmation for a delete. For the upload folder the count and size are the whole point — the row
+ * the user clicked shows neither, so a generic "are you sure" would tell them nothing new.
  *
  * Chrome follows DialogEnvKeys (title / description / footer rhythm, see .asset-delete-dialog in
  * index.css) so the two modals read as one product rather than two.
  */
-function AssetDeleteDialog(props: {
-  /** The folder's name, or undefined when the target is the upload folder itself. */
-  name?: string
-  subtree: { count: number; bytes: number }
-  onConfirm: () => void
-}) {
+function AssetDeleteDialog(props: { title: string; description: string; onConfirm: () => void }) {
   const dialog = useDialog()
   const language = useLanguage()
 
   return (
     <Dialog
-      title={
-        props.name
-          ? language.t("session.files.delete.confirm.title", { name: props.name })
-          : language.t("session.files.delete.confirm.title.all")
-      }
-      description={language.t("session.files.delete.confirm.body", {
-        count: props.subtree.count.toLocaleString(),
-        size: formatBytes(props.subtree.bytes),
-      })}
+      title={props.title}
+      description={props.description}
       action={<span class="sr-only" />}
       transition
       fit
@@ -357,5 +403,24 @@ export function AssetUploadProgress(props: { upload: AssetUpload }) {
         </div>
       )}
     </Show>
+  )
+}
+
+export function FileDeleteAllButton(props: { upload: AssetUpload; class?: string }) {
+  const language = useLanguage()
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="small"
+      class={`gap-1.5 ${props.class ?? ""}`}
+      disabled={props.upload.uploading()}
+      onClick={() => props.upload.confirmAll()}
+      aria-label={language.t("session.files.deleteAll.label")}
+      title={language.t("session.files.deleteAll.label")}
+    >
+      <Icon name="trash" />
+      <span class="text-12-regular">{language.t("session.files.deleteAll.label")}</span>
+    </Button>
   )
 }
