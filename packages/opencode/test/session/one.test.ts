@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { Instance } from "../../src/project/instance"
-import { ensureSession, getOrCreateMain } from "../../src/session/ensure"
+import { ensureSession, firstSession, getOrCreateMain, sessionLimit } from "../../src/session/ensure"
 import { Session } from "../../src/session"
 import { Log } from "../../src/util/log"
 import { tmpdir } from "../fixture/fixture"
@@ -110,5 +110,82 @@ describe("ensureSession with ensureOneSession", () => {
     })
 
     expect(await active(tmp.path)).toHaveLength(0)
+  })
+})
+
+describe("team session limit", () => {
+  afterEach(() => {
+    delete process.env["ENK_SESSION_LIMIT"]
+  })
+
+  test("creates sessions up to the limit, then returns an existing one", async () => {
+    process.env["ENK_SESSION_LIMIT"] = "2"
+    await using tmp = await tmpdir({ config: { ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const one = await getOrCreateMain()
+        const two = await getOrCreateMain(undefined, { fresh: true })
+        const three = await getOrCreateMain(undefined, { fresh: true })
+        expect(two.id).not.toBe(one.id)
+        expect([one.id, two.id]).toContain(three.id)
+        expect(await active(tmp.path)).toHaveLength(2)
+      },
+    })
+  })
+
+  test("concurrent creates never pass the limit", async () => {
+    process.env["ENK_SESSION_LIMIT"] = "2"
+    await using tmp = await tmpdir({ config: { ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const fresh = { fresh: true }
+        await Promise.all([
+          getOrCreateMain(undefined, fresh),
+          getOrCreateMain(undefined, fresh),
+          getOrCreateMain(undefined, fresh),
+          getOrCreateMain(undefined, fresh),
+        ])
+        expect(await active(tmp.path)).toHaveLength(2)
+      },
+    })
+  })
+
+  test("a create without the fresh request reuses the open session", async () => {
+    process.env["ENK_SESSION_LIMIT"] = "2"
+    await using tmp = await tmpdir({ config: { ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const one = await getOrCreateMain()
+        const two = await getOrCreateMain()
+        expect(two.id).toBe(one.id)
+        expect(await active(tmp.path)).toHaveLength(1)
+      },
+    })
+  })
+
+  test("an out-of-range limit falls back to between 1 and 3", async () => {
+    process.env["ENK_SESSION_LIMIT"] = "9"
+    expect(sessionLimit()).toBe(3)
+    process.env["ENK_SESSION_LIMIT"] = "0"
+    expect(sessionLimit()).toBe(1)
+    delete process.env["ENK_SESSION_LIMIT"]
+    expect(sessionLimit()).toBe(1)
+  })
+
+  test("the first session is the oldest active one", async () => {
+    process.env["ENK_SESSION_LIMIT"] = "2"
+    await using tmp = await tmpdir({ config: { ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const one = await getOrCreateMain()
+        await getOrCreateMain(undefined, { fresh: true })
+        await Session.setTitle({ sessionID: one.id, title: "touched" })
+        expect((await firstSession()).id).toBe(one.id)
+      },
+    })
   })
 })

@@ -15110,6 +15110,9 @@
           },
           "consentRequired": {
             "type": "boolean"
+          },
+          "sessionLimit": {
+            "type": "integer"
           }
         }
       },
