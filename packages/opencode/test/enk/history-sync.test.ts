@@ -11,6 +11,7 @@ import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Instance } from "../../src/project/instance"
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session"
+import { SessionPrompt } from "../../src/session/prompt"
 import type { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util/log"
@@ -377,5 +378,45 @@ describe("HistorySync.failed", () => {
     } finally {
       sent.mockRestore()
     }
+  })
+})
+
+describe("merging GitHub changes with AI", () => {
+  test("is refused when GitHub has nothing that conflicts", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session } = await team(tmp.path)
+
+        await expect(HistorySync.merge({ sessionID: session.id })).rejects.toMatchObject({ code: "clean" })
+        expect(await Session.messages({ sessionID: session.id })).toHaveLength(0)
+      },
+    })
+  })
+
+  test("asks the AI to clear the markers in the conflicting files", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session } = await team(tmp.path)
+        using absorb = spyOn(GitHub, "absorb").mockResolvedValue({ files: ["index.html"], kept: ["logo.png"] })
+        using loop = spyOn(SessionPrompt, "loop").mockResolvedValue(undefined as never)
+
+        const result = await HistorySync.merge({ sessionID: session.id, locale: "en" })
+
+        expect(result).toEqual({ files: ["index.html"], kept: ["logo.png"] })
+        expect(absorb).toHaveBeenCalledWith(tmp.path, { backup: "Saved before merging GitHub changes" })
+        expect(loop).toHaveBeenCalledWith({ sessionID: session.id })
+        const [message] = await Session.messages({ sessionID: session.id })
+        const text = message!.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+        expect(text).toContain("- index.html")
+        expect(text).toContain("- logo.png")
+        expect(text).toContain("`=======`")
+      },
+    })
   })
 })

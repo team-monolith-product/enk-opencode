@@ -8,6 +8,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import type { QuestionRequest } from "@opencode-ai/sdk/v2"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
+import { useSync } from "@/context/sync"
 import { useParentParams } from "@/context/parent-params"
 import { useClientEnv } from "@/context/client-env"
 import { label } from "@/components/blocksuite/actor"
@@ -100,6 +101,7 @@ function Option(props: {
 
 export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit: () => void }> = (props) => {
   const sdk = useSDK()
+  const sync = useSync()
   const language = useLanguage()
   const dialog = useDialog()
   const parentParams = useParentParams()
@@ -356,7 +358,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   // presence round-trip.
   const selectionKey = (selection: string[]) => [...selection].sort().join("\u0000")
   const mineEffective = () => effective(tab(), mine[tab()] ?? [], on())
+  const consentRequired = () => sync.data.env.consentRequired !== false
   const consensus = createMemo(() => {
+    if (!consentRequired()) return mineEffective().length > 0
     const self = actor()?.actorID
     const here = presence().filter((item) => item.qIndex === tab())
     // A participant who selected the custom option but left the (shared) text empty has an INCOMPLETE

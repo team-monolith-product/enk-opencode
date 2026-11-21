@@ -143,7 +143,14 @@ export type GitHubStatus = {
   repo?: GitHubRepo
   push?: { sha: string; time: number; by?: string }
   firstPush?: { attempts: number; code: string; reason: string }
-  blocked?: { code: "diverged" | "conflict"; files: string[]; resolving?: boolean }
+  conflict?: GitHubConflict
+}
+export type GitHubConflict = {
+  branch: string
+  target: string
+  files: string[]
+  resolving: boolean
+  compare?: string
 }
 
 export function githubCode(err: unknown) {
@@ -166,22 +173,13 @@ export function pushGitHub(
     .then((res) => res.data as GitHubStatus & { pushed: boolean })
 }
 
-export function resolveGitHub(
-  opts: GitHubOpts,
-  input: { prefer: "ours" | "theirs"; locale?: PromptLocale },
-): Promise<GitHubStatus & { pushed: boolean }> {
-  return devServerClient(opts)
-    .post({ url: "/github/resolve", body: input })
-    .then((res) => res.data as GitHubStatus & { pushed: boolean })
-}
-
-export function mergeGitHubWithAI(
+export function mergeGitHub(
   opts: GitHubOpts,
   input: { sessionID: string; locale?: PromptLocale },
-): Promise<GitHubStatus> {
+): Promise<GitHubStatus & { files: string[]; kept: string[] }> {
   return devServerClient(opts)
-    .post({ url: "/github/merge-ai", body: input })
-    .then((res) => res.data as GitHubStatus)
+    .post({ url: "/github/merge", body: input })
+    .then((res) => res.data as GitHubStatus & { files: string[]; kept: string[] })
 }
 
 export function getGitHubRepositories(opts: GitHubOpts): Promise<GitHubRepo[]> {
