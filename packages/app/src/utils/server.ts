@@ -133,7 +133,7 @@ export function deleteEnvKey(opts: EnvFileOpts, name: string): Promise<string[]>
 }
 
 type GitHubOpts = EnvFileOpts
-export type GitHubRepo = { owner: string; name: string; url: string; private?: boolean }
+export type GitHubRepo = { owner: string; name: string; url: string; private?: boolean; pushedAt?: string }
 export type GitHubStatus = {
   enabled: boolean
   connectUrl?: string

@@ -12,6 +12,7 @@ const Repo = z.object({
   name: z.string(),
   url: z.string(),
   private: z.boolean().optional(),
+  pushedAt: z.string().optional(),
 })
 const Status = z
   .object({
