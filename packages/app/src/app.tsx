@@ -45,6 +45,7 @@ import { ServerConnection, ServerProvider, serverName, useServer } from "@/conte
 import { SettingsProvider } from "@/context/settings"
 import { TerminalProvider } from "@/context/terminal"
 import { ProjectSummaryBridge } from "@/components/project-summary-bridge"
+import { LastTurnBridge } from "@/components/last-turn-bridge"
 import { InitialPlanBridge } from "@/components/initial-plan-bridge"
 import DirectoryLayout from "@/pages/directory-layout"
 import Layout from "@/pages/layout"
@@ -346,6 +347,7 @@ export function AppInterface(props: {
     >
       <ProjectSummaryBridge />
       <InitialPlanBridge />
+      <LastTurnBridge />
       <ConnectionGate disableHealthCheck={props.disableHealthCheck}>
         <ServerKey>
           <GlobalSDKProvider>
