@@ -143,7 +143,7 @@ export type GitHubStatus = {
   repo?: GitHubRepo
   push?: { sha: string; time: number; by?: string }
   firstPush?: { attempts: number; code: string; reason: string }
-  blocked?: { code: "diverged" | "conflict"; files: string[] }
+  blocked?: { code: "diverged" | "conflict"; files: string[]; resolving?: boolean }
 }
 
 export function githubCode(err: unknown) {
@@ -173,6 +173,15 @@ export function resolveGitHub(
   return devServerClient(opts)
     .post({ url: "/github/resolve", body: input })
     .then((res) => res.data as GitHubStatus & { pushed: boolean })
+}
+
+export function mergeGitHubWithAI(
+  opts: GitHubOpts,
+  input: { sessionID: string; locale?: PromptLocale },
+): Promise<GitHubStatus> {
+  return devServerClient(opts)
+    .post({ url: "/github/merge-ai", body: input })
+    .then((res) => res.data as GitHubStatus)
 }
 
 export function getGitHubRepositories(opts: GitHubOpts): Promise<GitHubRepo[]> {

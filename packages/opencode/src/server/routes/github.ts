@@ -5,6 +5,7 @@ import z from "zod"
 import { GitHub } from "../../enk/github"
 import { Locale } from "../../enk/locale"
 import { Instance } from "../../project/instance"
+import { SessionID } from "../../session/schema"
 import { lazy } from "../../util/lazy"
 
 const Repo = z.object({
@@ -29,7 +30,13 @@ const Status = z
         reason: z.string(),
       })
       .optional(),
-    blocked: z.object({ code: z.enum(["diverged", "conflict"]), files: z.array(z.string()) }).optional(),
+    blocked: z
+      .object({
+        code: z.enum(["diverged", "conflict"]),
+        files: z.array(z.string()),
+        resolving: z.boolean().optional(),
+      })
+      .optional(),
   })
   .meta({ ref: "GitHubStatus" })
 const Pushed = Status.extend({ pushed: z.boolean() }).meta({ ref: "GitHubPushed" })
@@ -106,6 +113,18 @@ export const GitHubRoutes = lazy(() =>
       }),
       validator("json", z.object({ prefer: z.enum(["ours", "theirs"]), locale: Locale.Schema.optional() })),
       async (c) => c.json(await alerting(c, () => GitHub.resolve(Instance.directory, c.req.valid("json")))),
+    )
+    .post(
+      "/merge-ai",
+      describeRoute({
+        summary: "Let the AI merge a GitHub conflict",
+        description:
+          "Send the files that changed on both GitHub and Jitda to the session's AI with GitHub's side of the change, so it edits them to keep both. The next push accepts the files the AI edited.",
+        operationId: "github.mergeWithAI",
+        responses: { ...ok("Link status", Status), ...failures(409, 502) },
+      }),
+      validator("json", z.object({ sessionID: SessionID.zod, locale: Locale.Schema.optional() })),
+      async (c) => c.json(await alerting(c, () => GitHub.mergeWithAI(Instance.directory, c.req.valid("json")))),
     )
     .post(
       "/push",

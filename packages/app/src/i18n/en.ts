@@ -184,6 +184,12 @@ export const dict = {
   "github.blocked.ours.hint":
     "Push Jitda's files: Jitda's files go up as a new commit. GitHub's earlier files stay in the commit history.",
   "github.blocked.done": "Synced with GitHub",
+  "github.blocked.ai": "Ask the AI to merge",
+  "github.blocked.ai.hint":
+    "Ask the AI to merge: the AI edits the files to keep both sides' changes, and they are pushed once it finishes.",
+  "github.blocked.ai.sent": "Asked the AI to merge the conflicting files",
+  "github.blocked.ai.working": "The AI is merging the conflicting files. They are pushed once it finishes.",
+  "github.error.stale": "This conflict is already resolved. Open the window again",
   "github.readonly": "Spectators can't change GitHub settings.",
   "command.history": "History",
   "command.history.description": "See saved versions and roll back to one",
