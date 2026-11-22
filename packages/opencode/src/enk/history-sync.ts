@@ -9,6 +9,7 @@ import { SessionID } from "@/session/schema"
 import { SessionStatus } from "@/session/status"
 import { Log } from "@/util/log"
 import { Question } from "@/question"
+import type { QuestionID } from "@/question/schema"
 import { EnkFailure } from "./failure"
 import { GitHub } from "./github"
 import { History } from "./history"
@@ -167,10 +168,63 @@ export namespace HistorySync {
         failed(err, evt.properties.sessionID)
         return undefined
       })
-      if (result?.conflict && !result.conflict.resolving) {
+      if (result?.conflict && !result.conflict.resolving && !result.conflict.queued) {
         void ask({ sessionID: evt.properties.sessionID, dir, conflict: result.conflict, locale: turn.user.locale })
       }
+      await drain(dir, turn.user.locale)
     })
+    GitHub.onSettle((done) => void close(done))
+  }
+
+  /**
+   * 팀이 고른 방식으로 GitHub 와 겹친 곳을 맞춘다. 같은 폴더의 다른 대화가 답하는 중이면 그 대화들이 끝난 뒤 실행하도록
+   * 남겨 두고 queued 로 돌려준다. AI 로 합치기는 고른 사람의 대화에 요청을 보낸다.
+   */
+  export async function choose(input: {
+    dir: string
+    choice: GitHub.Choose
+    sessionID?: SessionID
+    locale?: Locale.Value
+  }): Promise<{ queued: boolean }> {
+    if (!(await GitHub.conflictOf(input.dir))) throw new GitHub.Failure("clean", 409)
+    if (await GitHub.working()) {
+      await GitHub.queue(input.dir, input.choice)
+      if (input.sessionID) owners.set(input.dir, input.sessionID)
+      return { queued: true }
+    }
+    await apply(input)
+    return { queued: false }
+  }
+
+  const owners = new Map<string, SessionID>()
+
+  async function apply(input: { dir: string; choice: GitHub.Choose; sessionID?: SessionID; locale?: Locale.Value }) {
+    if (input.choice === "ai") {
+      const sessionID = input.sessionID ?? owners.get(input.dir)
+      if (!sessionID) throw new GitHub.Failure("busy", 409)
+      await merge({ sessionID, locale: input.locale })
+      return
+    }
+    await GitHub.resolve(input.dir, { prefer: input.choice, locale: input.locale })
+  }
+
+  /** 미뤄 둔 선택을 모든 대화가 쉴 때 실행한다. */
+  async function drain(dir: string, locale?: Locale.Value) {
+    const conflict = await GitHub.conflictOf(dir)
+    if (!conflict?.queued || (await GitHub.working())) return
+    const sessionID = owners.get(dir)
+    owners.delete(dir)
+    await apply({ dir, choice: conflict.queued, sessionID, locale }).catch((err) =>
+      log.warn("queued choice failed", { error: err instanceof Error ? err.message : String(err) }),
+    )
+  }
+
+  /** 충돌이 다른 길(연결 창, 다른 팀원, 다음 대화의 올리기)로 풀리면 떠 있던 고르기 질문을 닫는다. */
+  async function close(dir: string) {
+    const id = asking.get(dir)
+    if (!id) return
+    const pending = (await Question.list()).find((item) => item.id === id)
+    if (pending) await Question.reject(pending.id).catch(() => undefined)
   }
 
   const CHOICE: Record<
@@ -178,6 +232,7 @@ export namespace HistorySync {
     {
       header: string
       question: (files: string[], linking?: boolean) => string
+      retry: string
       ai: GitHub.Choice
       theirs: GitHub.Choice
       ours: GitHub.Choice
@@ -187,6 +242,7 @@ export namespace HistorySync {
       header: "GitHub 충돌",
       question: (files, linking) =>
         `${linking ? "연결한 GitHub 저장소에 있던 파일" : "GitHub에서 따로 바뀐 내용"}과 짓다에서 바뀐 내용이 같은 곳에서 겹쳐요. 어떻게 맞출까요? 고르기 전까지 짓다 내용은 따로 만든 브랜치에만 올라가 있어요.\n\n겹친 파일: ${files.join(", ")}`,
+      retry: "앞서 고른 방식으로 맞추지 못했어요. 다시 골라 주세요.",
       ai: { label: "AI가 합치기", description: "양쪽 내용을 모두 살려 AI가 합친 뒤 올려요" },
       theirs: { label: "GitHub 기준", description: "겹친 곳은 GitHub 내용을 따르고, 나머지는 양쪽을 합쳐 올려요" },
       ours: { label: "짓다 기준", description: "겹친 곳은 짓다 내용을 따르고, 나머지는 양쪽을 합쳐 올려요" },
@@ -195,6 +251,7 @@ export namespace HistorySync {
       header: "GitHub conflict",
       question: (files, linking) =>
         `${linking ? "Files already in the linked GitHub repository" : "Changes made separately on GitHub"} overlap with changes made in Jitda. How should they be lined up? Until you choose, Jitda's work is only on a separate branch.\n\nOverlapping files: ${files.join(", ")}`,
+      retry: "The previous choice could not be applied. Please choose again.",
       ai: { label: "Let the AI merge", description: "The AI combines both sides, then it is pushed" },
       theirs: {
         label: "GitHub's side",
@@ -204,7 +261,7 @@ export namespace HistorySync {
     },
   }
 
-  const asking = new Set<string>()
+  const asking = new Map<string, QuestionID | undefined>()
 
   /**
    * 대화가 끝나 올리다 GitHub 와 겹치면 바로 대화창에 고를 거리를 띄운다. 질문 창이 떠 있는 동안 다음 대화는 시작되지
@@ -215,32 +272,51 @@ export namespace HistorySync {
     dir: string
     conflict: GitHub.Conflict
     locale?: Locale.Value
+    retry?: boolean
   }) {
     if (asking.has(input.dir)) return
-    asking.add(input.dir)
+    asking.set(input.dir, undefined)
     const locale = input.locale ?? Locale.DEFAULT
     const text = CHOICE[locale]
     const options = [text.ai, text.theirs, text.ours]
+    const unsub = Bus.subscribe(Question.Event.Asked, (evt) => {
+      if (evt.properties.sessionID === input.sessionID && evt.properties.questions[0]?.header === text.header) {
+        asking.set(input.dir, evt.properties.id)
+      }
+    })
     const answers = await Question.ask({
       sessionID: input.sessionID,
       questions: [
         {
           header: text.header,
-          question: text.question(input.conflict.files, input.conflict.linking),
+          question:
+            (input.retry ? `${text.retry}\n\n` : "") + text.question(input.conflict.files, input.conflict.linking),
           options,
           custom: false,
         },
       ],
     })
       .catch(() => undefined)
-      .finally(() => asking.delete(input.dir))
+      .finally(() => {
+        unsub()
+        asking.delete(input.dir)
+      })
     const picked = answers?.[0]?.[0]
-    if (picked === text.ai.label) {
-      return merge({ sessionID: input.sessionID, locale }).catch((err) => failed(err, input.sessionID))
-    }
-    const prefer = picked === text.theirs.label ? "theirs" : picked === text.ours.label ? "ours" : undefined
-    if (!prefer) return
-    return GitHub.resolve(input.dir, { prefer, locale }).catch((err) => failed(err, input.sessionID))
+    const choice: GitHub.Choose | undefined =
+      picked === text.ai.label
+        ? "ai"
+        : picked === text.theirs.label
+          ? "theirs"
+          : picked === text.ours.label
+            ? "ours"
+            : undefined
+    if (!choice) return
+    await choose({ dir: input.dir, choice, sessionID: input.sessionID, locale }).catch(async (err) => {
+      failed(err, input.sessionID)
+      if (err instanceof GitHub.Failure && err.code === "clean") return
+      const conflict = await GitHub.conflictOf(input.dir)
+      if (conflict && !conflict.resolving) await ask({ ...input, conflict, retry: true })
+    })
   }
 
   export function failed(err: unknown, sessionID: SessionID) {

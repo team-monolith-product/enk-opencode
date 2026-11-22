@@ -192,6 +192,7 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
     if (!result) return void refetch()
     const { files, kept: _, ...status } = result
     setState("status", reconcile(status))
+    if (status.conflict?.queued) return void showToast({ title: language.t("github.conflict.queued") })
     showToast({ title: language.t(files.length ? "github.merge.sent" : "github.merge.done") })
     if (files.length) dialog.close()
   }
@@ -204,6 +205,7 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
     const { pushed: _, ...status } = result
     if (status.enabled) setState("status", reconcile(status))
     else void refetch()
+    if (status.conflict?.queued) return void showToast({ title: language.t("github.conflict.queued") })
     showToast({ title: language.t(status.conflict ? "github.linking.pending" : "github.linking.done") })
   }
 
@@ -401,6 +403,9 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
                             branch: item().branch,
                           })}
                         </span>
+                        <Show when={item().queued}>
+                          <span class="text-12-regular text-text-strong">{language.t("github.conflict.queued")}</span>
+                        </Show>
                         <span class="text-12-medium text-text-strong">{language.t("github.conflict.files")}</span>
                         <ul class="flex flex-col gap-0.5">
                           <For each={item().files}>

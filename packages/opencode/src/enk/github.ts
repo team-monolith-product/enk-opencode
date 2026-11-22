@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "fs/promises"
+import { readFile, rm, writeFile } from "fs/promises"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import path from "path"
 import { setTimeout as sleep } from "node:timers/promises"
@@ -43,12 +43,20 @@ export namespace GitHub {
     firstPush?: FirstPush
     conflict?: Conflict & { compare?: string }
   }
-  /** GitHub 에서 따로 바뀐 곳과 짓다에서 바뀐 곳이 겹쳐 기본 브랜치 대신 `branch` 에 올린 상태. */
   /**
    * GitHub 에서 따로 바뀐 곳과 짓다에서 바뀐 곳이 겹쳐 기본 브랜치 대신 `branch` 에 올린 상태. `linking` 은 짓다가
    * 아직 올린 적 없는 저장소를 연결했는데 이미 다른 내용이 있던 경우다.
    */
-  export type Conflict = { branch: string; target: string; files: string[]; resolving: boolean; linking?: boolean }
+  export type Conflict = {
+    branch: string
+    target: string
+    files: string[]
+    resolving: boolean
+    linking?: boolean
+    queued?: Choose
+    remote?: string
+  }
+  export type Choose = "ours" | "theirs" | "ai"
   export type Result = { sha?: string; conflict?: Conflict; absorbed?: number }
   export type Prefer = "ours" | "theirs"
   export type Choice = { label: string; description: string }
@@ -148,7 +156,47 @@ export namespace GitHub {
   }
 
   const failed = new Map<string, FirstPush>()
-  const conflicts = new Map<string, Conflict>()
+  const conflicts = new Map<string, Conflict | null>()
+  const settled = new Set<(dir: string) => void>()
+
+  /** 충돌 상태는 기록 저장소 옆 파일에도 남긴다. pod 가 다시 떠도 연결 창과 고르기가 이어진다. */
+  function conflictFile(dir: string) {
+    return path.join(WorkspaceRepo.open(dir).root, "github-conflict.json")
+  }
+
+  export async function conflictOf(dir: string): Promise<Conflict | undefined> {
+    if (conflicts.has(dir)) return conflicts.get(dir) ?? undefined
+    const raw = await readFile(conflictFile(dir), "utf8").catch(() => undefined)
+    const parsed = (() => {
+      if (!raw) return null
+      try {
+        return JSON.parse(raw) as Conflict
+      } catch {
+        return null
+      }
+    })()
+    conflicts.set(dir, parsed)
+    return parsed ?? undefined
+  }
+
+  async function keep(dir: string, conflict?: Conflict) {
+    conflicts.set(dir, conflict ?? null)
+    if (conflict) await writeFile(conflictFile(dir), JSON.stringify(conflict)).catch(() => undefined)
+    else await rm(conflictFile(dir), { force: true }).catch(() => undefined)
+  }
+
+  /** 충돌이 풀릴 때 부른다. 대화창에 떠 있던 고르기 질문을 닫는 데 쓴다. */
+  export function onSettle(fn: (dir: string) => void) {
+    settled.add(fn)
+    return () => settled.delete(fn)
+  }
+
+  /** 다른 대화가 답하는 중이라 지금 맞출 수 없는 선택을 남겨 둔다. 모든 대화가 쉬면 실행한다. */
+  export async function queue(dir: string, choice: Choose) {
+    const conflict = await conflictOf(dir)
+    if (!conflict) throw new Failure("clean", 409)
+    await keep(dir, { ...conflict, queued: choice })
+  }
 
   async function link(): Promise<Link | undefined> {
     const rails = Rails.endpoint(route)
@@ -230,14 +278,19 @@ export namespace GitHub {
       repo: hit.repo,
       push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
       firstPush: failed.get(dir),
-      conflict: shown(dir, hit),
+      conflict: await shown(dir, hit),
     }
   }
 
-  function shown(dir: string, hit: Link) {
-    const conflict = conflicts.get(dir)
+  async function shown(dir: string, hit: Link) {
+    const conflict = await conflictOf(dir)
     if (!conflict || !hit.repo) return
-    return { ...conflict, compare: `${hit.repo.url}/compare/${conflict.target}...${conflict.branch}` }
+    if (conflict.remote && conflict.remote !== `${web}/${hit.repo.owner}/${hit.repo.name}.git`) {
+      await keep(dir)
+      return
+    }
+    const { remote: _, ...rest } = conflict
+    return { ...rest, compare: `${hit.repo.url}/compare/${conflict.target}...${conflict.branch}` }
   }
 
   const secret = /^(set-cookie|cookie|authorization|proxy-authorization|x-github-sso)$/i
@@ -408,10 +461,17 @@ export namespace GitHub {
    */
   export async function resolve(dir: string, input: { prefer: Prefer; locale?: Locale.Value }) {
     if (!(await status(dir)).enabled) throw new Failure("disabled", 409)
-    if (!conflicts.get(dir)) throw new Failure("clean", 409)
+    if (!(await conflictOf(dir))) throw new Failure("clean", 409)
     if (await working()) throw new Failure("busy", 409)
     const label = RESOLVE[input.locale ?? "ko"]
-    const result = await absorb(dir, { backup: label.backup })
+    const result = await absorb(dir, { backup: label.backup }).catch((err) => {
+      if (err instanceof Failure && err.code === "clean") return undefined
+      throw err
+    })
+    if (!result) {
+      const pushed = await push(dir, { locale: input.locale, subject: label[input.prefer] })
+      return { ...(await status(dir)), pushed: !!pushed.sha }
+    }
     const repo = WorkspaceRepo.open(dir)
     const side = input.prefer === "theirs" ? result.theirs : result.ours
     for (const file of result.files) {
@@ -433,7 +493,7 @@ export namespace GitHub {
     return { ...(await status(dir)), pushed: !!pushed.sha }
   }
 
-  async function working(except?: string) {
+  export async function working(except?: string) {
     return [...(await SessionStatus.list()).entries()].some(([id, item]) => id !== except && item.type !== "idle")
   }
 
@@ -448,10 +508,11 @@ export namespace GitHub {
    */
   export async function pull(dir: string, input: { locale?: Locale.Value; except?: string; known?: Link } = {}) {
     if (!ServeTargets.isProject(dir)) return
-    if (conflicts.get(dir)) return
+    if (await conflictOf(dir)) return
     const hit = input.known ?? (await link())
     if (!hit?.enabled || !hit.connected || !hit.token || !hit.repo) return
     if (await working(input.except)) return
+    await History.commit(dir, { message: PULL[input.locale ?? "ko"].backup })
     const repo = WorkspaceRepo.open(dir)
     const lane: Lane = { repo, remote: `${web}/${hit.repo.owner}/${hit.repo.name}.git`, env: auth(hit.token) }
     return repo.lock(async () => {
@@ -676,7 +737,7 @@ export namespace GitHub {
    */
   export async function absorb(dir: string, input: { backup: string; marked?: string }): Promise<Absorbed> {
     if (!ServeTargets.isProject(dir)) throw new Failure("disabled", 409)
-    const conflict = conflicts.get(dir)
+    const conflict = await conflictOf(dir)
     if (!conflict) throw new Failure("clean", 409)
     const hit = await linked()
     if (!hit.repo) throw new Failure("norepo", 409)
@@ -696,33 +757,23 @@ export namespace GitHub {
       const base = (await baseOf(lane, conflict.target, theirs, hit.push?.sha)) || (await empty(repo))
       const merged = await merge(repo, base, theirs, tree)
       if (merged.conflicts.length === 0) {
-        conflicts.delete(dir)
+        await keep(dir)
         throw new Failure("clean", 409)
       }
-      const changes = await WorkspaceRepo.diff(repo, tree, merged.tree)
-      await repo.lock(async () => {
-        const spec = path.join(repo.root, "absorb-pathspec")
-        await writeFile(spec, changes.map((change) => `:(literal)${change.file}`).join("\0"))
-        await repo.must([
-          "restore",
-          `--source=${merged.tree}`,
-          "--staged",
-          "--worktree",
-          `--pathspec-from-file=${spec}`,
-          "--pathspec-file-nul",
-        ])
-      })
+      const changes = (await WorkspaceRepo.diff(repo, tree, merged.tree)).map((change) => change.file)
+      const source = (
+        await repo.must(["commit-tree", "--no-gpg-sign", merged.tree, "-p", theirs, "-m", "jitda"], { env: who })
+      ).trim()
+      // 표시가 든 상태를 바로 기록에 남긴다. AI 가 답하기 전에 끼어든 올리기는 표시를 보고 별도 브랜치로 간다.
+      await History.absorb(dir, { source, files: changes, message: input.marked ?? input.backup, backup: input.backup })
       await repo.must(["update-ref", baseRef(lane.remote, conflict.target), theirs])
       const kept: string[] = []
       for (const file of merged.conflicts) if (!(await marked(repo, merged.tree, [file]))) kept.push(file)
       const files = merged.conflicts.filter((file) => !kept.includes(file))
-      conflicts.set(dir, { ...conflict, files, resolving: true })
+      await keep(dir, { ...conflict, files, resolving: true, queued: undefined })
       log.info("absorbed", { files: files.length, kept: kept.length, changes: changes.length })
       return { files, kept, theirs, ours: merged.ours }
     }, "github")
-    // 충돌 표시가 든 지금 상태를 바로 기록해 둔다. AI 가 답하기 전에 끼어든 올리기가 표시 전 기록을 GitHub 끝 위에
-    // 올리면 GitHub 쪽 변경이 빠진 채 기본 브랜치에 올라간다. 표시가 든 기록은 올리기가 별도 브랜치로 보낸다.
-    await History.commit(dir, { message: input.marked ?? input.backup })
     return result
   }
 
@@ -785,10 +836,18 @@ export namespace GitHub {
       const head = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
       const tree = head ? await publishable(repo, `${head}^{tree}`) : EMPTY
       const subject = input.subject ?? (head ? (await repo.must(["log", "-1", "--format=%s", head])).trim() : "")
-      const pending = conflicts.get(repo.dir)
+      const pending = await conflictOf(repo.dir)
       const settle = async (base: string) => {
         await repo.must(["update-ref", baseRef(input.remote, input.branch), base])
-        conflicts.delete(repo.dir)
+        if (!pending) return
+        await keep(repo.dir)
+        if (pending.branch.startsWith("jitda/")) {
+          const out = await repo.run(["push", "--quiet", input.remote, "--delete", `refs/heads/${pending.branch}`], {
+            env: input.env,
+          })
+          if (out.exitCode !== 0) log.warn("side branch kept", { branch: pending.branch })
+        }
+        for (const fn of settled) fn(repo.dir)
       }
 
       const diverged = async (theirs: string, files: string[], retry: boolean, linking?: boolean): Promise<Result> => {
@@ -801,11 +860,14 @@ export namespace GitHub {
           target: input.branch,
           files,
           resolving: false,
-          ...(linking ? { linking } : {}),
+          remote: input.remote,
+          ...(linking || pending?.linking ? { linking: true } : {}),
+          ...(pending?.queued ? { queued: pending.queued } : {}),
         }
+        const { remote: _, ...visible } = conflict
         if (parentTree === tree) {
-          conflicts.set(repo.dir, conflict)
-          return { conflict }
+          await keep(repo.dir, conflict)
+          return { conflict: visible }
         }
         const sha = await write(tree, parent, parentTree, subject)
         const out = await send(sha, branch)
@@ -813,9 +875,9 @@ export namespace GitHub {
           if (retry) return diverged(theirs, files, false, linking)
           throw new Failure("remote", 502, out.stderr.toString().trim())
         }
-        conflicts.set(repo.dir, conflict)
+        await keep(repo.dir, conflict)
         log.info("diverged", { branch, files: files.length })
-        return { conflict }
+        return { conflict: visible }
       }
 
       const attempt = async (retry: boolean): Promise<Result> => {

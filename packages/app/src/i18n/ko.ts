@@ -175,6 +175,7 @@ export const dict = {
     "짓다 기준으로: 겹친 곳은 짓다 내용을 따르고, 나머지는 양쪽을 합쳐 {{target}} 브랜치에 올려요. GitHub의 이전 내용은 커밋 기록에 남아요.",
   "github.linking.done": "GitHub와 맞췄어요",
   "github.linking.pending": "아직 겹친 곳이 남아 있어요",
+  "github.conflict.queued": "다른 대화가 끝나면 고른 방식으로 맞춰요",
   "github.conflict.title": "GitHub에서 바뀐 내용과 겹쳤어요",
   "github.conflict.body":
     "GitHub에서 따로 고친 곳과 짓다에서 고친 곳이 겹쳐서, {{target}} 브랜치는 그대로 두고 {{branch}} 브랜치에 올렸어요. 어느 쪽 작업도 사라지지 않았어요.",

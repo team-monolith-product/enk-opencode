@@ -151,6 +151,7 @@ export type GitHubConflict = {
   files: string[]
   resolving: boolean
   linking?: boolean
+  queued?: "ours" | "theirs" | "ai"
   compare?: string
 }
 
