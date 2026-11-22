@@ -39,6 +39,7 @@ const Status = z
         files: z.array(z.string()),
         resolving: z.boolean(),
         linking: z.boolean().optional(),
+        queued: z.enum(["ours", "theirs", "ai"]).optional(),
         compare: z.string().optional(),
       })
       .optional(),
@@ -113,14 +114,20 @@ export const GitHubRoutes = lazy(() =>
     .post(
       "/resolve",
       describeRoute({
-        summary: "Line up a repository that already had files when linked",
+        summary: "Line up files that overlap with GitHub",
         description:
-          "The linked repository already had other files, so the push went to a side branch. `theirs` brings the repository's files into the project, `ours` pushes the project's files on top of the repository's default branch.",
+          "Keep one side only where the project and GitHub changed the same place, keeping every other change from both sides, then push. If another conversation is answering, the choice waits until everyone is idle.",
         operationId: "github.resolve",
         responses: { ...ok("Link status and whether a commit was pushed", Pushed), ...failures(404, 409, 422, 502) },
       }),
       validator("json", z.object({ prefer: z.enum(["ours", "theirs"]), locale: Locale.Schema.optional() })),
-      async (c) => c.json(await alerting(c, () => GitHub.resolve(Instance.directory, c.req.valid("json")))),
+      async (c) => {
+        const input = c.req.valid("json")
+        await alerting(c, () =>
+          HistorySync.choose({ dir: Instance.directory, choice: input.prefer, locale: input.locale }),
+        )
+        return c.json({ ...(await GitHub.status(Instance.directory)), pushed: false })
+      },
     )
     .post(
       "/push",
@@ -146,6 +153,17 @@ export const GitHubRoutes = lazy(() =>
       validator("json", z.object({ sessionID: SessionID.zod, locale: Locale.Schema.optional() })),
       async (c) => {
         const input = c.req.valid("json")
+        if (await GitHub.working()) {
+          await alerting(c, () =>
+            HistorySync.choose({
+              dir: Instance.directory,
+              choice: "ai",
+              sessionID: input.sessionID,
+              locale: input.locale,
+            }),
+          )
+          return c.json({ ...(await GitHub.status(Instance.directory)), files: [], kept: [] })
+        }
         const result = await alerting(c, () => HistorySync.merge(input))
         return c.json({ ...(await GitHub.status(Instance.directory)), ...result })
       },

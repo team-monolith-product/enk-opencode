@@ -478,3 +478,39 @@ describe("merging GitHub changes with AI", () => {
     })
   })
 })
+
+describe("choosing how to line up a GitHub conflict", () => {
+  test("waits until every conversation of the folder is idle", async () => {
+    using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+      branch: "jitda/1",
+      target: "main",
+      files: ["app.py"],
+      resolving: false,
+    })
+    using _working = spyOn(GitHub, "working").mockResolvedValue(true)
+    using queue = spyOn(GitHub, "queue").mockResolvedValue(undefined)
+    using resolve = spyOn(GitHub, "resolve").mockResolvedValue({ enabled: true, pushed: true })
+
+    const result = await HistorySync.choose({ dir: "/tmp/x", choice: "theirs" })
+
+    expect(result).toEqual({ queued: true })
+    expect(queue).toHaveBeenCalledWith("/tmp/x", "theirs")
+    expect(resolve).not.toHaveBeenCalled()
+  })
+
+  test("applies right away when nobody is answering", async () => {
+    using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+      branch: "jitda/1",
+      target: "main",
+      files: ["app.py"],
+      resolving: false,
+    })
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    using resolve = spyOn(GitHub, "resolve").mockResolvedValue({ enabled: true, pushed: true })
+
+    const result = await HistorySync.choose({ dir: "/tmp/x", choice: "ours", locale: "en" })
+
+    expect(result).toEqual({ queued: false })
+    expect(resolve).toHaveBeenCalledWith("/tmp/x", { prefer: "ours", locale: "en" })
+  })
+})

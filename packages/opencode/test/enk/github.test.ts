@@ -698,6 +698,9 @@ describe("GitHub.absorb", () => {
     const status = await resolve(ws.work, "ours")
 
     expect(status.conflict).toBeUndefined()
+    expect(
+      (await $`git --git-dir=${ws.bare} for-each-ref ${"--format=%(refname:short)"} refs/heads`.quiet().text()).trim(),
+    ).toBe("main")
     expect(await show(ws.bare, "main:index.html")).toBe("<h1>jitda</h1>\n")
     expect(await show(ws.bare, "main:README.md")).toBe("from github")
     expect(await show(ws.bare, "main:logo.bin")).toBe("\0c")
@@ -755,6 +758,35 @@ describe("GitHub.absorb", () => {
     expect(await show(bare, "main:index.html")).toBe("<html>\n<head>\n<title>b</title>\n</head>\n</html>\n")
     expect(await show(bare, "main:app.js")).toBe("2")
     expect(await show(bare, "main:new.txt")).toBe("n")
+  })
+
+  test("pulling records an unsaved edit first, so a file changed on both sides is left alone", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(tmp.path, "work")
+    await put(work, { "app.js": "1\n" })
+    await History.commit(work, { message: "first" })
+    await GitHub.publish({
+      repo: WorkspaceRepo.open(work),
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+    await edit(bare, tmp.path, { "app.js": "github\n" })
+    await put(work, { "app.js": "uploaded\n" })
+
+    const pulled = await Instance.provide({ directory: work, fn: () => GitHub.pull(work, { locale: "en" }) })
+
+    expect(pulled).toBeUndefined()
+    expect(await Bun.file(path.join(work, "app.js")).text()).toBe("uploaded\n")
   })
 
   test("pulling leaves an overlapping file alone for the push to report", async () => {
