@@ -588,8 +588,16 @@ export namespace GitHub {
     if (!ServeTargets.isProject(dir)) return
     const hit = await link()
     if (!hit?.enabled || !hit.connected || !hit.token || !hit.repo) return
+    const subject = await latest(dir)
     await pull(dir, { locale, known: hit }).catch((err) => log.warn("pull skipped", { error: lean(err) }))
-    return push(dir, { locale }, hit)
+    return push(dir, { locale, subject }, hit)
+  }
+
+  async function latest(dir: string) {
+    const repo = WorkspaceRepo.open(dir)
+    const head = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD).catch(() => undefined)
+    if (!head) return
+    return (await repo.must(["log", "-1", "--format=%s", head])).trim() || undefined
   }
 
   export async function push(dir: string, input: { locale?: Locale.Value; subject?: string }, known?: Link) {
@@ -884,6 +892,18 @@ export namespace GitHub {
         return { conflict: visible }
       }
 
+      const bring = async (target: string, theirs: string, from: string) => {
+        const files = (await WorkspaceRepo.diff(repo, from, target)).map((change) => change.file)
+        if (files.length === 0) return 0
+        const source = (
+          await repo.must(["commit-tree", "--no-gpg-sign", target, "-p", theirs, "-m", "jitda"], { env: who })
+        ).trim()
+        return absorb(source, files).catch((err) => {
+          log.warn("absorb skipped", { error: lean(err) })
+          return undefined
+        })
+      }
+
       const attempt = async (retry: boolean): Promise<Result> => {
         const theirs = await tip(lane, input.branch)
         const again = async (out: { exitCode: number; stderr: Buffer }) => {
@@ -940,15 +960,16 @@ export namespace GitHub {
         if (pending?.resolving && (await marked(repo, merged.tree, pending.files))) {
           return diverged(theirs, pending.files, true)
         }
+        const taken = await bring(merged.tree, theirs, tree)
         if (merged.tree === theirsTree) {
-          await settle(merged.ours)
-          return {}
+          await settle(taken === undefined ? merged.ours : theirs)
+          return taken ? { absorbed: taken } : {}
         }
         const sha = await write(merged.tree, theirs, theirsTree, subject)
         const out = await send(sha, input.branch)
         if (out.exitCode !== 0) return again(out)
-        await settle(merged.tree === tree ? sha : merged.ours)
-        return { sha }
+        await settle(merged.tree === tree || taken !== undefined ? sha : merged.ours)
+        return taken ? { sha, absorbed: taken } : { sha }
       }
       return attempt(true)
     }, "github")

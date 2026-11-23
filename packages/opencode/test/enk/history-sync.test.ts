@@ -6,6 +6,7 @@ import { Doc } from "../../src/doc"
 import { GitHub } from "../../src/enk/github"
 import { History } from "../../src/enk/history"
 import { HistorySync } from "../../src/enk/history-sync"
+import { Question } from "../../src/question"
 import { WorkspaceRepo } from "../../src/enk/workspace-repo"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Instance } from "../../src/project/instance"
@@ -554,5 +555,53 @@ describe("running a choice that waited for other conversations", () => {
     await HistorySync.drain("/tmp/d4")
 
     expect(resolve).not.toHaveBeenCalled()
+  })
+})
+
+describe("asking again after a restart", () => {
+  test("a conflict left unanswered is asked again in the latest conversation", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session } = await team(tmp.path)
+        using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+          branch: "jitda/1",
+          target: "main",
+          files: ["app.py"],
+          resolving: false,
+        })
+        using ask = spyOn(Question, "ask").mockImplementation(() => new Promise(() => {}))
+
+        await HistorySync.reask(tmp.path)
+        await new Promise((done) => setTimeout(done, 50))
+
+        expect(ask).toHaveBeenCalledTimes(1)
+        expect(ask.mock.calls[0]![0]).toMatchObject({ sessionID: session.id })
+      },
+    })
+  })
+
+  test("a choice already waiting or an AI merge in progress is not asked again", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await team(tmp.path)
+        using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+          branch: "jitda/1",
+          target: "main",
+          files: ["app.py"],
+          resolving: true,
+        })
+        using ask = spyOn(Question, "ask").mockImplementation(() => new Promise(() => {}))
+
+        await HistorySync.reask(tmp.path)
+
+        expect(ask).not.toHaveBeenCalled()
+      },
+    })
   })
 })

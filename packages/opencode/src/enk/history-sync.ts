@@ -213,9 +213,16 @@ export namespace HistorySync {
       await drain(dir, sessionID, turn.user.locale)
     })
     GitHub.onSettle((done) => void close(done))
-    void drain(dir).catch((err) =>
-      log.warn("queued choice skipped", { error: err instanceof Error ? err.message : String(err) }),
-    )
+    void drain(dir)
+      .then(() => reask(dir))
+      .catch((err) => log.warn("queued choice skipped", { error: err instanceof Error ? err.message : String(err) }))
+  }
+
+  export async function reask(dir: string) {
+    const conflict = await GitHub.conflictOf(dir)
+    if (!conflict || conflict.resolving || conflict.queued) return
+    const latest = [...Session.list({ directory: dir, roots: true })].sort((a, b) => b.time.updated - a.time.updated)[0]
+    if (latest) void ask({ sessionID: latest.id, dir, conflict })
   }
 
   const lanes = new Map<string, Promise<unknown>>()
