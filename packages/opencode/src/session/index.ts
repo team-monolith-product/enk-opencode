@@ -25,6 +25,7 @@ import { Snapshot } from "@/snapshot"
 import { ProjectID } from "../project/schema"
 import { WorkspaceID } from "../control-plane/schema"
 import { SessionID, MessageID, PartID } from "./schema"
+import { Cloning } from "./cloning"
 
 import type { Provider } from "@/provider/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
@@ -516,59 +517,49 @@ export namespace Session {
           title,
         })
         const msgs = yield* messages({ sessionID: input.sessionID })
-        const kept: MessageV2.WithParts[] = []
+        const cut: MessageV2.WithParts[] = []
         for (const msg of msgs) {
           if (input.messageID && msg.info.id >= input.messageID) break
-          kept.push(msg)
+          cut.push(msg)
         }
+        // An answer whose question fell outside the cut (ids and time order disagree after a
+        // clock step-back) would sit in the fork with no question, still pointing at the
+        // original's message. Leave such answers out with their question.
+        const all = new Set(msgs.map((msg) => msg.info.id as string))
+        const inCut = new Set(cut.map((msg) => msg.info.id as string))
+        const kept = cut.filter(
+          (msg) => !(msg.info.role === "assistant" && all.has(msg.info.parentID) && !inCut.has(msg.info.parentID)),
+        )
 
         // Map every kept message BEFORE cloning any, so an assistant's parentID is remapped
         // whenever its parent is part of the fork, regardless of which one is cloned first.
         const idMap = new Map<string, MessageID>(kept.map((msg) => [msg.info.id, MessageID.ascending()]))
 
-        // Clone parents before their answers, by the parentID link itself: neither timestamps
-        // (clock steps back) nor rowid (imports insert in array order) guarantee that. An answer
-        // whose parent is still waiting is held and cloned right after it; everything else
-        // keeps the original order. A parent must exist first so the cycle recorder sees it.
-        const ordered: MessageV2.WithParts[] = []
-        const waiting = new Map<string, MessageV2.WithParts[]>()
-        const done = new Set<string>()
-        const place = (msg: MessageV2.WithParts) => {
-          ordered.push(msg)
-          done.add(msg.info.id)
-          const held = waiting.get(msg.info.id)
-          if (!held) return
-          waiting.delete(msg.info.id)
-          held.forEach(place)
-        }
-        for (const msg of kept) {
-          const parent = msg.info.role === "assistant" ? msg.info.parentID : undefined
-          if (parent && idMap.has(parent) && !done.has(parent)) {
-            waiting.set(parent, [...(waiting.get(parent) ?? []), msg])
-            continue
-          }
-          place(msg)
-        }
-
-        for (const msg of ordered) {
-          const newID = idMap.get(msg.info.id)!
-          const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
-          const cloned = yield* updateMessage({
-            ...msg.info,
-            sessionID: session.id,
-            id: newID,
-            ...(parentID && { parentID }),
-          })
-
-          for (const part of msg.parts) {
-            yield* updatePart({
-              ...part,
-              id: PartID.ascending(),
-              messageID: cloned.id,
+        const clone = Effect.gen(function* () {
+          for (const msg of kept) {
+            const newID = idMap.get(msg.info.id)!
+            const parentID =
+              msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
+            const cloned = yield* updateMessage({
+              ...msg.info,
               sessionID: session.id,
+              id: newID,
+              ...(parentID && { parentID }),
             })
+
+            for (const part of msg.parts) {
+              yield* updatePart({
+                ...part,
+                id: PartID.ascending(),
+                messageID: cloned.id,
+                sessionID: session.id,
+              })
+            }
           }
-        }
+        })
+        // Copies are not new turns: no usage cycle or rails marker for them (see Cloning).
+        Cloning.begin(session.id)
+        yield* clone.pipe(Effect.ensuring(Effect.sync(() => Cloning.end(session.id))))
         return session
       })
 

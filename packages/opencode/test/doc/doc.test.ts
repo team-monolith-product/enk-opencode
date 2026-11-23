@@ -17,6 +17,7 @@ import type { SessionID } from "../../src/session/schema"
 import { Project } from "../../src/project/project"
 import { Server } from "../../src/server/server"
 import { tmpdir } from "../fixture/fixture"
+import { AiUsage } from "../../src/enk/ai-usage"
 
 const prompt = {
   noReply: true,
@@ -1807,7 +1808,10 @@ describe("doc", () => {
         const before = Doc.cycleList({ sessionID: session.id })
         expect(before).toHaveLength(1)
 
+        const report = spyOn(AiUsage, "report")
         const forked = await Session.fork({ sessionID: session.id })
+        // Copying a finished turn is not a turn: no rails turn-end marker for the fork.
+        expect(report.mock.calls.filter(([m]) => m.sessionID === forked.id)).toHaveLength(0)
 
         // The original's cycle is untouched and still belongs to the original session.
         const after = Doc.cycleList({ sessionID: session.id })
@@ -1822,15 +1826,18 @@ describe("doc", () => {
         expect(assistant).toBeDefined()
         expect(assistant!.info.role === "assistant" && assistant!.info.parentID).toBe(user!.info.id)
         expect(user!.info.sessionID).toBe(forked.id)
-        // The fork records its own cycle for the cloned turn.
-        const forkCycles = Doc.cycleList({ sessionID: forked.id })
-        expect(forkCycles).toHaveLength(1)
-        expect(forkCycles[0]!.inputs[0].userMessageID).toBe(user!.info.id)
+        // The copy spent nothing, so the fork records no cycle (no double-counted cost).
+        expect(Doc.cycleList({ sessionID: forked.id })).toHaveLength(0)
+
+        // Forking from that prompt cuts it off; its answer (earlier in time order) must not be
+        // left behind in the fork without its question.
+        const cut = await Session.fork({ sessionID: session.id, messageID: "msg_user_skew" as never })
+        expect(await Session.messages({ sessionID: cut.id })).toHaveLength(0)
       },
     })
   })
 
-  test("fork clones a parent before its answer even when the answer was stored first (import)", async () => {
+  test("fork remaps an answer stored before its question (import) and records no cycle", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({
       directory: tmp.path,
@@ -1888,9 +1895,7 @@ describe("doc", () => {
         const user = msgs.find((m) => m.info.role === "user")!
         const assistant = msgs.find((m) => m.info.role === "assistant")!
         expect(assistant.info.role === "assistant" && assistant.info.parentID).toBe(user.info.id)
-        const forkCycles = Doc.cycleList({ sessionID: forked.id })
-        expect(forkCycles).toHaveLength(1)
-        expect(forkCycles[0]!.inputs[0].prompt).toBe("imported prompt")
+        expect(Doc.cycleList({ sessionID: forked.id })).toHaveLength(0)
       },
     })
   })
