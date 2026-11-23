@@ -300,6 +300,7 @@ const filetime = Layer.succeed(
     read: () => Effect.void,
     get: () => Effect.succeed(undefined),
     assert: () => Effect.void,
+    check: () => Effect.succeed({ status: "fresh" as const }),
     withLock: (_filepath, fn) => Effect.promise(fn),
   }),
 )

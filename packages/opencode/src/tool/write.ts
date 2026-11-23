@@ -9,6 +9,7 @@ import { File } from "../file"
 import { FileWatcher } from "../file/watcher"
 import { Format } from "../format"
 import { FileTime } from "../file/time"
+import { FileMerge } from "../file/merge"
 import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Snapshot } from "@/snapshot"
@@ -28,29 +29,35 @@ export const WriteTool = Tool.define("write", {
     const filepath = path.isAbsolute(params.filePath) ? params.filePath : path.join(Instance.directory, params.filePath)
     await assertExternalDirectory(ctx, filepath)
 
-    const exists = await Filesystem.exists(filepath)
-    const contentOld = exists ? await Filesystem.readText(filepath) : ""
-    if (exists) await FileTime.assert(ctx.sessionID, filepath)
+    const written = await FileTime.withLock(filepath, async () => {
+      const exists = await Filesystem.exists(filepath)
+      const contentOld = exists ? await Filesystem.readText(filepath) : ""
+      const content = exists
+        ? await FileMerge.resolve(ctx.sessionID, filepath, contentOld, params.content)
+        : params.content
 
-    const diff = trimDiff(createTwoFilesPatch(filepath, filepath, contentOld, params.content))
-    await ctx.ask({
-      permission: "edit",
-      patterns: [path.relative(Instance.worktree, filepath)],
-      always: ["*"],
-      metadata: {
-        filepath,
-        diff,
-      },
-    })
+      const diff = trimDiff(createTwoFilesPatch(filepath, filepath, contentOld, content))
+      await ctx.ask({
+        permission: "edit",
+        patterns: [path.relative(Instance.worktree, filepath)],
+        always: ["*"],
+        metadata: {
+          filepath,
+          diff,
+        },
+      })
 
-    await Filesystem.write(filepath, params.content)
-    await Format.file(filepath)
-    Bus.publish(File.Event.Edited, { file: filepath })
-    await Bus.publish(FileWatcher.Event.Updated, {
-      file: filepath,
-      event: exists ? "change" : "add",
+      await Filesystem.write(filepath, content)
+      await Format.file(filepath)
+      Bus.publish(File.Event.Edited, { file: filepath })
+      await Bus.publish(FileWatcher.Event.Updated, {
+        file: filepath,
+        event: exists ? "change" : "add",
+      })
+      await FileTime.read(ctx.sessionID, filepath)
+      return { exists, contentOld, diff, merged: content !== params.content }
     })
-    await FileTime.read(ctx.sessionID, filepath)
+    const { exists, contentOld, diff, merged } = written
 
     const contentNew = await Filesystem.readText(filepath)
     const filediff: Snapshot.FileDiff = {
@@ -73,7 +80,7 @@ export const WriteTool = Tool.define("write", {
       },
     })
 
-    let output = "Wrote file successfully."
+    let output = merged ? `Wrote file successfully. ${FileMerge.NOTE}` : "Wrote file successfully."
     await LSP.touchFile(filepath, true)
     const diagnostics = await LSP.diagnostics()
     const normalizedFilepath = Filesystem.normalizePath(filepath)
