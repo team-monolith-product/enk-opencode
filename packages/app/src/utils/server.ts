@@ -144,6 +144,16 @@ export type GitHubStatus = {
   repo?: GitHubRepo
   push?: { sha: string; time: number; by?: string }
   firstPush?: { attempts: number; code: string; reason: string }
+  conflict?: GitHubConflict
+}
+export type GitHubConflict = {
+  branch: string
+  target: string
+  files: string[]
+  resolving: boolean
+  linking?: boolean
+  queued?: "ours" | "theirs" | "ai"
+  compare?: string
 }
 
 export function githubCode(err: unknown) {
@@ -163,6 +173,24 @@ export function pushGitHub(
 ): Promise<GitHubStatus & { pushed: boolean }> {
   return devServerClient(opts)
     .post({ url: "/github/push", body: input })
+    .then((res) => res.data as GitHubStatus & { pushed: boolean })
+}
+
+export function mergeGitHub(
+  opts: GitHubOpts,
+  input: { sessionID: string; locale?: PromptLocale },
+): Promise<GitHubStatus & { files: string[]; kept: string[] }> {
+  return devServerClient(opts)
+    .post({ url: "/github/merge", body: input })
+    .then((res) => res.data as GitHubStatus & { files: string[]; kept: string[] })
+}
+
+export function resolveGitHub(
+  opts: GitHubOpts,
+  input: { prefer: "ours" | "theirs"; locale?: PromptLocale },
+): Promise<GitHubStatus & { pushed: boolean }> {
+  return devServerClient(opts)
+    .post({ url: "/github/resolve", body: input })
     .then((res) => res.data as GitHubStatus & { pushed: boolean })
 }
 

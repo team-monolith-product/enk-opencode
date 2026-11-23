@@ -135,7 +135,8 @@ export const dict = {
   "github.repo.new": "GitHub에서 새 저장소 만들기",
   "github.repo.reload": "목록 다시 불러오기",
   "github.repo.installations": "GitHub 앱 설치 설정 열기",
-  "github.repo.new.hint": "만든 뒤 목록을 다시 불러오세요. 설치할 때 \"선택한 저장소만\"을 골랐다면 GitHub 앱 설치 설정에서 새 저장소를 추가해야 보여요.",
+  "github.repo.new.hint":
+    '만든 뒤 목록을 다시 불러오세요. 설치할 때 "선택한 저장소만"을 골랐다면 GitHub 앱 설치 설정에서 새 저장소를 추가해야 보여요.',
   "github.repo.empty": "올릴 수 있는 저장소가 없어요. GitHub에서 저장소를 만든 뒤 목록을 다시 불러오세요.",
   "github.repo.private": "비공개",
   "github.error.repos": "저장소 목록을 불러오지 못했어요",
@@ -165,6 +166,33 @@ export const dict = {
   "github.firstPush.reason": "사유: {{reason}}",
   "github.firstPush.retry": "다음 대화가 끝나면 다시 올라가요.",
   "github.error.disabled": "이 작업 공간에서는 GitHub를 쓸 수 없어요",
+  "github.error.clean": "이제 겹치는 변경이 없어요. 다음 올리기에 그대로 올라가요",
+  "github.error.busy": "AI가 답하는 중이에요. 답변이 끝난 뒤 다시 눌러 주세요",
+  "github.linking.title": "이 저장소에는 이미 다른 파일이 있어요",
+  "github.linking.body":
+    "연결한 저장소에 있던 파일과 짓다 작업 폴더의 파일이 같은 곳에서 겹쳐서, 덮어쓰지 않도록 {{target}} 브랜치는 그대로 두고 {{branch}} 브랜치에 올렸어요. 어떻게 맞출지 골라 주세요.",
+  "github.linking.theirs": "GitHub 기준으로",
+  "github.linking.ours": "짓다 기준으로",
+  "github.linking.theirs.hint":
+    "GitHub 기준으로: 겹친 곳은 GitHub 내용을 따르고, 나머지는 양쪽을 합쳐 올려요. 지금 파일은 버전 기록에 남아요.",
+  "github.linking.ours.hint":
+    "짓다 기준으로: 겹친 곳은 짓다 내용을 따르고, 나머지는 양쪽을 합쳐 {{target}} 브랜치에 올려요. GitHub의 이전 내용은 커밋 기록에 남아요.",
+  "github.linking.done": "GitHub와 맞췄어요",
+  "github.linking.pending": "아직 겹친 곳이 남아 있어요",
+  "github.conflict.queued": "다른 대화가 끝나면 고른 방식으로 맞춰요",
+  "github.conflict.title": "GitHub에서 바뀐 내용과 겹쳤어요",
+  "github.conflict.body":
+    "GitHub에서 따로 고친 곳과 짓다에서 고친 곳이 겹쳐서, {{target}} 브랜치는 그대로 두고 {{branch}} 브랜치에 올렸어요. 어느 쪽 작업도 사라지지 않았어요.",
+  "github.conflict.files": "겹친 파일",
+  "github.conflict.merge": "AI로 합치기",
+  "github.conflict.merge.hint":
+    "GitHub에서 바뀐 내용을 작업 공간에 가져오고, 겹친 곳은 AI가 양쪽을 살려 합쳐요. 합친 결과는 답변이 끝나면 {{target}} 브랜치에 올라가요.",
+  "github.conflict.compare": "GitHub에서 직접 보기",
+  "github.conflict.resolving": "AI가 겹친 곳을 합치고 있어요. 답변이 끝나면 {{target}} 브랜치에 올라가요.",
+  "github.conflict.toast": "GitHub에서 바뀐 내용과 겹쳐 {{branch}} 브랜치에 올렸어요",
+  "github.conflict.badge": "GitHub 충돌 파일 {{count}}개",
+  "github.merge.sent": "AI에게 합치기를 부탁했어요",
+  "github.merge.done": "GitHub에서 바뀐 내용을 합쳐서 올렸어요",
   "github.readonly": "관전 중에는 GitHub 설정을 바꿀 수 없어요.",
   "command.history": "버전 기록",
   "command.history.description": "저장된 버전을 보고 원하는 시점으로 되돌리기",
