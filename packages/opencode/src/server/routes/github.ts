@@ -122,10 +122,10 @@ export const GitHubRoutes = lazy(() =>
       validator("json", z.object({ prefer: z.enum(["ours", "theirs"]), locale: Locale.Schema.optional() })),
       async (c) => {
         const input = c.req.valid("json")
-        await alerting(c, () =>
+        const result = await alerting(c, () =>
           HistorySync.choose({ dir: Instance.directory, choice: input.prefer, locale: input.locale }),
         )
-        return c.json({ ...(await GitHub.status(Instance.directory)), pushed: false })
+        return c.json({ ...(await GitHub.status(Instance.directory)), pushed: !!result.pushed })
       },
     )
     .post(
@@ -152,19 +152,15 @@ export const GitHubRoutes = lazy(() =>
       validator("json", z.object({ sessionID: SessionID.zod, locale: Locale.Schema.optional() })),
       async (c) => {
         const input = c.req.valid("json")
-        if (await GitHub.working()) {
-          await alerting(c, () =>
-            HistorySync.choose({
-              dir: Instance.directory,
-              choice: "ai",
-              sessionID: input.sessionID,
-              locale: input.locale,
-            }),
-          )
-          return c.json({ ...(await GitHub.status(Instance.directory)), files: [], kept: [] })
-        }
-        const result = await alerting(c, () => HistorySync.merge(input))
-        return c.json({ ...(await GitHub.status(Instance.directory)), ...result })
+        const result = await alerting(c, () =>
+          HistorySync.choose({
+            dir: Instance.directory,
+            choice: "ai",
+            sessionID: input.sessionID,
+            locale: input.locale,
+          }),
+        )
+        return c.json({ ...(await GitHub.status(Instance.directory)), files: [], kept: [], ...result.merged })
       },
     ),
 )

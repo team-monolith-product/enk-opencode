@@ -158,8 +158,13 @@ export namespace HistorySync {
   export function init() {
     const dir = Instance.directory
     Bus.subscribe(SessionStatus.Event.Idle, async (evt) => {
-      const turn = await TurnSummary.current(evt.properties.sessionID).catch(() => undefined)
-      if (!turn) return
+      const sessionID = evt.properties.sessionID
+      const turn = await TurnSummary.current(sessionID).catch(() => undefined)
+      if (!turn) {
+        const session = await Session.get(sessionID).catch(() => undefined)
+        if (session && !session.parentID) await drain(dir, sessionID)
+        return
+      }
       await History.commit(dir, {
         message: (changes) => TurnSummary.describe(turn, changes),
         turn: turn.user.id,
@@ -171,55 +176,71 @@ export namespace HistorySync {
       if (result?.conflict && !result.conflict.resolving && !result.conflict.queued) {
         void ask({ sessionID: evt.properties.sessionID, dir, conflict: result.conflict, locale: turn.user.locale })
       }
-      await drain(dir, turn.user.locale)
+      await drain(dir, sessionID, turn.user.locale)
     })
     GitHub.onSettle((done) => void close(done))
   }
 
-  /**
-   * 팀이 고른 방식으로 GitHub 와 겹친 곳을 맞춘다. 같은 폴더의 다른 대화가 답하는 중이면 그 대화들이 끝난 뒤 실행하도록
-   * 남겨 두고 queued 로 돌려준다. AI 로 합치기는 고른 사람의 대화에 요청을 보낸다.
-   */
-  export async function choose(input: {
+  const lanes = new Map<string, Promise<unknown>>()
+
+  function serial<T>(dir: string, fn: () => Promise<T>) {
+    const run = (lanes.get(dir) ?? Promise.resolve()).catch(() => undefined).then(fn)
+    lanes.set(dir, run)
+    return run
+  }
+
+  export type Chosen = { queued: boolean; pushed?: boolean; merged?: GitHub.Absorbed }
+
+  export function choose(input: {
     dir: string
     choice: GitHub.Choose
     sessionID?: SessionID
     locale?: Locale.Value
-  }): Promise<{ queued: boolean }> {
-    if (!(await GitHub.conflictOf(input.dir))) throw new GitHub.Failure("clean", 409)
-    if (await GitHub.working()) {
-      await GitHub.queue(input.dir, input.choice)
-      if (input.sessionID) owners.set(input.dir, input.sessionID)
-      return { queued: true }
-    }
-    await apply(input)
-    return { queued: false }
+  }): Promise<Chosen> {
+    return serial(input.dir, async () => {
+      if (!(await GitHub.conflictOf(input.dir))) throw new GitHub.Failure("clean", 409)
+      if (await GitHub.working()) {
+        await GitHub.queue(input.dir, input.choice, input.sessionID)
+        return { queued: true }
+      }
+      return { queued: false, ...(await apply(input)) }
+    })
   }
 
-  const owners = new Map<string, SessionID>()
-
-  async function apply(input: { dir: string; choice: GitHub.Choose; sessionID?: SessionID; locale?: Locale.Value }) {
+  async function apply(input: {
+    dir: string
+    choice: GitHub.Choose
+    sessionID?: SessionID
+    locale?: Locale.Value
+  }): Promise<Omit<Chosen, "queued">> {
     if (input.choice === "ai") {
-      const sessionID = input.sessionID ?? owners.get(input.dir)
-      if (!sessionID) throw new GitHub.Failure("busy", 409)
-      await merge({ sessionID, locale: input.locale })
-      return
+      if (!input.sessionID) throw new GitHub.Failure("busy", 409)
+      return { merged: await merge({ sessionID: input.sessionID, locale: input.locale }) }
     }
-    await GitHub.resolve(input.dir, { prefer: input.choice, locale: input.locale })
+    const result = await GitHub.resolve(input.dir, { prefer: input.choice, locale: input.locale })
+    return { pushed: result.pushed }
   }
 
-  /** 미뤄 둔 선택을 모든 대화가 쉴 때 실행한다. */
-  async function drain(dir: string, locale?: Locale.Value) {
+  async function drain(dir: string, sessionID: SessionID, locale?: Locale.Value) {
     const conflict = await GitHub.conflictOf(dir)
     if (!conflict?.queued || (await GitHub.working())) return
-    const sessionID = owners.get(dir)
-    owners.delete(dir)
-    await apply({ dir, choice: conflict.queued, sessionID, locale }).catch((err) =>
-      log.warn("queued choice failed", { error: err instanceof Error ? err.message : String(err) }),
-    )
+    const retry = await serial(dir, async () => {
+      const now = await GitHub.conflictOf(dir)
+      if (!now?.queued || (await GitHub.working())) return false
+      await GitHub.queue(dir)
+      return apply({ dir, choice: now.queued, sessionID: now.owner as SessionID | undefined, locale }).then(
+        () => false,
+        (err) => {
+          log.warn("queued choice failed", { error: err instanceof Error ? err.message : String(err) })
+          return !(err instanceof GitHub.Failure && err.code === "clean")
+        },
+      )
+    })
+    if (!retry) return
+    const left = await GitHub.conflictOf(dir)
+    if (left && !left.resolving) void ask({ sessionID, dir, conflict: left, locale, retry: true })
   }
 
-  /** 충돌이 다른 길(연결 창, 다른 팀원, 다음 대화의 올리기)로 풀리면 떠 있던 고르기 질문을 닫는다. */
   async function close(dir: string) {
     const id = asking.get(dir)
     if (!id) return
@@ -281,7 +302,11 @@ export namespace HistorySync {
     const options = [text.ai, text.theirs, text.ours]
     const unsub = Bus.subscribe(Question.Event.Asked, (evt) => {
       if (evt.properties.sessionID === input.sessionID && evt.properties.questions[0]?.header === text.header) {
-        asking.set(input.dir, evt.properties.id)
+        const id = evt.properties.id
+        asking.set(input.dir, id)
+        void GitHub.conflictOf(input.dir)
+          .then((left) => (left ? undefined : Question.reject(id)))
+          .catch(() => undefined)
       }
     })
     const answers = await Question.ask({
