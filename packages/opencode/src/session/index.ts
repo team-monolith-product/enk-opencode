@@ -9,10 +9,10 @@ import { Config } from "../config/config"
 import { Flag } from "../flag/flag"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt, sql } from "../storage/db"
+import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt } from "../storage/db"
 import { SyncEvent } from "../sync"
 import type { SQL } from "../storage/db"
-import { MessageTable, SessionTable } from "./session.sql"
+import { SessionTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
 import { Log } from "../util/log"
 import { updateSchema } from "../util/update-schema"
@@ -526,25 +526,29 @@ export namespace Session {
         // whenever its parent is part of the fork, regardless of which one is cloned first.
         const idMap = new Map<string, MessageID>(kept.map((msg) => [msg.info.id, MessageID.ascending()]))
 
-        // Clone in storage (rowid) order, not time order: timestamps can disagree with
-        // insertion order (server clock stepped back), and a parent row must exist before
-        // its answers so the cycle recorder sees it.
-        const rank = yield* Effect.sync(
-          () =>
-            new Map(
-              Database.use((db) =>
-                db
-                  .select({ id: MessageTable.id })
-                  .from(MessageTable)
-                  .where(eq(MessageTable.session_id, input.sessionID))
-                  .orderBy(sql`rowid`)
-                  .all(),
-              ).map((row, index) => [row.id as string, index]),
-            ),
-        )
-        const ordered = kept.toSorted(
-          (a, b) => (rank.get(a.info.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.info.id) ?? Number.MAX_SAFE_INTEGER),
-        )
+        // Clone parents before their answers, by the parentID link itself: neither timestamps
+        // (clock steps back) nor rowid (imports insert in array order) guarantee that. An answer
+        // whose parent is still waiting is held and cloned right after it; everything else
+        // keeps the original order. A parent must exist first so the cycle recorder sees it.
+        const ordered: MessageV2.WithParts[] = []
+        const waiting = new Map<string, MessageV2.WithParts[]>()
+        const done = new Set<string>()
+        const place = (msg: MessageV2.WithParts) => {
+          ordered.push(msg)
+          done.add(msg.info.id)
+          const held = waiting.get(msg.info.id)
+          if (!held) return
+          waiting.delete(msg.info.id)
+          held.forEach(place)
+        }
+        for (const msg of kept) {
+          const parent = msg.info.role === "assistant" ? msg.info.parentID : undefined
+          if (parent && idMap.has(parent) && !done.has(parent)) {
+            waiting.set(parent, [...(waiting.get(parent) ?? []), msg])
+            continue
+          }
+          place(msg)
+        }
 
         for (const msg of ordered) {
           const newID = idMap.get(msg.info.id)!

@@ -8,7 +8,7 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { Doc } from "../../src/doc"
 import * as Room from "../../src/doc/room"
 import { Database } from "../../src/storage/db"
-import { DocSubmitTable, DocSubmitActorTable } from "../../src/doc/doc.sql"
+import { DocSubmitTable, DocSubmitActorTable, PromptCycleTable } from "../../src/doc/doc.sql"
 import { MessageTable, PartTable } from "../../src/session/session.sql"
 import * as CycleRecorder from "../../src/doc/cycle-recorder"
 import { and, eq } from "drizzle-orm"
@@ -1822,6 +1822,114 @@ describe("doc", () => {
         expect(assistant).toBeDefined()
         expect(assistant!.info.role === "assistant" && assistant!.info.parentID).toBe(user!.info.id)
         expect(user!.info.sessionID).toBe(forked.id)
+        // The fork records its own cycle for the cloned turn.
+        const forkCycles = Doc.cycleList({ sessionID: forked.id })
+        expect(forkCycles).toHaveLength(1)
+        expect(forkCycles[0]!.inputs[0].userMessageID).toBe(user!.info.id)
+      },
+    })
+  })
+
+  test("fork clones a parent before its answer even when the answer was stored first (import)", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const info = assistantInfo({
+          sessionID: session.id,
+          id: "msg_assistant_imp",
+          parentID: "msg_user_imp",
+          cost: 0.01,
+          tokens: { input: 2, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+          created: 1100,
+          completed: 1200,
+          finish: "stop",
+        })
+        // Imports insert in array order: here the answer row lands before its prompt row,
+        // while timestamps are ordinary (prompt 1000 < answer 1100).
+        Database.use((db) => {
+          const { id: _id, sessionID: _sid, ...data } = info
+          db.insert(MessageTable)
+            .values({ id: info.id as never, session_id: session.id as never, time_created: 1100, data: data as never })
+            .run()
+          db.insert(PartTable)
+            .values({
+              id: `${info.id}_p0` as never,
+              message_id: info.id as never,
+              session_id: session.id as never,
+              time_created: 1100,
+              data: { type: "text", text: "imported answer" } as never,
+            })
+            .run()
+          db.insert(MessageTable)
+            .values({
+              id: info.parentID as never,
+              session_id: session.id as never,
+              time_created: 1000,
+              data: { role: "user", time: { created: 1000 } } as never,
+            })
+            .run()
+          db.insert(PartTable)
+            .values({
+              id: `${info.parentID}_p0` as never,
+              message_id: info.parentID as never,
+              session_id: session.id as never,
+              time_created: 1000,
+              data: { type: "text", text: "imported prompt" } as never,
+            })
+            .run()
+        })
+
+        const forked = await Session.fork({ sessionID: session.id })
+        const msgs = await Session.messages({ sessionID: forked.id })
+        const user = msgs.find((m) => m.info.role === "user")!
+        const assistant = msgs.find((m) => m.info.role === "assistant")!
+        expect(assistant.info.role === "assistant" && assistant.info.parentID).toBe(user.info.id)
+        const forkCycles = Doc.cycleList({ sessionID: forked.id })
+        expect(forkCycles).toHaveLength(1)
+        expect(forkCycles[0]!.inputs[0].prompt).toBe("imported prompt")
+      },
+    })
+  })
+
+  test("re-recording restores a cycle that an earlier fork moved to another session", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const original = await Session.create({})
+        const other = await Session.create({})
+        const info = assistantInfo({
+          sessionID: original.id,
+          id: "msg_assistant_moved",
+          parentID: "msg_user_moved",
+          cost: 0.01,
+          tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          created: 1100,
+          completed: 1200,
+          finish: "stop",
+        })
+        seedTurn({ userText: "moved", userTime: 1000, steps: [{ info, text: "ok" }] })
+        Database.use((db) => CycleRecorder.record(db, info as never))
+        const cycleID = Doc.cycleList({ sessionID: original.id })[0]!.id
+        // A database already hit by the old fork bug: the row now claims the other session.
+        Database.use((db) =>
+          db
+            .update(PromptCycleTable)
+            .set({ session_id: other.id as never })
+            .where(eq(PromptCycleTable.id, cycleID))
+            .run(),
+        )
+
+        expect(() => Database.use((db) => CycleRecorder.record(db, info as never))).not.toThrow()
+        expect(Doc.cycleGet({ cycleID })?.sessionID).toBe(original.id)
+        expect(Doc.cycleList({ sessionID: original.id }).map((c) => c.id)).toEqual([cycleID])
+        expect(Doc.cycleList({ sessionID: other.id })).toHaveLength(0)
       },
     })
   })
