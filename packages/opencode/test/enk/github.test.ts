@@ -820,6 +820,41 @@ describe("GitHub.absorb", () => {
     expect(await count()).toBe(before)
   })
 
+  test("pulling a GitHub change Jitda already has moves the base so later turns leave no backup", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(tmp.path, "work")
+    const repo = WorkspaceRepo.open(work)
+    await put(work, { "app.js": "1\n" })
+    await History.commit(work, { message: "first" })
+    await GitHub.publish({
+      repo,
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+    await edit(bare, tmp.path, { "app.js": "2\n" })
+    await put(work, { "app.js": "2\n" })
+    await History.commit(work, { message: "same" })
+    const pull = () => Instance.provide({ directory: work, fn: () => GitHub.pull(work, { locale: "en" }) })
+    await pull()
+    await put(work, { "app.js": "uploaded\n" })
+    const count = async () => (await repo.must(["rev-list", "--count", WorkspaceRepo.HEAD])).trim()
+    const before = await count()
+
+    await pull()
+
+    expect(await count()).toBe(before)
+  })
+
   test("a conflict kept for another repository is dropped once the team links a different one", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)
@@ -921,6 +956,25 @@ describe("GitHub.absorb", () => {
 
     expect(result.conflict).toMatchObject({ branch: ws.result.conflict!.branch, files: ["index.html"] })
     expect(await show(ws.bare, "main:index.html")).toBe("<h1>github</h1>\n")
+  })
+
+  test("choosing a side after the branch was merged on GitHub pushes and deletes the branch", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    using _github = fakeGitHub()
+    const settled: string[] = []
+    const off = GitHub.onSettle((dir) => settled.push(dir))
+    await edit(ws.bare, tmp.path, { "index.html": "<h1>jitda</h1>\n", "logo.bin": "\0c" })
+
+    await resolve(ws.work, "ours")
+    off()
+
+    expect(await GitHub.conflictOf(ws.work)).toBeUndefined()
+    expect(settled).toEqual([ws.work])
+    expect(
+      (await $`git --git-dir=${ws.bare} for-each-ref ${"--format=%(refname:short)"} refs/heads`.quiet().text()).trim(),
+    ).toBe("main")
   })
 
   test("is refused when there is no conflict", async () => {

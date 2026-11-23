@@ -535,7 +535,10 @@ export namespace GitHub {
       const merged = await merge(repo, base, theirs, tree)
       if (merged.conflicts.length) return
       const files = (await WorkspaceRepo.diff(repo, tree, merged.tree)).map((change) => change.file)
-      if (files.length === 0) return
+      if (files.length === 0) {
+        await repo.must(["update-ref", baseRef(lane.remote, branch), theirs])
+        return
+      }
       const source = (
         await repo.must(["commit-tree", "--no-gpg-sign", merged.tree, "-p", theirs, "-m", "jitda"], { env: who })
       ).trim()
@@ -761,10 +764,7 @@ export namespace GitHub {
       const tree = await publishable(repo, `${head}^{tree}`)
       const base = (await baseOf(lane, conflict.target, theirs, hit.push?.sha)) || (await empty(repo))
       const merged = await merge(repo, base, theirs, tree)
-      if (merged.conflicts.length === 0) {
-        await keep(dir)
-        throw new Failure("clean", 409)
-      }
+      if (merged.conflicts.length === 0) throw new Failure("clean", 409)
       const changes = (await WorkspaceRepo.diff(repo, tree, merged.tree)).map((change) => change.file)
       const source = (
         await repo.must(["commit-tree", "--no-gpg-sign", merged.tree, "-p", theirs, "-m", "jitda"], { env: who })

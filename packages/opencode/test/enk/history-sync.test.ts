@@ -403,6 +403,12 @@ describe("merging GitHub changes with AI", () => {
       init: InstanceBootstrap,
       fn: async () => {
         const { session } = await team(tmp.path)
+        using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+          branch: "jitda/1",
+          target: "main",
+          files: ["index.html"],
+          resolving: false,
+        })
         using absorb = spyOn(GitHub, "absorb").mockResolvedValue({
           files: ["index.html"],
           kept: ["logo.png"],

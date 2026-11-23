@@ -90,30 +90,61 @@ export namespace HistorySync {
     await SessionPrompt.assertNotBusy(input.sessionID).catch(busy)
     const locale = input.locale ?? Locale.DEFAULT
     const label = MERGE[locale]
+    const dir = session.directory
+    if (!(await GitHub.conflictOf(dir))) throw new GitHub.Failure("clean", 409)
+    if (merging.has(dir)) throw new EnkFailure("busy", 409)
+    const finish: { done?: () => void } = {}
+    merging.set(dir, new Promise<void>((done) => (finish.done = done)))
+    const release = () => {
+      merging.delete(dir)
+      finish.done!()
+    }
     const outcome: { result?: GitHub.Absorbed; error?: unknown } = {}
     await SessionPrompt.exclusive(input.sessionID, async () => {
-      await GitHub.absorb(session.directory, { backup: label.backup, marked: label.marked }).then(
+      await GitHub.absorb(dir, { backup: label.backup, marked: label.marked }).then(
         (result) => (outcome.result = result),
         (error) => (outcome.error = error),
       )
-    }).catch(busy)
-    if (outcome.error) throw outcome.error
-    const result = outcome.result!
-    if (result.files.length === 0) {
-      await History.commit(session.directory, { message: label.merged })
-      await GitHub.sync(session.directory, locale)
-      return result
+    })
+      .catch(busy)
+      .catch((error) => {
+        release()
+        throw error
+      })
+    const clean = outcome.error instanceof GitHub.Failure && outcome.error.code === "clean"
+    if (outcome.error && !clean) {
+      release()
+      throw outcome.error
     }
+    if (clean || outcome.result!.files.length === 0) {
+      await History.commit(dir, { message: label.merged })
+        .then(() => GitHub.sync(dir, locale))
+        .finally(release)
+      return outcome.result
+    }
+    const result = outcome.result!
     const text = [label.prompt(result.files), ...(result.kept.length ? [label.kept(result.kept)] : [])].join("\n\n")
-    await SessionPrompt.prompt({ sessionID: input.sessionID, locale, noReply: true, parts: [{ type: "text", text }] })
-    SessionPrompt.loop({ sessionID: input.sessionID }).catch((err) =>
-      log.error("merge loop failed", {
-        sessionID: input.sessionID,
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    )
+    await SessionPrompt.prompt({
+      sessionID: input.sessionID,
+      locale,
+      noReply: true,
+      parts: [{ type: "text", text }],
+    }).catch((error) => {
+      release()
+      throw error
+    })
+    SessionPrompt.loop({ sessionID: input.sessionID })
+      .catch((err) =>
+        log.error("merge loop failed", {
+          sessionID: input.sessionID,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      )
+      .finally(release)
     return result
   }
+
+  const merging = new Map<string, Promise<void>>()
 
   const MANIFESTS = new Set([
     "package.json",
@@ -159,6 +190,7 @@ export namespace HistorySync {
     const dir = Instance.directory
     Bus.subscribe(SessionStatus.Event.Idle, async (evt) => {
       const sessionID = evt.properties.sessionID
+      await merging.get(dir)
       const turn = await TurnSummary.current(sessionID).catch(() => undefined)
       if (!turn) {
         const session = await Session.get(sessionID).catch(() => undefined)
