@@ -1781,6 +1781,92 @@ describe("doc", () => {
     })
   })
 
+  test("forking a session whose clock stepped back keeps the original's cycle and remaps parentID", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        // Stored user message first (rowid order), but the server clock stepped back before
+        // the answer was written: the answer's timestamp is EARLIER than its prompt's, so
+        // time order puts the assistant before its parent user message.
+        const info = assistantInfo({
+          sessionID: session.id,
+          id: "msg_assistant_skew",
+          parentID: "msg_user_skew",
+          cost: 0.01,
+          tokens: { input: 3, output: 4, reasoning: 0, cache: { read: 0, write: 0 } },
+          created: 1500,
+          completed: 1800,
+          finish: "stop",
+        })
+        seedTurn({ userText: "skewed", userTime: 2000, steps: [{ info, text: "answer" }] })
+        Database.use((db) => CycleRecorder.record(db, info as never))
+        const before = Doc.cycleList({ sessionID: session.id })
+        expect(before).toHaveLength(1)
+
+        const forked = await Session.fork({ sessionID: session.id })
+
+        // The original's cycle is untouched and still belongs to the original session.
+        const after = Doc.cycleList({ sessionID: session.id })
+        expect(after.map((c) => c.id)).toEqual(before.map((c) => c.id))
+        expect(Doc.cycleGet({ cycleID: before[0]!.id })?.sessionID).toBe(session.id)
+
+        // The forked answer points at the fork's own copy of the prompt, never the original's.
+        const msgs = await Session.messages({ sessionID: forked.id })
+        const user = msgs.find((m) => m.info.role === "user")
+        const assistant = msgs.find((m) => m.info.role === "assistant")
+        expect(user).toBeDefined()
+        expect(assistant).toBeDefined()
+        expect(assistant!.info.role === "assistant" && assistant!.info.parentID).toBe(user!.info.id)
+        expect(user!.info.sessionID).toBe(forked.id)
+      },
+    })
+  })
+
+  test("recorder ignores an assistant whose parent message belongs to another session", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const original = await Session.create({})
+        const other = await Session.create({})
+        const info = assistantInfo({
+          sessionID: original.id,
+          id: "msg_assistant_own",
+          parentID: "msg_user_own",
+          cost: 0.01,
+          tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          created: 1100,
+          completed: 1200,
+          finish: "stop",
+        })
+        seedTurn({ userText: "mine", userTime: 1000, steps: [{ info, text: "ok" }] })
+        Database.use((db) => CycleRecorder.record(db, info as never))
+        const cycleID = Doc.cycleList({ sessionID: original.id })[0]!.id
+
+        // An assistant in another session whose parentID still points at the original's
+        // prompt (e.g. an unmapped clone) must not take over the original's cycle.
+        const stray = { ...info, id: "msg_assistant_stray", sessionID: other.id }
+        Database.use((db) => {
+          const { id: _id, sessionID: _sid, ...data } = stray
+          db.insert(MessageTable)
+            .values({ id: stray.id as never, session_id: other.id as never, time_created: 1100, data: data as never })
+            .run()
+          CycleRecorder.record(db, stray as never)
+        })
+
+        expect(Doc.cycleGet({ cycleID })?.sessionID).toBe(original.id)
+        expect(Doc.cycleList({ sessionID: original.id }).map((c) => c.id)).toEqual([cycleID])
+        expect(Doc.cycleList({ sessionID: other.id })).toHaveLength(0)
+      },
+    })
+  })
+
   test("fills docID from the session's prompt doc even without consent", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

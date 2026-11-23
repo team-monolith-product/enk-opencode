@@ -9,10 +9,10 @@ import { Config } from "../config/config"
 import { Flag } from "../flag/flag"
 import { Installation } from "../installation"
 
-import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt } from "../storage/db"
+import { Database, NotFoundError, eq, and, gte, isNull, desc, like, inArray, lt, sql } from "../storage/db"
 import { SyncEvent } from "../sync"
 import type { SQL } from "../storage/db"
-import { SessionTable } from "./session.sql"
+import { MessageTable, SessionTable } from "./session.sql"
 import { ProjectTable } from "../project/project.sql"
 import { Log } from "../util/log"
 import { updateSchema } from "../util/update-schema"
@@ -516,13 +516,38 @@ export namespace Session {
           title,
         })
         const msgs = yield* messages({ sessionID: input.sessionID })
-        const idMap = new Map<string, MessageID>()
-
+        const kept: MessageV2.WithParts[] = []
         for (const msg of msgs) {
           if (input.messageID && msg.info.id >= input.messageID) break
-          const newID = MessageID.ascending()
-          idMap.set(msg.info.id, newID)
+          kept.push(msg)
+        }
 
+        // Map every kept message BEFORE cloning any, so an assistant's parentID is remapped
+        // whenever its parent is part of the fork, regardless of which one is cloned first.
+        const idMap = new Map<string, MessageID>(kept.map((msg) => [msg.info.id, MessageID.ascending()]))
+
+        // Clone in storage (rowid) order, not time order: timestamps can disagree with
+        // insertion order (server clock stepped back), and a parent row must exist before
+        // its answers so the cycle recorder sees it.
+        const rank = yield* Effect.sync(
+          () =>
+            new Map(
+              Database.use((db) =>
+                db
+                  .select({ id: MessageTable.id })
+                  .from(MessageTable)
+                  .where(eq(MessageTable.session_id, input.sessionID))
+                  .orderBy(sql`rowid`)
+                  .all(),
+              ).map((row, index) => [row.id as string, index]),
+            ),
+        )
+        const ordered = kept.toSorted(
+          (a, b) => (rank.get(a.info.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.info.id) ?? Number.MAX_SAFE_INTEGER),
+        )
+
+        for (const msg of ordered) {
+          const newID = idMap.get(msg.info.id)!
           const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
           const cloned = yield* updateMessage({
             ...msg.info,

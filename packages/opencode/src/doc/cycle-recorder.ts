@@ -1,4 +1,4 @@
-import { Database, eq } from "@/storage/db"
+import { Database, and, eq } from "@/storage/db"
 import { MessageTable, PartTable } from "@/session/session.sql"
 import { MessageV2 } from "@/session/message-v2"
 import type { MessageID } from "@/session/schema"
@@ -144,6 +144,16 @@ export function record(db: Database.TxOrDb, info: MessageV2.Info) {
 
   const parent = db.select().from(MessageTable).where(eq(MessageTable.id, parentID)).get()
   if (!parent) return
+  // Never record across sessions: an anchor from another session (e.g. a forked clone whose
+  // parentID was not remapped) would otherwise take over that session's cycle.
+  if (parent.session_id !== info.sessionID) {
+    log.warn("skipped cycle: parent in another session", {
+      session: info.sessionID,
+      parentSession: parent.session_id,
+      messageID: info.id,
+    })
+    return
+  }
 
   // All completed assistant steps of this turn (same parent user message), in order.
   const steps = db
@@ -231,7 +241,7 @@ export function record(db: Database.TxOrDb, info: MessageV2.Info) {
   const existing = db
     .select({ id: PromptCycleTable.id })
     .from(PromptCycleTable)
-    .where(eq(PromptCycleTable.user_message_id, parentID))
+    .where(and(eq(PromptCycleTable.user_message_id, parentID), eq(PromptCycleTable.session_id, info.sessionID)))
     .get()
 
   if (existing) {
