@@ -789,6 +789,63 @@ describe("GitHub.absorb", () => {
     expect(await Bun.file(path.join(work, "app.js")).text()).toBe("uploaded\n")
   })
 
+  test("pulling when GitHub has nothing new leaves no backup version", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(tmp.path, "work")
+    const repo = WorkspaceRepo.open(work)
+    await put(work, { "app.js": "1\n" })
+    await History.commit(work, { message: "first" })
+    await GitHub.publish({
+      repo,
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+    await put(work, { "app.js": "uploaded\n" })
+    const count = async () => (await repo.must(["rev-list", "--count", WorkspaceRepo.HEAD])).trim()
+    const before = await count()
+
+    const pulled = await Instance.provide({ directory: work, fn: () => GitHub.pull(work, { locale: "en" }) })
+
+    expect(pulled).toBeUndefined()
+    expect(await count()).toBe(before)
+  })
+
+  test("a conflict kept for another repository is dropped once the team links a different one", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    expect(ws.result.conflict).toBeDefined()
+    const other = path.join(tmp.path, "hub", "octocat", "other.git")
+    await $`git init --quiet --bare --initial-branch=main ${other}`.quiet()
+
+    const result = await GitHub.publish({
+      repo: WorkspaceRepo.open(ws.work),
+      remote: "https://github.com/octocat/other.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+
+    expect(result.conflict).toBeUndefined()
+    expect(result.sha).toBeDefined()
+    expect(await GitHub.conflictOf(ws.work)).toBeUndefined()
+    expect(
+      (
+        await $`git --git-dir=${ws.bare} for-each-ref ${"--format=%(refname:short)"} refs/heads/jitda`.quiet().text()
+      ).trim(),
+    ).toBe(ws.result.conflict!.branch)
+  })
+
   test("pulling leaves an overlapping file alone for the push to report", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)

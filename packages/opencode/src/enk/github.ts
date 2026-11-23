@@ -55,6 +55,7 @@ export namespace GitHub {
     resolving: boolean
     linking?: boolean
     queued?: Choose
+    owner?: string
     remote?: string
   }
   export type Choose = "ours" | "theirs" | "ai"
@@ -188,17 +189,27 @@ export namespace GitHub {
     else await rm(conflictFile(dir), { force: true }).catch(() => undefined)
   }
 
-  /** 충돌이 풀릴 때 부른다. 대화창에 떠 있던 고르기 질문을 닫는 데 쓴다. */
+  function remoteOf(repo: Repo) {
+    return `${web}/${repo.owner}/${repo.name}.git`
+  }
+
+  async function current(dir: string, remote: string) {
+    const conflict = await conflictOf(dir)
+    if (!conflict || conflict.remote === remote) return conflict
+    await keep(dir)
+    for (const fn of settled) fn(dir)
+    return undefined
+  }
+
   export function onSettle(fn: (dir: string) => void) {
     settled.add(fn)
     return () => settled.delete(fn)
   }
 
-  /** 다른 대화가 답하는 중이라 지금 맞출 수 없는 선택을 남겨 둔다. 모든 대화가 쉬면 실행한다. */
-  export async function queue(dir: string, choice: Choose) {
+  export async function queue(dir: string, choice?: Choose, owner?: string) {
     const conflict = await conflictOf(dir)
     if (!conflict) throw new Failure("clean", 409)
-    await keep(dir, { ...conflict, queued: choice })
+    await keep(dir, { ...conflict, queued: choice, owner: choice ? owner : undefined })
   }
 
   const repoKey = (repo?: Repo) => (repo ? `${repo.owner}/${repo.name}` : undefined)
@@ -303,13 +314,10 @@ export namespace GitHub {
   }
 
   async function shown(dir: string, hit: Link) {
-    const conflict = await conflictOf(dir)
-    if (!conflict || !hit.repo) return
-    if (conflict.remote && conflict.remote !== `${web}/${hit.repo.owner}/${hit.repo.name}.git`) {
-      await keep(dir)
-      return
-    }
-    const { remote: _, ...rest } = conflict
+    if (!hit.repo) return
+    const conflict = await current(dir, remoteOf(hit.repo))
+    if (!conflict) return
+    const { remote: _, owner: __, ...rest } = conflict
     return { ...rest, compare: `${hit.repo.url}/compare/${conflict.target}...${conflict.branch}` }
   }
 
@@ -533,21 +541,21 @@ export namespace GitHub {
    */
   export async function pull(dir: string, input: { locale?: Locale.Value; except?: string; known?: Link } = {}) {
     if (!ServeTargets.isProject(dir)) return
-    if (await conflictOf(dir)) return
     const hit = input.known ?? (await link())
     if (!hit?.enabled || !hit.connected || !hit.token || !hit.repo) return
+    if (await current(dir, remoteOf(hit.repo))) return
     if (await working(input.except)) return
-    await History.commit(dir, { message: PULL[input.locale ?? "ko"].backup })
     const repo = WorkspaceRepo.open(dir)
-    const lane: Lane = { repo, remote: `${web}/${hit.repo.owner}/${hit.repo.name}.git`, env: auth(hit.token) }
+    const lane: Lane = { repo, remote: remoteOf(hit.repo), env: auth(hit.token) }
     return repo.lock(async () => {
-      const head = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
-      if (!head) return
       const branch = await defaultBranch(lane)
       const theirs = branch && (await tip(lane, branch))
       if (!branch || !theirs) return
       const base = await baseOf(lane, branch, theirs, hit.push?.sha)
-      if (!base) return
+      if (!base || base === theirs) return
+      await History.commit(dir, { message: PULL[input.locale ?? "ko"].backup })
+      const head = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
+      if (!head) return
       const tree = await publishable(repo, `${head}^{tree}`)
       const merged = await merge(repo, base, theirs, tree)
       if (merged.conflicts.length) return
@@ -620,7 +628,7 @@ export namespace GitHub {
     }
     const result = await publish({
       repo: WorkspaceRepo.open(dir),
-      remote: `${web}/${hit.repo.owner}/${hit.repo.name}.git`,
+      remote: remoteOf(hit.repo),
       branch: remote.default_branch || "main",
       locale: input.locale,
       subject: input.subject,
@@ -762,17 +770,14 @@ export namespace GitHub {
    */
   export async function absorb(dir: string, input: { backup: string; marked?: string }): Promise<Absorbed> {
     if (!ServeTargets.isProject(dir)) throw new Failure("disabled", 409)
-    const conflict = await conflictOf(dir)
-    if (!conflict) throw new Failure("clean", 409)
+    if (!(await conflictOf(dir))) throw new Failure("clean", 409)
     const hit = await linked()
     if (!hit.repo) throw new Failure("norepo", 409)
+    const conflict = await current(dir, remoteOf(hit.repo))
+    if (!conflict) throw new Failure("clean", 409)
     await History.commit(dir, { message: input.backup })
     const repo = WorkspaceRepo.open(dir)
-    const lane: Lane = {
-      repo,
-      remote: `${web}/${hit.repo.owner}/${hit.repo.name}.git`,
-      env: auth(hit.token!),
-    }
+    const lane: Lane = { repo, remote: remoteOf(hit.repo), env: auth(hit.token!) }
     const result = await repo.lock(async () => {
       const theirs = await tip(lane, conflict.target)
       if (!theirs) throw new Failure("clean", 409)
@@ -789,13 +794,12 @@ export namespace GitHub {
       const source = (
         await repo.must(["commit-tree", "--no-gpg-sign", merged.tree, "-p", theirs, "-m", "jitda"], { env: who })
       ).trim()
-      // 표시가 든 상태를 바로 기록에 남긴다. AI 가 답하기 전에 끼어든 올리기는 표시를 보고 별도 브랜치로 간다.
       await History.absorb(dir, { source, files: changes, message: input.marked ?? input.backup, backup: input.backup })
       await repo.must(["update-ref", baseRef(lane.remote, conflict.target), theirs])
       const kept: string[] = []
       for (const file of merged.conflicts) if (!(await marked(repo, merged.tree, [file]))) kept.push(file)
       const files = merged.conflicts.filter((file) => !kept.includes(file))
-      await keep(dir, { ...conflict, files, resolving: true, queued: undefined })
+      await keep(dir, { ...conflict, files, resolving: true, queued: undefined, owner: undefined })
       log.info("absorbed", { files: files.length, kept: kept.length, changes: changes.length })
       return { files, kept, theirs, ours: merged.ours }
     }, "github")
@@ -861,7 +865,7 @@ export namespace GitHub {
       const head = await WorkspaceRepo.rev(repo, WorkspaceRepo.HEAD)
       const tree = head ? await publishable(repo, `${head}^{tree}`) : EMPTY
       const subject = input.subject ?? (head ? (await repo.must(["log", "-1", "--format=%s", head])).trim() : "")
-      const pending = await conflictOf(repo.dir)
+      const pending = await current(repo.dir, input.remote)
       const settle = async (base: string) => {
         await repo.must(["update-ref", baseRef(input.remote, input.branch), base])
         if (!pending) return
@@ -887,9 +891,9 @@ export namespace GitHub {
           resolving: false,
           remote: input.remote,
           ...(linking || pending?.linking ? { linking: true } : {}),
-          ...(pending?.queued ? { queued: pending.queued } : {}),
+          ...(pending?.queued ? { queued: pending.queued, owner: pending.owner } : {}),
         }
-        const { remote: _, ...visible } = conflict
+        const { remote: _, owner: __, ...visible } = conflict
         if (parentTree === tree) {
           await keep(repo.dir, conflict)
           return { conflict: visible }

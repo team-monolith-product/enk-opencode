@@ -494,7 +494,7 @@ describe("choosing how to line up a GitHub conflict", () => {
     const result = await HistorySync.choose({ dir: "/tmp/x", choice: "theirs" })
 
     expect(result).toEqual({ queued: true })
-    expect(queue).toHaveBeenCalledWith("/tmp/x", "theirs")
+    expect(queue).toHaveBeenCalledWith("/tmp/x", "theirs", undefined)
     expect(resolve).not.toHaveBeenCalled()
   })
 
@@ -510,7 +510,32 @@ describe("choosing how to line up a GitHub conflict", () => {
 
     const result = await HistorySync.choose({ dir: "/tmp/x", choice: "ours", locale: "en" })
 
-    expect(result).toEqual({ queued: false })
+    expect(result).toEqual({ queued: false, pushed: true })
     expect(resolve).toHaveBeenCalledWith("/tmp/x", { prefer: "ours", locale: "en" })
+  })
+
+  test("two members choosing at once are lined up one after another", async () => {
+    const state: { conflict?: GitHub.Conflict } = {
+      conflict: { branch: "jitda/1", target: "main", files: ["app.py"], resolving: false },
+    }
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    const order: string[] = []
+    using resolve = spyOn(GitHub, "resolve").mockImplementation(async (_dir, input) => {
+      order.push(`start:${input.prefer}`)
+      await new Promise((done) => setTimeout(done, 20))
+      state.conflict = undefined
+      order.push(`end:${input.prefer}`)
+      return { enabled: true, pushed: true }
+    })
+
+    const results = await Promise.allSettled([
+      HistorySync.choose({ dir: "/tmp/y", choice: "theirs" }),
+      HistorySync.choose({ dir: "/tmp/y", choice: "ours" }),
+    ])
+
+    expect(order).toEqual(["start:theirs", "end:theirs"])
+    expect(resolve).toHaveBeenCalledTimes(1)
+    expect(results[1]).toMatchObject({ status: "rejected", reason: { code: "clean" } })
   })
 })
