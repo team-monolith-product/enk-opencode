@@ -35,6 +35,7 @@ export namespace GitHub {
   export type Status = {
     enabled: boolean
     connectUrl?: string
+    manageUrl?: string
     login?: string
     linkedBy?: string
     app?: boolean
@@ -69,6 +70,7 @@ export namespace GitHub {
     | "forbidden"
     | "revoked"
     | "app"
+    | "selected"
     | "missing"
     | "empty"
     | "remote"
@@ -120,6 +122,7 @@ export namespace GitHub {
     enabled: boolean
     connected: boolean
     connect_url?: string
+    manage_url?: string
     login?: string
     github_user_id?: number
     linked_by?: string
@@ -156,7 +159,21 @@ export namespace GitHub {
     }
   }
 
-  const failed = new Map<string, FirstPush>()
+  const failed = new Map<string, FirstPush & { repo?: string }>()
+
+  const repoKey = (repo?: Repo) => (repo ? `${repo.owner}/${repo.name}` : undefined)
+
+  function lastFailure(dir: string, repo?: Repo): FirstPush | undefined {
+    const hit = failed.get(dir)
+    if (!hit) return
+    if (hit.repo !== repoKey(repo)) {
+      failed.delete(dir)
+      return
+    }
+    const { repo: _, ...first } = hit
+    return first
+  }
+
   const conflicts = new Map<string, Conflict | null>()
   const settled = new Set<(dir: string) => void>()
 
@@ -264,7 +281,10 @@ export namespace GitHub {
     }).catch(() => undefined)
     if (res?.ok) return (await res.json()) as T
     if (res?.status === 404) throw new Failure("missing", 404)
-    if (res?.status === 409) throw new Failure("unlinked", 409)
+    if (res?.status === 409) {
+      const body = (await res.json().catch(() => undefined)) as { errors?: { title?: string }[] } | undefined
+      throw new Failure(body?.errors?.[0]?.title === "AlreadySelected" ? "selected" : "unlinked", 409)
+    }
     throw new Failure("remote", 502)
   }
 
@@ -283,12 +303,13 @@ export namespace GitHub {
     return {
       enabled: true,
       connectUrl: hit.connect_url,
+      manageUrl: hit.connected ? hit.manage_url : undefined,
       login: hit.connected ? hit.login : undefined,
       linkedBy: hit.connected ? hit.linked_by : undefined,
       app: hit.connected ? hit.app : undefined,
       repo: hit.repo,
       push: hit.push ? { sha: hit.push.sha, time: hit.push.at, by: hit.push.by } : undefined,
-      firstPush: failed.get(dir),
+      firstPush: lastFailure(dir, hit.repo),
       conflict: await shown(dir, hit),
     }
   }
@@ -423,7 +444,12 @@ export namespace GitHub {
       log.error("first push failed", { attempt, error: lean(failure) })
       if (!transient.includes(failure.code) || attempt >= attempts || Date.now() - started > budget) {
         if (notify.includes(failure.code)) alert("first push gave up", failure, { attempt })
-        failed.set(dir, { attempts: attempt, code: failure.code, reason: failure.message.slice(0, detail) })
+        failed.set(dir, {
+          attempts: attempt,
+          code: failure.code,
+          reason: failure.message.slice(0, detail),
+          repo: repoKey(hit.repo),
+        })
         return
       }
       await sleep(backoff * attempt)
