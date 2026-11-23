@@ -69,6 +69,40 @@ async function workspace(root: string) {
   }
 }
 
+async function seed(remote: string, root: string, files: Record<string, string>) {
+  const other = path.join(root, "seed")
+  await $`git init --quiet --initial-branch=main ${other}`.quiet()
+  await put(other, files)
+  await $`git -C ${other} add -A -f`.quiet()
+  await $`git -C ${other} -c user.name=o -c user.email=o@o commit --quiet -m existing`.quiet()
+  await $`git -C ${other} push --quiet ${remote} HEAD:main`.quiet()
+}
+
+function fakeGitHub() {
+  const original = globalThis.fetch
+  const spy = spyOn(globalThis, "fetch").mockImplementation(((input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input))
+    if (url.host !== "api.github.com") return original(input, init)
+    return Promise.resolve(
+      Response.json({
+        name: "jitda-app",
+        owner: { login: "octocat" },
+        html_url: "https://github.com/octocat/jitda-app",
+        private: false,
+        default_branch: "main",
+        permissions: { push: true },
+      }),
+    )
+  }) as typeof fetch)
+  return { [Symbol.dispose]: () => spy.mockRestore() }
+}
+
+async function read(file: string) {
+  return Bun.file(file)
+    .text()
+    .catch(() => undefined)
+}
+
 async function put(root: string, files: Record<string, string>) {
   for (const [name, text] of Object.entries(files)) {
     await mkdir(path.dirname(path.join(root, name)), { recursive: true })
@@ -307,6 +341,702 @@ describe("GitHub.publish", () => {
   })
 })
 
+async function edit(remote: string, root: string, files: Record<string, string | null>, branch = "main") {
+  const other = path.join(root, `other-${Math.random().toString(36).slice(2)}`)
+  await $`git clone --quiet --branch ${branch} ${remote} ${other}`.quiet()
+  for (const [name, text] of Object.entries(files)) {
+    if (text === null) await rm(path.join(other, name))
+    else await put(other, { [name]: text })
+  }
+  await $`git -C ${other} -c user.name=o -c user.email=o@o add -A`.quiet()
+  await $`git -C ${other} -c user.name=o -c user.email=o@o commit --quiet -m theirs`.quiet()
+  await $`git -C ${other} push --quiet origin HEAD:${branch}`.quiet()
+}
+
+async function show(remote: string, spec: string) {
+  return $`git --git-dir=${remote} show ${spec}`.quiet().text()
+}
+
+async function branches(remote: string) {
+  return (await $`git --git-dir=${remote} for-each-ref ${"--format=%(refname:short)"} refs/heads`.quiet().text())
+    .split("\n")
+    .filter(Boolean)
+}
+
+describe("GitHub.publish with changes made on GitHub", () => {
+  test("a file changed only on GitHub is kept when Jitda pushes next", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "a", "README.md": "readme" })
+    await ws.publish("first")
+    await edit(ws.remote, tmp.path, { "README.md": "edited on github", "docs/a.md": "added on github" })
+    await put(ws.work, { "index.html": "b" })
+
+    const result = await ws.publish("mine")
+
+    expect(result.conflict).toBeUndefined()
+    expect(await ws.log()).toEqual(["mine", "theirs", "first"])
+    expect(await ws.files()).toEqual(["README.md", "docs/a.md", "index.html"])
+    expect(await show(ws.remote, "main:README.md")).toBe("edited on github")
+    expect(await show(ws.remote, "main:index.html")).toBe("b")
+  })
+
+  test("a GitHub change survives later pushes that do not touch it", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "a", "README.md": "readme" })
+    await ws.publish("first")
+    await edit(ws.remote, tmp.path, { "README.md": "edited on github" })
+    await put(ws.work, { "index.html": "b" })
+    await ws.publish("second")
+    await put(ws.work, { "index.html": "c" })
+
+    await ws.publish("third")
+
+    expect(await show(ws.remote, "main:README.md")).toBe("edited on github")
+    expect(await show(ws.remote, "main:index.html")).toBe("c")
+    expect(await ws.log()).toEqual(["third", "second", "theirs", "first"])
+  })
+
+  test("when only GitHub changed, nothing is pushed and the change comes into the workspace", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "a" })
+    await ws.publish("first")
+    await edit(ws.remote, tmp.path, { "index.html": "edited on github" })
+
+    const result = await ws.publish("again")
+
+    expect(result).toEqual({ absorbed: 1 })
+    expect(await show(ws.remote, "main:index.html")).toBe("edited on github")
+    expect(await Bun.file(path.join(ws.work, "index.html")).text()).toBe("edited on github")
+  })
+
+  test("a push that merges a GitHub-only file also brings it into the workspace", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "a" })
+    await ws.publish("first")
+    await edit(ws.remote, tmp.path, { "extra.txt": "from github" })
+    await put(ws.work, { "index.html": "b" })
+
+    const result = await ws.publish("mine")
+
+    expect(result.sha).toBeDefined()
+    expect(result.absorbed).toBe(1)
+    expect(await show(ws.remote, "main:index.html")).toBe("b")
+    expect(await show(ws.remote, "main:extra.txt")).toBe("from github")
+    expect(await Bun.file(path.join(ws.work, "extra.txt")).text()).toBe("from github")
+  })
+
+  test("the same place changed on both sides goes to a separate branch and leaves main alone", async () => {
+    await using tmp = await tmpdir()
+    setSystemTime(new Date("2026-11-21T06:30:15Z"))
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "line\n", "app.js": "x" })
+    await ws.publish("first")
+    await edit(ws.remote, tmp.path, { "index.html": "github\n" })
+    await put(ws.work, { "index.html": "jitda\n", "app.js": "y" })
+
+    const result = await ws.publish("mine")
+    setSystemTime()
+
+    expect(result.sha).toBeUndefined()
+    expect(result.conflict).toEqual({
+      branch: "jitda/20261121-063015",
+      target: "main",
+      files: ["index.html"],
+      resolving: false,
+    })
+    expect(await ws.log()).toEqual(["theirs", "first"])
+    expect(await show(ws.remote, "main:index.html")).toBe("github\n")
+    expect(await show(ws.remote, "jitda/20261121-063015:index.html")).toBe("jitda\n")
+    expect(await show(ws.remote, "jitda/20261121-063015:app.js")).toBe("y")
+  })
+
+  test("later pushes while the conflict stays go to the same branch", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "line\n" })
+    await ws.publish("first")
+    await edit(ws.remote, tmp.path, { "index.html": "github\n" })
+    await put(ws.work, { "index.html": "jitda\n" })
+    const first = await ws.publish("mine")
+    await put(ws.work, { "index.html": "jitda again\n" })
+
+    const second = await ws.publish("mine again")
+
+    expect(second.conflict?.branch).toBe(first.conflict!.branch)
+    expect(await branches(ws.remote)).toEqual([first.conflict!.branch, "main"].sort())
+    expect(await show(ws.remote, `${first.conflict!.branch}:index.html`)).toBe("jitda again\n")
+    expect(await show(ws.remote, "main:index.html")).toBe("github\n")
+  })
+
+  test("once the branch is merged on GitHub, the next push lands on main again", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "line\n" })
+    await ws.publish("first")
+    await edit(ws.remote, tmp.path, { "index.html": "github\n" })
+    await put(ws.work, { "index.html": "jitda\n" })
+    await ws.publish("mine")
+    await edit(ws.remote, tmp.path, { "index.html": "jitda\n" })
+    await put(ws.work, { "app.js": "new" })
+
+    const result = await ws.publish("after merge")
+
+    expect(result.conflict).toBeUndefined()
+    expect(result.sha).toBeDefined()
+    expect(await show(ws.remote, "main:index.html")).toBe("jitda\n")
+    expect(await show(ws.remote, "main:app.js")).toBe("new")
+  })
+
+  test("a team that pushed before this change uses the recorded push as the starting point", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await put(ws.work, { "index.html": "a", "README.md": "readme" })
+    const first = await ws.publish("first")
+    const repo = WorkspaceRepo.open(ws.work)
+    for (const ref of (await repo.must(["for-each-ref", "--format=%(refname)", "refs/jitda"])).split("\n"))
+      if (ref) await repo.must(["update-ref", "-d", ref])
+    await edit(ws.remote, tmp.path, { "README.md": "edited on github" })
+    await put(ws.work, { "index.html": "b" })
+    await History.commit(ws.work, { message: "mine" })
+
+    await GitHub.publish({ repo, remote: ws.remote, branch: "main", locale: "en", author, known: first.sha })
+
+    expect(await show(ws.remote, "main:README.md")).toBe("edited on github")
+    expect(await show(ws.remote, "main:index.html")).toBe("b")
+  })
+})
+
+describe("GitHub.publish when linking a repository that already has files", () => {
+  const branches = (remote: string) =>
+    $`git --git-dir=${remote} for-each-ref ${"--format=%(refname:short)"} refs/heads`
+      .quiet()
+      .text()
+      .then((text) => text.split("\n").filter(Boolean).sort())
+
+  test("files on both sides that do not overlap are pulled into the workspace and pushed together", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await seed(ws.remote, tmp.path, { "README.md": "mine on github", "main.py": "print(1)" })
+    await put(ws.work, { "index.html": "jitda" })
+
+    const result = await ws.publish("first")
+
+    expect(result.conflict).toBeUndefined()
+    expect(result.sha).toBeDefined()
+    expect(result.absorbed).toBe(2)
+    expect(await read(path.join(ws.work, "README.md"))).toBe("mine on github")
+    expect(await ws.files()).toEqual(["README.md", "index.html", "main.py"])
+    expect(await ws.log()).toEqual(["first", "existing"])
+  })
+
+  test("an overlapping file leaves the default branch alone and puts the workspace on a side branch", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await seed(ws.remote, tmp.path, { "index.html": "github", "README.md": "readme" })
+    await put(ws.work, { "index.html": "jitda" })
+
+    const result = await ws.publish("first")
+    await put(ws.work, { "index.html": "jitda 2" })
+    const again = await ws.publish("second")
+
+    expect(result.sha).toBeUndefined()
+    expect(result.conflict).toMatchObject({ target: "main", linking: true, resolving: false, files: ["index.html"] })
+    expect(await ws.log()).toEqual(["existing"])
+    expect(await branches(ws.remote)).toEqual([result.conflict!.branch, "main"].sort())
+    expect(await show(ws.remote, `${result.conflict!.branch}:index.html`)).toBe("jitda 2")
+    expect(again.conflict?.branch).toBe(result.conflict!.branch)
+    expect(await read(path.join(ws.work, "README.md"))).toBeUndefined()
+  })
+
+  test("a blank workspace takes the repository as it is", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    await seed(ws.remote, tmp.path, { "README.md": "mine on github", "src/main.js": "go()" })
+    await WorkspaceRepo.ignore(ws.work)
+
+    const result = await ws.publish("first")
+
+    expect(result.conflict).toBeUndefined()
+    expect(result.absorbed).toBeGreaterThan(0)
+    expect(await read(path.join(ws.work, "README.md"))).toBe("mine on github")
+    expect(await read(path.join(ws.work, "src/main.js"))).toBe("go()")
+    expect(await ws.log()).toEqual(["existing"])
+  })
+
+  test("a page pulled from GitHub goes back up byte for byte, so the next push sees no change", async () => {
+    await using tmp = await tmpdir()
+    const ws = await workspace(tmp.path)
+    const tag = `<script src="/__preview-bridge.js" data-preview-bridge></script>`
+    const page = "<!doctype html>\n<html>\n<head>\n<title>b</title>\n</head>\n<body></body>\n</html>\n"
+    await seed(ws.remote, tmp.path, { "about.html": page })
+    await put(ws.work, {
+      "index.html": `<html><head>${tag}\n<title>a</title></head></html>`,
+      "__preview-bridge.js": "b",
+    })
+
+    const first = await ws.publish("first")
+    const after = await ws.publish("next")
+
+    expect(first.conflict).toBeUndefined()
+    expect(await read(path.join(ws.work, "about.html"))).toBe(page)
+    expect(await show(ws.remote, "main:about.html")).toBe(page)
+    expect(await show(ws.remote, "main:index.html")).toBe("<html><head><title>a</title></head></html>")
+    expect(after.sha).toBeUndefined()
+  })
+})
+
+describe("GitHub.pick", () => {
+  const text = "a\n<<<<<<< ours\njitda\n=======\ngithub\n>>>>>>> theirs\nb\n"
+
+  test("keeps Jitda's side", () => {
+    expect(GitHub.pick(text, "ours")).toBe("a\njitda\nb\n")
+  })
+
+  test("keeps GitHub's side and drops a diff3 base section", () => {
+    const diff3 = "<<<<<<< ours\nx\n||||||| base\no\n=======\ny\n>>>>>>> theirs\n"
+    expect(GitHub.pick(text, "theirs")).toBe("a\ngithub\nb\n")
+    expect(GitHub.pick(diff3, "ours")).toBe("x\n")
+    expect(GitHub.pick(diff3, "theirs")).toBe("y\n")
+  })
+})
+
+describe("GitHub.absorb", () => {
+  const link = {
+    enabled: true,
+    connected: true,
+    login: "octocat",
+    token: "gho_1",
+    repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+  }
+
+  async function conflicted(root: string) {
+    const hub = path.join(root, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(root, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(root, "work")
+    const repo = WorkspaceRepo.open(work)
+    const publish = async (message: string) => {
+      await History.commit(work, { message })
+      return GitHub.publish({
+        repo,
+        remote: "https://github.com/octocat/jitda-app.git",
+        branch: "main",
+        locale: "en",
+        author,
+      })
+    }
+    await put(work, { "index.html": "<h1>hi</h1>\n", "logo.bin": "\0a", "README.md": "readme" })
+    await publish("first")
+    await edit(bare, root, { "index.html": "<h1>github</h1>\n", "logo.bin": "\0b", "README.md": "from github" })
+    await put(work, { "index.html": "<h1>jitda</h1>\n", "logo.bin": "\0c" })
+    const result = await publish("mine")
+    return { bare, work, publish, result }
+  }
+
+  const absorb = (dir: string) =>
+    Instance.provide({ directory: dir, fn: () => GitHub.absorb(dir, { backup: "backup" }) })
+
+  test("for a repository that already had files, brings in GitHub-only files and marks files that differ", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    await seed(bare, tmp.path, { "README.md": "from github", "app.py": "print('github')\n" })
+    const work = path.join(tmp.path, "work")
+    await put(work, { "app.py": "print('jitda')\n", "jitda.txt": "j" })
+    const publish = async (message: string) => {
+      await History.commit(work, { message })
+      return GitHub.publish({
+        repo: WorkspaceRepo.open(work),
+        remote: "https://github.com/octocat/jitda-app.git",
+        branch: "main",
+        locale: "en",
+        author,
+      })
+    }
+    const first = await publish("first")
+    expect(first.conflict?.linking).toBe(true)
+
+    const result = await absorb(work)
+    await put(work, { "app.py": "print('jitda')\nprint('github')\n" })
+    const pushed = await publish("merged")
+
+    expect(result.files).toEqual(["app.py"])
+    expect(await read(path.join(work, "README.md"))).toBe("from github")
+    expect(pushed.sha).toBeDefined()
+    expect(await $`git --git-dir=${bare} show main:app.py`.quiet().text()).toBe("print('jitda')\nprint('github')\n")
+    expect(
+      (await $`git --git-dir=${bare} ls-tree -r --name-only main`.quiet().text()).split("\n").filter(Boolean),
+    ).toEqual(["README.md", "app.py", "jitda.txt"])
+  })
+
+  test("brings GitHub's changes into the workspace and marks the conflicting lines", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    expect(ws.result.conflict?.files).toEqual(["index.html", "logo.bin"])
+
+    const result = await absorb(ws.work)
+
+    expect(result).toEqual({
+      files: ["index.html"],
+      kept: ["logo.bin"],
+      theirs: expect.any(String),
+      ours: expect.any(String),
+    })
+    const html = await Bun.file(path.join(ws.work, "index.html")).text()
+    expect(html).toContain("<<<<<<< ")
+    expect(html).toContain("<h1>jitda</h1>\n=======\n<h1>github</h1>")
+    expect(await Bun.file(path.join(ws.work, "README.md")).text()).toBe("from github")
+    expect(await Bun.file(path.join(ws.work, "logo.bin")).text()).toBe("\0c")
+  })
+
+  const resolve = (dir: string, prefer: GitHub.Prefer) =>
+    Instance.provide({ directory: dir, fn: () => GitHub.resolve(dir, { prefer, locale: "en" }) })
+
+  test("choosing Jitda's side keeps Jitda in the overlap and GitHub elsewhere, then pushes to main", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    using _github = fakeGitHub()
+
+    const status = await resolve(ws.work, "ours")
+
+    expect(status.conflict).toBeUndefined()
+    expect(
+      (await $`git --git-dir=${ws.bare} for-each-ref ${"--format=%(refname:short)"} refs/heads`.quiet().text()).trim(),
+    ).toBe("main")
+    expect(await show(ws.bare, "main:index.html")).toBe("<h1>jitda</h1>\n")
+    expect(await show(ws.bare, "main:README.md")).toBe("from github")
+    expect(await show(ws.bare, "main:logo.bin")).toBe("\0c")
+  })
+
+  test("choosing GitHub's side takes GitHub in the overlap, binaries included", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    using _github = fakeGitHub()
+
+    await resolve(ws.work, "theirs")
+
+    expect(await Bun.file(path.join(ws.work, "index.html")).text()).toBe("<h1>github</h1>\n")
+    expect(await Bun.file(path.join(ws.work, "logo.bin")).text()).toBe("\0b")
+    expect(await show(ws.bare, "main:index.html")).toBe("<h1>github</h1>\n")
+  })
+
+  test("pulling brings GitHub's separate edits into the workspace so the next push keeps them", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(tmp.path, "work")
+    const publish = async (message: string) => {
+      await History.commit(work, { message })
+      return GitHub.publish({
+        repo: WorkspaceRepo.open(work),
+        remote: "https://github.com/octocat/jitda-app.git",
+        branch: "main",
+        locale: "en",
+        author,
+      })
+    }
+    const tag = `<script src="/__preview-bridge.js" data-preview-bridge></script>`
+    await put(work, { "index.html": `<html>\n<head>${tag}\n<title>a</title>\n</head>\n</html>\n`, "app.js": "1" })
+    await publish("first")
+    await edit(bare, tmp.path, { "index.html": "<html>\n<head>\n<title>b</title>\n</head>\n</html>\n" })
+    await edit(bare, tmp.path, { "app.js": "2" })
+
+    const pulled = await Instance.provide({ directory: work, fn: () => GitHub.pull(work, { locale: "en" }) })
+    await put(work, { "new.txt": "n" })
+    const pushed = await publish("mine")
+
+    expect(pulled).toEqual(["app.js", "index.html"])
+    expect(await Bun.file(path.join(work, "index.html")).text()).toBe(
+      `<html>\n<head>${tag}\n\n<title>b</title>\n</head>\n</html>\n`,
+    )
+    expect(pushed.sha).toBeDefined()
+    expect(await show(bare, "main:index.html")).toBe("<html>\n<head>\n<title>b</title>\n</head>\n</html>\n")
+    expect(await show(bare, "main:app.js")).toBe("2")
+    expect(await show(bare, "main:new.txt")).toBe("n")
+  })
+
+  test("pulling records an unsaved edit first, so a file changed on both sides is left alone", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(tmp.path, "work")
+    await put(work, { "app.js": "1\n" })
+    await History.commit(work, { message: "first" })
+    await GitHub.publish({
+      repo: WorkspaceRepo.open(work),
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+    await edit(bare, tmp.path, { "app.js": "github\n" })
+    await put(work, { "app.js": "uploaded\n" })
+
+    const pulled = await Instance.provide({ directory: work, fn: () => GitHub.pull(work, { locale: "en" }) })
+
+    expect(pulled).toBeUndefined()
+    expect(await Bun.file(path.join(work, "app.js")).text()).toBe("uploaded\n")
+  })
+
+  test("pulling when GitHub has nothing new leaves no backup version", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(tmp.path, "work")
+    const repo = WorkspaceRepo.open(work)
+    await put(work, { "app.js": "1\n" })
+    await History.commit(work, { message: "first" })
+    await GitHub.publish({
+      repo,
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+    await put(work, { "app.js": "uploaded\n" })
+    const count = async () => (await repo.must(["rev-list", "--count", WorkspaceRepo.HEAD])).trim()
+    const before = await count()
+
+    const pulled = await Instance.provide({ directory: work, fn: () => GitHub.pull(work, { locale: "en" }) })
+
+    expect(pulled).toBeUndefined()
+    expect(await count()).toBe(before)
+  })
+
+  test("pulling a GitHub change Jitda already has moves the base so later turns leave no backup", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(tmp.path, "work")
+    const repo = WorkspaceRepo.open(work)
+    await put(work, { "app.js": "1\n" })
+    await History.commit(work, { message: "first" })
+    await GitHub.publish({
+      repo,
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+    await edit(bare, tmp.path, { "app.js": "2\n" })
+    await put(work, { "app.js": "2\n" })
+    await History.commit(work, { message: "same" })
+    const pull = () => Instance.provide({ directory: work, fn: () => GitHub.pull(work, { locale: "en" }) })
+    await pull()
+    await put(work, { "app.js": "uploaded\n" })
+    const count = async () => (await repo.must(["rev-list", "--count", WorkspaceRepo.HEAD])).trim()
+    const before = await count()
+
+    await pull()
+
+    expect(await count()).toBe(before)
+  })
+
+  test("a conflict kept for another repository is dropped once the team links a different one", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    expect(ws.result.conflict).toBeDefined()
+    const other = path.join(tmp.path, "hub", "octocat", "other.git")
+    await $`git init --quiet --bare --initial-branch=main ${other}`.quiet()
+
+    const result = await GitHub.publish({
+      repo: WorkspaceRepo.open(ws.work),
+      remote: "https://github.com/octocat/other.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+
+    expect(result.conflict).toBeUndefined()
+    expect(result.sha).toBeDefined()
+    expect(await GitHub.conflictOf(ws.work)).toBeUndefined()
+    expect(
+      (
+        await $`git --git-dir=${ws.bare} for-each-ref ${"--format=%(refname:short)"} refs/heads/jitda`.quiet().text()
+      ).trim(),
+    ).toBe(ws.result.conflict!.branch)
+  })
+
+  test("the push at the end of a turn keeps the turn's title even after pulling GitHub changes", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    using _github = fakeGitHub()
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(tmp.path, "work")
+    await put(work, { "app.js": "1\n" })
+    await History.commit(work, { message: "first" })
+    await GitHub.publish({
+      repo: WorkspaceRepo.open(work),
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+    await edit(bare, tmp.path, { "readme.md": "github" })
+    await put(work, { "app.js": "2\n" })
+    await History.commit(work, { message: "Change app.js" })
+
+    await Instance.provide({ directory: work, fn: () => GitHub.sync(work, "en") })
+
+    expect((await $`git --git-dir=${bare} log -1 --format=%s main`.quiet().text()).trim()).toBe("Change app.js")
+    expect(await show(bare, "main:readme.md")).toBe("github")
+    expect(await show(bare, "main:app.js")).toBe("2\n")
+  })
+
+  test("pulling leaves an overlapping file alone for the push to report", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const hub = path.join(tmp.path, "hub")
+    const bare = path.join(hub, "octocat", "jitda-app.git")
+    await mkdir(path.dirname(bare), { recursive: true })
+    await $`git init --quiet --bare --initial-branch=main ${bare}`.quiet()
+    const config = path.join(tmp.path, "gitconfig")
+    await writeFile(config, `[url "file://${hub}/"]\n\tinsteadOf = https://github.com/\n`)
+    process.env["GIT_CONFIG_GLOBAL"] = config
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>\n" })
+    await History.commit(work, { message: "first" })
+    await GitHub.publish({
+      repo: WorkspaceRepo.open(work),
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+    await edit(bare, tmp.path, { "index.html": "<h1>github</h1>\n" })
+    await put(work, { "index.html": "<h1>jitda</h1>\n" })
+    await History.commit(work, { message: "mine" })
+
+    const pulled = await Instance.provide({ directory: work, fn: () => GitHub.pull(work, { locale: "en" }) })
+
+    expect(pulled).toBeUndefined()
+    expect(await Bun.file(path.join(work, "index.html")).text()).toBe("<h1>jitda</h1>\n")
+  })
+
+  test("a push that slips in before the AI answers never lands on main", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    const before = await $`git --git-dir=${ws.bare} rev-parse main`.quiet().text()
+
+    await absorb(ws.work)
+    const stray = await GitHub.publish({
+      repo: WorkspaceRepo.open(ws.work),
+      remote: "https://github.com/octocat/jitda-app.git",
+      branch: "main",
+      locale: "en",
+      author,
+    })
+
+    expect(stray.sha).toBeUndefined()
+    expect(stray.conflict).toBeDefined()
+    expect(await $`git --git-dir=${ws.bare} rev-parse main`.quiet().text()).toBe(before)
+  })
+
+  test("once the AI clears the markers, the next push lands on main with both sides", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    await absorb(ws.work)
+    await put(ws.work, { "index.html": "<h1>jitda and github</h1>\n" })
+
+    const result = await ws.publish("resolved")
+
+    expect(result.conflict).toBeUndefined()
+    expect(await show(ws.bare, "main:index.html")).toBe("<h1>jitda and github</h1>\n")
+    expect(await show(ws.bare, "main:README.md")).toBe("from github")
+    expect(await show(ws.bare, "main:logo.bin")).toBe("\0c")
+  })
+
+  test("markers left behind keep main untouched and go to the branch again", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    await absorb(ws.work)
+
+    const result = await ws.publish("not resolved")
+
+    expect(result.conflict).toMatchObject({ branch: ws.result.conflict!.branch, files: ["index.html"] })
+    expect(await show(ws.bare, "main:index.html")).toBe("<h1>github</h1>\n")
+  })
+
+  test("choosing a side after the branch was merged on GitHub pushes and deletes the branch", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const ws = await conflicted(tmp.path)
+    using _github = fakeGitHub()
+    const settled: string[] = []
+    const off = GitHub.onSettle((dir) => settled.push(dir))
+    await edit(ws.bare, tmp.path, { "index.html": "<h1>jitda</h1>\n", "logo.bin": "\0c" })
+
+    await resolve(ws.work, "ours")
+    off()
+
+    expect(await GitHub.conflictOf(ws.work)).toBeUndefined()
+    expect(settled).toEqual([ws.work])
+    expect(
+      (await $`git --git-dir=${ws.bare} for-each-ref ${"--format=%(refname:short)"} refs/heads`.quiet().text()).trim(),
+    ).toBe("main")
+  })
+
+  test("is refused when there is no conflict", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve(link)
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "a" })
+
+    await expect(absorb(work)).rejects.toMatchObject({ code: "clean" })
+  })
+})
+
 describe("GitHub.status", () => {
   test("stays off when the hackathon backend is not configured", async () => {
     await using tmp = await tmpdir()
@@ -320,6 +1050,7 @@ describe("GitHub.status", () => {
       enabled: true,
       connected: true,
       connect_url: "https://dev.jitda.io/auth/github?team_id=7",
+      manage_url: "https://dev.jitda.io/auth/github/manage?team_id=7",
       login: "octocat",
       linked_by: "홍길동",
       token: "gho_secret_token",
@@ -332,6 +1063,7 @@ describe("GitHub.status", () => {
     expect(status).toEqual({
       enabled: true,
       connectUrl: "https://dev.jitda.io/auth/github?team_id=7",
+      manageUrl: "https://dev.jitda.io/auth/github/manage?team_id=7",
       login: "octocat",
       linkedBy: "홍길동",
       repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
@@ -362,6 +1094,7 @@ describe("GitHub.status", () => {
       enabled: true,
       connected: false,
       connect_url: "https://dev.jitda.io/auth/github?team_id=7",
+      manage_url: "https://dev.jitda.io/auth/github/manage?team_id=7",
       login: "octocat",
       linked_by: "홍길동",
       repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
@@ -371,6 +1104,7 @@ describe("GitHub.status", () => {
 
     expect(status.login).toBeUndefined()
     expect(status.linkedBy).toBeUndefined()
+    expect(status.manageUrl).toBeUndefined()
     expect(status.connectUrl).toBe("https://dev.jitda.io/auth/github?team_id=7")
     expect(status.repo?.name).toBe("jitda-app")
   })
@@ -612,6 +1346,21 @@ describe("GitHub.create", () => {
     expect(await origin.subjects()).toEqual(["later"])
   })
 
+  test("a first push failure is not shown once the team switches to another repository", async () => {
+    await using tmp = await tmpdir()
+    const current = { ...link }
+    await using _rails = serve(current)
+    using _github = mockGitHub(() => Response.json({ message: "Server Error" }, { status: 500 }))
+    const created = await create(tmp.path, { name: "jitda-app" })
+    expect(created.firstPush).toMatchObject({ code: "remote" })
+
+    current.repo = { owner: "octocat", name: "other", url: "https://github.com/octocat/other" }
+    expect((await GitHub.status(tmp.path)).firstPush).toBeUndefined()
+
+    current.repo = link.repo
+    expect((await GitHub.status(tmp.path)).firstPush).toBeUndefined()
+  })
+
   test("stops retrying once the first push has used up its time budget", async () => {
     await using tmp = await tmpdir()
     await using _rails = serve(link)
@@ -694,6 +1443,22 @@ describe("GitHub.create", () => {
     ])
   })
 
+  test("choosing after a teammate already chose is reported as selected, not unlinked", async () => {
+    await using tmp = await tmpdir()
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => Response.json({ errors: [{ status: "409", title: "AlreadySelected" }] }, { status: 409 }),
+    })
+    process.env["ENK_HACKATHON_RAILS_URL"] = server.url.origin
+    process.env["ENK_AI_USAGE_TOKEN"] = "team-token"
+
+    const failure = await select(tmp.path, { owner: "octocat", name: "demo" }).catch((err) => err)
+    await server.stop(true)
+
+    expect(failure).toBeInstanceOf(GitHub.Failure)
+    expect(failure.code).toBe("selected")
+  })
+
   test("listing without a link is refused", async () => {
     await using tmp = await tmpdir()
     const server = Bun.serve({ port: 0, fetch: () => Response.json({}, { status: 409 }) })
@@ -726,6 +1491,38 @@ describe("GitHub.create", () => {
     expect(status.firstPush).toBeUndefined()
     expect(await origin.files()).toEqual([".gitignore", "index.html"])
     expect(rails.reports[1]).toMatchObject({ pushed_sha: expect.any(String) })
+  })
+
+  test("choosing a repository that already has other files leaves it alone and offers to line them up", async () => {
+    await using tmp = await tmpdir()
+    await using rails = serve({
+      ...link,
+      app: true,
+      repo: { owner: "octocat", name: "jitda-app", url: "https://github.com/octocat/jitda-app" },
+    })
+    await hub(tmp.path)
+    await seed(path.join(tmp.path, "hub", "octocat", "jitda-app.git"), tmp.path, {
+      "index.html": "<h1>github</h1>",
+      "README.md": "on github",
+    })
+    const work = path.join(tmp.path, "work")
+    await put(work, { "index.html": "<h1>hi</h1>" })
+    using _github = mockGitHub(() => Response.json({ ...remote, default_branch: "main", permissions: { push: true } }))
+
+    const status = await select(work, { owner: "octocat", name: "jitda-app" })
+
+    expect(status.firstPush).toBeUndefined()
+    expect(status.conflict?.linking).toBe(true)
+    expect(rails.reports).toHaveLength(1)
+
+    const resolved = await Instance.provide({
+      directory: work,
+      fn: () => GitHub.resolve(work, { prefer: "theirs" }),
+    })
+
+    expect(resolved.conflict).toBeUndefined()
+    expect(await read(path.join(work, "README.md"))).toBe("on github")
+    expect(await read(path.join(work, "index.html"))).toBe("<h1>github</h1>")
   })
 
   test("a GitHub App link pushes even though the installation token reports no push permission", async () => {
