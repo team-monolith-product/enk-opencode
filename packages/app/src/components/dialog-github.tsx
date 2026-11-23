@@ -16,6 +16,7 @@ import { connectUrlFor } from "@/utils/connect-url"
 import { manageLink, refetchOnReturn, statusSync, type ManageAction } from "./dialog-github-manage"
 import { promptLocale } from "@/utils/prompt-locale"
 import { getRelativeTime } from "@/utils/time"
+import { filterRepos, type RepoSort } from "@/utils/github-repos"
 import {
   createGitHubRepo,
   getGitHubRepositories,
@@ -73,6 +74,8 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
     reposFailed: boolean
     reposLoading: boolean
     picked?: string
+    query: string
+    sort: RepoSort
     managing: boolean
   }>({
     failed: false,
@@ -81,8 +84,12 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
     name: "",
     reposFailed: false,
     reposLoading: false,
+    query: "",
+    sort: "recent",
     managing: false,
   })
+
+  const shownRepos = createMemo(() => filterRepos(state.repos ?? [], state.query, state.sort))
 
   const fail = (err: unknown) => {
     const code = githubCode(err)
@@ -98,7 +105,11 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
     },
     current: () => state.status,
     managing: () => state.managing,
-    apply: (status) => (status ? setState({ status, failed: false }) : setState("failed", !state.status)),
+    apply: (status) => {
+      if (!status) return void setState("failed", !state.status)
+      setState("status", reconcile(status))
+      setState("failed", false)
+    },
     push: () => push(),
   })
 
@@ -357,8 +368,39 @@ export function DialogGitHub(props: { sessionID?: string; onChange?: (status: Gi
                   </Match>
                   <Match when={state.repos}>
                     <span class="github-hint">{language.t("github.repo.select.hint")}</span>
+                    <div class="github-repo-toolbar">
+                      <input
+                        type="search"
+                        class="github-repo-search"
+                        value={state.query}
+                        onInput={(e) => setState("query", e.currentTarget.value)}
+                        placeholder={language.t("github.repo.search.placeholder")}
+                        aria-label={language.t("github.repo.search.placeholder")}
+                        autocomplete="off"
+                        spellcheck={false}
+                      />
+                      <div class="github-repo-sort" role="radiogroup" aria-label={language.t("github.repo.sort.label")}>
+                        <For each={["recent", "name"] as const}>
+                          {(sort) => (
+                            <button
+                              type="button"
+                              role="radio"
+                              aria-checked={state.sort === sort}
+                              onClick={() => setState("sort", sort)}
+                            >
+                              {language.t(sort === "recent" ? "github.repo.sort.recent" : "github.repo.sort.name")}
+                            </button>
+                          )}
+                        </For>
+                      </div>
+                    </div>
+                    <Show when={shownRepos().length === 0}>
+                      <div class="github-panel text-12-regular text-text-weak">
+                        {language.t("github.repo.search.empty")}
+                      </div>
+                    </Show>
                     <div class="github-repos" role="radiogroup" aria-label={language.t("github.repo.select.title")}>
-                      <For each={state.repos}>
+                      <For each={shownRepos()}>
                         {(repo) => {
                           const key = `${repo.owner}/${repo.name}`
                           return (
