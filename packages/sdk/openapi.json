@@ -15108,6 +15108,9 @@
           "aiModelVariant": {
             "type": "string"
           },
+          "consentRequired": {
+            "type": "boolean"
+          },
           "sessionLimit": {
             "type": "integer"
           }
@@ -15248,6 +15251,9 @@
             "type": "boolean"
           },
           "connectUrl": {
+            "type": "string"
+          },
+          "manageUrl": {
             "type": "string"
           },
           "login": {

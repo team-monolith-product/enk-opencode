@@ -6,7 +6,7 @@ import { Schema } from "effect"
  * @example
  *   export const Foo = fooSchema.pipe(
  *     withStatics((schema) => ({
- *       zero: schema.makeUnsafe(0),
+ *       zero: schema.make(0),
  *       from: Schema.decodeUnknownOption(schema),
  *     }))
  *   )
@@ -48,6 +48,6 @@ export function Newtype<Self>() {
 
     return Base as unknown as (abstract new (_: never) => Branded) & {
       readonly makeUnsafe: (value: Schema.Schema.Type<S>) => Self
-    } & Omit<Schema.Opaque<Self, S, {}>, "makeUnsafe">
+    } & Omit<Schema.Opaque<Self, S, {}>, "make">
   }
 }

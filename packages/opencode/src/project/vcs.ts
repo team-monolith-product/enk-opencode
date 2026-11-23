@@ -1,5 +1,5 @@
-import { Effect, Layer, ServiceMap, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Effect, Layer, Context, Stream } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
@@ -39,7 +39,7 @@ export namespace Vcs {
     current: string | undefined
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Vcs") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Vcs") {}
 
   export const layer: Layer.Layer<Service, never, Bus.Service | ChildProcessSpawner.ChildProcessSpawner> = Layer.effect(
     Service,

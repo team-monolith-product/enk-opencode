@@ -44,6 +44,9 @@ describe("plan agent in the pod config", () => {
         expect(action("edit", "index.html")).toBe("deny")
         expect(action("edit", ".opencode/plans/plan.md")).toBe("allow")
         expect(action("bash", "rm -rf src")).toBe("deny")
+        // 브라우저 도구도 bash 명령이라 같이 막힌다(미리보기 앱을 직접 조작하지 못하게)
+        expect(action("bash", "browser-check http://localhost:3000")).toBe("deny")
+        expect(action("bash", 'agent-browser batch "open http://localhost:3000"')).toBe("deny")
         expect(action("task", "general")).toBe("deny")
         expect(action("task", "explore")).toBe("deny")
         expect(action("read", "src/App.tsx")).toBe("allow")
@@ -57,20 +60,10 @@ describe("plan agent in the pod config", () => {
           "ensure_dev_server",
           "env_request",
           "task",
-          "playwright_browser_click",
-          "playwright_browser_navigate",
           "read",
         ]
         const disabled = Permission.disabled(tools, plan.permission)
-        for (const tool of [
-          "bash",
-          "generate_image",
-          "ensure_dev_server",
-          "env_request",
-          "task",
-          "playwright_browser_click",
-          "playwright_browser_navigate",
-        ])
+        for (const tool of ["bash", "generate_image", "ensure_dev_server", "env_request", "task"])
           expect(disabled.has(tool)).toBe(true)
         expect(disabled.has("read")).toBe(false)
       },
@@ -85,6 +78,42 @@ describe("plan agent in the pod config", () => {
         const build = await Agent.get("build")
         expect(Permission.evaluate("edit", "src/App.tsx", build.permission).action).toBe("allow")
         expect(Permission.evaluate("bash", "npm run dev", build.permission).action).toBe("allow")
+      },
+    })
+  })
+
+  test("build keeps the debugging browser commands but not the ones that change or leave the pod", async () => {
+    await using tmp = await podPermissions()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const build = await Agent.get("build")
+        const bash = (command: string) => Permission.evaluate("bash", command, build.permission).action
+        for (const command of [
+          "browser-check http://localhost:3000",
+          "browser-check -s http://localhost:3000 3000",
+          'agent-browser batch --json "open http://localhost:3000" "errors" "close"',
+          "agent-browser doctor",
+          // 입력값에 막힌 하위 명령 이름이 들어 있어도 막지 않는다
+          "agent-browser --json fill #cmd npm install",
+        ])
+          expect(bash(command)).toBe("allow")
+        for (const command of [
+          "agent-browser install",
+          "agent-browser install --with-deps",
+          "agent-browser upgrade",
+          "agent-browser chat hello",
+          "agent-browser connect 9222",
+          "agent-browser plugin add x",
+          "agent-browser dashboard start",
+          "agent-browser stream enable",
+        ])
+          expect(bash(command)).toBe("deny")
+        // bash 도구 자체는 꺼지지 않는다(하위 명령만 막힘)
+        expect(Permission.disabled(["bash"], build.permission).has("bash")).toBe(false)
+        // 최상위를 문자열에서 객체로 바꿨어도 나머지는 예전처럼 다 허용
+        expect(Permission.evaluate("edit", "src/App.tsx", build.permission).action).toBe("allow")
+        expect(Permission.evaluate("webfetch", "*", build.permission).action).toBe("allow")
       },
     })
   })

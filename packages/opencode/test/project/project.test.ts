@@ -7,7 +7,7 @@ import { tmpdir } from "../fixture/fixture"
 import { GlobalBus } from "../../src/bus/global"
 import { ProjectID } from "../../src/project/schema"
 import { Effect, Layer, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { AppFileSystem } from "../../src/filesystem"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
@@ -34,6 +34,7 @@ function mockGitFailure(failArg: string) {
               pid: ChildProcessSpawner.ProcessId(0),
               exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(128)),
               isRunning: Effect.succeed(false),
+              unref: Effect.succeed(Effect.void),
               kill: () => Effect.void,
               stdin: { [Symbol.for("effect/Sink/TypeId")]: Symbol.for("effect/Sink/TypeId") } as any,
               stdout: Stream.empty,

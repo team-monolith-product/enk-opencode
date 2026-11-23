@@ -32,7 +32,7 @@ import { Truncate } from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
 import { Glob } from "../util/glob"
 import { pathToFileURL } from "url"
-import { Effect, Layer, ServiceMap } from "effect"
+import { Effect, Layer, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 
@@ -52,7 +52,7 @@ export namespace ToolRegistry {
     ) => Effect.Effect<(Tool.Def & { id: string })[]>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/ToolRegistry") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/ToolRegistry") {}
 
   export const layer: Layer.Layer<Service, never, Config.Service | Plugin.Service> = Layer.effect(
     Service,

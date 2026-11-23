@@ -1,5 +1,5 @@
-import { Clock, Duration, Effect, Layer, Option, Schema, SchemaGetter, ServiceMap } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { Clock, Duration, Effect, Layer, Option, Schema, SchemaGetter, Context } from "effect"
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http"
 
 import { makeRuntime } from "@/effect/run-service"
 import { withTransientReadRetry } from "@/util/effect-http-client"
@@ -146,7 +146,7 @@ export namespace Account {
     readonly poll: (input: Login) => Effect.Effect<PollResult, AccountError>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Account") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Account") {}
 
   export const layer: Layer.Layer<Service, never, AccountRepo | HttpClient.HttpClient> = Layer.effect(
     Service,
@@ -249,7 +249,7 @@ export namespace Account {
 
       const orgsByAccount = Effect.fn("Account.orgsByAccount")(function* () {
         const accounts = yield* repo.list()
-        const [errors, results] = yield* Effect.partition(
+        const [results, errors] = yield* Effect.partition(
           accounts,
           (account) => orgs(account.id).pipe(Effect.map((orgs) => ({ account, orgs }))),
           { concurrency: 3 },

@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer, Schema, ServiceMap } from "effect"
+import { Deferred, Effect, Layer, Schema, Context } from "effect"
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
 import { InstanceState } from "@/effect/instance-state"
@@ -76,7 +76,7 @@ export namespace Question {
     ),
   }
 
-  export class RejectedError extends Schema.TaggedErrorClass<RejectedError>()("QuestionRejectedError", {}) {
+  export class RejectedError extends Schema.TaggedError<RejectedError>()("QuestionRejectedError", {}) {
     override get message() {
       return "The user dismissed this question"
     }
@@ -104,7 +104,7 @@ export namespace Question {
     readonly list: () => Effect.Effect<Request[]>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Question") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/Question") {}
 
   export const layer = Layer.effect(
     Service,

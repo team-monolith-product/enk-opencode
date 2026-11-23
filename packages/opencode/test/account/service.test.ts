@@ -1,6 +1,6 @@
 import { expect } from "bun:test"
 import { Duration, Effect, Layer, Option, Schema } from "effect"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientResponse } from "effect/http"
 
 import { AccountRepo } from "../../src/account/repo"
 import { Account } from "../../src/account"

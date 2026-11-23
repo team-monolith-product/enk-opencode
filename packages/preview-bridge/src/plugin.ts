@@ -29,6 +29,14 @@ const SCRIPT_TAG = `<script src="${BRIDGE_SCRIPT_PATH}" ${BRIDGE_MARKER}></scrip
 const HTML_CANDIDATES = ["index.html", "public/index.html", "src/index.html"]
 // 브릿지 번들 사본을 둘 위치(여러 서버 형태 대응). 존재하는 디렉토리에만 기록.
 const BRIDGE_TARGET_DIRS = [".", "public", "static"]
+// 태그를 넣는 HTML 이 있는 폴더도 넣는다. 그 폴더를 서빙하면(`npx serve src`) 거기서 /__preview-bridge.js 를
+// 찾기 때문이다. src 는 index.html 이 있을 때만 — 보통의 앱 소스 폴더에 번들을 두면 린트 등에 걸린다.
+const bridgeDirs = (directory: string) => [
+  ...BRIDGE_TARGET_DIRS,
+  ...HTML_CANDIDATES.map((rel) => dirname(rel)).filter(
+    (dir) => !BRIDGE_TARGET_DIRS.includes(dir) && existsSync(join(directory, dir, "index.html")),
+  ),
+]
 
 const SOURCE_BRIDGE = join(dirname(fileURLToPath(import.meta.url)), "preview-bridge.js")
 
@@ -69,10 +77,10 @@ export default async function previewBridgePlugin({ directory }: { directory?: s
     log("브릿지 번들을 찾지 못했습니다. 주입을 건너뜁니다:", SOURCE_BRIDGE, err?.message)
   }
 
-  async function heal() {
+  // 브릿지 번들 사본 배치 — 존재하는 후보 디렉토리에.
+  async function placeBridge() {
     if (!bridgeSource || !directory) return
-    // 1) 브릿지 번들 사본 배치 — 존재하는 후보 디렉토리에.
-    for (const dir of BRIDGE_TARGET_DIRS) {
+    for (const dir of bridgeDirs(directory)) {
       const targetDir = dir === "." ? directory : join(directory, dir)
       if (!existsSync(targetDir)) continue
       try {
@@ -81,6 +89,12 @@ export default async function previewBridgePlugin({ directory }: { directory?: s
         log("브릿지 복사 실패:", targetDir, err?.message)
       }
     }
+  }
+
+  async function heal() {
+    if (!bridgeSource || !directory) return
+    // 1) 브릿지 번들 사본 배치.
+    await placeBridge()
     // 2) 엔트리 HTML 에 스크립트 태그 주입.
     for (const rel of HTML_CANDIDATES) {
       const path = join(directory, rel)
@@ -100,6 +114,10 @@ export default async function previewBridgePlugin({ directory }: { directory?: s
   return {
     event: async ({ event }: { event?: { type?: string } }) => {
       if (event?.type === "session.idle") await heal()
+      // 응답 도중에도 AI 가 태그를 넣은 HTML 을 바로 열어 보면(browser-check, 미리보기) 브릿지가 있어야
+      // 초기 에러를 잡는다. 파일을 고칠 때마다 브릿지 사본만 둔다. HTML 은 건드리지 않는다 — 응답 도중
+      // AI 가 읽은 파일을 바꾸면 다음 edit 가 "읽은 뒤 바뀜" 으로 실패하기 때문이다(태그 보강은 응답 끝에).
+      else if (event?.type === "file.edited") await placeBridge()
     },
   }
 }
