@@ -165,13 +165,15 @@ export namespace HistorySync {
         if (session && !session.parentID) await drain(dir, sessionID)
         return
       }
-      await History.commit(dir, {
-        message: (changes) => TurnSummary.describe(turn, changes),
-        turn: turn.user.id,
-      }).catch((err) => log.warn("save failed", { error: err instanceof Error ? err.message : String(err) }))
-      const result = await GitHub.sync(dir, turn.user.locale).catch((err) => {
-        failed(err, evt.properties.sessionID)
-        return undefined
+      const result = await serial(dir, async () => {
+        await History.commit(dir, {
+          message: (changes) => TurnSummary.describe(turn, changes),
+          turn: turn.user.id,
+        }).catch((err) => log.warn("save failed", { error: err instanceof Error ? err.message : String(err) }))
+        return GitHub.sync(dir, turn.user.locale).catch((err) => {
+          failed(err, sessionID)
+          return undefined
+        })
       })
       if (result?.conflict && !result.conflict.resolving && !result.conflict.queued) {
         void ask({ sessionID: evt.properties.sessionID, dir, conflict: result.conflict, locale: turn.user.locale })
@@ -179,6 +181,9 @@ export namespace HistorySync {
       await drain(dir, sessionID, turn.user.locale)
     })
     GitHub.onSettle((done) => void close(done))
+    void drain(dir).catch((err) =>
+      log.warn("queued choice skipped", { error: err instanceof Error ? err.message : String(err) }),
+    )
   }
 
   const lanes = new Map<string, Promise<unknown>>()
@@ -221,24 +226,37 @@ export namespace HistorySync {
     return { pushed: result.pushed }
   }
 
-  async function drain(dir: string, sessionID: SessionID, locale?: Locale.Value) {
+  const LATER = ["remote", "missing", "busy"]
+
+  export async function drain(dir: string, sessionID?: SessionID, locale?: Locale.Value) {
     const conflict = await GitHub.conflictOf(dir)
     if (!conflict?.queued || (await GitHub.working())) return
-    const retry = await serial(dir, async () => {
+    const target = await serial(dir, async () => {
       const now = await GitHub.conflictOf(dir)
-      if (!now?.queued || (await GitHub.working())) return false
+      if (!now?.queued || (await GitHub.working())) return
+      const owner = now.owner
+        ? await Session.get(now.owner as SessionID).then(
+            (session) => session.id,
+            () => undefined,
+          )
+        : undefined
+      const err =
+        now.queued === "ai" && !owner
+          ? new GitHub.Failure("unlinked", 409)
+          : await apply({ dir, choice: now.queued, sessionID: owner, locale }).then(
+              () => undefined,
+              (error: unknown) => error,
+            )
+      if (!err) return
+      log.warn("queued choice failed", { error: err instanceof Error ? err.message : String(err) })
+      if (err instanceof EnkFailure && err.code === "clean") return
+      if (err instanceof EnkFailure && LATER.includes(err.code)) return
       await GitHub.queue(dir)
-      return apply({ dir, choice: now.queued, sessionID: now.owner as SessionID | undefined, locale }).then(
-        () => false,
-        (err) => {
-          log.warn("queued choice failed", { error: err instanceof Error ? err.message : String(err) })
-          return !(err instanceof GitHub.Failure && err.code === "clean")
-        },
-      )
+      return owner ?? sessionID
     })
-    if (!retry) return
+    if (!target) return
     const left = await GitHub.conflictOf(dir)
-    if (left && !left.resolving) void ask({ sessionID, dir, conflict: left, locale, retry: true })
+    if (left && !left.resolving) void ask({ sessionID: target, dir, conflict: left, locale, retry: true })
   }
 
   async function close(dir: string) {
