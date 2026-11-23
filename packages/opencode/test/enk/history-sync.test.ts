@@ -539,3 +539,65 @@ describe("choosing how to line up a GitHub conflict", () => {
     expect(results[1]).toMatchObject({ status: "rejected", reason: { code: "clean" } })
   })
 })
+
+describe("running a choice that waited for other conversations", () => {
+  const waiting = (queued: GitHub.Choose, owner?: string) => {
+    const state: { conflict?: GitHub.Conflict } = {
+      conflict: { branch: "jitda/1", target: "main", files: ["app.py"], resolving: false, queued, owner },
+    }
+    return state
+  }
+
+  test("runs the queued side as soon as nobody is answering", async () => {
+    const state = waiting("theirs", "ses_owner")
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    using _session = spyOn(Session, "get").mockResolvedValue({ id: "ses_owner" } as Session.Info)
+    using resolve = spyOn(GitHub, "resolve").mockImplementation(async () => {
+      state.conflict = undefined
+      return { enabled: true, pushed: true }
+    })
+
+    await HistorySync.drain("/tmp/d1")
+
+    expect(resolve).toHaveBeenCalledWith("/tmp/d1", { prefer: "theirs", locale: undefined })
+  })
+
+  test("keeps the choice when GitHub could not be reached for a moment", async () => {
+    const state = waiting("ours", "ses_owner")
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    using _session = spyOn(Session, "get").mockResolvedValue({ id: "ses_owner" } as Session.Info)
+    using _resolve = spyOn(GitHub, "resolve").mockRejectedValue(new GitHub.Failure("remote", 502))
+    using queue = spyOn(GitHub, "queue").mockResolvedValue(undefined)
+
+    await HistorySync.drain("/tmp/d2")
+
+    expect(queue).not.toHaveBeenCalled()
+  })
+
+  test("drops an AI choice whose conversation is gone so the team is asked again", async () => {
+    const state = waiting("ai", "ses_gone")
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    using _session = spyOn(Session, "get").mockRejectedValue(new Error("not found"))
+    using queue = spyOn(GitHub, "queue").mockImplementation(async () => {
+      state.conflict = { ...state.conflict!, queued: undefined, owner: undefined, resolving: true }
+    })
+
+    await HistorySync.drain("/tmp/d3")
+
+    expect(queue).toHaveBeenCalledWith("/tmp/d3")
+  })
+
+  test("waits while another conversation is answering", async () => {
+    const state = waiting("theirs")
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(true)
+    using resolve = spyOn(GitHub, "resolve").mockResolvedValue({ enabled: true, pushed: true })
+
+    await HistorySync.drain("/tmp/d4")
+
+    expect(resolve).not.toHaveBeenCalled()
+  })
+})
