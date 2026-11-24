@@ -1,3 +1,5 @@
+import { createSignal } from "solid-js"
+
 // Collaborative identity storage.
 //
 // Two modes:
@@ -45,5 +47,38 @@ export function clearActor(sessionID: string, userID?: string) {
     else sessionStorage.removeItem(tabKey(sessionID))
   } catch {
     // ignore
+  }
+}
+
+const autoPrefix = "opencode-auto-consent"
+const [autoState, setAutoState] = createSignal<Record<string, boolean>>({})
+
+function autoStorage(userID?: string) {
+  return userID ? localStorage : sessionStorage
+}
+
+function autoKey(userID?: string) {
+  return userID ? `${autoPrefix}:user:${userID}` : autoPrefix
+}
+
+export function loadAutoConsent(userID?: string) {
+  const key = autoKey(userID)
+  const cached = autoState()[key]
+  if (cached !== undefined) return cached
+  try {
+    return autoStorage(userID).getItem(key) === "1"
+  } catch {
+    return false
+  }
+}
+
+export function saveAutoConsent(value: boolean, userID?: string) {
+  const key = autoKey(userID)
+  setAutoState((prev) => ({ ...prev, [key]: value }))
+  try {
+    if (value) autoStorage(userID).setItem(key, "1")
+    else autoStorage(userID).removeItem(key)
+  } catch {
+    // ignore storage access errors
   }
 }

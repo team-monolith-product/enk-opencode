@@ -478,6 +478,8 @@ export const dict = {
   "prompt.action.collapseView": "Collapse",
   "prompt.action.docAutoExpand": "Auto-expand",
   "prompt.action.docAutoExpandHint": "When on, the input grows automatically as you type",
+  "prompt.action.docAutoConsent": "Auto-agree",
+  "prompt.action.docAutoConsentHint": "When on, you agree to your teammates' send, answer, and stop requests right away. Reset and rollback still need your own approval",
 
   "prompt.toast.pasteUnsupported.title": "Unsupported attachment",
   "prompt.toast.pasteUnsupported.description": "Only images, PDFs, or text files can be attached here.",

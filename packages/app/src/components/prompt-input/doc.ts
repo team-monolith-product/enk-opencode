@@ -7,7 +7,7 @@ import type { FileNodeType } from "@/components/blocksuite/file-reference-block"
 import type { LineRefInput } from "@/components/blocksuite/line-reference-url"
 import type { DocSyncOpts } from "@/components/blocksuite/opencode-doc-source"
 import { label } from "@/components/blocksuite/actor"
-import { clearActor, loadActor, saveActor } from "./doc-actor"
+import { clearActor, loadActor, loadAutoConsent, saveActor } from "./doc-actor"
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENT_COUNT,
@@ -92,6 +92,7 @@ async function register(input: PromptDocInput, sessionID: string, alive?: () => 
       ...(stored ? { actorID: stored } : {}),
       ...(user ? { userID: user.id, name: user.name } : {}),
       ...(user?.color ? { color: user.color } : {}),
+      autoConsent: loadAutoConsent(user?.id),
     })
     const value = res.data as SessionActor | undefined
     if (!value) throw new Error("actor registration failed")

@@ -2905,6 +2905,7 @@ export class Actor extends HeyApiClient {
       userID?: string
       name?: string
       color?: string
+      autoConsent?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -2920,6 +2921,7 @@ export class Actor extends HeyApiClient {
             { in: "body", key: "userID" },
             { in: "body", key: "name" },
             { in: "body", key: "color" },
+            { in: "body", key: "autoConsent" },
           ],
         },
       ],

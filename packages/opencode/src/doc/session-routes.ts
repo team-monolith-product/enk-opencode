@@ -584,6 +584,7 @@ export const SessionDocRoutes = () =>
           userID: z.string().optional(),
           name: z.string().optional(),
           color: z.string().optional(),
+          autoConsent: z.boolean().optional(),
         }),
       ),
       async (c) => {
@@ -596,6 +597,7 @@ export const SessionDocRoutes = () =>
             userID: body.userID,
             name: body.name,
             color: body.color,
+            autoConsent: body.autoConsent,
           }),
         )
       },

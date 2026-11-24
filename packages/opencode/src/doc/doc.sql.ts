@@ -49,6 +49,7 @@ export const SessionActorTable = sqliteTable(
     user_id: text(),
     name: text().notNull(),
     color: text().notNull(),
+    auto_consent: integer({ mode: "boolean" }).notNull().default(false),
     time_created: integer()
       .notNull()
       .$default(() => Date.now()),

@@ -430,6 +430,7 @@ export type QuestionPresenceEntry = {
   qIndex: number
   selection: string[]
   customFocused: boolean
+  autoConsent?: boolean
 }
 
 type DraftSocketInput = {
