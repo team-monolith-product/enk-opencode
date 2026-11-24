@@ -5,6 +5,7 @@ import { showToast } from "@opencode-ai/ui/toast"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
+import { readonlyViewer } from "@/context/parent-params"
 import { apiUrl } from "@/utils/api-url"
 import { errorMessage } from "@/pages/layout/helpers"
 import "./session-tabs.css"
@@ -90,16 +91,18 @@ export function SessionTabs() {
             </button>
           )}
         </For>
-        <button
-          type="button"
-          class="session-tab session-tab--add"
-          onClick={() => void add()}
-          disabled={creating() || full()}
-          aria-label={language.t("session.tabs.new")}
-          title={full() ? language.t("session.tabs.full", { count: limit() }) : language.t("session.tabs.new")}
-        >
-          <Icon name="plus-small" size="small" />
-        </button>
+        <Show when={!readonlyViewer()}>
+          <button
+            type="button"
+            class="session-tab session-tab--add"
+            onClick={() => void add()}
+            disabled={creating() || full()}
+            aria-label={language.t("session.tabs.new")}
+            title={full() ? language.t("session.tabs.full", { count: limit() }) : language.t("session.tabs.new")}
+          >
+            <Icon name="plus-small" size="small" />
+          </button>
+        </Show>
       </div>
     </Show>
   )

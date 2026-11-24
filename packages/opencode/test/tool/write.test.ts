@@ -399,5 +399,26 @@ describe("tool.write", () => {
         },
       })
     })
+
+    test("refuses without merging when the file was too large to keep a base", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "big.txt")
+      const big = "x".repeat(600 * 1024) + "\n"
+      await fs.writeFile(filepath, big, "utf-8")
+      await fs.utimes(filepath, 1, 1)
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          await FileTime.read(ctx.sessionID, filepath)
+          await fs.writeFile(filepath, "theirs\n" + big, "utf-8")
+          await fs.utimes(filepath, 2, 2)
+
+          const write = await WriteTool.init()
+          await expect(write.execute({ filePath: filepath, content: "ours\n" + big }, ctx)).rejects.toThrow()
+          expect(await fs.readFile(filepath, "utf-8")).toBe("theirs\n" + big)
+        },
+      })
+    })
   })
 })
