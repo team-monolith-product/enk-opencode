@@ -1854,25 +1854,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const watch = state.watches.get(sessionID)
             if (watch) watch.readAt = readAt
 
-            let lastUser: MessageV2.User | undefined
-            let lastAssistant: MessageV2.Assistant | undefined
-            let lastFinished: MessageV2.Assistant | undefined
-            let tasks: (MessageV2.CompactionPart | MessageV2.SubtaskPart)[] = []
-            // filterCompacted orders msgs for the model, which puts a retained tail after the
-            // summary that replaced its predecessors. "Latest" has to follow the clock, not that
-            // order, so scan a chronological view; msgs itself stays as the model should read it.
-            const ordered = msgs.toSorted(
-              (a, b) => a.info.time.created - b.info.time.created || (a.info.id < b.info.id ? -1 : 1),
-            )
-            for (let i = ordered.length - 1; i >= 0; i--) {
-              const msg = ordered[i]
-              if (!lastUser && msg.info.role === "user") lastUser = msg.info
-              if (!lastAssistant && msg.info.role === "assistant") lastAssistant = msg.info
-              if (!lastFinished && msg.info.role === "assistant" && msg.info.finish) lastFinished = msg.info
-              if (lastUser && lastFinished) break
-              const task = msg.parts.filter((part) => part.type === "compaction" || part.type === "subtask")
-              if (task && !lastFinished) tasks.push(...task)
-            }
+            const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
 
             if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
             if (

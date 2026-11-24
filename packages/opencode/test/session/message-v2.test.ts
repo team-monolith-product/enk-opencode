@@ -1200,3 +1200,175 @@ describe("session.message-v2.fromError", () => {
     expect(result.name).toBe("MessageAbortedError")
   })
 })
+
+describe("session.message-v2.latest", () => {
+  const TAIL_USER = MessageID.make("msg_001")
+  const OVERFLOW_ASSISTANT = MessageID.make("msg_002")
+  const COMPACTION_USER = MessageID.make("msg_003")
+  const SUMMARY_ASSISTANT = MessageID.make("msg_004")
+  const CONTINUE_USER = MessageID.make("msg_005")
+  const NEW_COMPACTION_USER = MessageID.make("msg_006")
+
+  const tailUser: MessageV2.WithParts = {
+    info: userInfo(TAIL_USER),
+    parts: [{ ...basePart(TAIL_USER, "p1"), type: "text", text: "original prompt" }] as MessageV2.Part[],
+  }
+
+  const overflowAssistant: MessageV2.WithParts = {
+    info: {
+      ...assistantInfo(OVERFLOW_ASSISTANT, TAIL_USER),
+      finish: "tool-calls",
+      tokens: { input: 280_000, output: 200, reasoning: 0, cache: { read: 0, write: 0 }, total: 280_200 },
+    } as MessageV2.Assistant,
+    parts: [],
+  }
+
+  const compactionUser: MessageV2.WithParts = {
+    info: userInfo(COMPACTION_USER),
+    parts: [
+      {
+        ...basePart(COMPACTION_USER, "p1"),
+        type: "compaction",
+        auto: true,
+        tail_start_id: TAIL_USER,
+      },
+    ] as MessageV2.Part[],
+  }
+
+  const summaryAssistant: MessageV2.WithParts = {
+    info: {
+      ...assistantInfo(SUMMARY_ASSISTANT, COMPACTION_USER),
+      summary: true,
+      finish: "stop",
+      tokens: { input: 150_000, output: 1_500, reasoning: 0, cache: { read: 0, write: 0 }, total: 151_500 },
+    } as MessageV2.Assistant,
+    parts: [],
+  }
+
+  const continueUser: MessageV2.WithParts = {
+    info: userInfo(CONTINUE_USER),
+    parts: [
+      {
+        ...basePart(CONTINUE_USER, "p1"),
+        type: "text",
+        text: "Continue if you have next steps...",
+        synthetic: true,
+        metadata: { compaction_continue: true },
+      },
+    ] as MessageV2.Part[],
+  }
+
+  test("selects latest messages by creation time when IDs are nonmonotonic", () => {
+    const oldUser = { ...userInfo("msg_z_user"), time: { created: 100 } }
+    const newUser = { ...userInfo("msg_a_user"), time: { created: 200 } }
+    const oldAssistant = {
+      ...assistantInfo("msg_z_assistant", oldUser.id),
+      time: { created: 300 },
+      finish: "stop",
+    } as MessageV2.Assistant
+    const newAssistant = {
+      ...assistantInfo("msg_a_assistant", newUser.id),
+      time: { created: 400 },
+      finish: "stop",
+    } as MessageV2.Assistant
+
+    const state = MessageV2.latest([
+      { info: newAssistant, parts: [] },
+      { info: oldUser, parts: [] },
+      { info: oldAssistant, parts: [] },
+      { info: newUser, parts: [] },
+    ])
+
+    expect(state.user?.id).toBe(newUser.id)
+    expect(state.assistant?.id).toBe(newAssistant.id)
+    expect(state.finished?.id).toBe(newAssistant.id)
+  })
+
+  test("uses ID as a deterministic tie-breaker for equal creation times", () => {
+    const lower = { ...userInfo("msg_a_user"), time: { created: 100 } }
+    const higher = { ...userInfo("msg_z_user"), time: { created: 100 } }
+
+    const state = MessageV2.latest([
+      { info: higher, parts: [] },
+      { info: lower, parts: [] },
+    ])
+
+    expect(state.user?.id).toBe(higher.id)
+  })
+
+  // Regression for double auto-compaction. The reorder in filterCompacted
+  // (#27145) returns [compaction-user, summary, ...tail..., continue-user],
+  // so picking lastFinished by array position landed on the pre-compaction
+  // overflow assistant and bypassed the `summary !== true` overflow guard
+  // in SessionPrompt.runLoop, firing a second compaction.create immediately.
+  test("finished is the chronologically-latest finished assistant, not the array-latest", async () => {
+    const filtered = await MessageV2.filterCompacted(
+      (async function* () {
+        yield* [continueUser, summaryAssistant, compactionUser, overflowAssistant, tailUser]
+      })(),
+    )
+
+    const state = MessageV2.latest(filtered)
+
+    expect(state.finished?.id).toBe(SUMMARY_ASSISTANT)
+    expect(state.finished?.summary).toBe(true)
+    expect(state.user?.id).toBe(CONTINUE_USER)
+    expect(state.tasks).toEqual([])
+  })
+
+  test("a fresh compaction-user newer than the latest summary surfaces in tasks", () => {
+    const newCompactionUser: MessageV2.WithParts = {
+      info: userInfo(NEW_COMPACTION_USER),
+      parts: [
+        {
+          ...basePart(NEW_COMPACTION_USER, "p1"),
+          type: "compaction",
+          auto: true,
+        },
+      ] as MessageV2.Part[],
+    }
+
+    const state = MessageV2.latest([
+      tailUser,
+      overflowAssistant,
+      compactionUser,
+      summaryAssistant,
+      continueUser,
+      newCompactionUser,
+    ])
+
+    expect(state.finished?.id).toBe(SUMMARY_ASSISTANT)
+    expect(state.user?.id).toBe(NEW_COMPACTION_USER)
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0]).toMatchObject({ type: "compaction", auto: true })
+  })
+
+  test("selects compaction and subtask work after the finished boundary by creation time", () => {
+    const finished = {
+      ...assistantInfo("msg_z_finished", "msg_parent"),
+      time: { created: 200 },
+      finish: "stop",
+    } as MessageV2.Assistant
+    const oldTask: MessageV2.WithParts = {
+      info: { ...userInfo("msg_z_old"), time: { created: 100 } },
+      parts: [{ ...basePart("msg_z_old", "old"), type: "compaction", auto: true }] as MessageV2.Part[],
+    }
+    const newTask: MessageV2.WithParts = {
+      info: { ...userInfo("msg_a_new"), time: { created: 300 } },
+      parts: [
+        {
+          ...basePart("msg_a_new", "new"),
+          type: "subtask",
+          prompt: "inspect",
+          description: "inspect ordering",
+          agent: "general",
+        },
+      ] as MessageV2.Part[],
+    }
+
+    const state = MessageV2.latest([newTask, { info: finished, parts: [] }, oldTask])
+
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0]).toMatchObject({ type: "subtask", prompt: "inspect" })
+  })
+})
