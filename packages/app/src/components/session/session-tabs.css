@@ -73,7 +73,7 @@
 
 [data-component="session-tabs"] .session-tab--add {
   position: sticky;
-  right: 0;
+  inset-inline-end: 0;
   flex: 0 0 auto;
   min-width: 0;
   padding: 11px 14px;
