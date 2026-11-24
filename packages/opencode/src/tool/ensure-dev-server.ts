@@ -114,7 +114,9 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
     }
 
     const existing = await DevServerReplay.loadRecord(cwd)
-    const running = await probePort(port)
+    let running = await probePort(port)
+    if (!running && !params.restart && DevServerReplay.launching(port))
+      running = await waitForPort(port, params.ready_timeout_ms, ctx.abort)
 
     if (running && !params.restart) {
       // 기록은 "재기동하면 이대로 뜬다" 는 약속이므로 검증된 커맨드만 담는다. 지금 떠 있는 서버가
@@ -149,7 +151,7 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       metadata: {},
     })
 
-    if (running) {
+    if (running || DevServerReplay.launching(port)) {
       const stopped = await DevServerReplay.stop(port, existing?.pid)
       if (!stopped) {
         return result("ensure_dev_server: failed", {
@@ -162,7 +164,7 @@ export const EnsureDevServerTool = Tool.define("ensure_dev_server", async () => 
       log.info("stopped previous dev server for restart", { port })
     }
 
-    const child = await DevServerReplay.launch(params.cmd, cwd, { dir: Instance.directory })
+    const child = await DevServerReplay.launch(params.cmd, cwd, { dir: Instance.directory, port })
     log.info("spawned dev server", { pid: child.pid, port, cwd })
 
     const ready = await waitForPort(port, params.ready_timeout_ms, ctx.abort)

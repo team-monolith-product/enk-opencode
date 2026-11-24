@@ -382,6 +382,57 @@ describe("DevServerReplay", () => {
     })
   })
 
+  describe("launching", () => {
+    test("포트를 열기 전까지 진행 중으로 보고 부팅 replay 를 다시 실행하지 않는다", async () => {
+      const dir = await tempProjectDir()
+      const marker = join(dir, "marker")
+      const port = await freePort()
+      await writeState(dir, { cmd: `echo run >> ${marker}; sleep 30`, cwd: dir, port })
+      process.env["ENK_PROJECT_DIRECTORY"] = dir
+
+      await DevServerReplay.replay()
+      const recorded = await DevServerReplay.loadRecord(dir)
+      cleanups.push(async () => {
+        try {
+          process.kill(-recorded!.pid!, "SIGKILL")
+        } catch {}
+      })
+      expect(DevServerReplay.launching(port)).toBe(true)
+
+      await DevServerReplay.replay()
+
+      expect(await waitFor(() => existsSync(marker))).toBe(true)
+      await new Promise((r) => setTimeout(r, 300))
+      expect((await readFile(marker, "utf8")).trim().split("\n")).toEqual(["run"])
+    })
+
+    test("실행이 끝나면 진행 중 표시를 지운다", async () => {
+      const dir = await tempProjectDir()
+      const port = await freePort()
+
+      await DevServerReplay.launch("true", dir, { port })
+
+      expect(await waitFor(() => !DevServerReplay.launching(port))).toBe(true)
+    })
+
+    test("stop 은 아직 포트를 열지 못한 실행도 내린다", async () => {
+      const dir = await tempProjectDir()
+      const port = await freePort()
+      const child = await DevServerReplay.launch("sleep 30", dir, { port })
+      cleanups.push(async () => {
+        try {
+          process.kill(-child.pid!, "SIGKILL")
+        } catch {}
+      })
+      expect(DevServerReplay.launching(port)).toBe(true)
+
+      expect(await DevServerReplay.stop(port, undefined, 500)).toBe(true)
+
+      expect(DevServerReplay.launching(port)).toBe(false)
+      expect(await waitFor(() => child.exitCode !== null || child.signalCode !== null)).toBe(true)
+    })
+  })
+
   describe("stop", () => {
     test("succeeds trivially when nothing is listening", async () => {
       expect(await DevServerReplay.stop(await freePort(), undefined, 500)).toBe(true)
