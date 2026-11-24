@@ -74,6 +74,9 @@ export namespace Flag {
   export declare const ENK_IMAGE_GENERATION_LIMIT: number | undefined
   // Hackathon phase (tutorial | main_event) the hub spawned this pod in; the limit is counted per phase.
   export declare const ENK_IMAGE_GENERATION_PHASE: string | undefined
+  // Image model and quality the hackathon operator picked for generate_image.
+  export declare const ENK_IMAGE_GENERATION_MODEL: string | undefined
+  export declare const ENK_IMAGE_GENERATION_QUALITY: string | undefined
   // Whether team consent votes need every connected member. The hub injects 0 when the hackathon turned it off.
   export declare const ENK_CONSENT_REQUIRED: boolean
   // Once a session has fallen back this many times it stops granting the primary model any
@@ -273,6 +276,22 @@ Object.defineProperty(Flag, "ENK_CONSENT_REQUIRED", {
 Object.defineProperty(Flag, "ENK_IMAGE_GENERATION_PHASE", {
   get() {
     return process.env["ENK_IMAGE_GENERATION_PHASE"] || undefined
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_IMAGE_GENERATION_MODEL", {
+  get() {
+    return process.env["ENK_IMAGE_GENERATION_MODEL"] || undefined
+  },
+  enumerable: true,
+  configurable: false,
+})
+
+Object.defineProperty(Flag, "ENK_IMAGE_GENERATION_QUALITY", {
+  get() {
+    return process.env["ENK_IMAGE_GENERATION_QUALITY"] || undefined
   },
   enumerable: true,
   configurable: false,
