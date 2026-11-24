@@ -27,8 +27,6 @@ export namespace GenerateImage {
   export const PRICES: Record<string, { text: number; image: number; output: number }> = {
     "gpt-image-2.5-flare": GPT_IMAGE_2,
     "gpt-image-2.5-sunburst": GPT_IMAGE_2,
-    "gpt-image-2.6-flare": GPT_IMAGE_2,
-    "gpt-image-2.6-sunburst": GPT_IMAGE_2,
   }
 
   export function model() {
