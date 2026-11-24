@@ -443,6 +443,10 @@ describe("GenerateImage", () => {
     expect(cost).toBeCloseTo(0.6 * 5 + 0.4 * 8 + 30)
   })
 
+  test("cost uses the default model price for an unknown model", () => {
+    expect(GenerateImage.cost({ input_tokens: 0, output_tokens: 1_000_000 }, "gpt-image-9")).toBeCloseTo(30)
+  })
+
   test("cost falls back to text tokens when details are missing", () => {
     expect(GenerateImage.cost({ input_tokens: 1_000_000, output_tokens: 0 })).toBeCloseTo(5)
     expect(GenerateImage.cost(undefined)).toBe(0)
