@@ -1879,7 +1879,7 @@ export default function Page() {
     // 전체 너비 입력창 위로 바가 올라오는 문제를 z-index 없이 막는다. (1px 경계선 디바이더는 유지)
     <Show when={isDesktop() && !composerLift()}>
       <div
-        class="absolute inset-y-0 right-0 w-0 overflow-visible"
+        class="absolute inset-y-0 end-0 w-0 overflow-visible"
         style={{ "--resize-gap-offset": "7px" }}
         onPointerDown={() => size.start()}
       >

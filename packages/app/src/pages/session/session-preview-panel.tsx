@@ -721,7 +721,7 @@ export function SessionBrowserChrome(props: {
             disabled={previewBlocked() || !props.canGoBack}
             onClick={() => props.onBack?.()}
           >
-            <Icon name="chevron-left" size="small" />
+            <Icon name="chevron-left" size="small" class="rtl:-scale-x-100" />
           </button>
           {/* 구분선 — 뒤로/앞으로 버튼 사이 세퍼레이터(디자인 시안: 1×13, 여백 없음) */}
           <span aria-hidden="true" class="h-[13px] w-px shrink-0 bg-border-weak-base" />
@@ -733,7 +733,7 @@ export function SessionBrowserChrome(props: {
             disabled={previewBlocked() || !props.canGoForward}
             onClick={() => props.onForward?.()}
           >
-            <Icon name="chevron-right" size="small" />
+            <Icon name="chevron-right" size="small" class="rtl:-scale-x-100" />
           </button>
         </div>
       </div>

@@ -16,6 +16,8 @@ import { dict as th } from "./th"
 import { dict as zh } from "./zh"
 import { dict as zht } from "./zht"
 import { dict as tr } from "./tr"
+import { dict as uiEn } from "@opencode-ai/ui/i18n/en"
+import { dict as uiAr } from "@opencode-ai/ui/i18n/ar"
 
 const locales = [ar, br, bs, da, de, es, fr, ja, ko, no, pl, ru, th, tr, zh, zht]
 const keys = ["command.session.previous.unseen", "command.session.next.unseen"] as const
@@ -30,6 +32,13 @@ describe("i18n parity", () => {
     expect(consentKeys(en).length).toBeGreaterThan(0)
   })
 
+  test("ar has every app key en has", () => {
+    expect(Object.keys(ar).sort()).toEqual(Object.keys(en).sort())
+  })
+
+  test("ar has every ui key en has", () => {
+    expect(Object.keys(uiAr).sort()).toEqual(Object.keys(uiEn).sort())
+  })
 
   test("non-English locales translate targeted unseen session keys", () => {
     for (const locale of locales) {

@@ -26,6 +26,14 @@
       transform: translateX(calc(-50% - var(--resize-gap-offset, 0px)));
     }
 
+    &:dir(rtl) {
+      transform: translateX(calc(-50% - var(--resize-gap-offset, 0px)));
+    }
+
+    &[data-edge="start"]:dir(rtl) {
+      transform: translateX(calc(50% + var(--resize-gap-offset, 0px)));
+    }
+
     &::after {
       width: 3px;
       inset-block: 0;

@@ -34,6 +34,14 @@ export namespace TurnSummary {
       first: "First push from Jitda",
       manual: "Manual push from Jitda",
     },
+    ar: {
+      A: "إضافة",
+      M: "تعديل",
+      D: "حذف",
+      fallback: "عمل من Jitda",
+      first: "أول رفع من Jitda",
+      manual: "رفع يدوي من Jitda",
+    },
   }
 
   export type Turn = { user: MessageV2.User; request: string; reply: string }

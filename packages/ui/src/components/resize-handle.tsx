@@ -33,6 +33,7 @@ export function ResizeHandle(props: ResizeHandleProps) {
     e.preventDefault()
     const edge = local.edge ?? (local.direction === "vertical" ? "start" : "end")
     const start = local.direction === "horizontal" ? e.clientX : e.clientY
+    const flip = local.direction === "horizontal" && getComputedStyle(handleRef).direction === "rtl"
     const startSize = local.size
     let current = startSize
 
@@ -62,7 +63,7 @@ export function ResizeHandle(props: ResizeHandleProps) {
           : edge === "start"
             ? start - pos
             : pos - start
-      current = startSize + delta
+      current = startSize + (flip ? -delta : delta)
       const clamped = Math.min(local.max, Math.max(local.min, current))
       local.onResize(clamped)
     }

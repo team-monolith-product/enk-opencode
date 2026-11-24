@@ -72,7 +72,7 @@
     align-items: baseline;
     justify-content: flex-start;
     max-width: 0;
-    margin-right: 0;
+    margin-inline-end: 0;
     opacity: 0;
     filter: blur(calc(var(--tool-motion-blur, 2px) * 0.55));
     overflow: hidden;
@@ -86,7 +86,7 @@
 
   [data-slot="tool-count-summary-prefix"][data-active="true"] {
     max-width: 1ch;
-    margin-right: 0.45ch;
+    margin-inline-end: 0.45ch;
     opacity: 1;
     filter: blur(0);
     transform: translateX(0);

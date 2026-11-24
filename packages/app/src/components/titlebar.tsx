@@ -266,7 +266,7 @@ export function Titlebar() {
                   <Button
                     variant="ghost"
                     icon="chevron-left"
-                    class="titlebar-icon w-6 h-6 p-0 box-border"
+                    class="titlebar-icon w-6 h-6 p-0 box-border rtl:-scale-x-100"
                     disabled={!canBack()}
                     onClick={back}
                     aria-label={language.t("common.goBack")}
@@ -276,7 +276,7 @@ export function Titlebar() {
                   <Button
                     variant="ghost"
                     icon="chevron-right"
-                    class="titlebar-icon w-6 h-6 p-0 box-border"
+                    class="titlebar-icon w-6 h-6 p-0 box-border rtl:-scale-x-100"
                     disabled={!canForward()}
                     onClick={forward}
                     aria-label={language.t("common.goForward")}

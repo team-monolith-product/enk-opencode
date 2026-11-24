@@ -556,7 +556,7 @@ export const CaptureEditDialog: Component<CaptureEditDialogProps> = (props) => {
             />
           </Tooltip>
           {/* 닫기 / 추가 */}
-          <div class="ml-auto flex items-center gap-2">
+          <div class="ms-auto flex items-center gap-2">
             <Button type="button" variant="ghost" class="h-7.5" onClick={() => dialog.close()}>
               {language.t("prompt.capture.close")}
             </Button>

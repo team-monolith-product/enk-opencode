@@ -2122,7 +2122,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       <Show when={docMode() === "doc" && !props.expanded}>
         <div
           data-component="prompt-doc-resize-handle"
-          class="group absolute -top-2.5 left-8 right-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
+          class="group absolute -top-2.5 start-8 end-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
           onPointerDown={resize}
         >
           <div class="h-0.5 w-18 rounded-none bg-border-weaker-base transition-colors group-hover:bg-border-strong-base" />
@@ -2131,7 +2131,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       <Show when={props.expanded && props.composerShell}>
         <div
           data-component="prompt-composer-resize-handle"
-          class="group absolute -top-2.5 left-8 right-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
+          class="group absolute -top-2.5 start-8 end-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
           onPointerDown={shellResize}
         >
           <div class="h-0.5 w-18 rounded-none bg-border-weaker-base transition-colors group-hover:bg-border-strong-base" />
@@ -2300,7 +2300,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           </Show>
 
           <Show when={!canvasMode(docMode())}>
-            <div class="pointer-events-none absolute bottom-2 right-2 flex items-center gap-1">
+            <div class="pointer-events-none absolute bottom-2 end-2 flex items-center gap-1">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -2336,7 +2336,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               </div>
             </div>
 
-            <div class="pointer-events-none absolute bottom-2 left-2 flex items-center gap-1">
+            <div class="pointer-events-none absolute bottom-2 start-2 flex items-center gap-1">
               <Show when={docMode() === "normal"}>
                 <div
                   class="pointer-events-auto flex items-center gap-1"
@@ -2375,7 +2375,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             <div class="flex items-center gap-1.5 min-w-0 flex-1 relative">
               <Show when={docMode() === "shell"}>
                 <div
-                  class="h-7 flex items-center gap-1.5 max-w-[160px] min-w-0 absolute inset-y-0 left-0"
+                  class="h-7 flex items-center gap-1.5 max-w-[160px] min-w-0 absolute inset-y-0 start-0"
                   style={{
                     padding: "0 4px 0 8px",
                     ...shell(),

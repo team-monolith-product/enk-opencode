@@ -110,7 +110,7 @@
   position: absolute;
   z-index: 2;
   top: 9px;
-  left: 6px;
+  inset-inline-start: 6px;
   padding: 2px 7px;
   border-radius: var(--radius-pill);
   background: rgba(0, 0, 0, 0.72);
@@ -132,7 +132,7 @@
   content: "";
   position: absolute;
   z-index: 2;
-  left: 0;
+  inset-inline-start: 0;
   top: 0;
   height: 3px;
   width: var(--oc-upload, 0%);
@@ -224,4 +224,9 @@
 
 [data-component="prompt-doc-viewer-error"] {
   color: var(--text-weak);
+}
+
+[dir="rtl"] .affine-paragraph-placeholder {
+  left: auto;
+  right: 0;
 }

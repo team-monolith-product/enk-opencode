@@ -109,6 +109,13 @@ export namespace CostQuota {
       monthly: "This month's",
       text: (label, at) => `${label} AI usage limit has been used up. It resets on ${at} (KST).`,
     },
+    ar: {
+      tag: "ar",
+      month: "long",
+      weekly: "لهذا الأسبوع",
+      monthly: "لهذا الشهر",
+      text: (label, at) => `تم استهلاك حد استخدام الذكاء الاصطناعي ${label}. سيُعاد ضبطه في ${at} (بتوقيت كوريا).`,
+    },
   }
 
   // 날짜와 시각을 따로 포맷해 잇는다. 한 포맷터에 맡기면 ICU 버전마다 "at"·쉼표 연결이 달라 문장이 흔들린다.

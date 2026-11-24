@@ -13,6 +13,12 @@ describe("enk.locale", () => {
     expect(text).not.toMatch(/[가-힣]/)
   })
 
+  test("arabic directive asks for arabic replies", () => {
+    const text = Locale.directive("ar")
+    expect(text).toContain("Arabic")
+    expect(text).not.toMatch(/[가-힣]/)
+  })
+
   test("every directive is a single response_language block", () => {
     for (const locale of Locale.Schema.options) {
       const text = Locale.directive(locale)
@@ -24,6 +30,7 @@ describe("enk.locale", () => {
   test("schema only accepts the locales the host can send", () => {
     expect(Locale.Schema.safeParse("ko").success).toBe(true)
     expect(Locale.Schema.safeParse("en").success).toBe(true)
+    expect(Locale.Schema.safeParse("ar").success).toBe(true)
     expect(Locale.Schema.safeParse("ja").success).toBe(false)
     expect(Locale.Schema.safeParse("en-US").success).toBe(false)
   })

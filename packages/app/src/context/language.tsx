@@ -53,6 +53,8 @@ const LOCALES: readonly Locale[] = [
   "tr",
 ]
 
+const RTL = new Set<Locale>(["ar"])
+
 const INTL: Record<Locale, string> = {
   en: "en",
   zh: "zh-Hans",
@@ -219,6 +221,7 @@ export const { use: useLanguage, provider: LanguageProvider } = createSimpleCont
     createEffect(() => {
       if (typeof document !== "object") return
       document.documentElement.lang = locale()
+      document.documentElement.dir = RTL.has(locale()) ? "rtl" : "ltr"
       document.cookie = cookie(locale())
     })
 
