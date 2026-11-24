@@ -404,6 +404,7 @@ export function createPromptDocSession(): PromptDocSession {
       setApproval(state)
       return
     }
+    if (finalized.includes(state.submitID)) return
     setApproval(state)
     if (dialogOpen(state.submitID)) return
     approvalID = state.submitID
