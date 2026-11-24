@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   createMissingRegistry,
+  createStoredSeed,
   createUploadTracker,
   missingMarks,
   paintUploads,
@@ -39,6 +40,52 @@ function harness() {
 }
 
 const file = (name = "a.png", size = 100) => new File([new Uint8Array(size)], name, { type: "image/png" })
+
+describe("createStoredSeed", () => {
+  test("asks the server once, however many files are attached", async () => {
+    let asks = 0
+    const marked: string[] = []
+    const seed = createStoredSeed({
+      list: async () => {
+        asks++
+        return ["k1", "k2"]
+      },
+      markStored: (key) => marked.push(key),
+    })
+
+    await Promise.all([seed(), seed()])
+    await seed()
+
+    expect(asks).toBe(1)
+    expect(marked).toEqual(["k1", "k2"])
+  })
+
+  test("never asks until the first attachment", () => {
+    let asks = 0
+    createStoredSeed({
+      list: async () => {
+        asks++
+        return []
+      },
+      markStored: () => {},
+    })
+    // Building the editor must not cost a round trip — most of them never see an attachment, and the
+    // doc each send rotates to is empty by construction.
+    expect(asks).toBe(0)
+  })
+
+  test("a failed query resolves, leaving the upload to send bytes it may not need to", async () => {
+    const seed = createStoredSeed({
+      list: () => Promise.reject(new Error("offline")),
+      markStored: () => {
+        throw new Error("nothing to mark")
+      },
+    })
+
+    // Resolves rather than rejecting: not knowing must not fail the attach.
+    expect(await seed().then(() => "resolved")).toBe("resolved")
+  })
+})
 
 describe("createUploadTracker", () => {
   test("an added file blocks submit until its bytes land", async () => {
@@ -161,6 +208,30 @@ describe("createUploadTracker", () => {
     // ...and an undo that brings such a block back has nothing to resume either.
     expect(tracker.resume("b3", "k1")).toBe(false)
     expect(calls).toHaveLength(1)
+  })
+
+  test("a file the doc already carried uploads nothing on a fresh tracker", () => {
+    // What a reload/session switch leaves behind: the editor (and its tracker) is rebuilt, so the
+    // asset of a block already in the doc was never uploaded by THIS tracker. Seeded, it still counts
+    // as stored and re-attaching the same file sends no bytes.
+    const { tracker, calls } = harness()
+    tracker.markStored("k1")
+
+    tracker.start({ blockId: "b1", key: "k1", name: "a.png", blob: file() })
+    expect(calls).toHaveLength(0)
+    expect(tracker.active()).toBe(false)
+    // ...and an undo that brings such a block back has nothing to resume either.
+    expect(tracker.resume("b2", "k1")).toBe(false)
+    expect(calls).toHaveLength(0)
+  })
+
+  test("a seeded key leaves an unrelated file's upload alone", () => {
+    const { tracker, calls } = harness()
+    tracker.markStored("k1")
+
+    tracker.start({ blockId: "b1", key: "k2", name: "b.png", blob: file("b.png") })
+    expect(calls.map((call) => call.key)).toEqual(["k2"])
+    expect(tracker.active()).toBe(true)
   })
 
   test("deleting the block that was uploading hands the bytes to its twin", () => {
