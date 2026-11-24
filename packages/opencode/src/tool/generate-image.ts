@@ -14,11 +14,21 @@ import { AiUsage } from "../enk/ai-usage"
 import { ImageQuota } from "../enk/image-quota"
 import { Session } from "../session"
 import { assertExternalDirectory } from "./external-directory"
+import { Flag } from "../flag/flag"
 
 export namespace GenerateImage {
-  export const MODEL = "gpt-image-1-mini"
-  // USD per 1M tokens — https://developers.openai.com/api/docs/pricing
-  const PRICE = { text: 2, image: 2.5, output: 8 }
+  export const DEFAULT_MODEL = "gpt-image-2.5-flare"
+  export const DEFAULT_QUALITY = "low"
+  // USD per 1M tokens, the same for every gpt-image-2.5/2.6 model rails lets operators pick. https://developers.openai.com/api/docs/pricing
+  const PRICE = { text: 5, image: 8, output: 30 }
+
+  export function model() {
+    return Flag.ENK_IMAGE_GENERATION_MODEL ?? DEFAULT_MODEL
+  }
+
+  export function quality() {
+    return Flag.ENK_IMAGE_GENERATION_QUALITY ?? DEFAULT_QUALITY
+  }
   export const TIMEOUT_MS = 180_000
 
   export const FORMATS = { ".png": "png", ".webp": "webp", ".jpg": "jpeg", ".jpeg": "jpeg" } as const
@@ -146,7 +156,7 @@ export namespace GenerateImage {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${api.key}` },
       body: JSON.stringify({
-        model: MODEL,
+        model: model(),
         prompt: input.prompt,
         n: 1,
         size: input.size,
@@ -198,7 +208,6 @@ export const GenerateImageTool = Tool.define("generate_image", {
     name: z.string().describe("파일 이름. 내용을 알 수 있는 짧은 영문 이름 (예: hero-cat). 폴더는 도구가 정한다"),
     format: z.enum(["png", "webp", "jpg"]).default("png"),
     size: z.enum(["1024x1024", "1536x1024", "1024x1536"]).default("1024x1024"),
-    quality: z.enum(["low", "medium", "high"]).default("medium"),
     background: z.enum(["auto", "transparent", "opaque"]).default("auto"),
   }),
   async execute(params, ctx) {
@@ -216,7 +225,7 @@ export const GenerateImageTool = Tool.define("generate_image", {
       url,
       prompt: params.prompt,
       size: params.size,
-      quality: params.quality,
+      quality: GenerateImage.quality(),
       background: params.background,
     }
     const done = (status: GenerateImage.Status, output: string, extra: Partial<GenerateImage.Metadata> = {}) => ({
@@ -257,7 +266,7 @@ export const GenerateImageTool = Tool.define("generate_image", {
         cwd: Instance.directory,
         messageID: ctx.messageID,
         callID,
-        modelID: GenerateImage.MODEL,
+        modelID: GenerateImage.model(),
         tokens: { input: outcome.usage?.input_tokens ?? 0, output: outcome.usage?.output_tokens ?? 0 },
         cost: GenerateImage.cost(outcome.usage),
       })
