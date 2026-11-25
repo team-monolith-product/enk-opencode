@@ -46,7 +46,7 @@ import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useClientEnv } from "@/context/client-env"
 import { useParentParams } from "@/context/parent-params"
-import { loadAutoConsent, saveAutoConsent } from "@/components/prompt-input/doc-actor"
+import { loadAutoConsent, toggleAutoConsent } from "@/components/prompt-input/doc-actor"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createOpenDiffTab, createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
@@ -571,17 +571,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const consentRequired = () => sync.data.env.consentRequired !== false
   const autoConsent = () => loadAutoConsent(parentParams.user[0]?.id)
-  const toggleAutoConsent = () => {
-    const userID = parentParams.user[0]?.id
+  const switchAutoConsent = () => {
     const sessionID = params.id
     const actorID = doc.actorID()
     if (!sessionID || !actorID) return
-    const next = !autoConsent()
-    saveAutoConsent(next, userID)
-    void sdk.client.session.actor
-      .upsert({ sessionID, directory: sdk.directory, actorID, autoConsent: next })
-      .then((res) => saveAutoConsent(res.data?.autoConsent === true, userID))
-      .catch(() => saveAutoConsent(!next, userID))
+    void toggleAutoConsent(parentParams.user[0]?.id, (next) =>
+      sdk.client.session.actor
+        .upsert({ sessionID, directory: sdk.directory, actorID, autoConsent: next })
+        .then((res) => res.data?.autoConsent === true),
+    )
   }
 
   const bridge = usePromptDocBridge()
@@ -2302,7 +2300,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               expand={composerExpand()}
               autoExpand={{ enabled: autoExpand(), onToggle: toggleAutoExpand }}
               autoConsent={
-                !readonly && consentRequired() ? { enabled: autoConsent(), onToggle: toggleAutoConsent } : undefined
+                !readonly && consentRequired() ? { enabled: autoConsent(), onToggle: switchAutoConsent } : undefined
               }
             />
           </Show>
