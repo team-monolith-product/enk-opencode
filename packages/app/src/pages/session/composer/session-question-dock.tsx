@@ -22,7 +22,7 @@ import { useSync } from "@/context/sync"
 import { useParentParams } from "@/context/parent-params"
 import { useClientEnv } from "@/context/client-env"
 import { label } from "@/components/blocksuite/actor"
-import { loadActor, loadAutoConsent, saveActor } from "@/components/prompt-input/doc-actor"
+import { loadActor, loadAutoConsent, saveActor, saveAutoConsent } from "@/components/prompt-input/doc-actor"
 import { DialogDocSubmit, type DocSubmitKind } from "@/components/doc-submit/dialog-doc-submit"
 import { questionConsensus } from "./question-consensus"
 import {
@@ -675,7 +675,6 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
           ...(stored ? { actorID: stored } : {}),
           ...(user ? { userID: user.id, name: user.name } : {}),
           ...(user?.color ? { color: user.color } : {}),
-          autoConsent: loadAutoConsent(user?.id),
         })
         a = res.data
         if (a) break
@@ -687,6 +686,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     }
     if (disposed || !a) return
     saveActor(sessionID, a.actorID, user?.id)
+    saveAutoConsent(a.autoConsent === true, user?.id)
     setActor({ actorID: a.actorID, name: label(a.actorID, a.name), color: a.color })
 
     channel = connectQuestionDraft({

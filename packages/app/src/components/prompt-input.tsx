@@ -572,14 +572,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const consentRequired = () => sync.data.env.consentRequired !== false
   const autoConsent = () => loadAutoConsent(parentParams.user[0]?.id)
   const toggleAutoConsent = () => {
-    const next = !autoConsent()
-    saveAutoConsent(next, parentParams.user[0]?.id)
+    const userID = parentParams.user[0]?.id
     const sessionID = params.id
     const actorID = doc.actorID()
     if (!sessionID || !actorID) return
+    const next = !autoConsent()
+    saveAutoConsent(next, userID)
     void sdk.client.session.actor
       .upsert({ sessionID, directory: sdk.directory, actorID, autoConsent: next })
-      .catch(() => {})
+      .then((res) => saveAutoConsent(res.data?.autoConsent === true, userID))
+      .catch(() => saveAutoConsent(!next, userID))
   }
 
   const bridge = usePromptDocBridge()
