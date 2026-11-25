@@ -38,3 +38,38 @@ describe("filterRepos", () => {
     expect(names(repos)).toEqual(before)
   })
 })
+
+describe("filterRepos with the repositories seen in the dev check", () => {
+  const dev = [
+    repo("ksy90101", "jwp-chess", "2020-05-01T00:00:00Z"),
+    repo("ksy90101", "jitda-qa-overlap2", "2026-11-23T01:00:00Z"),
+    repo("ksy90101", "jitda-qa-overlap1", "2026-11-23T03:00:00Z"),
+    repo("ksy90101", "2020-taggle", "2020-01-01T00:00:00Z"),
+    repo("ksy90101", "jitda-project"),
+  ]
+
+  test("recent first shows the repositories pushed today at the top", () => {
+    expect(names(filterRepos(dev, "", "recent"))).toEqual([
+      "jitda-qa-overlap1",
+      "jitda-qa-overlap2",
+      "jwp-chess",
+      "2020-taggle",
+      "jitda-project",
+    ])
+  })
+
+  test("name order puts digits before letters", () => {
+    expect(names(filterRepos(dev, "", "name"))).toEqual([
+      "2020-taggle",
+      "jitda-project",
+      "jitda-qa-overlap1",
+      "jitda-qa-overlap2",
+      "jwp-chess",
+    ])
+  })
+
+  test("a search keeps the chosen order and an unknown name leaves nothing", () => {
+    expect(names(filterRepos(dev, "QA-OVER", "recent"))).toEqual(["jitda-qa-overlap1", "jitda-qa-overlap2"])
+    expect(names(filterRepos(dev, "zzz", "recent"))).toEqual([])
+  })
+})
