@@ -1662,6 +1662,38 @@ describe("GitHubRoutes", () => {
 
     expect(await res.json()).toEqual({ enabled: false })
   })
+
+  test("repositories carry the last push time so the picker can sort by recent", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve({
+      repositories: [
+        {
+          owner: "octocat",
+          name: "recent",
+          url: "https://github.com/octocat/recent",
+          private: true,
+          pushed_at: "2026-11-20T09:00:00Z",
+        },
+        { owner: "octocat", name: "never", url: "https://github.com/octocat/never", private: false, pushed_at: null },
+      ],
+    })
+
+    const res = await request(tmp.path, "GET", "/repositories")
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      repositories: [
+        {
+          owner: "octocat",
+          name: "recent",
+          url: "https://github.com/octocat/recent",
+          private: true,
+          pushedAt: "2026-11-20T09:00:00Z",
+        },
+        { owner: "octocat", name: "never", url: "https://github.com/octocat/never", private: false },
+      ],
+    })
+  })
 })
 
 describe("GitHub failure reporting", () => {
