@@ -1020,13 +1020,14 @@ export namespace Doc {
     return kind === "doc" || kind === "question" || kind === "stop"
   }
 
-  function autoActors(sessionID: SessionID) {
+  function autoActors(ids: ActorID[]) {
+    if (ids.length === 0) return new Set<ActorID>()
     return new Set(
       Database.use((db) =>
         db
           .select({ actorID: SessionActorTable.actor_id })
           .from(SessionActorTable)
-          .where(and(eq(SessionActorTable.session_id, sessionID), eq(SessionActorTable.auto_consent, true)))
+          .where(and(inArray(SessionActorTable.actor_id, ids), eq(SessionActorTable.auto_consent, true)))
           .all(),
       ).map((row) => row.actorID),
     )
@@ -1071,7 +1072,7 @@ export namespace Doc {
     }
 
     const ids = targets(input.targetID, input.actorID)
-    const auto = autoKind(input.targetKind) ? autoActors(input.sessionID) : new Set<ActorID>()
+    const auto = autoKind(input.targetKind) ? autoActors(ids) : new Set<ActorID>()
     const approved = (id: ActorID) => id === input.actorID || auto.has(id)
     const timeout = clamp(input.timeoutMs)
     const now = Date.now()
@@ -1394,7 +1395,7 @@ export namespace Doc {
         state = read(extend(next))
         cast("updated", state)
       }
-      const auto = !existing && autoKind(next.target_kind) && autoActors(sessionID).has(actorID)
+      const auto = !existing && autoKind(next.target_kind) && autoActors([actorID]).has(actorID)
       if (!existing) {
         Database.use((db) =>
           db
@@ -2097,7 +2098,7 @@ export namespace Doc {
           .run(),
       )
 
-      if (row.auto_consent && !existing?.auto_consent) autoApprove(input.sessionID, actorID)
+      if (row.auto_consent && !existing?.auto_consent) autoApprove(actorID)
 
       return {
         actorID,
@@ -2124,13 +2125,9 @@ export namespace Doc {
     }))
   })
 
-  function autoApprove(sessionID: SessionID, actorID: ActorID) {
+  function autoApprove(actorID: ActorID) {
     const rows = Database.use((db) =>
-      db
-        .select()
-        .from(DocSubmitTable)
-        .where(and(eq(DocSubmitTable.session_id, sessionID), eq(DocSubmitTable.status, "pending")))
-        .all(),
+      db.select().from(DocSubmitTable).where(eq(DocSubmitTable.status, "pending")).all(),
     )
     for (const row of rows) {
       if (!autoKind(row.target_kind)) continue
