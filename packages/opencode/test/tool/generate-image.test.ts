@@ -130,12 +130,12 @@ describe("tool.generate_image", () => {
   })
 
   test("uses the image model and quality the hackathon picked", async () => {
-    process.env["ENK_IMAGE_GENERATION_MODEL"] = "gpt-image-2.6-sunburst"
-    process.env["ENK_IMAGE_GENERATION_QUALITY"] = "high"
+    process.env["ENK_IMAGE_GENERATION_MODEL"] = "gpt-image-2.5-sunburst"
+    process.env["ENK_IMAGE_GENERATION_QUALITY"] = "medium"
     mockFetch(() => new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] })))
     const { result } = await run({ prompt: "sky", name: "bg", quality: "low" })
-    expect(requests[0].body).toMatchObject({ model: "gpt-image-2.6-sunburst", quality: "high" })
-    expect(result.metadata.quality).toBe("high")
+    expect(requests[0].body).toMatchObject({ model: "gpt-image-2.5-sunburst", quality: "medium" })
+    expect(result.metadata.quality).toBe("medium")
   })
 
   test("maps the format to output_format", async () => {
@@ -441,6 +441,10 @@ describe("GenerateImage", () => {
       output_tokens: 1_000_000,
     })
     expect(cost).toBeCloseTo(0.6 * 5 + 0.4 * 8 + 30)
+  })
+
+  test("cost uses the default model price for an unknown model", () => {
+    expect(GenerateImage.cost({ input_tokens: 0, output_tokens: 1_000_000 }, "gpt-image-9")).toBeCloseTo(30)
   })
 
   test("cost falls back to text tokens when details are missing", () => {

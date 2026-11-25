@@ -4041,6 +4041,100 @@ describe("doc", () => {
     })
   })
 
+  test("a stop vote left open in another team conversation does not block this one's send", async () => {
+    await using tmp = await tmpdir()
+    let ids = { other: "", here: "", docID: "", alice: "" }
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        // Two conversations of one team (same folder) share the consent dialog and its one-vote rule.
+        const other = await Session.create({})
+        const here = await Session.create({})
+        const otherDoc = Doc.prompt(other.id).docID
+        const { docID } = Doc.prompt(here.id)
+        const alice = Doc.actorUpsert({ sessionID: other.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: other.id, name: "Bob" })
+        const stopA = Doc.submitConnect({ sessionID: other.id, docID: otherDoc, actorID: alice.actorID, peer: { send: () => {} } })
+        const stopB = Doc.submitConnect({ sessionID: other.id, docID: otherDoc, actorID: bob.actorID, peer: { send: () => {} } })
+        await working(other.id)
+        const stop = Doc.stopSubmitCreate({
+          sessionID: other.id,
+          docID: otherDoc,
+          actorID: bob.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+        })
+        expect(stop.status).toBe("pending")
+        ids = { other: other.id, here: here.id, docID, alice: alice.actorID }
+        stopA()
+        stopB()
+        await Instance.dispose()
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        Doc.actorUpsert({ sessionID: ids.here as never, name: "Alice" })
+        // The other conversation's AI is not running any more, so its stop vote has nothing to stop and
+        // must not hold up a send in this conversation.
+        const send = Doc.submitCreate({
+          sessionID: ids.here as never,
+          docID: ids.docID as never,
+          actorID: ids.alice as never,
+          actorIDs: [ids.alice as never],
+          prompt,
+        })
+        expect(send.targetKind).toBe("doc")
+      },
+    })
+  })
+
+  test("a peer whose socket opens outside an instance context still gets a stale stop vote closed", async () => {
+    await using tmp = await tmpdir()
+    let ids = { session: "", docID: "", alice: "", stop: "" }
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const stopA = Doc.submitConnect({ sessionID: session.id, docID, actorID: alice.actorID, peer: { send: () => {} } })
+        const stopB = Doc.submitConnect({ sessionID: session.id, docID, actorID: bob.actorID, peer: { send: () => {} } })
+        await working(session.id)
+        const stop = Doc.stopSubmitCreate({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          actorIDs: [alice.actorID, bob.actorID],
+        })
+        expect(stop.status).toBe("pending")
+        ids = { session: session.id, docID, alice: alice.actorID, stop: stop.submitID }
+        stopA()
+        stopB()
+        await Instance.dispose()
+      },
+    })
+
+    // A WebSocket's open callback can run outside the request's instance context. The stale vote is then
+    // closed from the session's own instance, a moment after the peer joined — and the peer is told.
+    const events: Doc.SubmitEvent[] = []
+    const again = Doc.submitConnect({
+      sessionID: ids.session as never,
+      docID: ids.docID as never,
+      actorID: ids.alice as never,
+      peer: { send: (data) => events.push(JSON.parse(data) as Doc.SubmitEvent) },
+    })
+    const closed = () => events.find((e) => e.type === "cancelled" && e.state.submitID === ids.stop)
+    for (let i = 0; i < 2000 && !closed(); i++) await Bun.sleep(1)
+    expect(closed()?.state.targetKind).toBe("stop")
+    again()
+  })
+
   test("an instance shutting down forgets the sessions it saw running", async () => {
     await using tmp = await tmpdir()
     let sessionID = ""

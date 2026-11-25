@@ -15,12 +15,19 @@ import { ImageQuota } from "../enk/image-quota"
 import { Session } from "../session"
 import { assertExternalDirectory } from "./external-directory"
 import { Flag } from "../flag/flag"
+import { Log } from "../util/log"
+
+const log = Log.create({ service: "generate-image" })
 
 export namespace GenerateImage {
   export const DEFAULT_MODEL = "gpt-image-2.5-flare"
   export const DEFAULT_QUALITY = "low"
-  // USD per 1M tokens, the same for every gpt-image-2.5/2.6 model rails lets operators pick. https://developers.openai.com/api/docs/pricing
-  const PRICE = { text: 5, image: 8, output: 30 }
+  // USD per 1M tokens — https://developers.openai.com/api/docs/pricing
+  const GPT_IMAGE_2 = { text: 5, image: 8, output: 30 }
+  export const PRICES: Record<string, { text: number; image: number; output: number }> = {
+    "gpt-image-2.5-flare": GPT_IMAGE_2,
+    "gpt-image-2.5-sunburst": GPT_IMAGE_2,
+  }
 
   export function model() {
     return Flag.ENK_IMAGE_GENERATION_MODEL ?? DEFAULT_MODEL
@@ -57,12 +64,14 @@ export namespace GenerateImage {
     quota?: ImageQuota.Quota
   }
 
-  export function cost(usage: Usage | undefined) {
+  export function cost(usage: Usage | undefined, model = GenerateImage.model()) {
     if (!usage) return 0
+    const price = PRICES[model] ?? PRICES[DEFAULT_MODEL]!
+    if (!PRICES[model]) log.warn("unknown image model price, using default", { model })
     const input = usage.input_tokens ?? 0
     const image = usage.input_tokens_details?.image_tokens ?? 0
     const text = usage.input_tokens_details?.text_tokens ?? input - image
-    return (text * PRICE.text + image * PRICE.image + (usage.output_tokens ?? 0) * PRICE.output) / 1_000_000
+    return (text * price.text + image * price.image + (usage.output_tokens ?? 0) * price.output) / 1_000_000
   }
 
   // 파드에서는 CHP 가 OPENAI_BASE_URL 로 실키를 주입하고, 로컬에서는 OPENAI_API_KEY 로 직접 부른다.
@@ -268,7 +277,7 @@ export const GenerateImageTool = Tool.define("generate_image", {
         callID,
         modelID: GenerateImage.model(),
         tokens: { input: outcome.usage?.input_tokens ?? 0, output: outcome.usage?.output_tokens ?? 0 },
-        cost: GenerateImage.cost(outcome.usage),
+        cost: GenerateImage.cost(outcome.usage, GenerateImage.model()),
       })
       await Filesystem.write(filepath, outcome.bytes)
       Bus.publish(File.Event.Edited, { file: filepath })

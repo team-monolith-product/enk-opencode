@@ -976,7 +976,7 @@ export namespace Doc {
    * 이 세션에서 아직 결론 나지 않은 투표들(종류·대상으로 좁힐 수 있다). 지나가며 마감이 지난 행은 만료시키고,
    * 남은 행은 만료 타이머가 걸려 있는지 확인한다 — 타이머는 메모리에만 있어 재시작 뒤에는 이렇게 되살린다.
    */
-  function pendingRows(sessionID: SessionID, filter: { kind?: SubmitTargetKind; targetID?: string } = {}) {
+  function pendingIn(sessionID: SessionID, filter: { kind?: SubmitTargetKind; targetID?: string } = {}) {
     const rows = Database.use((db) =>
       db
         .select()
@@ -1002,12 +1002,12 @@ export namespace Doc {
 
   /** 이 세션에서 아직 결론 나지 않은 투표 하나. */
   function pending(sessionID: SessionID) {
-    return pendingRows(sessionID)[0]
+    return pendingIn(sessionID)[0]
   }
 
   /** 이 세션에서 아직 결론 나지 않은 한 종류의 투표들. */
   function pendingOf(sessionID: SessionID, kind: SubmitTargetKind) {
-    return pendingRows(sessionID, { kind })
+    return pendingIn(sessionID, { kind })
   }
 
   /**
@@ -1086,10 +1086,17 @@ export namespace Doc {
    * 것 없는 중지 창을 띄운다. 돌고 있지도, 막 쉬어 정리를 기다리는 중(settling)도 아니면 그 투표는 멈출 것이 없다
    * — 정리 중인 세션은 곧바로 다시 돌 수 있어(SessionPrompt.loop 의 재실행) 그 투표가 아직 필요하다.
    * "돌고 있는가"는 인스턴스 상태라 인스턴스 컨텍스트 안에서만 물을 수 있다.
+   *
+   * 같은 폴더의 팀 대화 전체를 본다. 동의 창은 팀이 함께 쓰고, 다른 대화에 남은 투표도 이 대화의 새 투표를 막기
+   * 때문이다(create 의 팀 단위 검사). 중지는 대화마다 자기 AI 를 멈추는 것이라, 남았는지는 그 대화의 실행으로 판단한다.
    */
   function closeStaleStops(sessionID: SessionID) {
-    if (running().has(sessionID) || settling.has(sessionID)) return
-    close(pendingOf(sessionID, "stop"), null)
+    const stale = pendingRows(teamRoute(sessionID))
+      .filter((row) => row.target_kind === "stop")
+      .filter((row) => !running().has(row.session_id) && !settling.has(row.session_id))
+      .map((row) => expire(row))
+      .filter((row) => row.status === "pending")
+    close(stale, null)
   }
 
   /**
@@ -1120,7 +1127,7 @@ export namespace Doc {
   }
 
   function active(sessionID: SessionID, targetID: string, actorID?: ActorID, targetKind?: SubmitTargetKind) {
-    return pendingRows(sessionID, { kind: targetKind, targetID })
+    return pendingIn(sessionID, { kind: targetKind, targetID })
       .map((row) => read(row))
       .find((item) => !actorID || item.actors.some((actor) => actor.actorID === actorID))
   }
@@ -1779,7 +1786,8 @@ export namespace Doc {
     // a guess from timestamps): an earlier, rejected stop vote dropped its own, which this peer was
     // already told about. And only while it is still news (dropIsNews). Looked up by that stop's id, not
     // through recent()'s time window: the stop vote can stay open (30s, topped up on every join) well past
-    // that window, and the send was dropped the moment it opened.
+    // that window, and the send was dropped the moment it opened. The stop can be another team session's
+    // (the consent socket is shared by the team), so the drop is looked up in the stop's own session.
     const replayDropped = (stop: SubmitState | undefined) => {
       if (stop?.targetKind !== "stop") return
       const dropped = Database.use((db) =>
@@ -1788,8 +1796,7 @@ export namespace Doc {
           .from(DocSubmitTable)
           .where(
             and(
-              eq(DocSubmitTable.session_id, input.sessionID),
-              eq(DocSubmitTable.target_id, input.targetID),
+              eq(DocSubmitTable.session_id, stop.sessionID),
               eq(DocSubmitTable.cancelled_by_submit, stop.submitID),
             ),
           )

@@ -12,8 +12,8 @@ import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Instance } from "../../src/project/instance"
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session"
-import type { SessionID } from "../../src/session/schema"
 import { SessionPrompt } from "../../src/session/prompt"
+import type { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util/log"
 import { SentryReporter } from "../../src/util/sentry"
@@ -385,54 +385,6 @@ describe("HistorySync.failed", () => {
   })
 })
 
-describe("rollback across team sessions", () => {
-  test("refuses while another session of the team is answering", async () => {
-    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
-    await Instance.provide({
-      directory: tmp.path,
-      init: InstanceBootstrap,
-      fn: async () => {
-        const { session, first } = await team(tmp.path)
-        const other = await Session.create({})
-        let release!: () => void
-        const held = new Promise<void>((resolve) => (release = resolve))
-        const running = SessionPrompt.exclusive(other.id, () => held)
-        await until(async () => (await SessionStatus.get(other.id)).type === "busy")
-
-        await expect(HistorySync.check({ sessionID: session.id, sha: first.sha })).rejects.toMatchObject({
-          code: "busy",
-        })
-
-        release()
-        await running
-        await expect(HistorySync.check({ sessionID: session.id, sha: first.sha })).resolves.toBeDefined()
-      },
-    })
-  })
-
-  test("holds every team session while rolling back", async () => {
-    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
-    await Instance.provide({
-      directory: tmp.path,
-      init: InstanceBootstrap,
-      fn: async () => {
-        const { session, first } = await team(tmp.path)
-        const other = await Session.create({})
-        const seen: string[] = []
-        const unsub = Bus.subscribe(SessionStatus.Event.Status, (event) => {
-          if (event.properties.sessionID === other.id) seen.push(event.properties.status.type)
-        })
-
-        await HistorySync.rollback({ sessionID: session.id, sha: first.sha })
-
-        expect(seen).toEqual(["busy", "idle"])
-        expect(await read(tmp.path)).toBe("v1")
-        unsub()
-      },
-    })
-  })
-})
-
 describe("merging GitHub changes with AI", () => {
   test("is refused when GitHub has nothing that conflicts", async () => {
     await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
@@ -652,6 +604,54 @@ describe("asking again after a restart", () => {
         await HistorySync.reask(tmp.path)
 
         expect(ask).not.toHaveBeenCalled()
+      },
+    })
+  })
+})
+
+describe("rollback across team sessions", () => {
+  test("refuses while another session of the team is answering", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session, first } = await team(tmp.path)
+        const other = await Session.create({})
+        let release!: () => void
+        const held = new Promise<void>((resolve) => (release = resolve))
+        const running = SessionPrompt.exclusive(other.id, () => held)
+        await until(async () => (await SessionStatus.get(other.id)).type === "busy")
+
+        await expect(HistorySync.check({ sessionID: session.id, sha: first.sha })).rejects.toMatchObject({
+          code: "busy",
+        })
+
+        release()
+        await running
+        await expect(HistorySync.check({ sessionID: session.id, sha: first.sha })).resolves.toBeDefined()
+      },
+    })
+  })
+
+  test("holds every team session while rolling back", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session, first } = await team(tmp.path)
+        const other = await Session.create({})
+        const seen: string[] = []
+        const unsub = Bus.subscribe(SessionStatus.Event.Status, (event) => {
+          if (event.properties.sessionID === other.id) seen.push(event.properties.status.type)
+        })
+
+        await HistorySync.rollback({ sessionID: session.id, sha: first.sha })
+
+        expect(seen).toEqual(["busy", "idle"])
+        expect(await read(tmp.path)).toBe("v1")
+        unsub()
       },
     })
   })
