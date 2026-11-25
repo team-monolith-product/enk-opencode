@@ -35,6 +35,7 @@ import {
 import { DialogDocSubmit } from "@/components/doc-submit/dialog-doc-submit"
 import { startRtcKeepalive } from "@/utils/rtc-keepalive"
 import { SessionVote } from "@/utils/session-vote"
+import { sessionLabel, teamSessions } from "@/components/session/session-tabs"
 
 export type PromptMode = "normal" | "shell" | "doc"
 
@@ -67,6 +68,7 @@ export type PromptDocSession = {
   requestClear: () => Promise<boolean>
   /** 진행 중인 합의가 있는지. 투표가 도는 동안에는 다른 합의를 시작할 수 없다. */
   votePending: Accessor<boolean>
+  teamWide: Accessor<boolean>
   /** Render/refresh the consent dialog for a vote state received from the server. */
   showApproval: (state: DocSubmitState) => void
   /** Session whose send is currently owned by a consent vote (composer skips its local finish). */
@@ -232,6 +234,8 @@ export function createPromptDocSession(): PromptDocSession {
    * and a file part is inlined by the server on each one — so the same file's contents get re-sent,
    * and re-billed, forever.
    */
+  const teamWide = () => (sync.data.env?.sessionLimit ?? 1) > 1 || teamSessions(sync.data.session ?? []).length > 1
+
   const clearComposer = () => {
     for (const item of prompt.context.items()) {
       prompt.context.remove(item.key)
@@ -328,6 +332,13 @@ export function createPromptDocSession(): PromptDocSession {
    * a client that was offline for that top-up expires early). Recording it as final was what left the
    * dialog frozen at "0초": the real 'sent'/'expired' cast arrived afterwards and was discarded.
    */
+  const originTitle = (state: DocSubmitState | undefined) => {
+    if (!state || state.sessionID === params.id) return
+    const list = teamSessions(sync.data.session ?? [])
+    const index = list.findIndex((item) => item.id === state.sessionID)
+    return sessionLabel(list[index]?.title, Math.max(0, index), language.t)
+  }
+
   const showApproval = (state: DocSubmitState, opts?: { local?: boolean }) => {
     const actorID = doc.actorID()
     if (!actorID) return
@@ -335,6 +346,21 @@ export function createPromptDocSession(): PromptDocSession {
     // non-member to a pending vote (dynamic membership), so every state we receive is ours to
     // render. The old gate silently dropped casts when membership drifted — the "dialog never
     // appeared" bug.
+    const elsewhere = state.sessionID !== params.id
+    if (state.status !== "pending" && elsewhere) {
+      if (!opts?.local) {
+        if (finalized.includes(state.submitID)) return
+        finalized.push(state.submitID)
+        if (finalized.length > 8) finalized.shift()
+      }
+      if (state.status === "sent" || state.targetKind === "stop") {
+        if (dialogOpen(state.submitID)) closeApproval()
+        return
+      }
+      if (!dialogOpen(state.submitID)) return
+      setApproval(state)
+      return
+    }
     if (state.status !== "pending") {
       // A server-sent ending is handled exactly once per submit: a replay on reconnect (or a
       // duplicate cast) must not re-clear context or re-open a dialog.
@@ -378,6 +404,7 @@ export function createPromptDocSession(): PromptDocSession {
       setApproval(state)
       return
     }
+    if (finalized.includes(state.submitID)) return
     setApproval(state)
     if (dialogOpen(state.submitID)) return
     approvalID = state.submitID
@@ -388,6 +415,7 @@ export function createPromptDocSession(): PromptDocSession {
           actorID={actorID}
           spectator={readonly}
           kind={voteKind(approval()?.targetKind)}
+          origin={originTitle(approval())}
           sdk={{ url: sdk.url, directory: sdk.directory, client: sdk.client }}
           approve={() => {
             const current = approval()
@@ -485,7 +513,7 @@ export function createPromptDocSession(): PromptDocSession {
     }
     const list = doc.actors()
     const ids = Array.from(new Set([actorID, ...list.map((item) => item.actorID)]))
-    if (ids.length <= 1) {
+    if (ids.length <= 1 && !teamWide()) {
       await abort()
       return
     }
@@ -499,6 +527,10 @@ export function createPromptDocSession(): PromptDocSession {
         actorID,
         names,
       })
+      if (state.status === "sent") {
+        await abort()
+        return
+      }
       setApprovalSession(sessionID)
       showApproval(state)
     } catch {
@@ -527,7 +559,7 @@ export function createPromptDocSession(): PromptDocSession {
 
     const list = doc.actors()
     const ids = Array.from(new Set([actorID, ...list.map((item) => item.actorID)]))
-    if (ids.length <= 1) return false
+    if (ids.length <= 1 && !teamWide()) return false
 
     const names = voteNames(list)
     try {
@@ -590,6 +622,7 @@ export function createPromptDocSession(): PromptDocSession {
     requestStop,
     requestClear,
     votePending,
+    teamWide,
     showApproval,
     approvalSession,
     setApprovalSession,

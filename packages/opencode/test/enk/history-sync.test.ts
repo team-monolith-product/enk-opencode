@@ -6,11 +6,13 @@ import { Doc } from "../../src/doc"
 import { GitHub } from "../../src/enk/github"
 import { History } from "../../src/enk/history"
 import { HistorySync } from "../../src/enk/history-sync"
+import { Question } from "../../src/question"
 import { WorkspaceRepo } from "../../src/enk/workspace-repo"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { Instance } from "../../src/project/instance"
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session"
+import { SessionPrompt } from "../../src/session/prompt"
 import type { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { Log } from "../../src/util/log"
@@ -380,5 +382,277 @@ describe("HistorySync.failed", () => {
     } finally {
       sent.mockRestore()
     }
+  })
+})
+
+describe("merging GitHub changes with AI", () => {
+  test("is refused when GitHub has nothing that conflicts", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session } = await team(tmp.path)
+
+        await expect(HistorySync.merge({ sessionID: session.id })).rejects.toMatchObject({ code: "clean" })
+        expect(await Session.messages({ sessionID: session.id })).toHaveLength(0)
+      },
+    })
+  })
+
+  test("asks the AI to clear the markers in the conflicting files", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session } = await team(tmp.path)
+        using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+          branch: "jitda/1",
+          target: "main",
+          files: ["index.html"],
+          resolving: false,
+        })
+        using absorb = spyOn(GitHub, "absorb").mockResolvedValue({
+          files: ["index.html"],
+          kept: ["logo.png"],
+          theirs: "abc",
+        })
+        using loop = spyOn(SessionPrompt, "loop").mockResolvedValue(undefined as never)
+
+        const result = await HistorySync.merge({ sessionID: session.id, locale: "en" })
+
+        expect(result).toEqual({ files: ["index.html"], kept: ["logo.png"], theirs: "abc" })
+        expect(absorb).toHaveBeenCalledWith(tmp.path, {
+          backup: "Saved before merging GitHub changes",
+          marked: "Brought in GitHub changes and marked the overlaps",
+        })
+        expect(loop).toHaveBeenCalledWith({ sessionID: session.id })
+        const [message] = await Session.messages({ sessionID: session.id })
+        const text = message!.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+        expect(text).toContain("- index.html")
+        expect(text).toContain("- logo.png")
+        expect(text).toContain("`=======`")
+      },
+    })
+  })
+})
+
+describe("choosing how to line up a GitHub conflict", () => {
+  test("waits until every conversation of the folder is idle", async () => {
+    using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+      branch: "jitda/1",
+      target: "main",
+      files: ["app.py"],
+      resolving: false,
+    })
+    using _working = spyOn(GitHub, "working").mockResolvedValue(true)
+    using queue = spyOn(GitHub, "queue").mockResolvedValue(undefined)
+    using resolve = spyOn(GitHub, "resolve").mockResolvedValue({ enabled: true, pushed: true })
+
+    const result = await HistorySync.choose({ dir: "/tmp/x", choice: "theirs" })
+
+    expect(result).toEqual({ queued: true })
+    expect(queue).toHaveBeenCalledWith("/tmp/x", "theirs", undefined)
+    expect(resolve).not.toHaveBeenCalled()
+  })
+
+  test("applies right away when nobody is answering", async () => {
+    using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+      branch: "jitda/1",
+      target: "main",
+      files: ["app.py"],
+      resolving: false,
+    })
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    using resolve = spyOn(GitHub, "resolve").mockResolvedValue({ enabled: true, pushed: true })
+
+    const result = await HistorySync.choose({ dir: "/tmp/x", choice: "ours", locale: "en" })
+
+    expect(result).toEqual({ queued: false, pushed: true })
+    expect(resolve).toHaveBeenCalledWith("/tmp/x", { prefer: "ours", locale: "en" })
+  })
+
+  test("two members choosing at once are lined up one after another", async () => {
+    const state: { conflict?: GitHub.Conflict } = {
+      conflict: { branch: "jitda/1", target: "main", files: ["app.py"], resolving: false },
+    }
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    const order: string[] = []
+    using resolve = spyOn(GitHub, "resolve").mockImplementation(async (_dir, input) => {
+      order.push(`start:${input.prefer}`)
+      await new Promise((done) => setTimeout(done, 20))
+      state.conflict = undefined
+      order.push(`end:${input.prefer}`)
+      return { enabled: true, pushed: true }
+    })
+
+    const results = await Promise.allSettled([
+      HistorySync.choose({ dir: "/tmp/y", choice: "theirs" }),
+      HistorySync.choose({ dir: "/tmp/y", choice: "ours" }),
+    ])
+
+    expect(order).toEqual(["start:theirs", "end:theirs"])
+    expect(resolve).toHaveBeenCalledTimes(1)
+    expect(results[1]).toMatchObject({ status: "rejected", reason: { code: "clean" } })
+  })
+})
+
+describe("running a choice that waited for other conversations", () => {
+  const waiting = (queued: GitHub.Choose, owner?: string) => {
+    const state: { conflict?: GitHub.Conflict } = {
+      conflict: { branch: "jitda/1", target: "main", files: ["app.py"], resolving: false, queued, owner },
+    }
+    return state
+  }
+
+  test("runs the queued side as soon as nobody is answering", async () => {
+    const state = waiting("theirs", "ses_owner")
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    using _session = spyOn(Session, "get").mockResolvedValue({ id: "ses_owner" } as Session.Info)
+    using resolve = spyOn(GitHub, "resolve").mockImplementation(async () => {
+      state.conflict = undefined
+      return { enabled: true, pushed: true }
+    })
+
+    await HistorySync.drain("/tmp/d1")
+
+    expect(resolve).toHaveBeenCalledWith("/tmp/d1", { prefer: "theirs", locale: undefined })
+  })
+
+  test("keeps the choice when GitHub could not be reached for a moment", async () => {
+    const state = waiting("ours", "ses_owner")
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    using _session = spyOn(Session, "get").mockResolvedValue({ id: "ses_owner" } as Session.Info)
+    using _resolve = spyOn(GitHub, "resolve").mockRejectedValue(new GitHub.Failure("remote", 502))
+    using queue = spyOn(GitHub, "queue").mockResolvedValue(undefined)
+
+    await HistorySync.drain("/tmp/d2")
+
+    expect(queue).not.toHaveBeenCalled()
+  })
+
+  test("drops an AI choice whose conversation is gone so the team is asked again", async () => {
+    const state = waiting("ai", "ses_gone")
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(false)
+    using _session = spyOn(Session, "get").mockRejectedValue(new Error("not found"))
+    using queue = spyOn(GitHub, "queue").mockImplementation(async () => {
+      state.conflict = { ...state.conflict!, queued: undefined, owner: undefined, resolving: true }
+    })
+
+    await HistorySync.drain("/tmp/d3")
+
+    expect(queue).toHaveBeenCalledWith("/tmp/d3")
+  })
+
+  test("waits while another conversation is answering", async () => {
+    const state = waiting("theirs")
+    using _conflict = spyOn(GitHub, "conflictOf").mockImplementation(async () => state.conflict)
+    using _working = spyOn(GitHub, "working").mockResolvedValue(true)
+    using resolve = spyOn(GitHub, "resolve").mockResolvedValue({ enabled: true, pushed: true })
+
+    await HistorySync.drain("/tmp/d4")
+
+    expect(resolve).not.toHaveBeenCalled()
+  })
+})
+
+describe("asking again after a restart", () => {
+  test("a conflict left unanswered is asked again in the latest conversation", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session } = await team(tmp.path)
+        using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+          branch: "jitda/1",
+          target: "main",
+          files: ["app.py"],
+          resolving: false,
+        })
+        using ask = spyOn(Question, "ask").mockImplementation(() => new Promise(() => {}))
+
+        await HistorySync.reask(tmp.path)
+        await new Promise((done) => setTimeout(done, 50))
+
+        expect(ask).toHaveBeenCalledTimes(1)
+        expect(ask.mock.calls[0]![0]).toMatchObject({ sessionID: session.id })
+      },
+    })
+  })
+
+  test("a choice already waiting or an AI merge in progress is not asked again", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await team(tmp.path)
+        using _conflict = spyOn(GitHub, "conflictOf").mockResolvedValue({
+          branch: "jitda/1",
+          target: "main",
+          files: ["app.py"],
+          resolving: true,
+        })
+        using ask = spyOn(Question, "ask").mockImplementation(() => new Promise(() => {}))
+
+        await HistorySync.reask(tmp.path)
+
+        expect(ask).not.toHaveBeenCalled()
+      },
+    })
+  })
+})
+
+describe("rollback across team sessions", () => {
+  test("refuses while another session of the team is answering", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session, first } = await team(tmp.path)
+        const other = await Session.create({})
+        let release!: () => void
+        const held = new Promise<void>((resolve) => (release = resolve))
+        const running = SessionPrompt.exclusive(other.id, () => held)
+        await until(async () => (await SessionStatus.get(other.id)).type === "busy")
+
+        await expect(HistorySync.check({ sessionID: session.id, sha: first.sha })).rejects.toMatchObject({
+          code: "busy",
+        })
+
+        release()
+        await running
+        await expect(HistorySync.check({ sessionID: session.id, sha: first.sha })).resolves.toBeDefined()
+      },
+    })
+  })
+
+  test("holds every team session while rolling back", async () => {
+    await using tmp = await tmpdir({ config: { ensureSession: true, ensureOneSession: true } })
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        const { session, first } = await team(tmp.path)
+        const other = await Session.create({})
+        const seen: string[] = []
+        const unsub = Bus.subscribe(SessionStatus.Event.Status, (event) => {
+          if (event.properties.sessionID === other.id) seen.push(event.properties.status.type)
+        })
+
+        await HistorySync.rollback({ sessionID: session.id, sha: first.sha })
+
+        expect(seen).toEqual(["busy", "idle"])
+        expect(await read(tmp.path)).toBe("v1")
+        unsub()
+      },
+    })
   })
 })

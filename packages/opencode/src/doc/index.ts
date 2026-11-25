@@ -1,4 +1,4 @@
-import { eq, and, desc, inArray, sql } from "drizzle-orm"
+import { eq, and, desc, inArray, ne, sql } from "drizzle-orm"
 import z from "zod"
 import { ulid } from "ulid"
 import { Bus } from "@/bus"
@@ -8,6 +8,7 @@ import { Question } from "@/question"
 import { QuestionID } from "@/question/schema"
 import { Session } from "@/session"
 import { SessionID } from "@/session/schema"
+import { SessionTable } from "@/session/session.sql"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionStatus } from "@/session/status"
 import { archiveSession } from "@/session/archive"
@@ -711,14 +712,26 @@ export namespace Doc {
     // Color is read live from SessionActorTable (the single source of truth shared with doc cursors /
     // question dock) rather than snapshotted into DocSubmitActorTable, so the "동의 전송" avatar always
     // matches the participant's current collaborative color.
+    const members = Database.use((db) =>
+      db.select().from(DocSubmitActorTable).where(eq(DocSubmitActorTable.submit_id, row.id)).all(),
+    )
     const colors = new Map(
       Database.use((db) =>
-        db.select().from(SessionActorTable).where(eq(SessionActorTable.session_id, row.session_id)).all(),
-      ).map((actor) => [actor.actor_id, actor.color]),
+        db
+          .select()
+          .from(SessionActorTable)
+          .where(
+            inArray(
+              SessionActorTable.actor_id,
+              members.map((item) => item.actor_id),
+            ),
+          )
+          .all(),
+      )
+        .sort((a, b) => Number(a.session_id === row.session_id) - Number(b.session_id === row.session_id))
+        .map((actor) => [actor.actor_id, actor.color]),
     )
-    const actors = Database.use((db) =>
-      db.select().from(DocSubmitActorTable).where(eq(DocSubmitActorTable.submit_id, row.id)).all(),
-    ).map((item) => ({
+    const actors = members.map((item) => ({
       actorID: item.actor_id,
       name: item.name,
       color: colors.get(item.actor_id) ?? color(item.actor_id),
@@ -749,9 +762,71 @@ export namespace Doc {
     }
   }
 
+  const TEAM = "team:"
+
+  const routes = new Map<string, string>()
+
+  function teamRoute(sessionID: string) {
+    const cached = routes.get(sessionID)
+    if (cached) return cached
+    const row = Database.use((db) =>
+      db
+        .select({ directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID as SessionID))
+        .get(),
+    )
+    if (!row) return `${TEAM}${sessionID}`
+    const route = `${TEAM}${row.directory}`
+    routes.set(sessionID, route)
+    return route
+  }
+
+  function routeOf(sessionID: string, targetKind: string, targetID: string) {
+    return targetKind === "question" ? targetID : teamRoute(sessionID)
+  }
+
+  function rowRoute(row: SubmitRow) {
+    return routeOf(row.session_id, row.target_kind, row.target_id)
+  }
+
+  function pendingRows(route: string) {
+    if (!route.startsWith(TEAM)) {
+      return Database.use((db) =>
+        db
+          .select()
+          .from(DocSubmitTable)
+          .where(and(eq(DocSubmitTable.target_id, route), eq(DocSubmitTable.status, "pending")))
+          .all(),
+      )
+    }
+    const ids = Database.use((db) =>
+      db
+        .select({ id: SessionTable.id })
+        .from(SessionTable)
+        .where(eq(SessionTable.directory, route.slice(TEAM.length)))
+        .all(),
+    ).map((item) => item.id)
+    if (ids.length === 0) return []
+    return Database.use((db) =>
+      db
+        .select()
+        .from(DocSubmitTable)
+        .where(
+          and(
+            inArray(DocSubmitTable.session_id, ids),
+            eq(DocSubmitTable.status, "pending"),
+            ne(DocSubmitTable.target_kind, "question"),
+          ),
+        )
+        .all(),
+    )
+  }
+
   function cast(type: SubmitEvent["type"], state: SubmitState) {
     const data = JSON.stringify({ type, state } satisfies SubmitEvent)
-    const set = peers.get(state.targetID)
+    const route = routeOf(state.sessionID, state.targetKind, state.targetID)
+    const set = peers.get(route)
     if (set) {
       const ids = new Set(state.actors.map((actor) => actor.actorID))
       set.forEach((peer) => {
@@ -759,7 +834,7 @@ export namespace Doc {
       })
     }
     // Spectators receive every state regardless of membership — they aren't in `state.actors`.
-    observers.get(state.targetID)?.forEach((peer) => peer.send(data))
+    observers.get(route)?.forEach((peer) => peer.send(data))
   }
 
   function done(id: SubmitID) {
@@ -901,7 +976,7 @@ export namespace Doc {
    * 이 세션에서 아직 결론 나지 않은 투표들(종류·대상으로 좁힐 수 있다). 지나가며 마감이 지난 행은 만료시키고,
    * 남은 행은 만료 타이머가 걸려 있는지 확인한다 — 타이머는 메모리에만 있어 재시작 뒤에는 이렇게 되살린다.
    */
-  function pendingRows(sessionID: SessionID, filter: { kind?: SubmitTargetKind; targetID?: string } = {}) {
+  function pendingIn(sessionID: SessionID, filter: { kind?: SubmitTargetKind; targetID?: string } = {}) {
     const rows = Database.use((db) =>
       db
         .select()
@@ -927,12 +1002,12 @@ export namespace Doc {
 
   /** 이 세션에서 아직 결론 나지 않은 투표 하나. */
   function pending(sessionID: SessionID) {
-    return pendingRows(sessionID)[0]
+    return pendingIn(sessionID)[0]
   }
 
   /** 이 세션에서 아직 결론 나지 않은 한 종류의 투표들. */
   function pendingOf(sessionID: SessionID, kind: SubmitTargetKind) {
-    return pendingRows(sessionID, { kind })
+    return pendingIn(sessionID, { kind })
   }
 
   /**
@@ -1011,10 +1086,17 @@ export namespace Doc {
    * 것 없는 중지 창을 띄운다. 돌고 있지도, 막 쉬어 정리를 기다리는 중(settling)도 아니면 그 투표는 멈출 것이 없다
    * — 정리 중인 세션은 곧바로 다시 돌 수 있어(SessionPrompt.loop 의 재실행) 그 투표가 아직 필요하다.
    * "돌고 있는가"는 인스턴스 상태라 인스턴스 컨텍스트 안에서만 물을 수 있다.
+   *
+   * 같은 폴더의 팀 대화 전체를 본다. 동의 창은 팀이 함께 쓰고, 다른 대화에 남은 투표도 이 대화의 새 투표를 막기
+   * 때문이다(create 의 팀 단위 검사). 중지는 대화마다 자기 AI 를 멈추는 것이라, 남았는지는 그 대화의 실행으로 판단한다.
    */
   function closeStaleStops(sessionID: SessionID) {
-    if (running().has(sessionID) || settling.has(sessionID)) return
-    close(pendingOf(sessionID, "stop"), null)
+    const stale = pendingRows(teamRoute(sessionID))
+      .filter((row) => row.target_kind === "stop")
+      .filter((row) => !running().has(row.session_id) && !settling.has(row.session_id))
+      .map((row) => expire(row))
+      .filter((row) => row.status === "pending")
+    close(stale, null)
   }
 
   /**
@@ -1045,7 +1127,7 @@ export namespace Doc {
   }
 
   function active(sessionID: SessionID, targetID: string, actorID?: ActorID, targetKind?: SubmitTargetKind) {
-    return pendingRows(sessionID, { kind: targetKind, targetID })
+    return pendingIn(sessionID, { kind: targetKind, targetID })
       .map((row) => read(row))
       .find((item) => !actorID || item.actors.some((actor) => actor.actorID === actorID))
   }
@@ -1152,7 +1234,7 @@ export namespace Doc {
       schedule(next)
       // 재시작 뒤 다시 접속하지 않은 참여자는 퇴장과 같다. 유예 시간 안에 돌아오면 그대로 남는다.
       const now = Date.now()
-      for (const actor of read(next).actors) scheduleLeave(next.target_id, actor.actorID, now)
+      for (const actor of read(next).actors) scheduleLeave(rowRoute(next), actor.actorID, now)
     }
     // GC a question's shared draft/presence when it resolves outside the vote path (e.g. the AI
     // tool times out, or a solo participant auto-replies). The vote path GCs in send() directly.
@@ -1167,26 +1249,29 @@ export namespace Doc {
 
   function actorNames(sessionID: SessionID, ids: ActorID[], names?: Record<string, string>) {
     const actors = Database.use((db) =>
-      db.select().from(SessionActorTable).where(eq(SessionActorTable.session_id, sessionID)).all(),
+      db.select().from(SessionActorTable).where(inArray(SessionActorTable.actor_id, ids)).all(),
     )
+    const named = (id: ActorID) =>
+      actors.find((actor) => actor.actor_id === id && actor.session_id === sessionID) ??
+      actors.find((actor) => actor.actor_id === id)
     return ids.map((id) => {
       const provided = names?.[id] ? cap(names[id]!) : ""
       if (provided) return { actorID: id, name: provided }
       return {
         actorID: id,
-        name: actors.find((actor) => actor.actor_id === id)?.name ?? fallback(id),
+        name: named(id)?.name ?? fallback(id),
       }
     })
   }
 
-  function targets(targetID: string, actorID: ActorID) {
+  function targets(route: string, actorID: ActorID) {
     // Connected submit peers are the single source of truth for the initial member set (same set as
     // cast()/leave()). Membership is dynamic from here on — join() adds anyone who connects during a
     // pending vote and leave() removes anyone who drops — so a stale/zombie peer captured here can
     // no longer block consensus: the heartbeat reaps it and leave() drops it from the vote. The
     // requester is always included, even if its own socket has not finished connecting yet.
     if (!Flag.ENK_CONSENT_REQUIRED) return [actorID]
-    const result = new Set(Array.from(peers.get(targetID) ?? []).map((peer) => peer.actorID))
+    const result = new Set(Array.from(peers.get(route) ?? []).map((peer) => peer.actorID))
     result.add(actorID)
     return Array.from(result)
   }
@@ -1226,11 +1311,20 @@ export namespace Doc {
       throw new VoteConflictError({ message: "A stop vote is in progress" })
     }
 
+    if (input.targetKind !== "question") {
+      const other = pendingRows(teamRoute(input.sessionID))
+        .filter((row) => row.session_id !== input.sessionID)
+        .some((row) => expire(row).status === "pending")
+      if (other) throw new VoteConflictError({ message: "Another consent vote is in progress" })
+    }
+
     // 돌고 있지 않은 세션의 중지는 멈출 것이 없다. 화면만 "작업 중"으로 남은 경우(끝나지 않은 채 남은 답)에
     // 누르는 것이라, 투표 없이 바로 보내 SessionPrompt.cancel 의 복구 경로가 화면을 풀게 한다. 투표를 열면 쉬는
     // 세션에는 닫아 줄 상태 변화도 오지 않아, 투표가 끝날 때까지 모두의 전송이 막힌다.
     const idleStop = input.targetKind === "stop" && !running().has(input.sessionID)
-    const ids = idleStop ? [input.actorID] : targets(input.targetID, input.actorID)
+    const ids = idleStop
+      ? [input.actorID]
+      : targets(routeOf(input.sessionID, input.targetKind, input.targetID), input.actorID)
     const timeout = clamp(input.timeoutMs)
     const now = Date.now()
     const build = () =>
@@ -1475,29 +1569,22 @@ export namespace Doc {
     return finished
   }
 
-  function online(targetID: string, actorID: ActorID) {
-    const set = peers.get(targetID)
+  function online(route: string, actorID: ActorID) {
+    const set = peers.get(route)
     return set ? Array.from(set).some((item) => item.actorID === actorID) : false
   }
 
   // 남은 전원이 동의했고 지금 모두 접속해 있을 때만 보낸다. 끊긴 채 유예 중인 사람의 표로는 보내지 않는다.
   function evaluate(row: SubmitRow) {
     const state = read(row)
-    if (agreed(state) && state.actors.every((item) => online(row.target_id, item.actorID))) return finalize(row)
+    if (agreed(state) && state.actors.every((item) => online(rowRoute(row), item.actorID))) return finalize(row)
     return state
   }
 
   // 참여 인원 기준 판단, 퇴장 쪽: 나간 사람들은 결론 나지 않은 모든 투표에서 표와 함께 빠지고, 남은 인원으로
   // 한 번만 다시 판단한다. 요청자도 예외가 아니다. 아무도 남지 않으면 보내지 않는다.
-  function leave(targetID: string, actorIDs: ActorID[]) {
-    const rows = Database.use((db) =>
-      db
-        .select()
-        .from(DocSubmitTable)
-        .where(and(eq(DocSubmitTable.target_id, targetID), eq(DocSubmitTable.status, "pending")))
-        .all(),
-    )
-    for (const row of rows) {
+  function leave(route: string, actorIDs: ActorID[]) {
+    for (const row of pendingRows(route)) {
       const next = expire(row)
       if (next.status !== "pending") continue
       const gone = read(next).actors.filter((item) => actorIDs.includes(item.actorID))
@@ -1526,22 +1613,9 @@ export namespace Doc {
   // gap, reaped zombie, frozen tab) at create() time — they were the ones who previously never saw
   // the dialog at all. Members reconnecting just get the current state back. Returns the first
   // pending state so connect() can replay it to the joining peer.
-  function join(sessionID: SessionID, targetID: string, actorID: ActorID) {
-    const rows = Database.use((db) =>
-      db
-        .select()
-        .from(DocSubmitTable)
-        .where(
-          and(
-            eq(DocSubmitTable.session_id, sessionID),
-            eq(DocSubmitTable.target_id, targetID),
-            eq(DocSubmitTable.status, "pending"),
-          ),
-        )
-        .all(),
-    )
+  function join(route: string, actorID: ActorID) {
     let first: SubmitState | undefined
-    for (const row of rows) {
+    for (const row of pendingRows(route)) {
       const next = expire(row)
       if (next.status !== "pending") continue
       if (!timers.has(next.id)) schedule(next)
@@ -1566,7 +1640,7 @@ export namespace Doc {
             .values({
               submit_id: next.id,
               actor_id: actorID,
-              name: actorNames(sessionID, [actorID])[0]!.name,
+              name: actorNames(next.session_id, [actorID])[0]!.name,
               status: "pending",
               time_responded: null,
             })
@@ -1665,6 +1739,7 @@ export namespace Doc {
   function connect(input: {
     sessionID: SessionID
     targetID: string
+    route: string
     actorID: ActorID
     peer: { send: (data: string) => void; close?: () => void }
     observer?: boolean
@@ -1674,15 +1749,15 @@ export namespace Doc {
     // in-progress state on connect (queried with NO actorID so membership isn't required to see it).
     if (input.observer) {
       const peer: LivePeer = { send: input.peer.send, close: input.peer.close, lastSeen: Date.now() }
-      const set = observers.get(input.targetID) ?? new Set<LivePeer>()
+      const set = observers.get(input.route) ?? new Set<LivePeer>()
       set.add(peer)
-      observers.set(input.targetID, set)
+      observers.set(input.route, set)
       heartbeatStart()
       const state = active(input.sessionID, input.targetID)
       if (state) peer.send(JSON.stringify({ type: "created", state } satisfies SubmitEvent))
       const stop = () => {
         set.delete(peer)
-        if (set.size === 0) observers.delete(input.targetID)
+        if (set.size === 0) observers.delete(input.route)
         heartbeatStop()
       }
       return Object.assign(stop, {
@@ -1697,15 +1772,15 @@ export namespace Doc {
       close: input.peer.close,
       lastSeen: Date.now(),
     }
-    const set = peers.get(input.targetID) ?? new Set<SubmitPeer>()
+    const set = peers.get(input.route) ?? new Set<SubmitPeer>()
     set.add(peer)
-    peers.set(input.targetID, set)
+    peers.set(input.route, set)
     heartbeatStart()
-    cancelLeave(input.targetID, input.actorID)
+    cancelLeave(input.route, input.actorID)
     // Unconditional replay: whatever vote is pending right now is sent to every connecting peer,
     // and a peer that isn't a member yet is joined to it (dynamic membership). No membership gate —
     // that gate was how a client that blipped at create() time ended up never seeing the dialog.
-    const state = join(input.sessionID, input.targetID, input.actorID)
+    const state = join(input.route, input.actorID)
     // A send of this peer's that a stop vote took over while the peer was away. Its cancellation is
     // replayed ahead of the stop vote — whether that is still pending or has already ended — so the peer
     // closes the send's dialog with the real outcome and learns why (it carries the stored reason).
@@ -1713,7 +1788,8 @@ export namespace Doc {
     // a guess from timestamps): an earlier, rejected stop vote dropped its own, which this peer was
     // already told about. And only while it is still news (dropIsNews). Looked up by that stop's id, not
     // through recent()'s time window: the stop vote can stay open (30s, topped up on every join) well past
-    // that window, and the send was dropped the moment it opened.
+    // that window, and the send was dropped the moment it opened. The stop can be another team session's
+    // (the consent socket is shared by the team), so the drop is looked up in the stop's own session.
     const replayDropped = (stop: SubmitState | undefined) => {
       if (stop?.targetKind !== "stop") return
       const dropped = Database.use((db) =>
@@ -1722,8 +1798,7 @@ export namespace Doc {
           .from(DocSubmitTable)
           .where(
             and(
-              eq(DocSubmitTable.session_id, input.sessionID),
-              eq(DocSubmitTable.target_id, input.targetID),
+              eq(DocSubmitTable.session_id, stop.sessionID),
               eq(DocSubmitTable.cancelled_by_submit, stop.submitID),
             ),
           )
@@ -1752,8 +1827,8 @@ export namespace Doc {
     // Returns the disposer (run on socket close); `.pong` refreshes liveness on a heartbeat reply.
     const stop = () => {
       set.delete(peer)
-      if (!Array.from(set).some((item) => item.actorID === peer.actorID)) scheduleLeave(input.targetID, peer.actorID)
-      if (set.size === 0) peers.delete(input.targetID)
+      if (!Array.from(set).some((item) => item.actorID === peer.actorID)) scheduleLeave(input.route, peer.actorID)
+      if (set.size === 0) peers.delete(input.route)
       heartbeatStop()
     }
     return Object.assign(stop, {
@@ -1787,6 +1862,7 @@ export namespace Doc {
       return connect({
         sessionID: input.sessionID,
         targetID: input.docID,
+        route: teamRoute(input.sessionID),
         actorID: input.actorID,
         peer: input.peer,
         observer: input.observer,
@@ -1807,6 +1883,7 @@ export namespace Doc {
       return connect({
         sessionID: input.sessionID,
         targetID: input.requestID,
+        route: input.requestID,
         actorID: input.actorID,
         peer: input.peer,
         observer: input.observer,

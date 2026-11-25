@@ -1,4 +1,14 @@
-import { For, Show, createMemo, createSignal, createEffect, on as onDep, onCleanup, onMount, type Component } from "solid-js"
+import {
+  For,
+  Show,
+  createMemo,
+  createSignal,
+  createEffect,
+  on as onDep,
+  onCleanup,
+  onMount,
+  type Component,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { Button } from "@opencode-ai/ui/button"
 import { DockPrompt } from "@opencode-ai/ui/dock-prompt"
@@ -8,6 +18,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import type { QuestionRequest } from "@opencode-ai/sdk/v2"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
+import { useSync } from "@/context/sync"
 import { useParentParams } from "@/context/parent-params"
 import { useClientEnv } from "@/context/client-env"
 import { label } from "@/components/blocksuite/actor"
@@ -51,11 +62,7 @@ function Avatars(props: { items: { actorID: string; name: string; color: string 
       <span data-slot="question-option-avatars" aria-hidden="true">
         <For each={props.items}>
           {(item) => (
-            <span
-              data-slot="question-option-avatar"
-              title={item.name}
-              style={{ "background-color": item.color }}
-            >
+            <span data-slot="question-option-avatar" title={item.name} style={{ "background-color": item.color }}>
               {((item.name || "?").trim().slice(-2) || "?").toUpperCase()}
             </span>
           )}
@@ -100,6 +107,7 @@ function Option(props: {
 
 export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit: () => void }> = (props) => {
   const sdk = useSDK()
+  const sync = useSync()
   const language = useLanguage()
   const dialog = useDialog()
   const parentParams = useParentParams()
@@ -302,7 +310,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
 
   const toggle = (answer: string) => {
     const next = !(mine[tab()]?.includes(answer) ?? false)
-    setMine(tab(), (current = []) => (next ? [...current.filter((x) => x !== answer), answer] : current.filter((x) => x !== answer)))
+    setMine(tab(), (current = []) =>
+      next ? [...current.filter((x) => x !== answer), answer] : current.filter((x) => x !== answer),
+    )
     sendOp({ kind: "toggle", q: tab(), label: answer, on: next })
   }
 
@@ -356,7 +366,9 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   // presence round-trip.
   const selectionKey = (selection: string[]) => [...selection].sort().join("\u0000")
   const mineEffective = () => effective(tab(), mine[tab()] ?? [], on())
+  const consentRequired = () => sync.data.env.consentRequired !== false
   const consensus = createMemo(() => {
+    if (!consentRequired()) return mineEffective().length > 0
     const self = actor()?.actorID
     const here = presence().filter((item) => item.qIndex === tab())
     // A participant who selected the custom option but left the (shared) text empty has an INCOMPLETE
@@ -475,7 +487,12 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               // Through showApproval: responding to an already finished vote answers with its
               // terminal state, which must close the dialog rather than leave a dead frame up.
               .then((next) => showApproval(next))
-              .catch(() => showToast({ title: language.t("docSubmit.toast.approveFailed"), description: language.t("common.requestFailed") }))
+              .catch(() =>
+                showToast({
+                  title: language.t("docSubmit.toast.approveFailed"),
+                  description: language.t("common.requestFailed"),
+                }),
+              )
           }}
           cancel={() => {
             const current = approval()
@@ -491,7 +508,12 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
               // Through showApproval: responding to an already finished vote answers with its
               // terminal state, which must close the dialog rather than leave a dead frame up.
               .then((next) => showApproval(next))
-              .catch(() => showToast({ title: language.t("docSubmit.toast.cancelFailed"), description: language.t("common.requestFailed") }))
+              .catch(() =>
+                showToast({
+                  title: language.t("docSubmit.toast.cancelFailed"),
+                  description: language.t("common.requestFailed"),
+                }),
+              )
           }}
           close={closeApproval}
           onExpire={() => {
@@ -627,7 +649,8 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
         sessionID,
         requestID,
         actorID,
-        onDraft: (d) => setDraft({ answers: d.answers, custom: d.custom, customOn: d.customOn, step: d.step ?? 0, rev: d.rev }),
+        onDraft: (d) =>
+          setDraft({ answers: d.answers, custom: d.custom, customOn: d.customOn, step: d.step ?? 0, rev: d.rev }),
         onPresence: (list) => setPresence(list),
       })
       // No broadcastPresence() → invisible in the presence list. Connect the consent socket
@@ -679,7 +702,8 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
       sessionID,
       requestID,
       actorID: a.actorID,
-      onDraft: (d) => setDraft({ answers: d.answers, custom: d.custom, customOn: d.customOn, step: d.step ?? 0, rev: d.rev }),
+      onDraft: (d) =>
+        setDraft({ answers: d.answers, custom: d.custom, customOn: d.customOn, step: d.step ?? 0, rev: d.rev }),
       onPresence: (list) => setPresence(list),
     })
     broadcastPresence()
@@ -844,96 +868,98 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
           )}
         </For>
 
-        <Show
-          when={editing()}
-          fallback={
-            <button
-              type="button"
+        <Show when={question()?.custom !== false}>
+          <Show
+            when={editing()}
+            fallback={
+              <button
+                type="button"
+                data-slot="question-option"
+                data-custom="true"
+                data-picked={on()}
+                data-soft={othersCustom() && !on() ? true : undefined}
+                role={multi() ? "checkbox" : "radio"}
+                aria-checked={on()}
+                disabled={busy()}
+                onClick={customToggle}
+              >
+                <Mark multi={multi()} picked={on()} soft={othersCustom()} onClick={toggleCustomMark} />
+                <span data-slot="question-option-main">
+                  <span data-slot="option-label">{customLabel()}</span>
+                  <span data-slot="option-description">{input() || customPlaceholder()}</span>
+                </span>
+                <Avatars items={customAvatars()} />
+              </button>
+            }
+          >
+            <form
               data-slot="question-option"
               data-custom="true"
               data-picked={on()}
               data-soft={othersCustom() && !on() ? true : undefined}
               role={multi() ? "checkbox" : "radio"}
               aria-checked={on()}
-              disabled={busy()}
-              onClick={customToggle}
+              onMouseDown={(e) => {
+                if (busy()) {
+                  e.preventDefault()
+                  return
+                }
+                if (e.target instanceof HTMLTextAreaElement) return
+                // Clicking the card body (not the field) toggles the choice, so keep focus off the textarea.
+                e.preventDefault()
+                if (multi()) return
+                const field = e.currentTarget.querySelector('[data-slot="question-custom-input"]')
+                if (field instanceof HTMLTextAreaElement) field.focus()
+              }}
+              onClick={(e) => {
+                if (e.target instanceof HTMLTextAreaElement) return
+                if (!multi()) return
+                customToggle()
+              }}
+              onSubmit={(e) => {
+                e.preventDefault()
+                commitCustom()
+              }}
             >
               <Mark multi={multi()} picked={on()} soft={othersCustom()} onClick={toggleCustomMark} />
               <span data-slot="question-option-main">
                 <span data-slot="option-label">{customLabel()}</span>
-                <span data-slot="option-description">{input() || customPlaceholder()}</span>
+                {/* Uncontrolled while editing: seeded once via ref, never re-bound, so IME is safe. */}
+                <textarea
+                  ref={focusCustom}
+                  data-slot="question-custom-input"
+                  placeholder={customPlaceholder()}
+                  rows={1}
+                  disabled={busy()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault()
+                      setEditing(false)
+                      return
+                    }
+                    if (e.key !== "Enter" || e.shiftKey) return
+                    e.preventDefault()
+                    commitCustom()
+                  }}
+                  onCompositionStart={() => {
+                    composing = true
+                  }}
+                  onCompositionEnd={(e) => {
+                    composing = false
+                    setLocalText(e.currentTarget.value)
+                    customUpdate(e.currentTarget.value)
+                  }}
+                  onInput={(e) => {
+                    // Update the local buffer first (IME-safe), then share the text.
+                    setLocalText(e.currentTarget.value)
+                    customUpdate(e.currentTarget.value)
+                    resizeInput(e.currentTarget)
+                  }}
+                />
               </span>
               <Avatars items={customAvatars()} />
-            </button>
-          }
-        >
-          <form
-            data-slot="question-option"
-            data-custom="true"
-            data-picked={on()}
-            data-soft={othersCustom() && !on() ? true : undefined}
-            role={multi() ? "checkbox" : "radio"}
-            aria-checked={on()}
-            onMouseDown={(e) => {
-              if (busy()) {
-                e.preventDefault()
-                return
-              }
-              if (e.target instanceof HTMLTextAreaElement) return
-              // Clicking the card body (not the field) toggles the choice, so keep focus off the textarea.
-              e.preventDefault()
-              if (multi()) return
-              const field = e.currentTarget.querySelector('[data-slot="question-custom-input"]')
-              if (field instanceof HTMLTextAreaElement) field.focus()
-            }}
-            onClick={(e) => {
-              if (e.target instanceof HTMLTextAreaElement) return
-              if (!multi()) return
-              customToggle()
-            }}
-            onSubmit={(e) => {
-              e.preventDefault()
-              commitCustom()
-            }}
-          >
-            <Mark multi={multi()} picked={on()} soft={othersCustom()} onClick={toggleCustomMark} />
-            <span data-slot="question-option-main">
-              <span data-slot="option-label">{customLabel()}</span>
-              {/* Uncontrolled while editing: seeded once via ref, never re-bound, so IME is safe. */}
-              <textarea
-                ref={focusCustom}
-                data-slot="question-custom-input"
-                placeholder={customPlaceholder()}
-                rows={1}
-                disabled={busy()}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    e.preventDefault()
-                    setEditing(false)
-                    return
-                  }
-                  if (e.key !== "Enter" || e.shiftKey) return
-                  e.preventDefault()
-                  commitCustom()
-                }}
-                onCompositionStart={() => {
-                  composing = true
-                }}
-                onCompositionEnd={(e) => {
-                  composing = false
-                  setLocalText(e.currentTarget.value)
-                  customUpdate(e.currentTarget.value)
-                }}
-                onInput={(e) => {
-                  // Update the local buffer first (IME-safe), then share the text.
-                  setLocalText(e.currentTarget.value)
-                  customUpdate(e.currentTarget.value)
-                  resizeInput(e.currentTarget)
-                }}
-              />
-            </span>
-            <Avatars items={customAvatars()} />
-          </form>
+            </form>
+          </Show>
         </Show>
       </div>
     </DockPrompt>

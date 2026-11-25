@@ -23,6 +23,8 @@ export const EnvRoutes = () =>
                     environment: z.string().optional(),
                     aiModel: z.string().optional(),
                     aiModelVariant: z.string().optional(),
+                    consentRequired: z.boolean().optional(),
+                    sessionLimit: z.number().int().optional(),
                   })
                   .meta({
                     ref: "Env",
@@ -40,6 +42,8 @@ export const EnvRoutes = () =>
         ...(Flag.ENVIRONMENT ? { environment: Flag.ENVIRONMENT } : {}),
         ...(Flag.ENK_AI_MODEL ? { aiModel: Flag.ENK_AI_MODEL } : {}),
         ...(Flag.ENK_AI_MODEL_VARIANT ? { aiModelVariant: Flag.ENK_AI_MODEL_VARIANT } : {}),
+        ...(Flag.ENK_CONSENT_REQUIRED ? {} : { consentRequired: false }),
+        sessionLimit: Flag.ENK_SESSION_LIMIT,
       })
     },
   )
