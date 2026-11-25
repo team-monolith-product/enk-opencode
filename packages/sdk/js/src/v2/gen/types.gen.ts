@@ -1874,6 +1874,7 @@ export type Env = {
   aiModel?: string
   aiModelVariant?: string
   consentRequired?: boolean
+  sessionLimit?: number
 }
 
 export type EnvFileKeys = {

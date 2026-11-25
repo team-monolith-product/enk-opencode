@@ -13,7 +13,6 @@ import {
 import { useClientEnv } from "@/context/client-env"
 import { useLanguage } from "@/context/language"
 import { createPage } from "@/components/blocksuite/blocksuite-doc"
-import { useColorScheme } from "@/utils/color-scheme"
 import { SessionPreviewMascot } from "@/pages/session/session-preview-mascot"
 import type { DocSubmitActor, DocSubmitState } from "../prompt-input/doc-submit"
 import { getRelativeTime } from "@/utils/time"
@@ -44,6 +43,7 @@ type Props = {
   state: Accessor<DocSubmitState | undefined>
   actorID: string
   kind?: DocSubmitKind
+  origin?: string
   preview?: () => DocSubmitPreviewItem[]
   // Required for kind === "doc": lets the snapshot mount the prompt doc read-only.
   sdk?: DocSubmitSdk
@@ -335,7 +335,6 @@ function ConsentCountdownChip(props: { sec: number; danger: boolean }) {
 // ── prompt doc snapshot — read-only mount of the doc being sent ────────────
 function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
   const language = useLanguage()
-  const snapshotTheme = useColorScheme()
   const [fail, setFail] = createSignal(false)
   // 테마 동기화 이펙트가 mount 완료보다 먼저 돌므로 시그널로 둔다.
   const [page, setPage] = createSignal<Awaited<ReturnType<typeof createPage>>>()
@@ -349,7 +348,7 @@ function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
       return
     }
     void createPage({
-      theme: snapshotTheme(),
+      theme: "light",
       init: false,
       readonly: true,
       preview: true,
@@ -376,11 +375,6 @@ function ConsentDocSnapshot(props: { docID: string; sdk: DocSubmitSdk }) {
         setPage(undefined)
         setFail(true)
       })
-  })
-
-  // OS 색 구성이 바뀌면 다시 칠한다 — 에디터는 테마를 내부 상태로 들고 있다.
-  createEffect(() => {
-    page()?.setTheme(snapshotTheme())
   })
 
   onCleanup(() => {
@@ -483,6 +477,7 @@ function SnapshotArea(props: {
 function VotingBody(props: {
   state: DocSubmitState
   kind?: DocSubmitKind
+  origin?: string
   preview?: () => DocSubmitPreviewItem[]
   sdk?: DocSubmitSdk
   actorID: string
@@ -511,6 +506,9 @@ function VotingBody(props: {
             language.t("docSubmit.request.line", { verb: language.t(requestVerb(props.kind)) }),
             requesterName(),
           )}
+          <Show when={props.origin}>
+            {(title) => <div class="ds-vote-origin">{language.t("docSubmit.origin", { title: title() })}</div>}
+          </Show>
         </div>
         <ConsentCountdownChip sec={props.sec} danger={danger()} />
       </div>
@@ -725,6 +723,7 @@ function ConsentFrame(props: {
   view: "voting" | "waiting"
   state: DocSubmitState
   kind?: DocSubmitKind
+  origin?: string
   preview?: () => DocSubmitPreviewItem[]
   sdk?: DocSubmitSdk
   actorID: string
@@ -764,6 +763,7 @@ function ConsentFrame(props: {
             <VotingBody
               state={props.state}
               kind={props.kind}
+              origin={props.origin}
               preview={props.preview}
               sdk={props.sdk}
               actorID={props.actorID}
@@ -838,6 +838,7 @@ export function DialogDocSubmit(props: Props) {
               view={props.spectator || (pending() && approved()) ? "waiting" : "voting"}
               state={current()}
               kind={props.kind}
+              origin={props.origin}
               preview={props.preview}
               sdk={props.sdk}
               actorID={props.actorID}

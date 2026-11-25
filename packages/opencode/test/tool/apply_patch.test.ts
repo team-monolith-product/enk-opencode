@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import * as fs from "fs/promises"
 import { ApplyPatchTool } from "../../src/tool/apply_patch"
+import { FileTime } from "../../src/file/time"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
@@ -309,11 +310,75 @@ describe("tool.apply_patch freeform", () => {
       fn: async () => {
         const target = path.join(fixture.path, "duplicate.txt")
         await fs.writeFile(target, "old content\n", "utf-8")
+        await FileTime.read(ctx.sessionID, target)
 
         const patchText = "*** Begin Patch\n*** Add File: duplicate.txt\n+new content\n*** End Patch"
 
         await execute({ patchText }, ctx)
         expect(await fs.readFile(target, "utf-8")).toBe("new content\n")
+      },
+    })
+  })
+
+  test("refuses to add over an existing file it never read", async () => {
+    await using fixture = await tmpdir()
+    const { ctx } = makeCtx()
+
+    await Instance.provide({
+      directory: fixture.path,
+      fn: async () => {
+        const target = path.join(fixture.path, "theirs.txt")
+        await fs.writeFile(target, "teammate content\n", "utf-8")
+
+        const patchText = "*** Begin Patch\n*** Add File: theirs.txt\n+new content\n*** End Patch"
+
+        await expect(execute({ patchText }, ctx)).rejects.toThrow("You must read file")
+        expect(await fs.readFile(target, "utf-8")).toBe("teammate content\n")
+      },
+    })
+  })
+
+  test("applies an update on top of changes made after the read and says so", async () => {
+    await using fixture = await tmpdir()
+    const { ctx } = makeCtx()
+
+    await Instance.provide({
+      directory: fixture.path,
+      fn: async () => {
+        const target = path.join(fixture.path, "shared.txt")
+        await fs.writeFile(target, "line1\nline2\nline3\n", "utf-8")
+        await fs.utimes(target, 1, 1)
+        await FileTime.read(ctx.sessionID, target)
+        await fs.writeFile(target, "line1\nline2\nline3\nline4\n", "utf-8")
+        await fs.utimes(target, 2, 2)
+
+        const patchText = "*** Begin Patch\n*** Update File: shared.txt\n@@\n-line1\n+LINE1\n line2\n*** End Patch"
+        const result = await execute({ patchText }, ctx)
+
+        expect(await fs.readFile(target, "utf-8")).toBe("LINE1\nline2\nline3\nline4\n")
+        expect(result.output).toContain("changed by someone else")
+      },
+    })
+  })
+
+  test("refuses to delete a file changed after the read", async () => {
+    await using fixture = await tmpdir()
+    const { ctx } = makeCtx()
+
+    await Instance.provide({
+      directory: fixture.path,
+      fn: async () => {
+        const target = path.join(fixture.path, "gone.txt")
+        await fs.writeFile(target, "v1\n", "utf-8")
+        await fs.utimes(target, 1, 1)
+        await FileTime.read(ctx.sessionID, target)
+        await fs.writeFile(target, "v2 from teammate\n", "utf-8")
+        await fs.utimes(target, 2, 2)
+
+        const patchText = "*** Begin Patch\n*** Delete File: gone.txt\n*** End Patch"
+
+        await expect(execute({ patchText }, ctx)).rejects.toThrow("Read the file again")
+        expect(await fs.readFile(target, "utf-8")).toBe("v2 from teammate\n")
       },
     })
   })
