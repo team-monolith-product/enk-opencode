@@ -29,7 +29,7 @@ export namespace GitHub {
   const transient: Code[] = ["remote", "missing"]
   const tag = /[ \t]*<script\b[^>]*\bdata-preview-bridge\b[^>]*>\s*<\/script>[ \t]*(\r?\n)?/gi
 
-  export type Repo = { owner: string; name: string; url: string; private?: boolean }
+  export type Repo = { owner: string; name: string; url: string; private?: boolean; pushedAt?: string }
   export type Push = { sha: string; time: number; by?: string }
   export type FirstPush = { attempts: number; code: Code; reason: string }
   export type Status = {
@@ -410,12 +410,13 @@ export namespace GitHub {
 
   export async function repositories(dir: string): Promise<Repo[]> {
     if (!ServeTargets.isProject(dir)) throw new Failure("disabled", 409)
-    const list = await rails<{ repositories: Repo[] }>("/repositories")
+    const list = await rails<{ repositories: (Repo & { pushed_at?: string | null })[] }>("/repositories")
     return list.repositories.map((item) => ({
       owner: item.owner,
       name: item.name,
       url: item.url,
       private: item.private,
+      pushedAt: item.pushed_at ?? undefined,
     }))
   }
 
