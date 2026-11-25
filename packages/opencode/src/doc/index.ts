@@ -1374,6 +1374,7 @@ export namespace Doc {
               name: actor.name,
               status: approved(actor.actorID) ? "approved" : "pending",
               time_responded: approved(actor.actorID) ? now : null,
+              auto: actor.actorID !== input.actorID && auto.has(actor.actorID),
             })),
           )
           .run()
@@ -1544,7 +1545,7 @@ export namespace Doc {
       Database.use((db) =>
         db
           .update(DocSubmitActorTable)
-          .set({ status: "approved", time_responded: Date.now() })
+          .set({ status: "approved", time_responded: Date.now(), auto: false })
           .where(
             and(eq(DocSubmitActorTable.submit_id, input.submitID), eq(DocSubmitActorTable.actor_id, input.actorID)),
           )
@@ -1646,7 +1647,7 @@ export namespace Doc {
         Database.use((db) =>
           db
             .update(DocSubmitActorTable)
-            .set({ status: auto ? "approved" : "pending", time_responded: auto ? Date.now() : null })
+            .set({ status: auto ? "approved" : "pending", time_responded: auto ? Date.now() : null, auto })
             .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
             .run(),
         )
@@ -1663,6 +1664,7 @@ export namespace Doc {
               name: actorNames(next.session_id, [actorID])[0]!.name,
               status: auto ? "approved" : "pending",
               time_responded: auto ? Date.now() : null,
+              auto,
             })
             .onConflictDoNothing()
             .run(),
@@ -2378,7 +2380,7 @@ export namespace Doc {
         user_id: input.userID ?? existing?.user_id ?? null,
         name,
         color: pickColor(input.sessionID, actorID, existing?.color, input.color),
-        auto_consent: input.autoConsent ?? existing?.auto_consent ?? false,
+        auto_consent: input.autoConsent ?? existing?.auto_consent ?? userAutoConsent(input.sessionID, input.userID),
         time_seen: Date.now(),
       }
 
@@ -2436,12 +2438,31 @@ export namespace Doc {
     }))
   })
 
-  function userActors(sessionID: SessionID, userID: string | null, self: ActorID, value: boolean) {
-    if (!userID) return []
+  function teamSessions(sessionID: SessionID) {
     const directory = teamRoute(sessionID).slice(TEAM.length)
-    const sessions = Database.use((db) =>
+    return Database.use((db) =>
       db.select({ id: SessionTable.id }).from(SessionTable).where(eq(SessionTable.directory, directory)).all(),
     ).map((item) => item.id)
+  }
+
+  function userAutoConsent(sessionID: SessionID, userID?: string) {
+    if (!userID) return false
+    const sessions = teamSessions(sessionID)
+    if (sessions.length === 0) return false
+    const latest = Database.use((db) =>
+      db
+        .select({ value: SessionActorTable.auto_consent })
+        .from(SessionActorTable)
+        .where(and(inArray(SessionActorTable.session_id, sessions), eq(SessionActorTable.user_id, userID)))
+        .orderBy(desc(SessionActorTable.time_seen))
+        .get(),
+    )
+    return latest?.value ?? false
+  }
+
+  function userActors(sessionID: SessionID, userID: string | null, self: ActorID, value: boolean) {
+    if (!userID) return []
+    const sessions = teamSessions(sessionID)
     if (sessions.length === 0) return []
     const stale = Database.use((db) =>
       db
@@ -2479,12 +2500,13 @@ export namespace Doc {
       const updated = Database.use((db) =>
         db
           .update(DocSubmitActorTable)
-          .set({ status: "pending", time_responded: null })
+          .set({ status: "pending", time_responded: null, auto: false })
           .where(
             and(
               eq(DocSubmitActorTable.submit_id, next.id),
               eq(DocSubmitActorTable.actor_id, actorID),
               eq(DocSubmitActorTable.status, "approved"),
+              eq(DocSubmitActorTable.auto, true),
             ),
           )
           .returning()
@@ -2506,7 +2528,7 @@ export namespace Doc {
       const updated = Database.use((db) =>
         db
           .update(DocSubmitActorTable)
-          .set({ status: "approved", time_responded: Date.now() })
+          .set({ status: "approved", time_responded: Date.now(), auto: true })
           .where(
             and(
               eq(DocSubmitActorTable.submit_id, next.id),

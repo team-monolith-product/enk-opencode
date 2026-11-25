@@ -50,35 +50,12 @@ export function clearActor(sessionID: string, userID?: string) {
   }
 }
 
-const autoPrefix = "opencode-auto-consent"
 const [autoState, setAutoState] = createSignal<Record<string, boolean>>({})
 
-function autoStorage(userID?: string) {
-  return userID ? localStorage : sessionStorage
-}
-
-function autoKey(userID?: string) {
-  return userID ? `${autoPrefix}:user:${userID}` : autoPrefix
-}
-
 export function loadAutoConsent(userID?: string) {
-  const key = autoKey(userID)
-  const cached = autoState()[key]
-  if (cached !== undefined) return cached
-  try {
-    return autoStorage(userID).getItem(key) === "1"
-  } catch {
-    return false
-  }
+  return autoState()[userID ?? ""] ?? false
 }
 
 export function saveAutoConsent(value: boolean, userID?: string) {
-  const key = autoKey(userID)
-  setAutoState((prev) => ({ ...prev, [key]: value }))
-  try {
-    if (value) autoStorage(userID).setItem(key, "1")
-    else autoStorage(userID).removeItem(key)
-  } catch {
-    // ignore storage access errors
-  }
+  setAutoState((prev) => ({ ...prev, [userID ?? ""]: value }))
 }

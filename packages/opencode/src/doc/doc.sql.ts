@@ -229,6 +229,7 @@ export const DocSubmitActorTable = sqliteTable(
     name: text().notNull(),
     status: text().notNull(),
     time_responded: integer(),
+    auto: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.submit_id, table.actor_id] }),

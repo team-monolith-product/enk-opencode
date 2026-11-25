@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, mock, test } from "bun:test"
 import { createStore } from "solid-js/store"
 import { assetKey, type DocMountInput } from "@/components/blocksuite/blocksuite-doc"
 import type { PromptDocConfig } from "./doc"
+import { loadAutoConsent, saveAutoConsent } from "./doc-actor"
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "@/constants/file-picker"
 
 const mounts: DocMountInput[] = []
@@ -152,6 +153,41 @@ describe("createPromptDoc plain props", () => {
     // the `act` prefix so it passes ActorID.zod on the observer-only submit socket.
     expect(upsert).not.toHaveBeenCalled()
     expect(doc.actorID()?.startsWith("act")).toBe(true)
+  })
+})
+
+describe("createPromptDoc auto-consent", () => {
+  const user = { id: "737", name: "E2E 나" }
+  const register = async (stored: boolean | undefined) => {
+    mounts.length = 0
+    const upsert = mock(async (_input: Record<string, unknown>) => ({
+      data: { actorID: "act_na", name: "E2E 나", color: "#be185d", autoConsent: stored },
+    }))
+    const userClient = {
+      session: {
+        actor: { upsert },
+        promptDoc: async () => ({ data: { docID: "doc_1" } }),
+      },
+    } as never
+    const [store] = createStore(config({ user }))
+    const doc = createPromptDoc({ createPage, config: store, client: userClient, onSubmit: () => {} })
+    await doc.mount({ el: document.createElement("div"), theme: "light" })
+    return upsert
+  }
+
+  test("registering never sends a value, so another device cannot switch it off", async () => {
+    saveAutoConsent(false, user.id)
+    const upsert = await register(true)
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(upsert.mock.calls[0]![0]).not.toHaveProperty("autoConsent")
+  })
+
+  test("the switch shows the value the server keeps for the person", async () => {
+    saveAutoConsent(false, user.id)
+    await register(true)
+    expect(loadAutoConsent(user.id)).toBe(true)
+    await register(false)
+    expect(loadAutoConsent(user.id)).toBe(false)
   })
 })
 

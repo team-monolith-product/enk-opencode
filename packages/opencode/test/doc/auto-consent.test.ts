@@ -271,6 +271,83 @@ describe("auto-consent: switching it off and other conversations", () => {
   )
 
   test(
+    "opening the app on another device keeps the setting and the approvals it gave",
+    within(async () => {
+      const first = await Session.create({})
+      const second = await Session.create({})
+      const secondDoc = Doc.prompt(second.id).docID
+      Doc.prompt(first.id)
+      const ga = Doc.actorUpsert({ sessionID: second.id, userID: "736", name: "E2E 가" })
+      const da = Doc.actorUpsert({ sessionID: second.id, userID: "9001", name: "E2E 다" })
+      const naFirst = Doc.actorUpsert({ sessionID: first.id, userID: "737", name: "E2E 나" })
+      const naSecond = Doc.actorUpsert({ sessionID: second.id, userID: "737", name: "E2E 나" })
+      Doc.actorUpsert({ sessionID: first.id, actorID: naFirst.actorID, autoConsent: true })
+      const stops = [ga, da, naSecond].map((actor) =>
+        Doc.submitConnect({
+          sessionID: second.id,
+          docID: secondDoc,
+          actorID: actor.actorID,
+          peer: { send: () => undefined },
+        }),
+      )
+      const state = Doc.submitCreate({ sessionID: second.id, docID: secondDoc, actorID: ga.actorID, prompt })
+      expect(status(state, naSecond.actorID)).toBe("approved")
+
+      const phone = Doc.actorUpsert({ sessionID: second.id, userID: "737", name: "E2E 나" })
+      Doc.actorUpsert({ sessionID: first.id, userID: "737", name: "E2E 나" })
+
+      expect(phone.actorID).toBe(naSecond.actorID)
+      expect(phone.autoConsent).toBe(true)
+      expect(Doc.actorList(first.id).find((actor) => actor.actorID === naFirst.actorID)?.autoConsent).toBe(true)
+      const after = Doc.submitActive({ sessionID: second.id, docID: secondDoc, actorID: ga.actorID })
+      expect(status(after, naSecond.actorID)).toBe("approved")
+      stops.forEach((stop) => stop())
+    }),
+  )
+
+  test(
+    "a new conversation starts with the person's current setting",
+    within(async () => {
+      const first = await Session.create({})
+      const na = Doc.actorUpsert({ sessionID: first.id, userID: "737", name: "E2E 나" })
+      Doc.actorUpsert({ sessionID: first.id, actorID: na.actorID, autoConsent: true })
+      const other = Doc.actorUpsert({ sessionID: first.id, userID: "736", name: "E2E 가" })
+
+      const second = await Session.create({})
+      const naSecond = Doc.actorUpsert({ sessionID: second.id, userID: "737", name: "E2E 나" })
+      const gaSecond = Doc.actorUpsert({ sessionID: second.id, userID: "736", name: "E2E 가" })
+
+      expect(naSecond.autoConsent).toBe(true)
+      expect(gaSecond.autoConsent).toBe(false)
+      expect(other.autoConsent).toBe(false)
+    }),
+  )
+
+  test(
+    "switching it off keeps an approval the person gave by hand",
+    within(async () => {
+      const session = await Session.create({})
+      const { docID } = Doc.prompt(session.id)
+      const ga = Doc.actorUpsert({ sessionID: session.id, name: "E2E 가" })
+      const na = Doc.actorUpsert({ sessionID: session.id, name: "E2E 나" })
+      const da = Doc.actorUpsert({ sessionID: session.id, name: "E2E 다" })
+      const stops = [ga, na, da].map((actor) =>
+        Doc.submitConnect({ sessionID: session.id, docID, actorID: actor.actorID, peer: { send: () => undefined } }),
+      )
+
+      const state = Doc.submitCreate({ sessionID: session.id, docID, actorID: ga.actorID, prompt })
+      Doc.submitRespond({ sessionID: session.id, submitID: state.submitID, actorID: na.actorID, action: "approve" })
+      Doc.actorUpsert({ sessionID: session.id, actorID: na.actorID, autoConsent: true })
+      Doc.actorUpsert({ sessionID: session.id, actorID: na.actorID, autoConsent: false })
+
+      const after = Doc.submitActive({ sessionID: session.id, docID, actorID: ga.actorID })
+      expect(after?.status).toBe("pending")
+      expect(status(after, na.actorID)).toBe("approved")
+      stops.forEach((stop) => stop())
+    }),
+  )
+
+  test(
     "a member stored as left by the old rule rejoins already agreeing when auto-consent is on",
     within(async () => {
       const session = await Session.create({})
