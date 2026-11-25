@@ -182,6 +182,7 @@ export const ReadTool = Tool.define("read", {
     const isBinary = await isBinaryFile(filepath, Number(stat.size))
     if (isBinary) throw new Error(`Cannot read binary file: ${filepath}`)
 
+    await FileTime.read(ctx.sessionID, filepath)
     const stream = createReadStream(filepath, { encoding: "utf8" })
     const rl = createInterface({
       input: stream,
@@ -252,7 +253,6 @@ export const ReadTool = Tool.define("read", {
 
     // just warms the lsp client
     LSP.touchFile(filepath, false)
-    await FileTime.read(ctx.sessionID, filepath)
 
     if (instructions.length > 0) {
       output += `\n\n<system-reminder>\n${instructions.map((i) => i.content).join("\n\n")}\n</system-reminder>`

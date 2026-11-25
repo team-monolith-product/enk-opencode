@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { createServer, type Server } from "node:net"
 import { networkInterfaces } from "node:os"
-import { probePort, reachableExternally, serveUrl } from "../../src/tool/ensure-dev-server"
+import {
+  oneAtATime,
+  probePort,
+  reachableExternally,
+  RECENT_START_MS,
+  serveUrl,
+  startedByOther,
+} from "../../src/tool/ensure-dev-server"
 
 function listen(host = "127.0.0.1"): Promise<{ server: Server; port: number }> {
   return new Promise((resolve, reject) => {
@@ -114,6 +121,50 @@ describe("ensure-dev-server", () => {
       process.env["JUPYTERHUB_USER"] = "student-42"
       delete process.env["OPENCODE_SERVE_DOMAIN"]
       expect(serveUrl(3000)).toBe("http://localhost:3000/")
+    })
+  })
+  describe("shared preview server across team chats", () => {
+    test("runs calls for the same port one at a time", async () => {
+      const order: string[] = []
+      const step = (name: string, ms: number) => async () => {
+        order.push(`${name}:start`)
+        await new Promise((r) => setTimeout(r, ms))
+        order.push(`${name}:end`)
+        return name
+      }
+      const results = await Promise.all([oneAtATime(43001, step("a", 30)), oneAtATime(43001, step("b", 1))])
+      expect(results).toEqual(["a", "b"])
+      expect(order).toEqual(["a:start", "a:end", "b:start", "b:end"])
+    })
+
+    test("keeps going after a failed call", async () => {
+      const failed = oneAtATime(43002, async () => {
+        throw new Error("boom")
+      })
+      await expect(failed).rejects.toThrow("boom")
+      expect(await oneAtATime(43002, async () => "next")).toBe("next")
+    })
+
+    test("does not serialize different ports", async () => {
+      const order: string[] = []
+      await Promise.all([
+        oneAtATime(43003, async () => {
+          await new Promise((r) => setTimeout(r, 30))
+          order.push("slow")
+        }),
+        oneAtATime(43004, async () => {
+          order.push("fast")
+        }),
+      ])
+      expect(order).toEqual(["fast", "slow"])
+    })
+
+    test("treats a server another chat just started as fresh", () => {
+      const now = 1_000_000
+      expect(startedByOther({ at: now - 1000, sessionID: "ses_other" }, "ses_me", now)).toBe(true)
+      expect(startedByOther({ at: now - 1000, sessionID: "ses_me" }, "ses_me", now)).toBe(false)
+      expect(startedByOther({ at: now - RECENT_START_MS, sessionID: "ses_other" }, "ses_me", now)).toBe(false)
+      expect(startedByOther(undefined, "ses_me", now)).toBe(false)
     })
   })
 })
