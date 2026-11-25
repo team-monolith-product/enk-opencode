@@ -261,6 +261,9 @@ export const dict = {
   "prompt.action.queue": "Add to queue",
   "prompt.action.expandView": "View larger",
   "prompt.action.collapseView": "Collapse",
+  "prompt.action.docAutoConsent": "موافقة تلقائية",
+  "prompt.action.docAutoConsentHint":
+    "عند التفعيل، توافق مباشرة على طلبات الإرسال والإجابة والإيقاف من زملائك. إعادة التعيين والاسترجاع تحتاج دائمًا إلى موافقتك بنفسك",
   "prompt.toast.pasteUnsupported.title": "مرفق غير مدعوم",
   "prompt.toast.pasteUnsupported.description": "يمكن إرفاق الصور أو ملفات PDF أو الملفات النصية فقط هنا.",
   "prompt.toast.fileTooLarge.title": "الملف كبير جدًا",

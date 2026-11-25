@@ -2161,6 +2161,7 @@ export type SessionActor = {
   userID?: string
   name: string
   color: string
+  autoConsent?: boolean
 }
 
 export type PromptCycleInput = {
@@ -5492,6 +5493,7 @@ export type SessionActorUpsertData = {
     userID?: string
     name?: string
     color?: string
+    autoConsent?: boolean
   }
   path: {
     sessionID: string

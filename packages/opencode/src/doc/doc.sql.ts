@@ -49,6 +49,7 @@ export const SessionActorTable = sqliteTable(
     user_id: text(),
     name: text().notNull(),
     color: text().notNull(),
+    auto_consent: integer({ mode: "boolean" }).notNull().default(false),
     time_created: integer()
       .notNull()
       .$default(() => Date.now()),
@@ -224,6 +225,7 @@ export const DocSubmitActorTable = sqliteTable(
     name: text().notNull(),
     status: text().notNull(),
     time_responded: integer(),
+    auto: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.submit_id, table.actor_id] }),

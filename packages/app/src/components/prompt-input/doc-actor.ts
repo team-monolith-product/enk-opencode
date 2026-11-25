@@ -1,3 +1,5 @@
+import { createSignal } from "solid-js"
+
 // Collaborative identity storage.
 //
 // Two modes:
@@ -46,4 +48,30 @@ export function clearActor(sessionID: string, userID?: string) {
   } catch {
     // ignore
   }
+}
+
+const [autoState, setAutoState] = createSignal<Record<string, boolean>>({})
+
+export function loadAutoConsent(userID?: string) {
+  return autoState()[userID ?? ""] ?? false
+}
+
+export function saveAutoConsent(value: boolean, userID?: string) {
+  setAutoState((prev) => ({ ...prev, [userID ?? ""]: value }))
+}
+
+let autoSeq = 0
+
+export function toggleAutoConsent(userID: string | undefined, send: (next: boolean) => Promise<boolean>) {
+  const next = !loadAutoConsent(userID)
+  const seq = ++autoSeq
+  saveAutoConsent(next, userID)
+  return send(next).then(
+    (value) => {
+      if (seq === autoSeq) saveAutoConsent(value, userID)
+    },
+    () => {
+      if (seq === autoSeq) saveAutoConsent(!next, userID)
+    },
+  )
 }

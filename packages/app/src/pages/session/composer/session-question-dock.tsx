@@ -22,8 +22,9 @@ import { useSync } from "@/context/sync"
 import { useParentParams } from "@/context/parent-params"
 import { useClientEnv } from "@/context/client-env"
 import { label } from "@/components/blocksuite/actor"
-import { loadActor, saveActor } from "@/components/prompt-input/doc-actor"
+import { loadActor, loadAutoConsent, saveActor, saveAutoConsent } from "@/components/prompt-input/doc-actor"
 import { DialogDocSubmit, type DocSubmitKind } from "@/components/doc-submit/dialog-doc-submit"
+import { questionConsensus } from "./question-consensus"
 import {
   connectQuestionDraft,
   connectQuestionSubmit,
@@ -199,6 +200,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
       selection: mine[tab()] ?? [],
       // Repurposed: "this participant currently has the custom option selected".
       customFocused: myCustomOn[tab()] === true,
+      autoConsent: loadAutoConsent(parentParams.user[0]?.id),
     })
   }
   createEffect(() => {
@@ -206,6 +208,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     tab()
     void mine[tab()]
     void myCustomOn[tab()]
+    loadAutoConsent(parentParams.user[0]?.id)
     broadcastPresence()
   })
   // Navigation is group-synced: follow the shared step the moment the server broadcasts a change.
@@ -364,30 +367,19 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   // (non-empty) answer. Order-independent compare covers both single- and multi-select. Solo ⇒
   // simply "I answered". My own latest pick (`mine`) is used directly so the gate doesn't lag a
   // presence round-trip.
-  const selectionKey = (selection: string[]) => [...selection].sort().join("\u0000")
   const mineEffective = () => effective(tab(), mine[tab()] ?? [], on())
   const consentRequired = () => sync.data.env.consentRequired !== false
-  const consensus = createMemo(() => {
-    if (!consentRequired()) return mineEffective().length > 0
-    const self = actor()?.actorID
-    const here = presence().filter((item) => item.qIndex === tab())
-    // A participant who selected the custom option but left the (shared) text empty has an INCOMPLETE
-    // selection — visually marked as selected but not yet a real answer. Since the text is shared, an
-    // empty text means EVERY custom-on participant is incomplete, so the gate can never be unanimous:
-    // block until text is entered or custom is deselected.
-    const customText = (draft.custom[tab()] ?? "").trim()
-    const customOn = here.map((item) => (item.actorID === self ? on() : item.customFocused))
-    if (self && !here.some((item) => item.actorID === self)) customOn.push(on())
-    if (!customText && customOn.some(Boolean)) return false
-    const selections = here.map((item) =>
-      item.actorID === self ? mineEffective() : effective(tab(), item.selection, item.customFocused),
-    )
-    if (self && !here.some((item) => item.actorID === self)) selections.push(mineEffective())
-    if (selections.length === 0) return false
-    const keys = selections.map(selectionKey)
-    if (keys.some((key) => key === "")) return false
-    return keys.every((key) => key === keys[0])
-  })
+  const consensus = createMemo(() =>
+    questionConsensus({
+      consentRequired: consentRequired(),
+      self: actor()?.actorID,
+      tab: tab(),
+      presence: presence(),
+      mine: mineEffective(),
+      mineCustomOn: on(),
+      customText: draft.custom[tab()] ?? "",
+    }),
+  )
 
   // ── Consent (send / dismiss) ────────────────────────────────────────────────────────────────
   const [approval, setApproval] = createSignal<DocSubmitState>()
@@ -694,6 +686,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     }
     if (disposed || !a) return
     saveActor(sessionID, a.actorID, user?.id)
+    saveAutoConsent(a.autoConsent === true, user?.id)
     setActor({ actorID: a.actorID, name: label(a.actorID, a.name), color: a.color })
 
     channel = connectQuestionDraft({
