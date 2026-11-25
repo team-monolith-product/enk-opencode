@@ -34,7 +34,14 @@ const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 
 let requests: { url: string; method: string; body: any; auth?: string }[] = []
 const originalFetch = globalThis.fetch
-const ENV_KEYS = ["OPENAI_BASE_URL", "OPENAI_API_KEY", "ENK_HACKATHON_RAILS_URL", "ENK_AI_USAGE_TOKEN"]
+const ENV_KEYS = [
+  "OPENAI_BASE_URL",
+  "OPENAI_API_KEY",
+  "ENK_HACKATHON_RAILS_URL",
+  "ENK_AI_USAGE_TOKEN",
+  "ENK_IMAGE_GENERATION_MODEL",
+  "ENK_IMAGE_GENERATION_QUALITY",
+]
 const originalEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]))
 
 function mockFetch(respond: (url: string, method: string) => Response) {
@@ -105,9 +112,9 @@ describe("tool.generate_image", () => {
     expect(requests[0].url).toBe("http://proxy/openai/v1/images/generations")
     expect(requests[0].auth).toBe("Bearer proxy-auth")
     expect(requests[0].body).toMatchObject({
-      model: "gpt-image-1-mini",
+      model: "gpt-image-2.5-flare",
       size: "1024x1024",
-      quality: "medium",
+      quality: "low",
       background: "auto",
       output_format: "png",
       n: 1,
@@ -120,6 +127,15 @@ describe("tool.generate_image", () => {
       mime: "image/png",
       bytes: PNG.length,
     })
+  })
+
+  test("uses the image model and quality the hackathon picked", async () => {
+    process.env["ENK_IMAGE_GENERATION_MODEL"] = "gpt-image-2.5-sunburst"
+    process.env["ENK_IMAGE_GENERATION_QUALITY"] = "medium"
+    mockFetch(() => new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] })))
+    const { result } = await run({ prompt: "sky", name: "bg", quality: "low" })
+    expect(requests[0].body).toMatchObject({ model: "gpt-image-2.5-sunburst", quality: "medium" })
+    expect(result.metadata.quality).toBe("medium")
   })
 
   test("maps the format to output_format", async () => {
@@ -418,17 +434,21 @@ describe("tool.generate_image folder", () => {
 })
 
 describe("GenerateImage", () => {
-  test("cost follows gpt-image-1-mini token prices", () => {
+  test("cost follows gpt-image-2.5 token prices", () => {
     const cost = GenerateImage.cost({
       input_tokens: 1_000_000,
       input_tokens_details: { text_tokens: 600_000, image_tokens: 400_000 },
       output_tokens: 1_000_000,
     })
-    expect(cost).toBeCloseTo(0.6 * 2 + 0.4 * 2.5 + 8)
+    expect(cost).toBeCloseTo(0.6 * 5 + 0.4 * 8 + 30)
+  })
+
+  test("cost uses the default model price for an unknown model", () => {
+    expect(GenerateImage.cost({ input_tokens: 0, output_tokens: 1_000_000 }, "gpt-image-9")).toBeCloseTo(30)
   })
 
   test("cost falls back to text tokens when details are missing", () => {
-    expect(GenerateImage.cost({ input_tokens: 1_000_000, output_tokens: 0 })).toBeCloseTo(2)
+    expect(GenerateImage.cost({ input_tokens: 1_000_000, output_tokens: 0 })).toBeCloseTo(5)
     expect(GenerateImage.cost(undefined)).toBe(0)
   })
 

@@ -300,6 +300,7 @@ const filetime = Layer.succeed(
     read: () => Effect.void,
     get: () => Effect.succeed(undefined),
     assert: () => Effect.void,
+    check: () => Effect.succeed({ status: "fresh" as const }),
     withLock: (_filepath, fn) => Effect.promise(fn),
   }),
 )
@@ -457,6 +458,46 @@ it.effect("loop exits immediately when last assistant has stop finish", () =>
         expect(yield* test.calls).toBe(0)
       }),
     { git: true },
+  ),
+)
+
+it.effect("loop exits for a completed parent turn with nonmonotonic message IDs", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { test, prompt, sessions, chat } = yield* boot()
+        const userID = MessageID.make("msg_z_user")
+        const assistantID = MessageID.make("msg_a_assistant")
+        yield* sessions.updateMessage({
+          id: userID,
+          role: "user",
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          time: { created: 100 },
+        })
+        yield* sessions.updateMessage({
+          id: assistantID,
+          role: "assistant",
+          parentID: userID,
+          sessionID: chat.id,
+          mode: "build",
+          agent: "build",
+          cost: 0,
+          path: { cwd: "/tmp", root: "/tmp" },
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: ref.modelID,
+          providerID: ref.providerID,
+          time: { created: 200, completed: 201 },
+          finish: "stop",
+        })
+
+        const result = yield* prompt.loop({ sessionID: chat.id })
+
+        expect(result.info.id).toBe(assistantID)
+        expect(yield* test.calls).toBe(0)
+      }),
+    { git: true, config: cfg },
   ),
 )
 
