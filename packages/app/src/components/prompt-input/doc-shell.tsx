@@ -45,6 +45,10 @@ type ShellProps = {
     enabled: boolean
     onToggle: () => void
   }
+  autoConsent?: {
+    enabled: boolean
+    onToggle: () => void
+  }
   imageToggle?: JSX.Element
 }
 
@@ -351,6 +355,26 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
                   <span class="oc-auto-thumb" />
                 </span>
                 <span class="oc-auto-label">{language.t("prompt.action.docAutoExpand")}</span>
+              </button>
+            </Tooltip>
+          </Show>
+          <Show when={props.autoConsent}>
+            <span class="mx-1 h-4 w-px shrink-0 bg-border-weaker-base" />
+            <Tooltip placement="top" value={language.t("prompt.action.docAutoConsentHint")}>
+              <button
+                type="button"
+                data-action="prompt-doc-auto-consent"
+                role="switch"
+                aria-checked={props.autoConsent!.enabled}
+                aria-label={language.t("prompt.action.docAutoConsent")}
+                class="oc-auto-toggle"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => props.autoConsent!.onToggle()}
+              >
+                <span class="oc-auto-track" classList={{ "is-on": props.autoConsent!.enabled }}>
+                  <span class="oc-auto-thumb" />
+                </span>
+                <span class="oc-auto-label">{language.t("prompt.action.docAutoConsent")}</span>
               </button>
             </Tooltip>
           </Show>

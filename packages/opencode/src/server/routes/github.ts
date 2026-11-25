@@ -3,6 +3,8 @@ import { describeRoute, validator } from "hono-openapi"
 import { failures, ok } from "../enk-responses"
 import z from "zod"
 import { GitHub } from "../../enk/github"
+import { HistorySync } from "../../enk/history-sync"
+import { SessionID } from "../../session/schema"
 import { Locale } from "../../enk/locale"
 import { Instance } from "../../project/instance"
 import { lazy } from "../../util/lazy"
@@ -12,11 +14,13 @@ const Repo = z.object({
   name: z.string(),
   url: z.string(),
   private: z.boolean().optional(),
+  pushedAt: z.string().optional(),
 })
 const Status = z
   .object({
     enabled: z.boolean(),
     connectUrl: z.string().optional(),
+    manageUrl: z.string().optional(),
     login: z.string().optional(),
     linkedBy: z.string().optional(),
     app: z.boolean().optional(),
@@ -29,9 +33,23 @@ const Status = z
         reason: z.string(),
       })
       .optional(),
+    conflict: z
+      .object({
+        branch: z.string(),
+        target: z.string(),
+        files: z.array(z.string()),
+        resolving: z.boolean(),
+        linking: z.boolean().optional(),
+        queued: z.enum(["ours", "theirs", "ai"]).optional(),
+        compare: z.string().optional(),
+      })
+      .optional(),
   })
   .meta({ ref: "GitHubStatus" })
 const Pushed = Status.extend({ pushed: z.boolean() }).meta({ ref: "GitHubPushed" })
+const Merged = Status.extend({ files: z.array(z.string()), kept: z.array(z.string()) }).meta({
+  ref: "GitHubMerged",
+})
 const Repositories = z.object({ repositories: z.array(Repo) }).meta({ ref: "GitHubRepositories" })
 const RepoName = z
   .string()
@@ -95,6 +113,24 @@ export const GitHubRoutes = lazy(() =>
       async (c) => c.json(await alerting(c, () => GitHub.create(Instance.directory, c.req.valid("json")))),
     )
     .post(
+      "/resolve",
+      describeRoute({
+        summary: "Line up files that overlap with GitHub",
+        description:
+          "Keep one side only where the project and GitHub changed the same place, keeping every other change from both sides, then push. If another conversation is answering, the choice waits until everyone is idle.",
+        operationId: "github.resolve",
+        responses: { ...ok("Link status and whether a commit was pushed", Pushed), ...failures(404, 409, 422, 502) },
+      }),
+      validator("json", z.object({ prefer: z.enum(["ours", "theirs"]), locale: Locale.Schema.optional() })),
+      async (c) => {
+        const input = c.req.valid("json")
+        const result = await alerting(c, () =>
+          HistorySync.choose({ dir: Instance.directory, choice: input.prefer, locale: input.locale }),
+        )
+        return c.json({ ...(await GitHub.status(Instance.directory)), pushed: !!result.pushed })
+      },
+    )
+    .post(
       "/push",
       describeRoute({
         summary: "Push to GitHub now",
@@ -105,5 +141,28 @@ export const GitHubRoutes = lazy(() =>
       }),
       validator("json", z.object({ locale: Locale.Schema.optional() })),
       async (c) => c.json(await alerting(c, () => GitHub.manual(Instance.directory, c.req.valid("json").locale))),
+    )
+    .post(
+      "/merge",
+      describeRoute({
+        summary: "Merge GitHub changes with AI",
+        description:
+          "Bring changes made separately on GitHub into the workspace, leave conflict markers where both sides changed the same place, and ask the AI in the given session to resolve them.",
+        operationId: "github.merge",
+        responses: { ...ok("Link status and the files handed to the AI", Merged), ...failures(404, 409, 422, 502) },
+      }),
+      validator("json", z.object({ sessionID: SessionID.zod, locale: Locale.Schema.optional() })),
+      async (c) => {
+        const input = c.req.valid("json")
+        const result = await alerting(c, () =>
+          HistorySync.choose({
+            dir: Instance.directory,
+            choice: "ai",
+            sessionID: input.sessionID,
+            locale: input.locale,
+          }),
+        )
+        return c.json({ ...(await GitHub.status(Instance.directory)), files: [], kept: [], ...result.merged })
+      },
     ),
 )

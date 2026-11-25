@@ -1,4 +1,4 @@
-import { DateTime, Effect, Layer, Option, Semaphore, ServiceMap } from "effect"
+import { DateTime, Effect, Layer, Option, Semaphore, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 import { AppFileSystem } from "@/filesystem"
@@ -13,6 +13,24 @@ export namespace FileTime {
     readonly read: Date
     readonly mtime: number | undefined
     readonly size: number | undefined
+    readonly content?: string
+  }
+
+  export type Seen =
+    | { readonly status: "unread" }
+    | { readonly status: "fresh" }
+    | { readonly status: "changed"; readonly base: string | undefined }
+
+  const MAX_BASE_BYTES = 512 * 1024
+  const MAX_SESSION_BASE_BYTES = 8 * 1024 * 1024
+
+  function trim(seen: Map<string, Stamp>) {
+    let total = 0
+    for (const [file, value] of [...seen].reverse()) {
+      if (value.content === undefined) continue
+      total += value.content.length
+      if (total > MAX_SESSION_BASE_BYTES) seen.set(file, { ...value, content: undefined })
+    }
   }
 
   const session = (reads: Map<SessionID, Map<string, Stamp>>, sessionID: SessionID) => {
@@ -33,10 +51,11 @@ export namespace FileTime {
     readonly read: (sessionID: SessionID, file: string) => Effect.Effect<void>
     readonly get: (sessionID: SessionID, file: string) => Effect.Effect<Date | undefined>
     readonly assert: (sessionID: SessionID, filepath: string) => Effect.Effect<void>
+    readonly check: (sessionID: SessionID, filepath: string) => Effect.Effect<Seen>
     readonly withLock: <T>(filepath: string, fn: () => Promise<T>) => Effect.Effect<T>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/FileTime") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/FileTime") {}
 
   export const layer = Layer.effect(
     Service,
@@ -44,12 +63,19 @@ export namespace FileTime {
       const fsys = yield* AppFileSystem.Service
       const disableCheck = yield* Flag.OPENCODE_DISABLE_FILETIME_CHECK
 
-      const stamp = Effect.fnUntraced(function* (file: string) {
+      const stamp = Effect.fnUntraced(function* (file: string, keep = false) {
+        const before = keep ? yield* fsys.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined))) : undefined
+        const content =
+          before && Number(before.size) <= MAX_BASE_BYTES
+            ? yield* fsys.readFileString(file).pipe(Effect.catch(() => Effect.succeed(undefined)))
+            : undefined
         const info = yield* fsys.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        const size = info ? Number(info.size) : undefined
         return {
           read: yield* DateTime.nowAsDate,
           mtime: info ? Option.getOrUndefined(info.mtime)?.getTime() : undefined,
-          size: info ? Number(info.size) : undefined,
+          size,
+          content: content === undefined || content.includes("\0") ? undefined : content,
         }
       })
       const state = yield* InstanceState.make<State>(
@@ -74,7 +100,11 @@ export namespace FileTime {
       const read = Effect.fn("FileTime.read")(function* (sessionID: SessionID, file: string) {
         const reads = (yield* InstanceState.get(state)).reads
         log.info("read", { sessionID, file })
-        session(reads, sessionID).set(file, yield* stamp(file))
+        const value = yield* stamp(file, true)
+        const seen = session(reads, sessionID)
+        seen.delete(file)
+        seen.set(file, value)
+        trim(seen)
       })
 
       const get = Effect.fn("FileTime.get")(function* (sessionID: SessionID, file: string) {
@@ -98,11 +128,20 @@ export namespace FileTime {
         )
       })
 
+      const check = Effect.fn("FileTime.check")(function* (sessionID: SessionID, filepath: string) {
+        const time = (yield* InstanceState.get(state)).reads.get(sessionID)?.get(filepath)
+        if (!time) return { status: "unread" } as Seen
+        if (disableCheck) return { status: "fresh" } as Seen
+        const next = yield* stamp(filepath)
+        if (next.mtime === time.mtime && next.size === time.size) return { status: "fresh" } as Seen
+        return { status: "changed", base: time.content } as Seen
+      })
+
       const withLock = Effect.fn("FileTime.withLock")(function* <T>(filepath: string, fn: () => Promise<T>) {
         return yield* Effect.promise(fn).pipe((yield* getLock(filepath)).withPermits(1))
       })
 
-      return Service.of({ read, get, assert, withLock })
+      return Service.of({ read, get, assert, check, withLock })
     }),
   ).pipe(Layer.orDie)
 
@@ -122,7 +161,17 @@ export namespace FileTime {
     return runPromise((s) => s.assert(sessionID, filepath))
   }
 
+  export function check(sessionID: SessionID, filepath: string) {
+    return runPromise((s) => s.check(sessionID, filepath))
+  }
+
   export async function withLock<T>(filepath: string, fn: () => Promise<T>): Promise<T> {
     return runPromise((s) => s.withLock(filepath, fn))
+  }
+
+  export function withLocks<T>(filepaths: string[], fn: () => Promise<T>): Promise<T> {
+    const [head, ...rest] = [...new Set(filepaths)].sort()
+    if (!head) return fn()
+    return withLock(head, () => withLocks(rest, fn))
   }
 }

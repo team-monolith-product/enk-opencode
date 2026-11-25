@@ -1873,6 +1873,8 @@ export type Env = {
   environment?: string
   aiModel?: string
   aiModelVariant?: string
+  consentRequired?: boolean
+  sessionLimit?: number
 }
 
 export type EnvFileKeys = {
@@ -1924,6 +1926,7 @@ export type DevServerLogs = {
 export type GitHubStatus = {
   enabled: boolean
   connectUrl?: string
+  manageUrl?: string
   login?: string
   linkedBy?: string
   app?: boolean
@@ -2192,6 +2195,7 @@ export type SessionActor = {
   userID?: string
   name: string
   color: string
+  autoConsent?: boolean
 }
 
 export type PromptCycleInput = {
@@ -5641,6 +5645,7 @@ export type SessionActorUpsertData = {
     userID?: string
     name?: string
     color?: string
+    autoConsent?: boolean
   }
   path: {
     sessionID: string

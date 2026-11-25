@@ -33,6 +33,7 @@ import { ModelFallback } from "../enk/model-fallback"
 import { Locale } from "../enk/locale"
 import { HistoryNote } from "../enk/history-note"
 import { MemoryNote } from "../enk/memory-note"
+import { GitHub } from "../enk/github"
 import { SessionFallback } from "./fallback"
 import { ulid } from "ulid"
 import { spawn } from "child_process"
@@ -57,7 +58,7 @@ import { decodeDataUrlBytes } from "@/util/data-url"
 import { isAssetRef } from "@opencode-ai/util/attachment-ref"
 import { Process } from "@/util/process"
 import { Secret } from "@/util/secret"
-import { Cause, Effect, Exit, Layer, Option, Scope, ServiceMap } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Scope, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { makeRuntime } from "@/effect/run-service"
 
@@ -104,7 +105,7 @@ export namespace SessionPrompt {
     readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/SessionPrompt") {}
+  export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrompt") {}
 
   export const layer = Layer.effect(
     Service,
@@ -1658,25 +1659,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             let msgs = yield* Effect.promise(() => MessageV2.filterCompacted(MessageV2.stream(sessionID)))
 
-            let lastUser: MessageV2.User | undefined
-            let lastAssistant: MessageV2.Assistant | undefined
-            let lastFinished: MessageV2.Assistant | undefined
-            let tasks: (MessageV2.CompactionPart | MessageV2.SubtaskPart)[] = []
-            // filterCompacted orders msgs for the model, which puts a retained tail after the
-            // summary that replaced its predecessors. "Latest" has to follow the clock, not that
-            // order, so scan a chronological view; msgs itself stays as the model should read it.
-            const ordered = msgs.toSorted(
-              (a, b) => a.info.time.created - b.info.time.created || (a.info.id < b.info.id ? -1 : 1),
-            )
-            for (let i = ordered.length - 1; i >= 0; i--) {
-              const msg = ordered[i]
-              if (!lastUser && msg.info.role === "user") lastUser = msg.info
-              if (!lastAssistant && msg.info.role === "assistant") lastAssistant = msg.info
-              if (!lastFinished && msg.info.role === "assistant" && msg.info.finish) lastFinished = msg.info
-              if (lastUser && lastFinished) break
-              const task = msg.parts.filter((part) => part.type === "compaction" || part.type === "subtask")
-              if (task && !lastFinished) tasks.push(...task)
-            }
+            const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
 
             if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
             if (
@@ -1697,6 +1680,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
 
             step++
+            // 연결한 GitHub 저장소에서 따로 바뀐 내용을 모델이 파일을 읽기 전에 작업 폴더로 가져온다.
+            if (step === 1)
+              yield* Effect.promise(() =>
+                GitHub.pull(session.directory, { locale: lastUser!.locale, except: sessionID }).catch(() => undefined),
+              )
             if (step === 1)
               yield* title({
                 session,
@@ -1920,7 +1908,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       // 모델을 부르지 않는 작업(되돌리기 등)을 셸 명령과 같은 자리에서 돌린다. 도는 동안 세션은 바쁨으로 보이고, 그
       // 사이 들어온 프롬프트는 끝난 뒤 이어서 돈다. 이미 답이 도는 중이면 BusyError. 셸 결과 자리는 러너도 호출자도
       // 읽지 않아 빈 값을 둔다.
-      const exclusive = Effect.fn("SessionPrompt.exclusive")(function* (sessionID: SessionID, work: () => Promise<void>) {
+      const exclusive = Effect.fn("SessionPrompt.exclusive")(function* (
+        sessionID: SessionID,
+        work: () => Promise<void>,
+      ) {
         const s = yield* InstanceState.get(cache)
         const runner = getRunner(s.runners, sessionID)
         yield* runner.startShell(() => Effect.promise(work).pipe(Effect.as(undefined as never)))
