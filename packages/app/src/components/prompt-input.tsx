@@ -46,6 +46,7 @@ import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useClientEnv } from "@/context/client-env"
 import { useParentParams } from "@/context/parent-params"
+import { loadAutoConsent, toggleAutoConsent } from "@/components/prompt-input/doc-actor"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createOpenDiffTab, createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
@@ -567,6 +568,19 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const parentParams = useParentParams()
   // `?readonly=true` makes this client a pure observer (captured once at module load, so it is stable).
   const readonly = parentParams.readonly
+
+  const consentRequired = () => sync.data.env.consentRequired !== false
+  const autoConsent = () => loadAutoConsent(parentParams.user[0]?.id)
+  const switchAutoConsent = () => {
+    const sessionID = params.id
+    const actorID = doc.actorID()
+    if (!sessionID || !actorID) return
+    void toggleAutoConsent(parentParams.user[0]?.id, (next) =>
+      sdk.client.session.actor
+        .upsert({ sessionID, directory: sdk.directory, actorID, autoConsent: next })
+        .then((res) => res.data?.autoConsent === true),
+    )
+  }
 
   const bridge = usePromptDocBridge()
   createEffect(() => {
@@ -2285,6 +2299,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               clearDisabled={session.votePending()}
               expand={composerExpand()}
               autoExpand={{ enabled: autoExpand(), onToggle: toggleAutoExpand }}
+              autoConsent={
+                !readonly && consentRequired() ? { enabled: autoConsent(), onToggle: switchAutoConsent } : undefined
+              }
             />
           </Show>
 
