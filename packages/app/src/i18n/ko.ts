@@ -460,6 +460,8 @@ export const dict = {
   "prompt.action.collapseView": "작게 보기",
   "prompt.action.docAutoExpand": "자동 확대",
   "prompt.action.docAutoExpandHint": "켜면 입력창을 클릭할 때 자동으로 커져요",
+  "prompt.action.docAutoConsent": "자동 동의",
+  "prompt.action.docAutoConsentHint": "켜면 팀원의 전송·답변·중지 요청에 내가 바로 동의해요. 초기화·되돌리기는 직접 동의해야 해요",
   "prompt.toast.pasteUnsupported.title": "지원되지 않는 첨부 파일",
   "prompt.toast.pasteUnsupported.description": "이미지, PDF 또는 텍스트 파일만 첨부할 수 있습니다.",
   "prompt.toast.fileTooLarge.title": "파일이 너무 큼",

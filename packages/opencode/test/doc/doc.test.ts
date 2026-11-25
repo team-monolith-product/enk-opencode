@@ -574,6 +574,125 @@ describe("doc", () => {
     }
   })
 
+  test("auto-consent members start approved and an all-auto team sends at once", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob", autoConsent: true })
+        const carol = Doc.actorUpsert({ sessionID: session.id, name: "Carol" })
+        expect(bob.autoConsent).toBe(true)
+        expect(Doc.actorList(session.id).find((item) => item.actorID === bob.actorID)?.autoConsent).toBe(true)
+
+        const stops = [bob, carol].map((actor) =>
+          Doc.submitConnect({ sessionID: session.id, docID, actorID: actor.actorID, peer: { send: () => undefined } }),
+        )
+
+        const state = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, prompt })
+        const status = (id: string) => state.actors.find((actor) => actor.actorID === id)?.status
+        expect(state.status).toBe("pending")
+        expect(status(alice.actorID)).toBe("approved")
+        expect(status(bob.actorID)).toBe("approved")
+        expect(status(carol.actorID)).toBe("pending")
+
+        Doc.submitRespond({ sessionID: session.id, submitID: state.submitID, actorID: carol.actorID, action: "cancel" })
+        Doc.actorUpsert({ sessionID: session.id, actorID: carol.actorID, autoConsent: true })
+
+        const sent = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, prompt })
+        expect(sent.status).toBe("sent")
+
+        stops.forEach((stop) => stop())
+      },
+    })
+  })
+
+  test("turning auto-consent on approves a pending vote, but never a clear vote", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob", autoConsent: true })
+        const stop = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+
+        const clear = Doc.clearSubmitCreate({ sessionID: session.id, docID, actorID: alice.actorID })
+        expect(clear.status).toBe("pending")
+        expect(clear.actors.find((actor) => actor.actorID === bob.actorID)?.status).toBe("pending")
+        Doc.submitRespond({ sessionID: session.id, submitID: clear.submitID, actorID: bob.actorID, action: "cancel" })
+
+        Doc.actorUpsert({ sessionID: session.id, actorID: bob.actorID, autoConsent: false })
+        const vote = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, prompt })
+        expect(vote.status).toBe("pending")
+
+        const seen: Doc.SubmitEvent[] = []
+        const stopAlice = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: alice.actorID,
+          peer: { send: (data) => seen.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        Doc.actorUpsert({ sessionID: session.id, actorID: bob.actorID, autoConsent: true })
+        expect(seen.some((event) => event.type === "sent" && event.state.submitID === vote.submitID)).toBe(true)
+
+        stopAlice()
+        stop()
+      },
+    })
+  })
+
+  test("an auto-consent member who joins a pending vote joins approved", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      init: InstanceBootstrap,
+      fn: async () => {
+        await Project.fromDirectory(tmp.path)
+        const session = await Session.create({})
+        const { docID } = Doc.prompt(session.id)
+        const alice = Doc.actorUpsert({ sessionID: session.id, name: "Alice" })
+        const bob = Doc.actorUpsert({ sessionID: session.id, name: "Bob" })
+        const carol = Doc.actorUpsert({ sessionID: session.id, name: "Carol", autoConsent: true })
+        const stopBob = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: bob.actorID,
+          peer: { send: () => undefined },
+        })
+
+        const vote = Doc.submitCreate({ sessionID: session.id, docID, actorID: alice.actorID, prompt })
+        expect(vote.status).toBe("pending")
+
+        const seen: Doc.SubmitEvent[] = []
+        const stopCarol = Doc.submitConnect({
+          sessionID: session.id,
+          docID,
+          actorID: carol.actorID,
+          peer: { send: (data) => seen.push(JSON.parse(data) as Doc.SubmitEvent) },
+        })
+        const joined = seen.find((event) => event.state.submitID === vote.submitID)?.state
+        expect(joined?.status).toBe("pending")
+        expect(joined?.actors.find((actor) => actor.actorID === carol.actorID)?.status).toBe("approved")
+
+        stopCarol()
+        stopBob()
+      },
+    })
+  })
+
   test("observer receives casts but is never a target", async () => {
     await using tmp = await tmpdir()
     await Instance.provide({

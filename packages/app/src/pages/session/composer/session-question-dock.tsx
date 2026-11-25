@@ -22,7 +22,7 @@ import { useSync } from "@/context/sync"
 import { useParentParams } from "@/context/parent-params"
 import { useClientEnv } from "@/context/client-env"
 import { label } from "@/components/blocksuite/actor"
-import { loadActor, saveActor } from "@/components/prompt-input/doc-actor"
+import { loadActor, loadAutoConsent, saveActor } from "@/components/prompt-input/doc-actor"
 import { DialogDocSubmit, type DocSubmitKind } from "@/components/doc-submit/dialog-doc-submit"
 import {
   connectQuestionDraft,
@@ -199,6 +199,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
       selection: mine[tab()] ?? [],
       // Repurposed: "this participant currently has the custom option selected".
       customFocused: myCustomOn[tab()] === true,
+      autoConsent: loadAutoConsent(parentParams.user[0]?.id),
     })
   }
   createEffect(() => {
@@ -206,6 +207,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     tab()
     void mine[tab()]
     void myCustomOn[tab()]
+    loadAutoConsent(parentParams.user[0]?.id)
     broadcastPresence()
   })
   // Navigation is group-synced: follow the shared step the moment the server broadcasts a change.
@@ -370,7 +372,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const consensus = createMemo(() => {
     if (!consentRequired()) return mineEffective().length > 0
     const self = actor()?.actorID
-    const here = presence().filter((item) => item.qIndex === tab())
+    const here = presence().filter((item) => item.qIndex === tab() && (item.actorID === self || !item.autoConsent))
     // A participant who selected the custom option but left the (shared) text empty has an INCOMPLETE
     // selection — visually marked as selected but not yet a real answer. Since the text is shared, an
     // empty text means EVERY custom-on participant is incomplete, so the gate can never be unanimous:
@@ -683,6 +685,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
           ...(stored ? { actorID: stored } : {}),
           ...(user ? { userID: user.id, name: user.name } : {}),
           ...(user?.color ? { color: user.color } : {}),
+          autoConsent: loadAutoConsent(user?.id),
         })
         a = res.data
         if (a) break

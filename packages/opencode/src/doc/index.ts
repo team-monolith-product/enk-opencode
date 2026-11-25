@@ -88,6 +88,7 @@ export namespace Doc {
       userID: z.string().optional(),
       name: z.string(),
       color: z.string(),
+      autoConsent: z.boolean().optional(),
     })
     .meta({ ref: "SessionActor" })
   export type ActorInfo = z.infer<typeof ActorInfo>
@@ -1091,7 +1092,7 @@ export namespace Doc {
    * 때문이다(create 의 팀 단위 검사). 중지는 대화마다 자기 AI 를 멈추는 것이라, 남았는지는 그 대화의 실행으로 판단한다.
    */
   function closeStaleStops(sessionID: SessionID) {
-    const stale = pendingRows(teamRoute(sessionID))
+    const stale = teamPending(teamRoute(sessionID))
       .filter((row) => row.target_kind === "stop")
       .filter((row) => !running().has(row.session_id) && !settling.has(row.session_id))
       .map((row) => expire(row))
@@ -1262,6 +1263,23 @@ export namespace Doc {
     })
   }
 
+  function autoKind(kind: string) {
+    return kind === "doc" || kind === "question" || kind === "stop"
+  }
+
+  function autoActors(ids: ActorID[]) {
+    if (ids.length === 0) return new Set<ActorID>()
+    return new Set(
+      Database.use((db) =>
+        db
+          .select({ actorID: SessionActorTable.actor_id })
+          .from(SessionActorTable)
+          .where(and(inArray(SessionActorTable.actor_id, ids), eq(SessionActorTable.auto_consent, true)))
+          .all(),
+      ).map((row) => row.actorID),
+    )
+  }
+
   function targets(route: string, actorID: ActorID) {
     // Connected submit peers are the single source of truth for the initial member set (same set as
     // cast()/leave()). Membership is dynamic from here on — join() adds anyone who connects during a
@@ -1323,6 +1341,8 @@ export namespace Doc {
     const ids = idleStop
       ? [input.actorID]
       : targets(routeOf(input.sessionID, input.targetKind, input.targetID), input.actorID)
+    const auto = autoKind(input.targetKind) ? autoActors(ids) : new Set<ActorID>()
+    const approved = (id: ActorID) => id === input.actorID || auto.has(id)
     const timeout = clamp(input.timeoutMs)
     const now = Date.now()
     const build = () =>
@@ -1334,7 +1354,7 @@ export namespace Doc {
           target_id: input.targetID,
           doc_id: input.docID,
           actor_id: input.actorID,
-          status: ids.length <= 1 ? "sent" : "pending",
+          status: ids.every(approved) ? "sent" : "pending",
           prompt: input.promptBlob,
           timeout_ms: timeout,
           expires_at: now + timeout,
@@ -1352,8 +1372,8 @@ export namespace Doc {
               submit_id: submit.id,
               actor_id: actor.actorID,
               name: actor.name,
-              status: actor.actorID === input.actorID ? "approved" : "pending",
-              time_responded: actor.actorID === input.actorID ? now : null,
+              status: approved(actor.actorID) ? "approved" : "pending",
+              time_responded: approved(actor.actorID) ? now : null,
             })),
           )
           .run()
@@ -1631,6 +1651,7 @@ export namespace Doc {
         state = read(extend(next))
         cast("updated", state)
       }
+      const auto = !existing && autoKind(next.target_kind) && autoActors([actorID]).has(actorID)
       if (!existing) {
         Database.use((db) =>
           db
@@ -1639,8 +1660,8 @@ export namespace Doc {
               submit_id: next.id,
               actor_id: actorID,
               name: actorNames(next.session_id, [actorID])[0]!.name,
-              status: "pending",
-              time_responded: null,
+              status: auto ? "approved" : "pending",
+              time_responded: auto ? Date.now() : null,
             })
             .onConflictDoNothing()
             .run(),
@@ -1648,7 +1669,7 @@ export namespace Doc {
         state = read(extend(next))
         cast("updated", state)
       }
-      if (existing?.status === "approved") {
+      if (existing?.status === "approved" || auto) {
         // 동의한 채 잠깐 끊겼던 사람이 돌아와 남은 전원이 접속·동의 상태가 되면 그때 보낸다.
         const after = evaluate(next)
         if (after?.status !== "pending") continue
@@ -1931,6 +1952,7 @@ export namespace Doc {
       qIndex: z.number(),
       selection: z.array(z.string()),
       customFocused: z.boolean(),
+      autoConsent: z.boolean().optional(),
     })
     .meta({ ref: "QuestionPresenceEntry" })
   export type QuestionPresenceEntry = z.infer<typeof QuestionPresenceEntry>
@@ -2314,6 +2336,7 @@ export namespace Doc {
       userID: z.string().optional(),
       name: z.string().optional(),
       color: z.string().optional(),
+      autoConsent: z.boolean().optional(),
     }),
     (input) => {
       Session.get(input.sessionID)
@@ -2354,6 +2377,7 @@ export namespace Doc {
         user_id: input.userID ?? existing?.user_id ?? null,
         name,
         color: pickColor(input.sessionID, actorID, existing?.color, input.color),
+        auto_consent: input.autoConsent ?? existing?.auto_consent ?? false,
         time_seen: Date.now(),
       }
 
@@ -2370,11 +2394,14 @@ export namespace Doc {
               user_id: row.user_id,
               name: row.name,
               color: row.color,
+              auto_consent: row.auto_consent,
               time_seen: row.time_seen,
             },
           })
           .run(),
       )
+
+      if (row.auto_consent && !existing?.auto_consent) autoApprove(actorID)
 
       return {
         actorID,
@@ -2382,6 +2409,7 @@ export namespace Doc {
         userID: row.user_id ?? undefined,
         name: row.name,
         color: row.color,
+        autoConsent: row.auto_consent,
       }
     },
   )
@@ -2396,6 +2424,35 @@ export namespace Doc {
       userID: row.user_id ?? undefined,
       name: row.name,
       color: row.color,
+      autoConsent: row.auto_consent,
     }))
   })
+
+  function autoApprove(actorID: ActorID) {
+    const rows = Database.use((db) =>
+      db.select().from(DocSubmitTable).where(eq(DocSubmitTable.status, "pending")).all(),
+    )
+    for (const row of rows) {
+      if (!autoKind(row.target_kind)) continue
+      const next = expire(row)
+      if (next.status !== "pending") continue
+      const updated = Database.use((db) =>
+        db
+          .update(DocSubmitActorTable)
+          .set({ status: "approved", time_responded: Date.now() })
+          .where(
+            and(
+              eq(DocSubmitActorTable.submit_id, next.id),
+              eq(DocSubmitActorTable.actor_id, actorID),
+              eq(DocSubmitActorTable.status, "pending"),
+            ),
+          )
+          .returning()
+          .get(),
+      )
+      if (!updated) continue
+      const state = evaluate(next)
+      if (state?.status === "pending") cast("updated", state)
+    }
+  }
 }
