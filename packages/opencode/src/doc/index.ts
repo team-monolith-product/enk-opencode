@@ -1639,19 +1639,20 @@ export namespace Doc {
       if (!timers.has(next.id)) schedule(next)
       let state = read(next)
       const existing = state.actors.find((actor) => actor.actorID === actorID)
+      const auto =
+        (!existing || existing.status === "left") && autoKind(next.target_kind) && autoActors([actorID]).has(actorID)
       if (existing?.status === "left") {
         // 예전 규칙으로 "나감" 표시가 남은 사람이 돌아오면 다시 대기로 묻는다.
         Database.use((db) =>
           db
             .update(DocSubmitActorTable)
-            .set({ status: "pending", time_responded: null })
+            .set({ status: auto ? "approved" : "pending", time_responded: auto ? Date.now() : null })
             .where(and(eq(DocSubmitActorTable.submit_id, next.id), eq(DocSubmitActorTable.actor_id, actorID)))
             .run(),
         )
         state = read(extend(next))
         cast("updated", state)
       }
-      const auto = !existing && autoKind(next.target_kind) && autoActors([actorID]).has(actorID)
       if (!existing) {
         Database.use((db) =>
           db
@@ -2401,7 +2402,14 @@ export namespace Doc {
           .run(),
       )
 
-      if (row.auto_consent && !existing?.auto_consent) autoApprove(actorID)
+      if (input.autoConsent !== undefined) {
+        const changed = [actorID, ...userActors(input.sessionID, row.user_id, actorID, row.auto_consent)]
+        if (row.auto_consent === (existing?.auto_consent ?? false)) changed.shift()
+        for (const id of changed) {
+          if (row.auto_consent) autoApprove(id)
+          else autoRevoke(id)
+        }
+      }
 
       return {
         actorID,
@@ -2427,6 +2435,65 @@ export namespace Doc {
       autoConsent: row.auto_consent,
     }))
   })
+
+  function userActors(sessionID: SessionID, userID: string | null, self: ActorID, value: boolean) {
+    if (!userID) return []
+    const directory = teamRoute(sessionID).slice(TEAM.length)
+    const sessions = Database.use((db) =>
+      db.select({ id: SessionTable.id }).from(SessionTable).where(eq(SessionTable.directory, directory)).all(),
+    ).map((item) => item.id)
+    if (sessions.length === 0) return []
+    const stale = Database.use((db) =>
+      db
+        .select({ actorID: SessionActorTable.actor_id })
+        .from(SessionActorTable)
+        .where(
+          and(
+            inArray(SessionActorTable.session_id, sessions),
+            eq(SessionActorTable.user_id, userID),
+            ne(SessionActorTable.actor_id, self),
+            ne(SessionActorTable.auto_consent, value),
+          ),
+        )
+        .all(),
+    ).map((item) => item.actorID)
+    if (stale.length === 0) return []
+    Database.use((db) =>
+      db
+        .update(SessionActorTable)
+        .set({ auto_consent: value })
+        .where(and(inArray(SessionActorTable.session_id, sessions), inArray(SessionActorTable.actor_id, stale)))
+        .run(),
+    )
+    return stale
+  }
+
+  function autoRevoke(actorID: ActorID) {
+    const rows = Database.use((db) =>
+      db.select().from(DocSubmitTable).where(eq(DocSubmitTable.status, "pending")).all(),
+    )
+    for (const row of rows) {
+      if (!autoKind(row.target_kind) || row.actor_id === actorID) continue
+      const next = expire(row)
+      if (next.status !== "pending") continue
+      const updated = Database.use((db) =>
+        db
+          .update(DocSubmitActorTable)
+          .set({ status: "pending", time_responded: null })
+          .where(
+            and(
+              eq(DocSubmitActorTable.submit_id, next.id),
+              eq(DocSubmitActorTable.actor_id, actorID),
+              eq(DocSubmitActorTable.status, "approved"),
+            ),
+          )
+          .returning()
+          .get(),
+      )
+      if (!updated) continue
+      cast("updated", read(next))
+    }
+  }
 
   function autoApprove(actorID: ActorID) {
     const rows = Database.use((db) =>
