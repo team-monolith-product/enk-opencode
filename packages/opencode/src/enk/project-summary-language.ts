@@ -5,12 +5,11 @@ export namespace ProjectSummaryLanguage {
     requested?: Locale.Value
     messages: ReadonlyArray<{ info: { role: string; locale?: Locale.Value } }>
   }): Locale.Value {
-    if (input.requested) return input.requested
-    for (let i = input.messages.length - 1; i >= 0; i--) {
-      const info = input.messages[i].info
-      if (info.role === "user" && info.locale) return info.locale
-    }
-    return Locale.DEFAULT
+    return (
+      input.requested ??
+      input.messages.findLast((m) => m.info.role === "user" && m.info.locale)?.info.locale ??
+      Locale.DEFAULT
+    )
   }
 
   const DIRECTIVE: Record<Locale.Value, string> = {

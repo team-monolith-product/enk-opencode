@@ -2,7 +2,7 @@ import { PostMessageManagerImpl } from "@team-monolith/post-message-manager"
 import { onCleanup, onMount } from "solid-js"
 import { currentLocale } from "@/context/language"
 import { parentLocale } from "@/context/parent-params"
-import { promptLocale } from "@/utils/prompt-locale"
+import { promptLocale, type PromptLocale } from "@/utils/prompt-locale"
 
 type Summary = {
   title: string
@@ -19,6 +19,10 @@ function currentSessionID(): string | undefined {
 
 const TIMEOUT_MS = 60_000
 
+export function summaryLocale(parent: PromptLocale | undefined, current: string): PromptLocale | undefined {
+  return parent ?? promptLocale(current)
+}
+
 export function ProjectSummaryBridge() {
   onMount(() => {
     const pmm = new PostMessageManagerImpl(TIMEOUT_MS)
@@ -33,7 +37,7 @@ export function ProjectSummaryBridge() {
           const res = await fetch(new URL("project-summary/generate", document.baseURI), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionID: sid, locale: parentLocale() ?? promptLocale(currentLocale()) }),
+            body: JSON.stringify({ sessionID: sid, locale: summaryLocale(parentLocale(), currentLocale()) }),
             signal: controller.signal,
           })
           if (!res.ok) return { status: "failed", error: `HTTP ${res.status}` }
