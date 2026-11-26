@@ -83,6 +83,7 @@ export const dict = {
   "envRequest.notice.docs": "Get the value from {{url}}",
   "envRequest.editing": "{{names}} is filling this in",
   "envRequest.readonly": "You are watching, so you cannot enter a value.",
+  "permission.readonly": "You are watching, so you cannot approve or deny this.",
   "envRequest.cancel": "Cancel",
   "envRequest.save": "Save securely",
   "envKeys.title": "Manage integrations",

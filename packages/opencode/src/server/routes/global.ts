@@ -13,6 +13,7 @@ import { lazy } from "../../util/lazy"
 import { Config } from "../../config/config"
 import { errors } from "../error"
 import { HubActivity } from "../hub-activity"
+import { Viewer } from "../viewer"
 
 const log = Log.create({ service: "server" })
 
@@ -197,7 +198,7 @@ export const GlobalRoutes = lazy(() =>
         },
       }),
       async (c) => {
-        return c.json(await Config.getGlobal())
+        return c.json(Viewer.redact(c.req.raw, await Config.getGlobal()))
       },
     )
     .patch(

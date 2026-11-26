@@ -22,6 +22,7 @@ import { shouldMarkBoundaryGesture, normalizeWheelDelta } from "@/pages/session/
 import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLanguage } from "@/context/language"
+import { readonlyViewer } from "@/context/parent-params"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { usePlatform } from "@/context/platform"
@@ -227,6 +228,7 @@ export function MessageTimeline(props: {
   const sync = useSync()
   const settings = useSettings()
   const dialog = useDialog()
+  const spectator = readonlyViewer()
   const language = useLanguage()
   const { params, sessionKey } = useSessionKey()
   const platform = usePlatform()
@@ -399,7 +401,7 @@ export function MessageTimeline(props: {
   )
 
   const openTitleEditor = () => {
-    if (!sessionID()) return
+    if (!sessionID() || spectator) return
     setTitle({ editing: true, draft: titleValue() ?? "" })
     requestAnimationFrame(() => {
       titleRef?.focus()
@@ -731,7 +733,7 @@ export function MessageTimeline(props: {
                       </Show>
                     </div>
                   </div>
-                  <Show when={sessionID()}>
+                  <Show when={!spectator && sessionID()}>
                     {(id) => (
                       <div class="shrink-0 flex items-center gap-3">
                         <SessionContextUsage placement="bottom" />
