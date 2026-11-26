@@ -1,6 +1,7 @@
 import { PostMessageManagerImpl } from "@team-monolith/post-message-manager"
 import { onCleanup, onMount } from "solid-js"
 import { currentLocale } from "@/context/language"
+import { parentLocale } from "@/context/parent-params"
 import { promptLocale } from "@/utils/prompt-locale"
 
 type Summary = {
@@ -32,7 +33,7 @@ export function ProjectSummaryBridge() {
           const res = await fetch(new URL("project-summary/generate", document.baseURI), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ sessionID: sid, locale: promptLocale(currentLocale()) }),
+            body: JSON.stringify({ sessionID: sid, locale: parentLocale() ?? promptLocale(currentLocale()) }),
             signal: controller.signal,
           })
           if (!res.ok) return { status: "failed", error: `HTTP ${res.status}` }
