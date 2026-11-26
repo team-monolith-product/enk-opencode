@@ -1248,15 +1248,13 @@
 /* C-3 composer 상단 리사이즈 핸들 — 디자인(.oc-resize-handle)은 카드 위로 떠 있지 않고 카드
    상단 안쪽에 위치. 기본은 -top-2.5(=−10px)로 카드 위에 떠 있어, top:0 으로 카드 상단에 맞춘다.
    -top-2.5 유틸리티를 이기기 위해 레이어 밖. composer 스타일과 동일하게 codle-session 스코프. */
-[data-component="codle-session"] [data-component="prompt-doc-resize-handle"],
-[data-component="codle-session"] [data-component="prompt-composer-resize-handle"] {
+[data-component="codle-session"] [data-component="prompt-doc-resize-handle"] {
   top: 0;
 }
 
 /* C-3 composer 리사이즈 핸들 (.oc-resize-handle 어휘) — hover/드래그 시 grab 바가 진해지며 넓어짐.
    유틸리티 클래스(w-18·bg-border-weaker-base 등)를 이기기 위해 레이어 밖에 둔다. */
-[data-component="prompt-doc-resize-handle"] > div,
-[data-component="prompt-composer-resize-handle"] > div {
+[data-component="prompt-doc-resize-handle"] > div {
   width: 72px;
   height: 2px;
   border-radius: var(--radius-pill);
@@ -1266,14 +1264,12 @@
     width var(--dur-fast) var(--ease-standard);
 }
 
-[data-component="prompt-doc-resize-handle"]:hover > div,
-[data-component="prompt-composer-resize-handle"]:hover > div {
+[data-component="prompt-doc-resize-handle"]:hover > div {
   background-color: var(--icon-base);
   width: 88px;
 }
 
-[data-component="prompt-doc-resize-handle"]:active > div,
-[data-component="prompt-composer-resize-handle"]:active > div {
+[data-component="prompt-doc-resize-handle"]:active > div {
   background-color: var(--text-strong);
   width: 96px;
 }
