@@ -458,8 +458,6 @@ export const dict = {
   "prompt.action.queue": "대기열에 추가",
   "prompt.action.expandView": "크게 보기",
   "prompt.action.collapseView": "작게 보기",
-  "prompt.action.docAutoExpand": "자동 확대",
-  "prompt.action.docAutoExpandHint": "켜면 입력창을 클릭할 때 자동으로 커져요",
   "prompt.action.docAutoConsent": "자동 동의",
   "prompt.action.docAutoConsentHint": "켜면 팀원의 전송·답변·중지 요청에 내가 바로 동의해요. 초기화·되돌리기는 직접 동의해야 해요",
   "prompt.toast.pasteUnsupported.title": "지원되지 않는 첨부 파일",
