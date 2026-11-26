@@ -7,6 +7,7 @@ import { ProjectTable } from "../project/project.sql"
 import { Log } from "../util/log"
 import * as CycleRecorder from "../doc/cycle-recorder"
 import { AiUsage } from "../enk/ai-usage"
+import { Cloning } from "./cloning"
 
 const log = Log.create({ service: "session.projector" })
 
@@ -101,6 +102,10 @@ export default [
       if (!foreign(err)) throw err
       log.warn("ignored late message update", { messageID: id, sessionID })
     }
+
+    // A message copied in by a fork is not a finished turn: skip usage recording and the rails
+    // turn-end marker (see Cloning).
+    if (Cloning.has(sessionID)) return
 
     // Record a prompt cycle when an assistant turn finishes (covers all prompt paths).
     try {
