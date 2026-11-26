@@ -396,6 +396,7 @@ export function createSessionPreview() {
     previewLogs,
     previewSrc,
     reload,
+    recheck: () => recheck(),
     restart,
     restarting,
     goHome,
