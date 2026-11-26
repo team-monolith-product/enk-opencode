@@ -1417,7 +1417,14 @@ describe("GitHub.create", () => {
     await using tmp = await tmpdir()
     await using _rails = serve({
       repositories: [
-        { owner: "octocat", name: "demo", url: "https://github.com/octocat/demo", private: true, pushable: true },
+        {
+          owner: "octocat",
+          name: "demo",
+          url: "https://github.com/octocat/demo",
+          private: true,
+          pushable: true,
+          pushed_at: "2026-11-20T09:00:00Z",
+        },
         { owner: "octocat", name: "blog", url: "https://github.com/octocat/blog", private: false, pushable: true },
       ],
     })
@@ -1425,7 +1432,13 @@ describe("GitHub.create", () => {
     const list = await GitHub.repositories(tmp.path)
 
     expect(list).toEqual([
-      { owner: "octocat", name: "demo", url: "https://github.com/octocat/demo", private: true },
+      {
+        owner: "octocat",
+        name: "demo",
+        url: "https://github.com/octocat/demo",
+        private: true,
+        pushedAt: "2026-11-20T09:00:00Z",
+      },
       { owner: "octocat", name: "blog", url: "https://github.com/octocat/blog", private: false },
     ])
   })
@@ -1648,6 +1661,38 @@ describe("GitHubRoutes", () => {
     const res = await request(tmp.path, "GET", "/")
 
     expect(await res.json()).toEqual({ enabled: false })
+  })
+
+  test("repositories carry the last push time so the picker can sort by recent", async () => {
+    await using tmp = await tmpdir()
+    await using _rails = serve({
+      repositories: [
+        {
+          owner: "octocat",
+          name: "recent",
+          url: "https://github.com/octocat/recent",
+          private: true,
+          pushed_at: "2026-11-20T09:00:00Z",
+        },
+        { owner: "octocat", name: "never", url: "https://github.com/octocat/never", private: false, pushed_at: null },
+      ],
+    })
+
+    const res = await request(tmp.path, "GET", "/repositories")
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      repositories: [
+        {
+          owner: "octocat",
+          name: "recent",
+          url: "https://github.com/octocat/recent",
+          private: true,
+          pushedAt: "2026-11-20T09:00:00Z",
+        },
+        { owner: "octocat", name: "never", url: "https://github.com/octocat/never", private: false },
+      ],
+    })
   })
 })
 

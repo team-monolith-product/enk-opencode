@@ -259,8 +259,6 @@ export const dict = {
   "prompt.action.send": "Envoyer",
   "prompt.action.stop": "Arrêter",
   "prompt.action.queue": "Add to queue",
-  "prompt.action.expandView": "View larger",
-  "prompt.action.collapseView": "Collapse",
   "prompt.toast.pasteUnsupported.title": "Pièce jointe non prise en charge",
   "prompt.toast.pasteUnsupported.description":
     "Seules les images, les PDF ou les fichiers texte peuvent être joints ici.",

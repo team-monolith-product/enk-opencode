@@ -1874,6 +1874,7 @@ export type Env = {
   aiModel?: string
   aiModelVariant?: string
   consentRequired?: boolean
+  sessionLimit?: number
 }
 
 export type EnvFileKeys = {
@@ -2160,6 +2161,7 @@ export type SessionActor = {
   userID?: string
   name: string
   color: string
+  autoConsent?: boolean
 }
 
 export type PromptCycleInput = {
@@ -5491,6 +5493,7 @@ export type SessionActorUpsertData = {
     userID?: string
     name?: string
     color?: string
+    autoConsent?: boolean
   }
   path: {
     sessionID: string

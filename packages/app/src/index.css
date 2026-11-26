@@ -422,32 +422,6 @@
     box-shadow: 0 0 0 3px rgba(255, 206, 43, 0.3);
   }
 
-
-  [data-component="session-prompt-dock"] dialog[data-component="session-composer-shell"]:not([open]) {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    border: none;
-    padding: 0;
-    margin: 0;
-    background: transparent;
-    color: inherit;
-  }
-
-  dialog[data-component="session-composer-expanded"][open] {
-    border: none;
-    margin: 0;
-    max-width: none;
-    max-height: none;
-    overflow: visible;
-    background: transparent;
-    color: inherit;
-  }
-
-  dialog[data-component="session-composer-expanded"]::backdrop {
-    display: none;
-  }
-
   /* 값 입력 도크 — Affine 전역 input 리셋·text-field 기본을 이 도크에서만 이긴다. */
   [data-component="dock-prompt"][data-kind="env"] [data-component="input"][data-variant="normal"] [data-slot="input-input"] {
     height: 32px !important;
@@ -623,12 +597,10 @@
     }
   }
 
-  /* 액션바 고스트 아이콘 버튼 (실행취소·다시실행·파일 첨부 +·확대/축소) — C-3 .oc-icon-btn 어휘 */
+  /* 액션바 고스트 아이콘 버튼 (실행취소·다시실행·파일 첨부 +) — C-3 .oc-icon-btn 어휘 */
   [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="prompt-draw-undo"],
   [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="prompt-draw-redo"],
-  [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="prompt-doc-attach"],
-  [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="composer-expand"],
-  [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="composer-collapse"] {
+  [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="prompt-doc-attach"] {
     border: none;
     background-color: transparent;
     box-shadow: none;
@@ -641,34 +613,26 @@
 
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-undo"]:not(:disabled) [data-slot="icon-svg"],
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-redo"]:not(:disabled) [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled) [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="composer-expand"]:not(:disabled) [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="composer-collapse"]:not(:disabled) [data-slot="icon-svg"] {
+  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled) [data-slot="icon-svg"] {
     color: var(--icon-base);
     transition: color var(--dur-fast) var(--ease-standard);
   }
 
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-undo"]:not(:disabled):hover,
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-redo"]:not(:disabled):hover,
-  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):hover,
-  [data-component="prompt-draw-actions"] [data-action="composer-expand"]:not(:disabled):hover,
-  [data-component="prompt-draw-actions"] [data-action="composer-collapse"]:not(:disabled):hover {
+  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):hover {
     background-color: var(--surface-base);
   }
 
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-undo"]:not(:disabled):hover [data-slot="icon-svg"],
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-redo"]:not(:disabled):hover [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):hover [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="composer-expand"]:not(:disabled):hover [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="composer-collapse"]:not(:disabled):hover [data-slot="icon-svg"] {
+  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):hover [data-slot="icon-svg"] {
     color: var(--icon-strong-base);
   }
 
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-undo"]:not(:disabled):active,
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-redo"]:not(:disabled):active,
-  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):active,
-  [data-component="prompt-draw-actions"] [data-action="composer-expand"]:not(:disabled):active,
-  [data-component="prompt-draw-actions"] [data-action="composer-collapse"]:not(:disabled):active {
+  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):active {
     background-color: var(--surface-base-active);
     transform: scale(0.92);
   }
@@ -1284,15 +1248,13 @@
 /* C-3 composer 상단 리사이즈 핸들 — 디자인(.oc-resize-handle)은 카드 위로 떠 있지 않고 카드
    상단 안쪽에 위치. 기본은 -top-2.5(=−10px)로 카드 위에 떠 있어, top:0 으로 카드 상단에 맞춘다.
    -top-2.5 유틸리티를 이기기 위해 레이어 밖. composer 스타일과 동일하게 codle-session 스코프. */
-[data-component="codle-session"] [data-component="prompt-doc-resize-handle"],
-[data-component="codle-session"] [data-component="prompt-composer-resize-handle"] {
+[data-component="codle-session"] [data-component="prompt-doc-resize-handle"] {
   top: 0;
 }
 
 /* C-3 composer 리사이즈 핸들 (.oc-resize-handle 어휘) — hover/드래그 시 grab 바가 진해지며 넓어짐.
    유틸리티 클래스(w-18·bg-border-weaker-base 등)를 이기기 위해 레이어 밖에 둔다. */
-[data-component="prompt-doc-resize-handle"] > div,
-[data-component="prompt-composer-resize-handle"] > div {
+[data-component="prompt-doc-resize-handle"] > div {
   width: 72px;
   height: 2px;
   border-radius: var(--radius-pill);
@@ -1302,14 +1264,12 @@
     width var(--dur-fast) var(--ease-standard);
 }
 
-[data-component="prompt-doc-resize-handle"]:hover > div,
-[data-component="prompt-composer-resize-handle"]:hover > div {
+[data-component="prompt-doc-resize-handle"]:hover > div {
   background-color: var(--icon-base);
   width: 88px;
 }
 
-[data-component="prompt-doc-resize-handle"]:active > div,
-[data-component="prompt-composer-resize-handle"]:active > div {
+[data-component="prompt-doc-resize-handle"]:active > div {
   background-color: var(--text-strong);
   width: 96px;
 }
@@ -1387,7 +1347,7 @@
   outline-offset: -1px;
 }
 
-/* C-3 '자동 확대' 토글 (.oc-auto-toggle) — 켜면 입력창 포커스 시 자동으로 커짐.
+/* 스위치 토글 (.oc-auto-toggle): 이미지 만들기·자동 동의 공용.
    디자인 어휘를 앱 토큰으로 매핑(다크 모드에서 track/thumb 대비 유지). */
 .oc-auto-toggle {
   display: inline-flex;
@@ -1957,6 +1917,52 @@
 .github-dialog .github-link {
   min-width: 0;
   font-size: 13px;
+  font-weight: 600;
+}
+
+.github-dialog .github-repo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.github-dialog .github-repo-search {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--env-line);
+  border-radius: 4px;
+  background: var(--env-surface);
+  color: var(--env-text-ink);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.github-dialog .github-repo-search:focus {
+  border-color: var(--env-accent);
+}
+
+.github-dialog .github-repo-sort {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--env-line);
+  border-radius: 4px;
+}
+
+.github-dialog .github-repo-sort button {
+  padding: 0 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--env-text-muted);
+}
+
+.github-dialog .github-repo-sort button[aria-checked="true"] {
+  background: var(--env-line);
+  color: var(--env-text-ink);
   font-weight: 600;
 }
 

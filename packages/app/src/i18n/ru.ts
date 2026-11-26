@@ -278,8 +278,6 @@ export const dict = {
   "prompt.action.send": "Отправить",
   "prompt.action.stop": "Остановить",
   "prompt.action.queue": "Add to queue",
-  "prompt.action.expandView": "View larger",
-  "prompt.action.collapseView": "Collapse",
 
   "prompt.toast.pasteUnsupported.title": "Неподдерживаемое вложение",
   "prompt.toast.pasteUnsupported.description": "Здесь можно прикрепить только изображения, PDF или текстовые файлы.",

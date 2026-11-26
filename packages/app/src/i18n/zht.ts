@@ -278,8 +278,6 @@ export const dict = {
   "prompt.action.send": "傳送",
   "prompt.action.stop": "停止",
   "prompt.action.queue": "Add to queue",
-  "prompt.action.expandView": "View larger",
-  "prompt.action.collapseView": "Collapse",
 
   "prompt.toast.pasteUnsupported.title": "不支援的附件",
   "prompt.toast.pasteUnsupported.description": "此處僅能附加圖片、PDF 或文字檔案。",

@@ -1,6 +1,6 @@
 import { useFilteredList } from "@opencode-ai/ui/hooks"
 import { useSpring } from "@opencode-ai/ui/motion-spring"
-import { createEffect, on, Component, Show, onCleanup, onMount, createMemo, createSignal } from "solid-js"
+import { createEffect, on, Component, Show, onCleanup, createMemo, createSignal } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { Binary } from "@opencode-ai/util/binary"
@@ -46,6 +46,7 @@ import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useClientEnv } from "@/context/client-env"
 import { useParentParams } from "@/context/parent-params"
+import { loadAutoConsent, toggleAutoConsent } from "@/components/prompt-input/doc-actor"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createOpenDiffTab, createSessionTabs } from "@/pages/session/helpers"
 import { promptEnabled, promptProbe } from "@/testing/prompt"
@@ -98,15 +99,6 @@ import { ImagePreview } from "@opencode-ai/ui/image-preview"
 interface PromptInputProps {
   class?: string
   ref?: (el: HTMLDivElement) => void
-  expanded?: boolean
-  onComposerExpand?: (opts?: { initialScale?: number }) => void
-  onComposerCollapse?: () => void
-  composerShell?: {
-    size: number
-    min: number
-    max: number
-    onResize: (height: number) => void
-  }
   newSessionWorktree?: string
   onNewSessionWorktreeReset?: () => void
   edit?: { id: string; prompt: Prompt; context: FollowupDraft["context"] }
@@ -154,8 +146,6 @@ const canvasMode = (mode: PromptMode) => mode === "doc"
 const DOC_MIN = 150
 const DOC_HEIGHT = 300
 const DOC_RATIO = 0.8
-// 자동 확대: 입력창 포커스 시 기존 '확대(전체 너비 expanded)'로 자동 진입할지 여부. localStorage 영속.
-const AUTO_EXPAND_KEY = "prompt.doc.autoExpand"
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
@@ -198,15 +188,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const mirror = { input: false }
   const inset = 56
   const space = `${inset}px`
-
-  const composerExpand = () => {
-    if (!props.onComposerExpand || !props.onComposerCollapse) return
-    return {
-      expanded: !!props.expanded,
-      onExpand: props.onComposerExpand,
-      onCollapse: props.onComposerCollapse,
-    }
-  }
 
   const scrollCursorIntoView = () => {
     const container = scrollRef
@@ -353,83 +334,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     applyingHistory: false,
   })
   const [height, setHeight] = createSignal(DOC_HEIGHT)
-  // 자동 확대: 입력창 포커스 시 전체 너비 expanded 로 자동 진입(기본 OFF, localStorage 영속).
-  const [autoExpand, setAutoExpand] = createSignal(
-    (() => {
-      try {
-        return localStorage.getItem(AUTO_EXPAND_KEY) === "1"
-      } catch {
-        return false
-      }
-    })(),
-  )
-  const [focusWithin, setFocusWithin] = createSignal(false)
-  // 탭 캡처 진행 중 여부. 미리보기 헤더 버튼과 공유하기 위해 SessionPreviewBridge 컨텍스트가 소유한다.
-  // (아래 자동 확대 이펙트가 이 값을 보고 캡처 동안 입력창을 강제 축소한다.)
   const previewBridge = useSessionPreviewBridge()
   const capturing = previewBridge.capturing
   const setCapturing = previewBridge.setCapturing
-  // 컴포저 내부에서 시작된 클릭(포커스 못 받는 버튼/컨트롤 포함)으로 포커스가 body 로 빠지는 걸
-  // '이탈'로 오인해 축소→재확장 깜빡이는 걸 막기 위한 플래그.
-  let pointerDownInside = false
-  // 마운트 시 에디터가 자동 포커스되어도 곧바로 확대되지 않도록, 실제 사용자 상호작용 이후에만 자동 확대.
-  const [interacted, setInteracted] = createSignal(false)
-  const toggleAutoExpand = () => {
-    const next = !autoExpand()
-    setAutoExpand(next)
-    try {
-      localStorage.setItem(AUTO_EXPAND_KEY, next ? "1" : "0")
-    } catch {}
-    // 토글만으로는 현재 확대/축소 상태를 바꾸지 않는다 — 끄면 그 상태 그대로 둔 채 자동 동작만 멈춘다.
-  }
-  // 자동 확대 ON 이면 포커스 상태를 expanded 에 반영. OFF면 무조건 축소(collapse) 모드로 강제한다.
-  createEffect(() => {
-    if (!props.onComposerExpand || !props.onComposerCollapse) return
-    // 탭 캡처 중엔 확대된 입력창이 캡처 화면을 가리므로 강제로 축소하고, 캡처가 완전히 끝날
-    // 때까지 재확대를 막는다. 끝나면(capturing=false) 아래 포커스 기준 로직이 원래 상태로 되돌린다.
-    if (capturing()) {
-      if (props.expanded) props.onComposerCollapse()
-      return
-    }
-    if (!autoExpand()) {
-      if (props.expanded) props.onComposerCollapse()
-      return
-    }
-    if (focusWithin() && interacted() && !props.expanded) props.onComposerExpand({ initialScale: 2 })
-    else if (!focusWithin() && props.expanded) props.onComposerCollapse()
-  })
-  onMount(() => {
-    const el = rootRef
-    if (!el) return
-    // 에디터 본문(prompt-doc) 클릭/타이핑만 '상호작용'으로 친다 — 리사이즈 핸들·액션바 버튼은
-    // 제외해, 마운트 자동 포커스 상태에서 작은 입력창 높이 조절(핸들 드래그)이 확대를 유발하지 않게.
-    const mark = (e: Event) => {
-      const t = e.target
-      if (t instanceof Element && t.closest('[data-component="prompt-doc"]')) setInteracted(true)
-    }
-    // 컴포저 내부에서 시작된 클릭인지 기록. 포커스 못 받는 컨트롤을 눌러 포커스가 body 로 빠져도
-    // 이 플래그가 있으면 focusout 에서 '이탈'로 보지 않는다. 키 입력(Tab 이동 등)이 시작되면 해제해
-    // 실제 포커스 위치 기준으로 판단하게 한다.
-    const trackPointer = (e: PointerEvent) => {
-      const t = e.target
-      pointerDownInside = t instanceof Node && el.contains(t)
-    }
-    const clearPointer = () => {
-      pointerDownInside = false
-    }
-    // doc 패널이 pointerdown 전파를 막으므로 캡처 단계로 듣는다.
-    el.addEventListener("pointerdown", mark, true)
-    el.addEventListener("keydown", mark, true)
-    // 컴포저 밖 클릭도 잡아야 하므로 window 캡처로 듣는다.
-    window.addEventListener("pointerdown", trackPointer, true)
-    el.addEventListener("keydown", clearPointer, true)
-    onCleanup(() => {
-      el.removeEventListener("pointerdown", mark, true)
-      el.removeEventListener("keydown", mark, true)
-      window.removeEventListener("pointerdown", trackPointer, true)
-      el.removeEventListener("keydown", clearPointer, true)
-    })
-  })
 
   const seed = (info: Session) => {
     const [, setStore] = globalSync.child(sdk.directory)
@@ -480,37 +387,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const fit = () => {
     if (docMode() !== "doc") return
     setHeight((value) => clamp(value))
-  }
-  const shellResize = (event: PointerEvent & { currentTarget: HTMLDivElement }) => {
-    const bounds = props.composerShell
-    if (!bounds || event.button !== 0) return
-    event.preventDefault()
-    event.stopPropagation()
-
-    const start = bounds.size
-    const y = event.clientY
-    const html = document.documentElement
-    const body = document.body
-    const cursor = html.style.cursor
-    const select = body.style.userSelect
-    html.style.cursor = "ns-resize"
-    body.style.userSelect = "none"
-
-    const clamp = (value: number) => Math.min(bounds.max, Math.max(bounds.min, value))
-    const move = (event: PointerEvent) => {
-      bounds.onResize(clamp(start + y - event.clientY))
-    }
-    const up = () => {
-      html.style.cursor = cursor
-      body.style.userSelect = select
-      window.removeEventListener("pointermove", move)
-      window.removeEventListener("pointerup", up)
-      window.removeEventListener("pointercancel", up)
-    }
-
-    window.addEventListener("pointermove", move)
-    window.addEventListener("pointerup", up)
-    window.addEventListener("pointercancel", up)
   }
 
   const resize = (event: PointerEvent & { currentTarget: HTMLDivElement }) => {
@@ -567,6 +443,19 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const parentParams = useParentParams()
   // `?readonly=true` makes this client a pure observer (captured once at module load, so it is stable).
   const readonly = parentParams.readonly
+
+  const consentRequired = () => sync.data.env.consentRequired !== false
+  const autoConsent = () => loadAutoConsent(parentParams.user[0]?.id)
+  const switchAutoConsent = () => {
+    const sessionID = params.id
+    const actorID = doc.actorID()
+    if (!sessionID || !actorID) return
+    void toggleAutoConsent(parentParams.user[0]?.id, (next) =>
+      sdk.client.session.actor
+        .upsert({ sessionID, directory: sdk.directory, actorID, autoConsent: next })
+        .then((res) => res.data?.autoConsent === true),
+    )
+  }
 
   const bridge = usePromptDocBridge()
   createEffect(() => {
@@ -825,9 +714,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const pick = () => fileInputRef?.click()
 
-  // 캡처 동안엔 확대된 입력창이 화면을 가리므로 축소 상태를 강제한다. 실제 축소/복귀는 위쪽
-  // 자동 확대 이펙트가 capturing() 을 보고 처리한다 — 캡처가 완전히 끝나기 전엔 재확대하지 않고,
-  // 끝나면 원래(포커스 기준) 상태로 되돌린다. 이미 축소 상태였다면 그대로 축소를 유지한다.
   const captureTab = async () => {
     if (capturing()) return
     setCapturing(true)
@@ -849,7 +735,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return
     }
     // 찍은 이미지를 편집 모달에서 크롭/드로잉한 뒤 "추가" 시에만 입력창에 넣는다.
-    // capturing 은 모달이 닫힐 때(onClose)만 해제 → 그동안 컴포저는 축소 유지.
+    // capturing 은 모달이 닫힐 때(onClose)만 해제한다.
     dialog.show(
       () => (
         <CaptureEditDialog
@@ -1709,7 +1595,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       // display names — vote membership itself is decided server-side from connected submit peers.
       const list = doc.actors()
       const ids = Array.from(new Set([actorID, ...list.map((item) => item.actorID)]))
-      if (ids.length <= 1) return false
+      if (ids.length <= 1 && !session.teamWide()) return false
       const names: Record<string, string> = {}
       for (const item of list) {
         const name = item.name?.trim()
@@ -2091,12 +1977,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       ref={(el) => (rootRef = el)}
       classList={{
         "relative flex w-full flex-col gap-0": true,
-        "size-full max-h-[512px] min-h-0": docMode() !== "doc" && !props.expanded,
-        "flex-1 min-h-0": props.expanded,
-        relative: props.expanded,
+        "size-full max-h-[512px] min-h-0": docMode() !== "doc",
       }}
       style={
-        docMode() === "doc" && !props.expanded
+        docMode() === "doc"
           ? {
               height: `${height()}px`,
               "min-height": `${DOC_MIN}px`,
@@ -2104,35 +1988,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }
           : undefined
       }
-      on:focusin={() => setFocusWithin(true)}
-      on:focusout={() => {
-        // 다음 틱에 실제 활성 요소가 컴포저 밖이면 focus 해제(에디터 내부 이동 시 깜빡임 방지).
-        setTimeout(() => {
-          if (!rootRef) return
-          if (rootRef.contains(document.activeElement)) return
-          // iframe(미리보기 등)로 포커스가 넘어간 경우는 명백한 이탈 — pointerDownInside 는 부모 window 로
-          // pointerdown 이 안 와 stale 일 수 있으니 무시하고 축소한다.
-          const toIframe = document.activeElement instanceof HTMLIFrameElement
-          // 컴포저 안의 포커스 못 받는 버튼/컨트롤을 눌러 포커스가 body 로 빠진 경우는 이탈이 아니다.
-          if (pointerDownInside && !toIframe) return
-          setFocusWithin(false)
-        }, 0)
-      }}
     >
-      <Show when={docMode() === "doc" && !props.expanded}>
+      <Show when={docMode() === "doc"}>
         <div
           data-component="prompt-doc-resize-handle"
           class="group absolute -top-2.5 start-8 end-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
           onPointerDown={resize}
-        >
-          <div class="h-0.5 w-18 rounded-none bg-border-weaker-base transition-colors group-hover:bg-border-strong-base" />
-        </div>
-      </Show>
-      <Show when={props.expanded && props.composerShell}>
-        <div
-          data-component="prompt-composer-resize-handle"
-          class="group absolute -top-2.5 start-8 end-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
-          onPointerDown={shellResize}
         >
           <div class="h-0.5 w-18 rounded-none bg-border-weaker-base transition-colors group-hover:bg-border-strong-base" />
         </div>
@@ -2157,7 +2018,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         classList={{
           "group/prompt-input": true,
           "border-icon-info-active border-dashed": store.draggingType !== null,
-          "flex min-h-0 flex-1 flex-col": canvasMode(docMode()) || props.expanded,
+          "flex min-h-0 flex-1 flex-col": canvasMode(docMode()),
           [props.class ?? ""]: !!props.class,
         }}
       >
@@ -2213,11 +2074,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             when={docMode() === "doc"}
             fallback={
               <div
-                classList={{
-                  "relative overflow-y-auto no-scrollbar": true,
-                  "max-h-[240px]": !props.expanded,
-                  "flex-1 min-h-0": props.expanded,
-                }}
+                class="relative max-h-[240px] overflow-y-auto no-scrollbar"
                 ref={(el) => (scrollRef = el)}
                 style={{ "scroll-padding-bottom": space }}
               >
@@ -2282,8 +2139,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               capturing={capturing()}
               canCapture={previewBridge.canCapture()}
               clearDisabled={session.votePending()}
-              expand={composerExpand()}
-              autoExpand={{ enabled: autoExpand(), onToggle: toggleAutoExpand }}
+              autoConsent={
+                !readonly && consentRequired() ? { enabled: autoConsent(), onToggle: switchAutoConsent } : undefined
+              }
             />
           </Show>
 

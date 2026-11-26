@@ -210,7 +210,8 @@ export const SessionRoutes = lazy(() =>
       validator("json", Session.create.schema.optional()),
       async (c) => {
         const body = c.req.valid("json") ?? {}
-        const session = body.parentID ? await Session.create(body) : await getOrCreateMain(body)
+        const fresh = c.req.query("fresh") === "true"
+        const session = body.parentID ? await Session.create(body) : await getOrCreateMain(body, { fresh })
         return c.json(session)
       },
     )

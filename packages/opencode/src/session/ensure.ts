@@ -1,32 +1,51 @@
 import { Config } from "../config/config"
+import { Flag } from "../flag/flag"
 import { Instance } from "../project/instance"
 import { Session } from "./index"
 
 type MainInput = NonNullable<Parameters<typeof Session.create>[0]>
 
-const pending = new Map<string, Promise<Session.Info>>()
+const creating = new Map<string, Promise<unknown>>()
 const ensuring = new Map<string, Promise<void>>()
 
 function active(dir: string) {
   return [...Session.list({ directory: dir, roots: true })].filter((s) => !s.time?.archived)
 }
 
-export async function getOrCreateMain(input?: MainInput) {
+export function sessionLimit() {
+  return Flag.ENK_SESSION_LIMIT
+}
+
+function serial<T>(dir: string, fn: () => Promise<T>) {
+  const prev = creating.get(dir) ?? Promise.resolve()
+  const task = prev.catch(() => {}).then(fn)
+  creating.set(dir, task)
+  void task.finally(() => {
+    if (creating.get(dir) === task) creating.delete(dir)
+  }).catch(() => {})
+  return task
+}
+
+export async function getOrCreateMain(input?: MainInput, opts?: { fresh?: boolean }) {
   if (input?.parentID) return Session.create(input)
 
   const config = await Config.get()
   if (!config.ensureOneSession) return Session.create(input)
 
   const dir = Instance.directory
-  const existing = active(dir)
-  if (existing[0]) return existing[0]
+  return serial(dir, async () => {
+    const existing = active(dir)
+    const room = opts?.fresh ? sessionLimit() : 1
+    if (existing.length >= room && existing[0]) return existing[0]
+    return Session.create(input)
+  })
+}
 
-  const inflight = pending.get(dir)
-  if (inflight) return inflight
-
-  const task = Session.create(input).finally(() => pending.delete(dir))
-  pending.set(dir, task)
-  return task
+export async function firstSession() {
+  const dir = Instance.directory
+  const oldest = active(dir).sort((a, b) => a.time.created - b.time.created)[0]
+  if (oldest) return oldest
+  return getOrCreateMain()
 }
 
 export async function ensureSession() {

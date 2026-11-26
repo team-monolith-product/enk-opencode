@@ -189,7 +189,11 @@ function readStoredLocale() {
   }
 }
 
-const warm = readStoredLocale() ?? detectLocale()
+export function currentLocale(): Locale {
+  return readStoredLocale() ?? detectLocale()
+}
+
+const warm = currentLocale()
 if (warm !== "en") void loadDict(warm)
 
 export const { use: useLanguage, provider: LanguageProvider } = createSimpleContext({
