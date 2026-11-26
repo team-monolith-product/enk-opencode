@@ -278,8 +278,6 @@ export const dict = {
   "prompt.action.send": "ส่ง",
   "prompt.action.stop": "หยุด",
   "prompt.action.queue": "Add to queue",
-  "prompt.action.expandView": "View larger",
-  "prompt.action.collapseView": "Collapse",
 
   "prompt.toast.pasteUnsupported.title": "ไฟล์แนบที่ไม่รองรับ",
   "prompt.toast.pasteUnsupported.description": "แนบได้เฉพาะรูปภาพ, PDF หรือไฟล์ข้อความเท่านั้น",

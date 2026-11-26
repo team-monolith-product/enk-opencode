@@ -99,15 +99,6 @@ import { ImagePreview } from "@opencode-ai/ui/image-preview"
 interface PromptInputProps {
   class?: string
   ref?: (el: HTMLDivElement) => void
-  expanded?: boolean
-  onComposerExpand?: (opts?: { initialScale?: number }) => void
-  onComposerCollapse?: () => void
-  composerShell?: {
-    size: number
-    min: number
-    max: number
-    onResize: (height: number) => void
-  }
   newSessionWorktree?: string
   onNewSessionWorktreeReset?: () => void
   edit?: { id: string; prompt: Prompt; context: FollowupDraft["context"] }
@@ -197,15 +188,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const mirror = { input: false }
   const inset = 56
   const space = `${inset}px`
-
-  const composerExpand = () => {
-    if (!props.onComposerExpand || !props.onComposerCollapse) return
-    return {
-      expanded: !!props.expanded,
-      onExpand: props.onComposerExpand,
-      onCollapse: props.onComposerCollapse,
-    }
-  }
 
   const scrollCursorIntoView = () => {
     const container = scrollRef
@@ -355,10 +337,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const previewBridge = useSessionPreviewBridge()
   const capturing = previewBridge.capturing
   const setCapturing = previewBridge.setCapturing
-  createEffect(() => {
-    if (!props.onComposerCollapse) return
-    if (capturing() && props.expanded) props.onComposerCollapse()
-  })
 
   const seed = (info: Session) => {
     const [, setStore] = globalSync.child(sdk.directory)
@@ -409,37 +387,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const fit = () => {
     if (docMode() !== "doc") return
     setHeight((value) => clamp(value))
-  }
-  const shellResize = (event: PointerEvent & { currentTarget: HTMLDivElement }) => {
-    const bounds = props.composerShell
-    if (!bounds || event.button !== 0) return
-    event.preventDefault()
-    event.stopPropagation()
-
-    const start = bounds.size
-    const y = event.clientY
-    const html = document.documentElement
-    const body = document.body
-    const cursor = html.style.cursor
-    const select = body.style.userSelect
-    html.style.cursor = "ns-resize"
-    body.style.userSelect = "none"
-
-    const clamp = (value: number) => Math.min(bounds.max, Math.max(bounds.min, value))
-    const move = (event: PointerEvent) => {
-      bounds.onResize(clamp(start + y - event.clientY))
-    }
-    const up = () => {
-      html.style.cursor = cursor
-      body.style.userSelect = select
-      window.removeEventListener("pointermove", move)
-      window.removeEventListener("pointerup", up)
-      window.removeEventListener("pointercancel", up)
-    }
-
-    window.addEventListener("pointermove", move)
-    window.addEventListener("pointerup", up)
-    window.addEventListener("pointercancel", up)
   }
 
   const resize = (event: PointerEvent & { currentTarget: HTMLDivElement }) => {
@@ -767,9 +714,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   const pick = () => fileInputRef?.click()
 
-  // 캡처 동안엔 확대된 입력창이 화면을 가리므로 축소 상태를 강제한다. 실제 축소/복귀는 위쪽
-  // 자동 확대 이펙트가 capturing() 을 보고 처리한다 — 캡처가 완전히 끝나기 전엔 재확대하지 않고,
-  // 끝나면 원래(포커스 기준) 상태로 되돌린다. 이미 축소 상태였다면 그대로 축소를 유지한다.
   const captureTab = async () => {
     if (capturing()) return
     setCapturing(true)
@@ -791,7 +735,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       return
     }
     // 찍은 이미지를 편집 모달에서 크롭/드로잉한 뒤 "추가" 시에만 입력창에 넣는다.
-    // capturing 은 모달이 닫힐 때(onClose)만 해제 → 그동안 컴포저는 축소 유지.
+    // capturing 은 모달이 닫힐 때(onClose)만 해제한다.
     dialog.show(
       () => (
         <CaptureEditDialog
@@ -2033,12 +1977,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       ref={(el) => (rootRef = el)}
       classList={{
         "relative flex w-full flex-col gap-0": true,
-        "size-full max-h-[512px] min-h-0": docMode() !== "doc" && !props.expanded,
-        "flex-1 min-h-0": props.expanded,
-        relative: props.expanded,
+        "size-full max-h-[512px] min-h-0": docMode() !== "doc",
       }}
       style={
-        docMode() === "doc" && !props.expanded
+        docMode() === "doc"
           ? {
               height: `${height()}px`,
               "min-height": `${DOC_MIN}px`,
@@ -2047,20 +1989,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           : undefined
       }
     >
-      <Show when={docMode() === "doc" && !props.expanded}>
+      <Show when={docMode() === "doc"}>
         <div
           data-component="prompt-doc-resize-handle"
           class="group absolute -top-2.5 left-8 right-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
           onPointerDown={resize}
-        >
-          <div class="h-0.5 w-18 rounded-none bg-border-weaker-base transition-colors group-hover:bg-border-strong-base" />
-        </div>
-      </Show>
-      <Show when={props.expanded && props.composerShell}>
-        <div
-          data-component="prompt-composer-resize-handle"
-          class="group absolute -top-2.5 left-8 right-8 z-30 flex h-3 cursor-ns-resize touch-none items-center justify-center"
-          onPointerDown={shellResize}
         >
           <div class="h-0.5 w-18 rounded-none bg-border-weaker-base transition-colors group-hover:bg-border-strong-base" />
         </div>
@@ -2085,7 +2018,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         classList={{
           "group/prompt-input": true,
           "border-icon-info-active border-dashed": store.draggingType !== null,
-          "flex min-h-0 flex-1 flex-col": canvasMode(docMode()) || props.expanded,
+          "flex min-h-0 flex-1 flex-col": canvasMode(docMode()),
           [props.class ?? ""]: !!props.class,
         }}
       >
@@ -2141,11 +2074,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             when={docMode() === "doc"}
             fallback={
               <div
-                classList={{
-                  "relative overflow-y-auto no-scrollbar": true,
-                  "max-h-[240px]": !props.expanded,
-                  "flex-1 min-h-0": props.expanded,
-                }}
+                class="relative max-h-[240px] overflow-y-auto no-scrollbar"
                 ref={(el) => (scrollRef = el)}
                 style={{ "scroll-padding-bottom": space }}
               >
@@ -2210,7 +2139,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               capturing={capturing()}
               canCapture={previewBridge.canCapture()}
               clearDisabled={session.votePending()}
-              expand={composerExpand()}
               autoConsent={
                 !readonly && consentRequired() ? { enabled: autoConsent(), onToggle: switchAutoConsent } : undefined
               }
