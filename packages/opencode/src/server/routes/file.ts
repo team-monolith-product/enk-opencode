@@ -6,6 +6,7 @@ import path from "path"
 import z from "zod"
 import { File } from "../../file"
 import { Assets } from "../../file/assets"
+import { FileRemove } from "../../file/remove"
 import { Ripgrep } from "../../file/ripgrep"
 import { LSP } from "../../lsp"
 import { Instance } from "../../project/instance"
@@ -402,6 +403,43 @@ export const FileRoutes = lazy(() =>
         if (!target) throw new HTTPException(400, { message: "Invalid path" })
         await fs.rm(target, { recursive: true, force: true })
         Assets.invalidate()
+        return c.json(true)
+      },
+    )
+    .delete(
+      "/file",
+      describeRoute({
+        summary: "Delete files",
+        description: `Delete one file or folder in the project directory, or every file when no path is given. The ${FileRemove.PROTECTED.join(", ")} folder is never deleted.`,
+        operationId: "file.delete",
+        responses: {
+          200: {
+            description: "Deleted",
+            content: {
+              "application/json": {
+                schema: resolver(z.boolean()),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "query",
+        z.object({
+          path: z.string().optional().meta({ description: "Path relative to the project directory. Omit to delete all." }),
+        }),
+      ),
+      async (c) => {
+        const requested = c.req.valid("query").path
+        if (!requested) {
+          await FileRemove.clear()
+          return c.json(true)
+        }
+
+        const target = await FileRemove.resolve(requested)
+        if (!target) throw new HTTPException(400, { message: "Invalid path" })
+        await FileRemove.remove(target)
         return c.json(true)
       },
     ),
