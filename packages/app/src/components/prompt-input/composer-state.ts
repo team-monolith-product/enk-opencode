@@ -8,7 +8,7 @@ const followupModes = new Set<FollowupMode>(["queue", "steer", "none"])
 
 export function parseFollowupMode(value: string | undefined): FollowupMode {
   if (value && followupModes.has(value as FollowupMode)) return value as FollowupMode
-  return "none"
+  return "steer"
 }
 
 type SessionStatus = { type: string }

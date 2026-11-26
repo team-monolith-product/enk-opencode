@@ -28,9 +28,9 @@ describe("parseFollowupMode", () => {
     expect(parseFollowupMode("none")).toBe("none")
   })
 
-  test("falls back to none for unknown values", () => {
-    expect(parseFollowupMode("steer-old")).toBe("none")
-    expect(parseFollowupMode(undefined)).toBe("none")
+  test("falls back to steer for unknown values", () => {
+    expect(parseFollowupMode("steer-old")).toBe("steer")
+    expect(parseFollowupMode(undefined)).toBe("steer")
   })
 })
 
