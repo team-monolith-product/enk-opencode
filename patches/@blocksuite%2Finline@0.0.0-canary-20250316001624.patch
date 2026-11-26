@@ -1,0 +1,325 @@
+diff --git a/dist/services/event.js b/dist/services/event.js
+index 10f4bf8d5feb0cbaf5c1cac602c17620d8e0493f..d857f11e7650a024bcd899d49ab6b9597c54c6a0 100644
+--- a/dist/services/event.js
++++ b/dist/services/event.js
+@@ -1,3 +1,4 @@
++import * as Y from 'yjs';
+ import { isInEmbedElement, isInEmbedGap, isInEmptyLine, } from '../utils/index.js';
+ import { isMaybeInlineRangeEqual } from '../utils/inline-range.js';
+ import { transformInput } from '../utils/transform-input.js';
+@@ -7,8 +8,12 @@ export class EventService {
+     }
+     constructor(editor) {
+         this.editor = editor;
+-        this._compositionInlineRange = null;
++        // The range the composition will replace, anchored with Yjs relative positions.
++        // Remote updates can land while composing (a host may even hold them back and apply
++        // them right at compositionend), and a plain index would then replace the wrong text.
++        this._compositionAnchor = null;
+         this._isComposing = false;
++        this._compositionTargetSeen = false;
+         this._isRangeCompletelyInRoot = (range) => {
+             if (range.commonAncestorContainer.ownerDocument !== document)
+                 return false;
+@@ -25,10 +30,96 @@ export class EventService {
+                     rootRange.comparePoint(range.startContainer, range.endOffset) <= 0);
+             }
+         };
++        this._setCompositionRange = (range) => {
++            if (!range) {
++                this._compositionAnchor = null;
++                return;
++            }
++            const yText = this.editor.yText;
++            this._compositionAnchor = {
++                // A non-empty range sticks to its own first and last characters, so text inserted
++                // right before or after it stays outside. A collapsed one sticks to the character
++                // before it.
++                start: Y.createRelativePositionFromTypeIndex(yText, range.index, range.length > 0 ? 0 : -1),
++                end: Y.createRelativePositionFromTypeIndex(yText, range.index + range.length, -1),
++                fallback: range,
++            };
++        };
++        this._getCompositionRange = () => {
++            const anchor = this._compositionAnchor;
++            if (!anchor)
++                return null;
++            const doc = this.editor.yText.doc;
++            const start = doc && Y.createAbsolutePositionFromRelativePosition(anchor.start, doc);
++            const end = doc && Y.createAbsolutePositionFromRelativePosition(anchor.end, doc);
++            if (!start || !end)
++                return anchor.fallback;
++            return {
++                index: start.index,
++                length: Math.max(0, end.index - start.index),
++            };
++        };
++        // Some IMEs re-open a composition over text that is already committed. Android
++        // keyboards do it through InputConnection#setComposingRegion: with "주" committed and
++        // the caret after it, the composition covers "주" and compositionend carries "주제".
++        // compositionstart only sees the caret, so "주제" used to be inserted after "주"
++        // ("주주제"). Widen the composition range to what the IME actually replaces.
++        // An IME that starts composing at the caret/selection never widens it, so no
++        // platform check is needed.
++        this._syncCompositionRange = (event) => {
++            const current = this._getCompositionRange();
++            const first = !this._compositionTargetSeen;
++            this._compositionTargetSeen = true;
++            if (this.editor.isReadonly || !current)
++                return;
++            const target = this._getCompositionTargetRange(event, first);
++            if (!target)
++                return;
++            const end = current.index + current.length;
++            if (first) {
++                // Nothing has been composed into the DOM yet, so DOM offsets still match the
++                // model and the whole target range can be trusted.
++                const index = Math.min(current.index, target.index);
++                this._setCompositionRange({
++                    index,
++                    length: Math.max(end, target.index + target.length) - index,
++                });
++                return;
++            }
++            // Later the DOM also holds uncommitted text, so only the start is reliable.
++            if (target.index < current.index) {
++                this._setCompositionRange({
++                    index: target.index,
++                    length: end - target.index,
++                });
++            }
++        };
++        this._getCompositionTargetRange = (event, first) => {
++            const [staticRange] = event.getTargetRanges();
++            let range = null;
++            if (staticRange) {
++                range = document.createRange();
++                range.setStart(staticRange.startContainer, staticRange.startOffset);
++                range.setEnd(staticRange.endContainer, staticRange.endOffset);
++            }
++            else if (first) {
++                // No target range: the selection is the only hint, and only before the DOM
++                // holds composed text.
++                range = this.editor.rangeService.getNativeRange();
++            }
++            if (!range || !this._isRangeCompletelyInRoot(range))
++                return null;
++            return this.editor.toInlineRange(range);
++        };
+         this._onBeforeInput = (event) => {
++            if (this._isComposing) {
++                if (event.inputType === 'insertCompositionText') {
++                    this._syncCompositionRange(event);
++                }
++                return;
++            }
+             const range = this.editor.rangeService.getNativeRange();
+             if (this.editor.isReadonly ||
+-                this._isComposing ||
+                 !range ||
+                 !this._isRangeCompletelyInRoot(range))
+                 return;
+@@ -116,7 +207,8 @@ export class EventService {
+                 return;
+             this.editor.rerenderWholeEditor();
+             await this.editor.waitForUpdate();
+-            const inlineRange = this._compositionInlineRange;
++            // Resolve only now: remote updates may have been applied since compositionstart.
++            const inlineRange = this._getCompositionRange();
+             if (!inlineRange)
+                 return;
+             event.preventDefault();
+@@ -140,18 +232,14 @@ export class EventService {
+         };
+         this._onCompositionStart = () => {
+             this._isComposing = true;
++            this._compositionTargetSeen = false;
+             // embeds is not editable and it will break IME
+             const embeds = this.editor.rootElement.querySelectorAll('[data-v-embed="true"]');
+             embeds.forEach(embed => {
+                 embed.removeAttribute('contenteditable');
+             });
+             const range = this.editor.rangeService.getNativeRange();
+-            if (range) {
+-                this._compositionInlineRange = this.editor.toInlineRange(range);
+-            }
+-            else {
+-                this._compositionInlineRange = null;
+-            }
++            this._setCompositionRange(range ? this.editor.toInlineRange(range) : null);
+         };
+         this._onCompositionUpdate = () => {
+             if (!this.editor.rootElement.isConnected)
+diff --git a/src/services/event.ts b/src/services/event.ts
+index 9a997e08a450019c69e6358ee29af8bb90f5adba..cdc993fd8a724c9c9e6e324e63ab5b893be03d3c 100644
+--- a/src/services/event.ts
++++ b/src/services/event.ts
+@@ -1,3 +1,5 @@
++import * as Y from 'yjs';
++
+ import type { InlineEditor } from '../inline-editor.js';
+ import type { InlineRange } from '../types.js';
+ import type { BeforeinputHookCtx, CompositionEndHookCtx } from './hook.js';
+@@ -12,10 +14,19 @@ import { isMaybeInlineRangeEqual } from '../utils/inline-range.js';
+ import { transformInput } from '../utils/transform-input.js';
+ 
+ export class EventService<TextAttributes extends BaseTextAttributes> {
+-  private _compositionInlineRange: InlineRange | null = null;
++  // The range the composition will replace, anchored with Yjs relative positions.
++  // Remote updates can land while composing (a host may even hold them back and apply
++  // them right at compositionend), and a plain index would then replace the wrong text.
++  private _compositionAnchor: {
++    start: Y.RelativePosition;
++    end: Y.RelativePosition;
++    fallback: InlineRange;
++  } | null = null;
+ 
+   private _isComposing = false;
+ 
++  private _compositionTargetSeen = false;
++
+   private _isRangeCompletelyInRoot = (range: Range) => {
+     if (range.commonAncestorContainer.ownerDocument !== document) return false;
+ 
+@@ -39,11 +50,109 @@ export class EventService<TextAttributes extends BaseTextAttributes> {
+     }
+   };
+ 
++  private _setCompositionRange = (range: InlineRange | null) => {
++    if (!range) {
++      this._compositionAnchor = null;
++      return;
++    }
++    const yText = this.editor.yText;
++    this._compositionAnchor = {
++      // A non-empty range sticks to its own first and last characters, so text inserted
++      // right before or after it stays outside. A collapsed one sticks to the character
++      // before it.
++      start: Y.createRelativePositionFromTypeIndex(
++        yText,
++        range.index,
++        range.length > 0 ? 0 : -1
++      ),
++      end: Y.createRelativePositionFromTypeIndex(
++        yText,
++        range.index + range.length,
++        -1
++      ),
++      fallback: range,
++    };
++  };
++
++  private _getCompositionRange = (): InlineRange | null => {
++    const anchor = this._compositionAnchor;
++    if (!anchor) return null;
++    const doc = this.editor.yText.doc;
++    const start =
++      doc && Y.createAbsolutePositionFromRelativePosition(anchor.start, doc);
++    const end =
++      doc && Y.createAbsolutePositionFromRelativePosition(anchor.end, doc);
++    if (!start || !end) return anchor.fallback;
++    return {
++      index: start.index,
++      length: Math.max(0, end.index - start.index),
++    };
++  };
++
++  // Some IMEs re-open a composition over text that is already committed. Android
++  // keyboards do it through InputConnection#setComposingRegion: with "주" committed and
++  // the caret after it, the composition covers "주" and compositionend carries "주제".
++  // compositionstart only sees the caret, so "주제" used to be inserted after "주"
++  // ("주주제"). Widen the composition range to what the IME actually replaces.
++  // An IME that starts composing at the caret/selection never widens it, so no
++  // platform check is needed.
++  private _syncCompositionRange = (event: InputEvent) => {
++    const current = this._getCompositionRange();
++    const first = !this._compositionTargetSeen;
++    this._compositionTargetSeen = true;
++    if (this.editor.isReadonly || !current) return;
++
++    const target = this._getCompositionTargetRange(event, first);
++    if (!target) return;
++
++    const end = current.index + current.length;
++    if (first) {
++      // Nothing has been composed into the DOM yet, so DOM offsets still match the
++      // model and the whole target range can be trusted.
++      const index = Math.min(current.index, target.index);
++      this._setCompositionRange({
++        index,
++        length: Math.max(end, target.index + target.length) - index,
++      });
++      return;
++    }
++
++    // Later the DOM also holds uncommitted text, so only the start is reliable.
++    if (target.index < current.index) {
++      this._setCompositionRange({
++        index: target.index,
++        length: end - target.index,
++      });
++    }
++  };
++
++  private _getCompositionTargetRange = (event: InputEvent, first: boolean) => {
++    const [staticRange] = event.getTargetRanges();
++    let range: Range | null = null;
++    if (staticRange) {
++      range = document.createRange();
++      range.setStart(staticRange.startContainer, staticRange.startOffset);
++      range.setEnd(staticRange.endContainer, staticRange.endOffset);
++    } else if (first) {
++      // No target range: the selection is the only hint, and only before the DOM
++      // holds composed text.
++      range = this.editor.rangeService.getNativeRange();
++    }
++    if (!range || !this._isRangeCompletelyInRoot(range)) return null;
++    return this.editor.toInlineRange(range);
++  };
++
+   private _onBeforeInput = (event: InputEvent) => {
++    if (this._isComposing) {
++      if (event.inputType === 'insertCompositionText') {
++        this._syncCompositionRange(event);
++      }
++      return;
++    }
++
+     const range = this.editor.rangeService.getNativeRange();
+     if (
+       this.editor.isReadonly ||
+-      this._isComposing ||
+       !range ||
+       !this._isRangeCompletelyInRoot(range)
+     )
+@@ -153,7 +262,8 @@ export class EventService<TextAttributes extends BaseTextAttributes> {
+     this.editor.rerenderWholeEditor();
+     await this.editor.waitForUpdate();
+ 
+-    const inlineRange = this._compositionInlineRange;
++    // Resolve only now: remote updates may have been applied since compositionstart.
++    const inlineRange = this._getCompositionRange();
+     if (!inlineRange) return;
+ 
+     event.preventDefault();
+@@ -181,6 +291,7 @@ export class EventService<TextAttributes extends BaseTextAttributes> {
+ 
+   private _onCompositionStart = () => {
+     this._isComposing = true;
++    this._compositionTargetSeen = false;
+     // embeds is not editable and it will break IME
+     const embeds = this.editor.rootElement.querySelectorAll(
+       '[data-v-embed="true"]'
+@@ -190,11 +301,7 @@ export class EventService<TextAttributes extends BaseTextAttributes> {
+     });
+ 
+     const range = this.editor.rangeService.getNativeRange();
+-    if (range) {
+-      this._compositionInlineRange = this.editor.toInlineRange(range);
+-    } else {
+-      this._compositionInlineRange = null;
+-    }
++    this._setCompositionRange(range ? this.editor.toInlineRange(range) : null);
+   };
+ 
+   private _onCompositionUpdate = () => {
