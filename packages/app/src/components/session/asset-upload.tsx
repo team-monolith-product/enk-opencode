@@ -30,7 +30,7 @@ import {
  * until it reads one. This is the path for a large corpus — prompt attachments are re-billed on
  * every step of every turn, so they cap out at ten files (see @/constants/file-picker).
  */
-export function createAssetUpload() {
+export function createAssetUpload(options?: { onDeleted?: (path?: string) => void }) {
   const sdk = useSDK()
   const file = useFile()
   const language = useLanguage()
@@ -181,6 +181,7 @@ export function createAssetUpload() {
 
   const removeNow = async (relative: string, label: string) => {
     const ok = await deleteAsset({ client: sdk.client, directory: sdk.directory, relative })
+    if (ok) options?.onDeleted?.(relative ? `${ASSETS_DIR}/${relative}` : ASSETS_DIR)
     refreshTree([relative])
     showToast(
       ok
@@ -197,6 +198,7 @@ export function createAssetUpload() {
   const removeProject = async (node: FileNode) => {
     const ok = await deleteProjectFile({ client: sdk.client, directory: sdk.directory, path: node.path })
     refreshParent(node.path)
+    if (ok) options?.onDeleted?.(node.path)
     showToast(
       ok
         ? { title: language.t("session.files.delete.done", { name: node.name }) }
@@ -206,6 +208,7 @@ export function createAssetUpload() {
 
   const removeEverything = async () => {
     const ok = await deleteProjectFile({ client: sdk.client, directory: sdk.directory })
+    if (ok) options?.onDeleted?.()
     // Re-listing the root drops every removed folder, and the entries cached under it, from the tree.
     void file.tree.refresh("")
     showToast(

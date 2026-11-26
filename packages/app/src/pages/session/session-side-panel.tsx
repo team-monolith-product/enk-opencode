@@ -62,7 +62,17 @@ export function SessionSidePanel(props: {
   })
 
   // __assets__ 업로드. 프롬프트 첨부와 달리 AI 를 거치지 않고 워크스페이스에 그대로 저장된다.
-  const assetUpload = createAssetUpload()
+  const assetUpload = createAssetUpload({
+    onDeleted: (deleted) => {
+      for (const tab of tabs().all()) {
+        const opened = pathFromContentTab(tab)
+        if (!opened) continue
+        if (deleted === undefined || opened === deleted || opened.startsWith(deleted + "/")) tabs().close(tab)
+      }
+      preview.recheck()
+      preview.reload()
+    },
+  })
 
   const isDesktop = createMediaQuery("(min-width: 768px)")
 
