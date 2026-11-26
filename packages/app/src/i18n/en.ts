@@ -480,10 +480,6 @@ export const dict = {
   "prompt.action.send": "Send",
   "prompt.action.stop": "Stop",
   "prompt.action.queue": "Add to queue",
-  "prompt.action.expandView": "View larger",
-  "prompt.action.collapseView": "Collapse",
-  "prompt.action.docAutoExpand": "Auto-expand",
-  "prompt.action.docAutoExpandHint": "When on, the input grows automatically as you type",
   "prompt.action.docAutoConsent": "Auto-agree",
   "prompt.action.docAutoConsentHint": "When on, you agree to your teammates' send, answer, and stop requests right away. Reset and rollback still need your own approval",
 

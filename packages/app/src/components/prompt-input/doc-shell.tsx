@@ -36,15 +36,6 @@ type ShellProps = {
   clearDisabled?: boolean
   /** 미리보기가 캡처 가능한 상태(URL·ready·패널 열림)인지. false 면 캡처 항목을 비활성화한다. */
   canCapture?: boolean
-  expand?: {
-    expanded: boolean
-    onExpand: () => void
-    onCollapse: () => void
-  }
-  autoExpand?: {
-    enabled: boolean
-    onToggle: () => void
-  }
   autoConsent?: {
     enabled: boolean
     onToggle: () => void
@@ -140,12 +131,6 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
-  const expandLabel = () => {
-    const expand = props.expand
-    if (!expand) return ""
-    return expand.expanded ? language.t("prompt.action.collapseView") : language.t("prompt.action.expandView")
-  }
-
   return (
     <div
       data-component="prompt-doc-shell"
@@ -321,43 +306,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
             />
           </Tooltip>
 
-          <Show when={props.expand && !env.productionLayout()}>
-            <Tooltip placement="top" value={expandLabel()}>
-              <IconButton
-                data-action={props.expand!.expanded ? "composer-collapse" : "composer-expand"}
-                type="button"
-                variant="ghost"
-                icon={props.expand!.expanded ? "collapse" : "expand"}
-                class="size-7.5"
-                aria-label={expandLabel()}
-                aria-expanded={props.expand!.expanded}
-                onClick={() =>
-                  props.expand!.expanded ? props.expand!.onCollapse() : props.expand!.onExpand()
-                }
-              />
-            </Tooltip>
-          </Show>
           {props.imageToggle}
-          <Show when={props.autoExpand}>
-            <span class="mx-1 h-4 w-px shrink-0 bg-border-weaker-base" />
-            <Tooltip placement="top" value={language.t("prompt.action.docAutoExpandHint")}>
-              <button
-                type="button"
-                data-action="prompt-doc-auto-expand"
-                role="switch"
-                aria-checked={props.autoExpand!.enabled}
-                aria-label={language.t("prompt.action.docAutoExpand")}
-                class="oc-auto-toggle"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => props.autoExpand!.onToggle()}
-              >
-                <span class="oc-auto-track" classList={{ "is-on": props.autoExpand!.enabled }}>
-                  <span class="oc-auto-thumb" />
-                </span>
-                <span class="oc-auto-label">{language.t("prompt.action.docAutoExpand")}</span>
-              </button>
-            </Tooltip>
-          </Show>
           <Show when={props.autoConsent}>
             <span class="mx-1 h-4 w-px shrink-0 bg-border-weaker-base" />
             <Tooltip placement="top" value={language.t("prompt.action.docAutoConsentHint")}>

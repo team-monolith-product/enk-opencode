@@ -10,7 +10,6 @@ import {
   Match,
   Switch,
   createMemo,
-  createSignal,
   createEffect,
   createComputed,
   on,
@@ -1763,8 +1762,6 @@ export default function Page() {
     if (fillFrame !== undefined) cancelAnimationFrame(fillFrame)
   })
 
-  const [composerLift, setComposerLift] = createSignal(false)
-
   const SessionPanelBody = () => (
     <>
       <SessionTabs />
@@ -1871,15 +1868,12 @@ export default function Page() {
         setPromptDockRef={(el) => {
           promptDock = el
         }}
-        onExpandedChange={setComposerLift}
       />
     </>
   )
 
   const SessionPanelResize = () => (
-    // 확장 입력창이 펼쳐지면(composerLift) 핸들을 렌더하지 않는다 — 어차피 드래그 불가이고,
-    // 전체 너비 입력창 위로 바가 올라오는 문제를 z-index 없이 막는다. (1px 경계선 디바이더는 유지)
-    <Show when={isDesktop() && !composerLift()}>
+    <Show when={isDesktop()}>
       <div
         class="absolute inset-y-0 right-0 w-0 overflow-visible"
         style={{ "--resize-gap-offset": "7px" }}
@@ -1910,8 +1904,6 @@ export default function Page() {
       data-component="codle-session-column"
       classList={{
         "relative flex min-h-0 min-w-0 flex-1 flex-col": true,
-        // expanded composer: sole z-index so column stacks above side panel (flex row DOM order)
-        "z-10": composerLift(),
         ...(props.classList ?? {}),
         [props.class ?? ""]: !!props.class,
       }}
