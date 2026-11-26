@@ -155,8 +155,6 @@ const canvasMode = (mode: PromptMode) => mode === "doc"
 const DOC_MIN = 150
 const DOC_HEIGHT = 300
 const DOC_RATIO = 0.8
-// 자동 확대: 입력창 포커스 시 기존 '확대(전체 너비 expanded)'로 자동 진입할지 여부. localStorage 영속.
-const AUTO_EXPAND_KEY = "prompt.doc.autoExpand"
 
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
@@ -354,82 +352,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     applyingHistory: false,
   })
   const [height, setHeight] = createSignal(DOC_HEIGHT)
-  // 자동 확대: 입력창 포커스 시 전체 너비 expanded 로 자동 진입(기본 OFF, localStorage 영속).
-  const [autoExpand, setAutoExpand] = createSignal(
-    (() => {
-      try {
-        return localStorage.getItem(AUTO_EXPAND_KEY) === "1"
-      } catch {
-        return false
-      }
-    })(),
-  )
-  const [focusWithin, setFocusWithin] = createSignal(false)
-  // 탭 캡처 진행 중 여부. 미리보기 헤더 버튼과 공유하기 위해 SessionPreviewBridge 컨텍스트가 소유한다.
-  // (아래 자동 확대 이펙트가 이 값을 보고 캡처 동안 입력창을 강제 축소한다.)
   const previewBridge = useSessionPreviewBridge()
   const capturing = previewBridge.capturing
   const setCapturing = previewBridge.setCapturing
-  // 컴포저 내부에서 시작된 클릭(포커스 못 받는 버튼/컨트롤 포함)으로 포커스가 body 로 빠지는 걸
-  // '이탈'로 오인해 축소→재확장 깜빡이는 걸 막기 위한 플래그.
-  let pointerDownInside = false
-  // 마운트 시 에디터가 자동 포커스되어도 곧바로 확대되지 않도록, 실제 사용자 상호작용 이후에만 자동 확대.
-  const [interacted, setInteracted] = createSignal(false)
-  const toggleAutoExpand = () => {
-    const next = !autoExpand()
-    setAutoExpand(next)
-    try {
-      localStorage.setItem(AUTO_EXPAND_KEY, next ? "1" : "0")
-    } catch {}
-    // 토글만으로는 현재 확대/축소 상태를 바꾸지 않는다 — 끄면 그 상태 그대로 둔 채 자동 동작만 멈춘다.
-  }
-  // 자동 확대 ON 이면 포커스 상태를 expanded 에 반영. OFF면 무조건 축소(collapse) 모드로 강제한다.
   createEffect(() => {
-    if (!props.onComposerExpand || !props.onComposerCollapse) return
-    // 탭 캡처 중엔 확대된 입력창이 캡처 화면을 가리므로 강제로 축소하고, 캡처가 완전히 끝날
-    // 때까지 재확대를 막는다. 끝나면(capturing=false) 아래 포커스 기준 로직이 원래 상태로 되돌린다.
-    if (capturing()) {
-      if (props.expanded) props.onComposerCollapse()
-      return
-    }
-    if (!autoExpand()) {
-      if (props.expanded) props.onComposerCollapse()
-      return
-    }
-    if (focusWithin() && interacted() && !props.expanded) props.onComposerExpand({ initialScale: 2 })
-    else if (!focusWithin() && props.expanded) props.onComposerCollapse()
-  })
-  onMount(() => {
-    const el = rootRef
-    if (!el) return
-    // 에디터 본문(prompt-doc) 클릭/타이핑만 '상호작용'으로 친다 — 리사이즈 핸들·액션바 버튼은
-    // 제외해, 마운트 자동 포커스 상태에서 작은 입력창 높이 조절(핸들 드래그)이 확대를 유발하지 않게.
-    const mark = (e: Event) => {
-      const t = e.target
-      if (t instanceof Element && t.closest('[data-component="prompt-doc"]')) setInteracted(true)
-    }
-    // 컴포저 내부에서 시작된 클릭인지 기록. 포커스 못 받는 컨트롤을 눌러 포커스가 body 로 빠져도
-    // 이 플래그가 있으면 focusout 에서 '이탈'로 보지 않는다. 키 입력(Tab 이동 등)이 시작되면 해제해
-    // 실제 포커스 위치 기준으로 판단하게 한다.
-    const trackPointer = (e: PointerEvent) => {
-      const t = e.target
-      pointerDownInside = t instanceof Node && el.contains(t)
-    }
-    const clearPointer = () => {
-      pointerDownInside = false
-    }
-    // doc 패널이 pointerdown 전파를 막으므로 캡처 단계로 듣는다.
-    el.addEventListener("pointerdown", mark, true)
-    el.addEventListener("keydown", mark, true)
-    // 컴포저 밖 클릭도 잡아야 하므로 window 캡처로 듣는다.
-    window.addEventListener("pointerdown", trackPointer, true)
-    el.addEventListener("keydown", clearPointer, true)
-    onCleanup(() => {
-      el.removeEventListener("pointerdown", mark, true)
-      el.removeEventListener("keydown", mark, true)
-      window.removeEventListener("pointerdown", trackPointer, true)
-      el.removeEventListener("keydown", clearPointer, true)
-    })
+    if (!props.onComposerCollapse) return
+    if (capturing() && props.expanded) props.onComposerCollapse()
   })
 
   const seed = (info: Session) => {
@@ -2118,20 +2046,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             }
           : undefined
       }
-      on:focusin={() => setFocusWithin(true)}
-      on:focusout={() => {
-        // 다음 틱에 실제 활성 요소가 컴포저 밖이면 focus 해제(에디터 내부 이동 시 깜빡임 방지).
-        setTimeout(() => {
-          if (!rootRef) return
-          if (rootRef.contains(document.activeElement)) return
-          // iframe(미리보기 등)로 포커스가 넘어간 경우는 명백한 이탈 — pointerDownInside 는 부모 window 로
-          // pointerdown 이 안 와 stale 일 수 있으니 무시하고 축소한다.
-          const toIframe = document.activeElement instanceof HTMLIFrameElement
-          // 컴포저 안의 포커스 못 받는 버튼/컨트롤을 눌러 포커스가 body 로 빠진 경우는 이탈이 아니다.
-          if (pointerDownInside && !toIframe) return
-          setFocusWithin(false)
-        }, 0)
-      }}
     >
       <Show when={docMode() === "doc" && !props.expanded}>
         <div
@@ -2297,7 +2211,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
               canCapture={previewBridge.canCapture()}
               clearDisabled={session.votePending()}
               expand={composerExpand()}
-              autoExpand={{ enabled: autoExpand(), onToggle: toggleAutoExpand }}
               autoConsent={
                 !readonly && consentRequired() ? { enabled: autoConsent(), onToggle: switchAutoConsent } : undefined
               }

@@ -1387,7 +1387,7 @@
   outline-offset: -1px;
 }
 
-/* C-3 '자동 확대' 토글 (.oc-auto-toggle) — 켜면 입력창 포커스 시 자동으로 커짐.
+/* 스위치 토글 (.oc-auto-toggle): 이미지 만들기·자동 동의 공용.
    디자인 어휘를 앱 토큰으로 매핑(다크 모드에서 track/thumb 대비 유지). */
 .oc-auto-toggle {
   display: inline-flex;
