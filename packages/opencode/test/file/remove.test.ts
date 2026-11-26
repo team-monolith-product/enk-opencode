@@ -9,6 +9,7 @@ import { tmpdir } from "../fixture/fixture"
 async function seed(dir: string) {
   await fs.mkdir(path.join(dir, "src/deep"), { recursive: true })
   await fs.mkdir(path.join(dir, ".opencode"), { recursive: true })
+  await fs.writeFile(path.join(dir, ".nfs0000000012345678"), "held")
   await fs.writeFile(path.join(dir, "a.txt"), "a")
   await fs.writeFile(path.join(dir, "src/deep/b.txt"), "b")
   await fs.writeFile(path.join(dir, ".opencode/keep.json"), "{}")
@@ -46,7 +47,6 @@ describe("FileRemove.resolve", () => {
         expect(await FileRemove.resolve("src/../../outside")).toBeUndefined()
         expect(await FileRemove.resolve(".git")).toBeUndefined()
         expect(await FileRemove.resolve(".git/config")).toBeUndefined()
-        expect(await FileRemove.resolve(".opencode/keep.json")).toBeUndefined()
       },
     })
   })
@@ -80,7 +80,7 @@ describe("FileRemove.remove / clear", () => {
     expect(await exists(path.join(tmp.path, "a.txt"))).toBe(true)
   })
 
-  test("clear deletes everything except protected folders", async () => {
+  test("clear empties the folder, dot files and .opencode included, and keeps only .git", async () => {
     await using tmp = await tmpdir({ git: true })
     await seed(tmp.path)
     await Instance.provide({
@@ -92,7 +92,9 @@ describe("FileRemove.remove / clear", () => {
     expect(await exists(path.join(tmp.path, "a.txt"))).toBe(false)
     expect(await exists(path.join(tmp.path, "src"))).toBe(false)
     expect(await exists(path.join(tmp.path, ".git"))).toBe(true)
-    expect(await exists(path.join(tmp.path, ".opencode/keep.json"))).toBe(true)
+    expect(await exists(path.join(tmp.path, ".opencode"))).toBe(false)
+    expect(await exists(path.join(tmp.path, ".nfs0000000012345678"))).toBe(false)
+    expect(await fs.readdir(tmp.path)).toEqual([".git"])
   })
 })
 
