@@ -422,32 +422,6 @@
     box-shadow: 0 0 0 3px rgba(255, 206, 43, 0.3);
   }
 
-
-  [data-component="session-prompt-dock"] dialog[data-component="session-composer-shell"]:not([open]) {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    border: none;
-    padding: 0;
-    margin: 0;
-    background: transparent;
-    color: inherit;
-  }
-
-  dialog[data-component="session-composer-expanded"][open] {
-    border: none;
-    margin: 0;
-    max-width: none;
-    max-height: none;
-    overflow: visible;
-    background: transparent;
-    color: inherit;
-  }
-
-  dialog[data-component="session-composer-expanded"]::backdrop {
-    display: none;
-  }
-
   /* 값 입력 도크 — Affine 전역 input 리셋·text-field 기본을 이 도크에서만 이긴다. */
   [data-component="dock-prompt"][data-kind="env"] [data-component="input"][data-variant="normal"] [data-slot="input-input"] {
     height: 32px !important;
@@ -623,12 +597,10 @@
     }
   }
 
-  /* 액션바 고스트 아이콘 버튼 (실행취소·다시실행·파일 첨부 +·확대/축소) — C-3 .oc-icon-btn 어휘 */
+  /* 액션바 고스트 아이콘 버튼 (실행취소·다시실행·파일 첨부 +) — C-3 .oc-icon-btn 어휘 */
   [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="prompt-draw-undo"],
   [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="prompt-draw-redo"],
-  [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="prompt-doc-attach"],
-  [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="composer-expand"],
-  [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="composer-collapse"] {
+  [data-component="prompt-draw-actions"] [data-component="icon-button"][data-action="prompt-doc-attach"] {
     border: none;
     background-color: transparent;
     box-shadow: none;
@@ -641,34 +613,26 @@
 
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-undo"]:not(:disabled) [data-slot="icon-svg"],
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-redo"]:not(:disabled) [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled) [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="composer-expand"]:not(:disabled) [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="composer-collapse"]:not(:disabled) [data-slot="icon-svg"] {
+  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled) [data-slot="icon-svg"] {
     color: var(--icon-base);
     transition: color var(--dur-fast) var(--ease-standard);
   }
 
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-undo"]:not(:disabled):hover,
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-redo"]:not(:disabled):hover,
-  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):hover,
-  [data-component="prompt-draw-actions"] [data-action="composer-expand"]:not(:disabled):hover,
-  [data-component="prompt-draw-actions"] [data-action="composer-collapse"]:not(:disabled):hover {
+  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):hover {
     background-color: var(--surface-base);
   }
 
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-undo"]:not(:disabled):hover [data-slot="icon-svg"],
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-redo"]:not(:disabled):hover [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):hover [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="composer-expand"]:not(:disabled):hover [data-slot="icon-svg"],
-  [data-component="prompt-draw-actions"] [data-action="composer-collapse"]:not(:disabled):hover [data-slot="icon-svg"] {
+  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):hover [data-slot="icon-svg"] {
     color: var(--icon-strong-base);
   }
 
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-undo"]:not(:disabled):active,
   [data-component="prompt-draw-actions"] [data-action="prompt-draw-redo"]:not(:disabled):active,
-  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):active,
-  [data-component="prompt-draw-actions"] [data-action="composer-expand"]:not(:disabled):active,
-  [data-component="prompt-draw-actions"] [data-action="composer-collapse"]:not(:disabled):active {
+  [data-component="prompt-draw-actions"] [data-action="prompt-doc-attach"]:not(:disabled):active {
     background-color: var(--surface-base-active);
     transform: scale(0.92);
   }

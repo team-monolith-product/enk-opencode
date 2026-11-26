@@ -259,8 +259,6 @@ export const dict = {
   "prompt.action.send": "إرسال",
   "prompt.action.stop": "توقف",
   "prompt.action.queue": "Add to queue",
-  "prompt.action.expandView": "View larger",
-  "prompt.action.collapseView": "Collapse",
   "prompt.action.docAutoConsent": "موافقة تلقائية",
   "prompt.action.docAutoConsentHint":
     "عند التفعيل، توافق مباشرة على طلبات الإرسال والإجابة والإيقاف من زملائك. إعادة التعيين والاسترجاع تحتاج دائمًا إلى موافقتك بنفسك",

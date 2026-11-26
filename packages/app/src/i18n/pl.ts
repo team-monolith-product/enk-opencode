@@ -260,8 +260,6 @@ export const dict = {
   "prompt.action.send": "Wyślij",
   "prompt.action.stop": "Zatrzymaj",
   "prompt.action.queue": "Add to queue",
-  "prompt.action.expandView": "View larger",
-  "prompt.action.collapseView": "Collapse",
   "prompt.toast.pasteUnsupported.title": "Nieobsługiwany załącznik",
   "prompt.toast.pasteUnsupported.description": "Można tutaj załączać tylko obrazy, pliki PDF lub pliki tekstowe.",
   "prompt.toast.fileTooLarge.title": "Plik jest za duży",
