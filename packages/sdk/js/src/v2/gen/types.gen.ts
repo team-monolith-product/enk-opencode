@@ -615,7 +615,7 @@ export type OutputFormatJsonSchema = {
 
 export type OutputFormat = OutputFormatText | OutputFormatJsonSchema
 
-export type PromptLocale = "ko" | "en"
+export type PromptLocale = "ko" | "en" | "ar"
 
 export type UserMessage = {
   id: string

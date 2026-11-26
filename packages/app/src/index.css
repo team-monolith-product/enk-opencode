@@ -138,7 +138,7 @@
 
   [data-component="codle-home-sidebar"] {
     background: color-mix(in srgb, var(--app-paper-strong) 91%, var(--app-mix) 9%);
-    border-right: 1px solid var(--app-line);
+    border-inline-end: 1px solid var(--app-line);
   }
 
   [data-component="codle-home-sidebar"] [data-component="button"] {
@@ -878,7 +878,7 @@
   }
 
   [data-component="codle-side-panel"] .scroll-view__thumb {
-    right: 12px;
+    inset-inline-end: 12px;
   }
 
   [data-component="codle-preview-panel"] {
@@ -1335,7 +1335,7 @@
   color: var(--text-base);
   font-size: 13px;
   font-weight: 500;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition: background var(--duration-150) var(--ease-standard);
 }
@@ -1388,17 +1388,17 @@
 .oc-auto-thumb {
   position: absolute;
   top: 2px;
-  left: 2px;
+  inset-inline-start: 2px;
   width: 12px;
   height: 12px;
   border-radius: 50%;
   background: var(--surface-raised-stronger-non-alpha);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
-  transition: left var(--dur-fast) var(--ease-standard);
+  transition: inset-inline-start var(--dur-fast) var(--ease-standard);
 }
 
 .oc-auto-track.is-on .oc-auto-thumb {
-  left: 14px;
+  inset-inline-start: 14px;
 }
 
 .oc-auto-label {
@@ -1442,7 +1442,7 @@
 /* 사이드패널 안쪽 래퍼의 좌측 보더 제거 — 디자인엔 구분선이 하나뿐인데, 이 보더(border-weaker)가
    좌 프레임 우측 테두리/핸들 ::before 와 1px 어긋나 겹쳐 두 줄로 보이게 만든다. 구분선은 핸들 쪽 하나로 통일. */
 :root[data-theme="jitda"] [data-component="codle-side-panel"] > div {
-  border-left-width: 0;
+  border-inline-start-width: 0;
 }
 
 /* 좌·우(채팅↔미리보기) 섹션 리사이즈 핸들에만 적용 — 파일트리 등 다른 가로 핸들엔 영향 없음.
@@ -1729,7 +1729,7 @@
   border-radius: 4px;
   font-size: 12.5px;
   font-weight: 600;
-  text-align: left;
+  text-align: start;
   color: var(--env-text-weak);
   background: transparent;
   box-sizing: border-box;
@@ -1875,7 +1875,7 @@
   flex-direction: column;
   gap: 6px;
   margin: 0;
-  padding-left: 30px;
+  padding-inline-start: 30px;
   list-style: disc;
   font-size: 12.5px;
   line-height: 1.55;
@@ -1985,7 +1985,7 @@
   background: var(--env-surface);
   color: var(--env-text-ink);
   font-size: 13px;
-  text-align: left;
+  text-align: start;
 }
 
 .github-dialog .github-repo[aria-checked="true"] {
@@ -1998,7 +1998,7 @@
 }
 
 .github-dialog .github-badge {
-  margin-left: auto;
+  margin-inline-start: auto;
   flex-shrink: 0;
   font-size: 11px;
   color: var(--env-text-muted);
@@ -2113,7 +2113,7 @@
 
 /* 키 힌트 — 합의 카드의 ds-kbd 와 같은 형태(모노 11px, 아래만 2px 테두리). */
 .session-clear-dialog .session-clear-kbd {
-  font-family: "D2Coding", "IBM Plex Mono", ui-monospace, monospace;
+  font-family: "D2Coding", "IBM Plex Mono", ui-monospace, "Geeza Pro", "Noto Sans Arabic", "Segoe UI", monospace;
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
@@ -2136,3 +2136,9 @@
   opacity: 0.45;
 }
 
+
+:root:lang(ar) *,
+:root:lang(ar) *::before,
+:root:lang(ar) *::after {
+  letter-spacing: 0 !important;
+}

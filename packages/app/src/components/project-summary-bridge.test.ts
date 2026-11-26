@@ -10,10 +10,10 @@ describe("summaryLocale", () => {
   test("호스트 locale 이 없으면 iframe 언어를 쓴다", () => {
     expect(summaryLocale(undefined, "en")).toBe("en")
     expect(summaryLocale(undefined, "ko")).toBe("ko")
+    expect(summaryLocale(undefined, "ar")).toBe("ar")
   })
 
   test("지원하지 않는 iframe 언어는 보내지 않는다", () => {
-    expect(summaryLocale(undefined, "ar")).toBeUndefined()
     expect(summaryLocale(undefined, "ja")).toBeUndefined()
   })
 })

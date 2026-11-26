@@ -11748,7 +11748,7 @@
       },
       "PromptLocale": {
         "type": "string",
-        "enum": ["ko", "en"]
+        "enum": ["ko", "en", "ar"]
       },
       "UserMessage": {
         "type": "object",

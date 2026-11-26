@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { ProjectSummaryLanguage } from "../../src/enk/project-summary-language"
 
-const user = (locale?: "ko" | "en") => ({ info: { role: "user", locale } })
+const user = (locale?: "ko" | "en" | "ar") => ({ info: { role: "user", locale } })
 const assistant = () => ({ info: { role: "assistant" } })
 
 describe("ProjectSummaryLanguage.resolve", () => {
@@ -32,5 +32,9 @@ describe("ProjectSummaryLanguage.directive", () => {
 
   test("ko 는 한국어로 쓰라고 명시한다", () => {
     expect(ProjectSummaryLanguage.directive("ko")).toContain("한국어로")
+  })
+
+  test("ar 는 아랍어로 쓰라고 명시한다", () => {
+    expect(ProjectSummaryLanguage.directive("ar")).toContain("باللغة العربية")
   })
 })

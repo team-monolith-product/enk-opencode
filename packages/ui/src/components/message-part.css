@@ -30,7 +30,7 @@
     gap: 8px;
     width: fit-content;
     max-width: min(82%, 64ch);
-    margin-left: auto;
+    margin-inline-start: auto;
   }
 
   [data-slot="user-message-attachment"] {
@@ -115,7 +115,7 @@
   [data-slot="user-message-body"] {
     width: fit-content;
     max-width: min(82%, 64ch);
-    margin-left: auto;
+    margin-inline-start: auto;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -185,7 +185,7 @@
 
   [data-slot="user-message-meta"] {
     user-select: none;
-    text-align: right;
+    text-align: end;
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
@@ -207,7 +207,7 @@
     user-select: none;
     flex: 0 0 auto;
     white-space: nowrap;
-    text-align: right;
+    text-align: end;
   }
 
   &:hover [data-slot="user-message-copy-wrapper"],
@@ -376,7 +376,7 @@
   [data-slot="bash-copy"] {
     position: absolute;
     top: 4px;
-    right: 4px;
+    inset-inline-end: 4px;
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s ease;
@@ -501,7 +501,7 @@
     overflow: hidden;
     white-space: nowrap;
     direction: rtl;
-    text-align: left;
+    text-align: start;
   }
 
   [data-slot="message-part-filename"] {
@@ -649,9 +649,9 @@
 
 [data-component="context-tool-group-list"] {
   padding-top: 6px;
-  padding-right: 0;
+  padding-inline-end: 0;
   padding-bottom: 4px;
-  padding-left: 13px;
+  padding-inline-start: 13px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -827,8 +827,8 @@
     gap: 8px;
 
     [data-component="button"] {
-      padding-left: 12px;
-      padding-right: 12px;
+      padding-inline-start: 12px;
+      padding-inline-end: 12px;
     }
   }
 }
@@ -891,8 +891,8 @@
     content: "";
     position: absolute;
     top: 0;
-    left: 0;
-    right: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
     height: 12px;
     background-image: repeating-linear-gradient(
       -45deg,
@@ -1141,7 +1141,7 @@
     border: 1px solid var(--border-weak-base);
     border-radius: 6px;
     box-shadow: none;
-    text-align: left;
+    text-align: start;
     width: 100%;
     cursor: pointer;
     transition:
@@ -1307,7 +1307,7 @@
   }
 
   [data-slot="question-custom-input-wrap"] {
-    padding-left: 36px;
+    padding-inline-start: 36px;
   }
 
   [data-slot="question-custom-input"] {
@@ -1358,7 +1358,7 @@
     align-items: center;
     gap: 8px;
     /* Stay right-aligned even when the dismiss button is hidden (no left sibling). */
-    margin-left: auto;
+    margin-inline-start: auto;
   }
 }
 
@@ -1440,7 +1440,7 @@
     overflow: hidden;
     white-space: nowrap;
     direction: rtl;
-    text-align: left;
+    text-align: start;
   }
 
   [data-slot="apply-patch-filename"] {

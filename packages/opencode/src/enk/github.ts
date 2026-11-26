@@ -488,6 +488,11 @@ export namespace GitHub {
       theirs: "Resolved the conflict with GitHub's side",
       backup: "Saved before resolving the conflict",
     },
+    ar: {
+      ours: "حُلّ التعارض باعتماد جانب Jitda",
+      theirs: "حُلّ التعارض باعتماد جانب GitHub",
+      backup: "حُفظ تلقائيًا قبل حل التعارض",
+    },
   } as const
 
   /**
@@ -535,6 +540,7 @@ export namespace GitHub {
   const PULL = {
     ko: { message: "GitHub에서 바뀐 내용 가져오기", backup: "GitHub 내용 가져오기 전 자동 저장" },
     en: { message: "Brought in changes from GitHub", backup: "Saved before bringing in GitHub changes" },
+    ar: { message: "جلب التغييرات من GitHub", backup: "حُفظ تلقائيًا قبل جلب تغييرات GitHub" },
   } as const
 
   /**
@@ -588,6 +594,7 @@ export namespace GitHub {
   const ABSORB = {
     ko: { message: "GitHub 저장소 내용 가져오기", backup: "GitHub 내용 가져오기 전 자동 저장" },
     en: { message: "Brought in the GitHub repository", backup: "Saved before bringing in GitHub files" },
+    ar: { message: "جلب محتوى مستودع GitHub", backup: "حُفظ تلقائيًا قبل جلب ملفات GitHub" },
   } as const
 
   /** 연결 화면에서 바로 올린다. 마지막 기록 뒤에 바뀐 파일이 있으면 먼저 기록에 남기고, 올릴 것이 없으면 pushed 가 false 다. */

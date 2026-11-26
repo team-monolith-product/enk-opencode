@@ -209,8 +209,8 @@
           content: "";
           position: absolute;
           top: 100%;
-          left: 0;
-          right: 0;
+          inset-inline-start: 0;
+          inset-inline-end: 0;
           height: 16px;
           background: linear-gradient(to bottom, var(--surface-raised-stronger-non-alpha), transparent);
           pointer-events: none;
@@ -269,14 +269,14 @@
 
           [data-slot="list-item-extra-icon"] {
             color: var(--icon-base);
-            margin-left: -4px;
+            margin-inline-start: -4px;
           }
 
           [data-slot="list-item-divider"] {
             position: absolute;
             bottom: 0;
-            left: var(--list-divider-inset, 16px);
-            right: var(--list-divider-inset, 16px);
+            inset-inline-start: var(--list-divider-inset, 16px);
+            inset-inline-end: var(--list-divider-inset, 16px);
             height: 1px;
             background: var(--border-weak-base);
             pointer-events: none;

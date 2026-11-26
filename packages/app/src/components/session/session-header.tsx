@@ -287,7 +287,7 @@ export function SessionHeader() {
                       <div class="flex h-[24px] box-border items-center rounded-md border border-border-weak-base bg-surface-panel overflow-hidden">
                         <Button
                           variant="ghost"
-                          class="rounded-none h-full py-0 pr-3 pl-0.5 gap-1.5 border-none shadow-none"
+                          class="rounded-none h-full py-0 pe-3 ps-0.5 gap-1.5 border-none shadow-none"
                           onClick={copyPath}
                           aria-label={language.t("session.header.open.copyPath")}
                         >
@@ -335,7 +335,7 @@ export function SessionHeader() {
                             aria-label={language.t("session.header.open.menu")}
                           />
                           <DropdownMenu.Portal>
-                            <DropdownMenu.Content class="[&_[data-slot=dropdown-menu-item]]:pl-1 [&_[data-slot=dropdown-menu-radio-item]]:pl-1 [&_[data-slot=dropdown-menu-radio-item]+[data-slot=dropdown-menu-radio-item]]:mt-1">
+                            <DropdownMenu.Content class="[&_[data-slot=dropdown-menu-item]]:ps-1 [&_[data-slot=dropdown-menu-radio-item]]:ps-1 [&_[data-slot=dropdown-menu-radio-item]+[data-slot=dropdown-menu-radio-item]]:mt-1">
                               <DropdownMenu.Group>
                                 <DropdownMenu.GroupLabel class="!px-1 !py-1">
                                   {language.t("session.header.openIn")}

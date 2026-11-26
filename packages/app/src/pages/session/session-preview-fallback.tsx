@@ -167,7 +167,7 @@ function PreviewLogs(props: { lines: string[]; cmd?: string; running?: boolean }
   })
 
   return (
-    <div class="mt-1 flex w-full max-w-140 flex-col gap-1 text-left">
+    <div class="mt-1 flex w-full max-w-140 flex-col gap-1 text-start">
       <div class="flex items-center gap-1.5">
         <span class="inline-flex shrink-0 text-icon-weak-base">
           <Icon name="terminal" size="small" />
@@ -196,7 +196,7 @@ function PreviewLogs(props: { lines: string[]; cmd?: string; running?: boolean }
       <div
         ref={(el) => (box = el)}
         onScroll={onScroll}
-        class="w-full overflow-y-auto overflow-x-hidden rounded-md border border-border-weak-base bg-background-stronger px-2.5 font-mono text-left"
+        class="w-full overflow-y-auto overflow-x-hidden rounded-md border border-border-weak-base bg-background-stronger px-2.5 font-mono text-left" dir="ltr"
         style={{
           "max-height": `${LOG_VISIBLE_LINES * LOG_LINE_HEIGHT}px`,
           "font-size": "11px",
@@ -396,7 +396,7 @@ export function SessionPreviewFallback(props: {
                 type="button"
                 onClick={copyPrompt}
                 title={promptText()}
-                class="min-w-0 flex-1 truncate rounded-md border border-border-weak-base bg-background-stronger px-2.5 py-1.5 text-left text-12-regular text-text-base cursor-pointer hover:bg-surface-raised-base-hover transition-colors"
+                class="min-w-0 flex-1 truncate rounded-md border border-border-weak-base bg-background-stronger px-2.5 py-1.5 text-start text-12-regular text-text-base cursor-pointer hover:bg-surface-raised-base-hover transition-colors"
               >
                 {promptText()}
               </button>

@@ -21,7 +21,7 @@ import { TurnSummary } from "./turn"
 export namespace HistorySync {
   const log = Log.create({ service: "history-sync" })
 
-  const REVERT = { ko: "되돌리기: ", en: "Roll back to: " } as const
+  const REVERT = { ko: "되돌리기: ", en: "Roll back to: ", ar: "الرجوع إلى: " } as const
 
   // 되돌리기 커밋으로 다시 되돌릴 때 제목이 "되돌리기: 되돌리기: …" 로 겹치지 않게 앞의 접두어를 걷어 낸다.
   function plain(subject: string) {
@@ -35,6 +35,7 @@ export namespace HistorySync {
   const LABEL: Record<Locale.Value, { revert: (subject: string) => string; backup: string }> = {
     ko: { revert: (subject) => `${REVERT.ko}${plain(subject)}`, backup: "되돌리기 전 자동 저장" },
     en: { revert: (subject) => `${REVERT.en}${plain(subject)}`, backup: "Saved before rolling back" },
+    ar: { revert: (subject) => `${REVERT.ar}${plain(subject)}`, backup: "حُفظ تلقائيًا قبل الرجوع" },
   }
 
   const MERGE: Record<
@@ -76,6 +77,22 @@ export namespace HistorySync {
       kept: (files) =>
         [
           "These files could not be merged automatically, so one side was kept as is. They need no edits.",
+          files.map((file) => `- ${file}`).join("\n"),
+        ].join("\n"),
+    },
+    ar: {
+      backup: "حُفظ تلقائيًا قبل دمج تغييرات GitHub",
+      marked: "جُلبت تغييرات GitHub ووُضعت علامات على المواضع المتداخلة",
+      merged: "دمج التغييرات من GitHub",
+      prompt: (files) =>
+        [
+          "دُمجت في مجلد العمل تغييرات أُجريت بشكل منفصل في مستودع GitHub. الملفات أدناه تغيّرت في المواضع نفسها من الجانبين، لذا ما زالت فيها علامات التعارض.",
+          files.map((file) => `- ${file}`).join("\n"),
+          "يمتد كل تعارض من السطر `<<<<<<<` إلى السطر `>>>>>>>`. ما فوق `=======` هو ما صُنع في Jitda، وما تحته هو ما تغيّر في GitHub. ادمجهما مع الحفاظ على مقصد الجانبين، واحذف كل أسطر العلامات (`<<<<<<<`، `=======`، `>>>>>>>`). لا تعدّل ملفات خارج هذه القائمة. عند الانتهاء، اشرح باختصار كيف دمجتهما.",
+        ].join("\n\n"),
+      kept: (files) =>
+        [
+          "تعذّر دمج هذه الملفات تلقائيًا، فبقي محتوى أحد الجانبين كما هو. لا تحتاج إلى تعديل.",
           files.map((file) => `- ${file}`).join("\n"),
         ].join("\n"),
     },
@@ -336,6 +353,15 @@ export namespace HistorySync {
         description: "Overlaps follow GitHub; everything else from both sides is kept",
       },
       ours: { label: "Jitda's side", description: "Overlaps follow Jitda; everything else from both sides is kept" },
+    },
+    ar: {
+      header: "تعارض في GitHub",
+      question: (files, linking) =>
+        `${linking ? "الملفات الموجودة في مستودع GitHub المرتبط" : "التغييرات التي أُجريت بشكل منفصل في GitHub"} تتداخل مع تغييرات Jitda في المواضع نفسها. كيف نوفّق بينهما؟ إلى أن تختار، يبقى عمل Jitda في فرع منفصل فقط.\n\nالملفات المتداخلة: ${files.join("، ")}`,
+      retry: "تعذّر تطبيق الاختيار السابق. يُرجى الاختيار مرة أخرى.",
+      ai: { label: "الدمج بالذكاء الاصطناعي", description: "يدمج الذكاء الاصطناعي الجانبين معًا ثم يرفع النتيجة" },
+      theirs: { label: "اعتماد GitHub", description: "تتبع المواضع المتداخلة GitHub، ويُحتفظ بباقي التغييرات من الجانبين" },
+      ours: { label: "اعتماد Jitda", description: "تتبع المواضع المتداخلة Jitda، ويُحتفظ بباقي التغييرات من الجانبين" },
     },
   }
 

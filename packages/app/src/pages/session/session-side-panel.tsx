@@ -284,7 +284,7 @@ export function SessionSidePanel(props: {
         }}
         style={{ width: panelWidth() }}
       >
-        <div class="size-full flex flex-col border-l border-border-weaker-base">
+        <div class="size-full flex flex-col border-s border-border-weaker-base">
           {/* 브라우저 chrome 바 — 시안처럼 상단 전체 폭을 차지(탐색기·미리보기 위). */}
           <SessionBrowserChrome
             previewReady={preview.previewReady()}
@@ -390,7 +390,7 @@ export function SessionSidePanel(props: {
                         <SortableProvider ids={openedTabs()}>
                           <For each={openedTabs()}>{(tab) => <SortableTab tab={tab} onTabClose={tabs().close} />}</For>
                         </SortableProvider>
-                        <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
+                        <div class="bg-background-stronger h-full shrink-0 sticky end-0 z-10 flex items-center justify-center pe-3">
                           <TooltipKeybind
                             title={language.t("command.file.open")}
                             keybind={command.keybind("file.open")}
@@ -516,7 +516,7 @@ export function SessionSidePanel(props: {
               <div
                 class="h-full flex flex-col overflow-hidden group/filetree relative"
                 classList={{
-                  "border-r border-border-weaker-base": reviewOpen(),
+                  "border-e border-border-weaker-base": reviewOpen(),
                   "outline outline-2 -outline-offset-2 outline-border-accent": assetUpload.dragging(),
                 }}
                 {...assetUpload.drop}

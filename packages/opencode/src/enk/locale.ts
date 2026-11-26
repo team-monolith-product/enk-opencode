@@ -1,7 +1,7 @@
 import z from "zod"
 
 export namespace Locale {
-  export const Schema = z.enum(["ko", "en"]).meta({ ref: "PromptLocale" })
+  export const Schema = z.enum(["ko", "en", "ar"]).meta({ ref: "PromptLocale" })
   export type Value = z.infer<typeof Schema>
   export const DEFAULT: Value = "ko"
 
@@ -12,6 +12,15 @@ export namespace Locale {
       "- Write every user-visible sentence in English: acknowledgements, change summaries, questions, refusals.",
       "- Think in English as well. Do not open your reasoning in another language.",
       "- Keep code, identifiers, file paths, shell commands, and URLs exactly as they are.",
+      "- Tone: friendly, short sentences, one step at a time, encouraging. Use the same polite, warm register the instructions above describe for Korean.",
+      "</response_language>",
+    ].join("\n"),
+    ar: [
+      "<response_language>",
+      "The user's interface language is Arabic (Modern Standard Arabic).",
+      "- Write every user-visible sentence in Arabic: acknowledgements, change summaries, questions, refusals.",
+      "- Think in Arabic as well. Do not open your reasoning in another language.",
+      "- Keep code, identifiers, file paths, shell commands, and URLs exactly as they are, in their original left-to-right form.",
       "- Tone: friendly, short sentences, one step at a time, encouraging. Use the same polite, warm register the instructions above describe for Korean.",
       "</response_language>",
     ].join("\n"),

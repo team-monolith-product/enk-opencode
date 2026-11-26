@@ -1875,7 +1875,7 @@ export default function Page() {
   const SessionPanelResize = () => (
     <Show when={isDesktop()}>
       <div
-        class="absolute inset-y-0 right-0 w-0 overflow-visible"
+        class="absolute inset-y-0 end-0 w-0 overflow-visible"
         style={{ "--resize-gap-offset": "7px" }}
         onPointerDown={() => size.start()}
       >

@@ -147,7 +147,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
         <Show when={!env.productionLayout()}>
           <div
             data-component="prompt-doc-id"
-            class="absolute bottom-0 right-0 z-10 max-w-[40%] rounded-tl-[10px] text-text-weaker"
+            class="absolute bottom-0 end-0 z-10 max-w-[40%] rounded-ss-[10px] text-text-weaker"
           >
             <Tooltip
               placement="top"
@@ -155,7 +155,7 @@ export const PromptDocShell: Component<ShellProps> = (props) => {
             >
               <button
                 type="button"
-                class="flex max-w-full items-center justify-start rounded-tl-lg rounded-tr-none rounded-br-none rounded-bl-none bg-surface-raised-stronger-non-alpha px-2 py-1 font-mono text-11-regular leading-[13px] text-text-weaker shadow-sm ring-1 ring-border-weaker-base hover:ring-border-base"
+                class="flex max-w-full items-center justify-start rounded-ss-lg rounded-se-none rounded-br-none rounded-bl-none bg-surface-raised-stronger-non-alpha px-2 py-1 font-mono text-11-regular leading-[13px] text-text-weaker shadow-sm ring-1 ring-border-weaker-base hover:ring-border-base"
                 title={props.doc.docID() ?? ""}
                 onClick={copy}
                 aria-label={copied() ? language.t("ui.message.copied") : language.t("ui.textField.copyToClipboard")}
