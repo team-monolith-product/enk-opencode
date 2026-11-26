@@ -1,4 +1,4 @@
-import { isAssetRef } from "@opencode-ai/util/attachment-ref"
+import { isAssetRef, mediaRefHash } from "@opencode-ai/util/attachment-ref"
 import { apiUrl } from "@/utils/api-url"
 
 /**
@@ -8,8 +8,9 @@ import { apiUrl } from "@/utils/api-url"
  * file:// reference) is handed back untouched.
  */
 export function attachmentSrc(input: { baseUrl: string; directory: string; url: string }) {
-  if (!isAssetRef(input.url)) return input.url
-  const next = apiUrl(input.baseUrl, input.url)
+  const media = mediaRefHash(input.url)
+  if (!media && !isAssetRef(input.url)) return input.url
+  const next = apiUrl(input.baseUrl, media ? `/experimental/media/${media}` : input.url)
   next.searchParams.set("directory", input.directory)
   return next.toString()
 }

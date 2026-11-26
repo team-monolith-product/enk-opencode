@@ -6,6 +6,7 @@ import z from "zod"
 import { Session } from "../../session"
 import { getOrCreateMain } from "../../session/ensure"
 import { archiveSession, removeSession } from "../../session/archive"
+import { SessionBlob } from "../../session/blob"
 import { MessageV2 } from "../../session/message-v2"
 import { SessionPrompt } from "../../session/prompt"
 import { SessionCompaction } from "../../session/compaction"
@@ -25,6 +26,12 @@ import { Bus } from "../../bus"
 import { NamedError } from "@opencode-ai/util/error"
 
 const log = Log.create({ service: "server" })
+
+const mediaRefs = (header: string | undefined) =>
+  !!header
+    ?.split(",")
+    .map((item) => item.trim())
+    .includes("experimental-media-uri") && SessionBlob.enabled()
 
 export const SessionRoutes = lazy(() =>
   new Hono()
@@ -611,6 +618,19 @@ export const SessionRoutes = lazy(() =>
       async (c) => {
         const query = c.req.valid("query")
         const sessionID = c.req.valid("param").sessionID
+        const refs = mediaRefs(c.req.header("x-opencode-capabilities"))
+        if (refs && !query.limit) {
+          await Session.get(sessionID)
+          const messages = [] as MessageV2.WithParts[]
+          let before: string | undefined
+          while (true) {
+            const next = await MessageV2.page({ sessionID, limit: 50, before, refs })
+            messages.unshift(...next.items)
+            if (!next.more || !next.cursor) break
+            before = next.cursor
+          }
+          return c.json(messages)
+        }
         if (query.limit === undefined) {
           await Session.get(sessionID)
           const messages = await Session.messages({ sessionID })
@@ -627,6 +647,7 @@ export const SessionRoutes = lazy(() =>
           sessionID,
           limit: query.limit,
           before: query.before,
+          refs,
         })
         if (page.cursor) {
           const url = new URL(c.req.url)
@@ -674,6 +695,7 @@ export const SessionRoutes = lazy(() =>
         const message = await MessageV2.get({
           sessionID: params.sessionID,
           messageID: params.messageID,
+          refs: mediaRefs(c.req.header("x-opencode-capabilities")),
         })
         return c.json(message)
       },

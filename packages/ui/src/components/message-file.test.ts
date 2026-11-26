@@ -27,6 +27,11 @@ describe("message-file", () => {
     expect(attached(file({ url: "file:///repo/doc/notes.md" }))).toBe(false)
   })
 
+  test("treats stored media references as attachments", () => {
+    expect(attached(file({ url: `media:${"a".repeat(64)}` }))).toBe(true)
+    expect(attached(file({ url: "media:abc" }))).toBe(false)
+  })
+
   test("treats only non-attachment source ranges as inline references", () => {
     expect(
       inline(

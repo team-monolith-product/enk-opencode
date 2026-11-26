@@ -18,7 +18,7 @@ export function createSdkForServer({
 }) {
   return createOpencodeClient({
     ...config,
-    headers: { ...config.headers, ...basicAuth(server) },
+    headers: { "x-opencode-capabilities": "experimental-media-uri", ...config.headers, ...basicAuth(server) },
     baseUrl: server.url,
   })
 }
