@@ -14,6 +14,7 @@ import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import { EnsureDevServerTool } from "./ensure-dev-server"
 import { EnvRequestTool } from "./env-request"
+import { HandoffTool, SIDE_AGENT } from "./handoff"
 import { GenerateImage, GenerateImageTool } from "./generate-image"
 import type { Agent } from "../agent/agent"
 import { Tool } from "./tool"
@@ -123,6 +124,8 @@ export namespace ToolRegistry {
           ...(question ? [QuestionTool] : []),
           // 값 입력창을 띄울 클라이언트가 있어야 의미가 있으므로 question 과 같은 조건으로 건다.
           ...(question ? [EnvRequestTool] : []),
+          // 사이드 채팅 → 메인 프롬프트 doc. 받아 줄 앱이 있어야 하고, 권한상 side 에이전트만 쓴다.
+          ...(question ? [HandoffTool] : []),
           BashTool,
           ReadTool,
           GlobTool,
@@ -168,6 +171,9 @@ export namespace ToolRegistry {
         const state = yield* InstanceState.get(cache)
         const allTools = yield* all(state.custom)
         const filtered = allTools.filter((tool) => {
+          // 사이드 채팅 전용. 권한 deny 만으로는 부족하다 — 운영 설정("permission": "allow")이 기본 deny
+          // 뒤에 병합돼 메인 에이전트에게도 열린다.
+          if (tool.id === HandoffTool.id) return agent?.name === SIDE_AGENT
           if (tool.id === "codesearch" || tool.id === "websearch") {
             return model.providerID === ProviderID.opencode || Flag.OPENCODE_ENABLE_EXA
           }

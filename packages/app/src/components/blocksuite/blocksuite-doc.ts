@@ -1,5 +1,5 @@
 import { AffineSchemas } from "@blocksuite/blocks/schemas"
-import { DocCollection, Schema, type BlockModel, type Doc, type Query } from "@blocksuite/store"
+import { DocCollection, Schema, Text, type BlockModel, type Doc, type Query } from "@blocksuite/store"
 import { getFilename } from "@opencode-ai/util/path"
 import "@/components/blocksuite/blocksuite-doc.css"
 import { watchCursorLabels } from "./cursor-labels"
@@ -849,6 +849,31 @@ export async function createPage(input: DocMountInput) {
     return true
   }
 
+  // 바깥(사이드 채팅 넘기기)에서 문단을 붙인다. 빈 줄로 나눈 덩어리마다 문단 하나. 초안이 비어 있으면
+  // ensureEditable 이 깔아 둔 빈 문단을 지워, 넘긴 내용 위에 빈 줄이 남지 않게 한다.
+  const addText = (value: string) => {
+    if (input.readonly) return false
+    const chunks = value
+      .split(/\n{2,}/)
+      .map((chunk) => chunk.trim())
+      .filter(Boolean)
+    if (chunks.length === 0) return false
+    ensureEditable(doc)
+    const parent = doc.getBlockByFlavour("affine:note")[0]
+    if (!parent) return false
+    // 맨 끝이 빈 문단이면 지우지 않고 거기에 이어 쓴다 — 공유 초안이라 다른 참여자가 막 그 줄에 입력을
+    // 시작했을 수 있다. 블록을 지우면 그 사람 글자가 같이 사라지지만, 글자 삽입은 Yjs 가 합쳐 준다.
+    const last = parent.children.at(-1) as (BlockModel & { text?: Text }) | undefined
+    const rest = [...chunks]
+    if (last?.flavour === "affine:paragraph" && last.text && !last.text.toString().trim()) {
+      last.text.insert(rest.shift()!, last.text.length)
+    }
+    for (const chunk of rest) doc.addBlock("affine:paragraph", { text: new Text(chunk) }, parent.id)
+    onHistory()
+    requestAnimationFrame(() => void focus())
+    return true
+  }
+
   const undo = () => {
     if (!doc.canUndo) return
     doc.undo()
@@ -890,6 +915,7 @@ export async function createPage(input: DocMountInput) {
     missing: missing.list,
     addReference,
     addLineReference,
+    addText,
     onHistory,
     markdown: async () => {
       const sync = input.sync

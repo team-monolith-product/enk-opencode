@@ -95,7 +95,8 @@ export function pruneSessionKeys(input: {
     .slice(input.max)
 }
 
-const pseudoSessionTab = (tab: string) => tab === "review" || tab === "preview"
+// "side-chat" 은 pages/session/helpers.ts SIDE_CHAT_TAB 과 같다(사이드 채팅 탭).
+const pseudoSessionTab = (tab: string) => tab === "review" || tab === "preview" || tab === "side-chat"
 
 function nextSessionTabsForOpen(current: SessionTabs | undefined, tab: string): SessionTabs {
   const all = current?.all ?? []
