@@ -281,7 +281,7 @@ export async function deleteAsset(input: {
   }
 }
 
-export const PROTECTED_DIRS = [".git", ".opencode"]
+export const PROTECTED_DIRS = [".git"]
 
 export function isProtectedPath(path: string): boolean {
   return PROTECTED_DIRS.includes(path.split("/")[0] ?? "")

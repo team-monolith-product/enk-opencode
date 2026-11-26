@@ -5014,7 +5014,7 @@ export class File extends HeyApiClient {
   /**
    * Delete files
    *
-   * Delete one file or folder in the project directory, or every file when no path is given. .git, .opencode are never deleted.
+   * Delete one file or folder in the project directory, or every file when no path is given. The .git folder is never deleted.
    */
   public delete<ThrowOnError extends boolean = false>(
     parameters?: {

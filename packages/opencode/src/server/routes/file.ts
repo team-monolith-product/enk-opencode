@@ -410,7 +410,7 @@ export const FileRoutes = lazy(() =>
       "/file",
       describeRoute({
         summary: "Delete files",
-        description: `Delete one file or folder in the project directory, or every file when no path is given. ${FileRemove.PROTECTED.join(", ")} are never deleted.`,
+        description: `Delete one file or folder in the project directory, or every file when no path is given. The ${FileRemove.PROTECTED.join(", ")} folder is never deleted.`,
         operationId: "file.delete",
         responses: {
           200: {

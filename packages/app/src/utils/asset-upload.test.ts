@@ -351,13 +351,14 @@ describe("deleteAsset", () => {
 })
 
 describe("isProtectedPath", () => {
-  test("protects the workspace folders and everything under them", () => {
+  test("protects the git folder and everything under it", () => {
     expect(isProtectedPath(".git")).toBe(true)
-    expect(isProtectedPath(".opencode/config.json")).toBe(true)
+    expect(isProtectedPath(".git/config")).toBe(true)
   })
 
   test("leaves ordinary paths deletable", () => {
     expect(isProtectedPath("src/index.ts")).toBe(false)
+    expect(isProtectedPath(".opencode/dev-server.json")).toBe(false)
     expect(isProtectedPath("docs/.git-notes.md")).toBe(false)
   })
 })

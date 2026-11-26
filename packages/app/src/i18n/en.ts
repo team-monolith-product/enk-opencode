@@ -811,7 +811,7 @@ export const dict = {
   "session.files.delete.confirm.body.project": "You can restore it from version history, except .env, dependencies and files over 100 MB.",
   "session.files.deleteAll.label": "Delete all",
   "session.files.deleteAll.confirm.title": "Delete all files?",
-  "session.files.deleteAll.confirm.body": "Every file in the workspace will be deleted except .git and .opencode. You can restore the state before deleting from version history, except .env, dependencies and files over 100 MB.",
+  "session.files.deleteAll.confirm.body": "Every file in the workspace will be deleted except .git. You can restore the state before deleting from version history, except .env, dependencies and files over 100 MB.",
   "session.files.deleteAll.done": "Deleted all files",
   "session.files.upload.label": "Upload",
   "session.files.upload.files": "Upload files",
