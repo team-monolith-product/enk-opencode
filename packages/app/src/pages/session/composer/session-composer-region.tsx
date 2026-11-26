@@ -180,7 +180,7 @@ export function SessionComposerRegion(props: {
         </Show>
 
         <Show when={!props.state.blocked()}>
-          <div>
+          <>
             {/* The todo dock lives outside the prompt gate: prompt.ready() drops to false while an
                 uncached session loads, and the dock must not unmount for that. */}
             <Show when={dock()}>
@@ -274,7 +274,7 @@ export function SessionComposerRegion(props: {
                 />
               </div>
             </Show>
-          </div>
+          </>
         </Show>
       </div>
     </div>
