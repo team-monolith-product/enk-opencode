@@ -472,6 +472,46 @@ describe("session.message-v2.toModelMessage", () => {
     expect(result.filter((msg) => msg.role === "user")).toHaveLength(1)
   })
 
+  test("tool parts recorded by execute for its inner calls are not sent to the model", async () => {
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+    const toolPart = (id: string, callID: string, tool: string, codemode: boolean) => ({
+      ...basePart(assistantID, id),
+      type: "tool",
+      callID,
+      tool,
+      state: {
+        status: "completed",
+        input: {},
+        output: `${tool} output`,
+        title: tool,
+        metadata: {},
+        time: { start: 0, end: 1 },
+      },
+      metadata: codemode ? { codemode: true } : {},
+    })
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [{ ...basePart(userID, "u1"), type: "text", text: "do it" }] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          toolPart("a1", "call-1", "execute", false),
+          toolPart("a2", "call-1:0", "read", true),
+          toolPart("a3", "call-1:1", "edit", true),
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const serialized = JSON.stringify(await MessageV2.toModelMessages(input, model))
+    expect(serialized).toContain("execute output")
+    expect(serialized).not.toContain("read output")
+    expect(serialized).not.toContain("edit output")
+  })
+
   test("converts assistant tool completion into tool-call + tool-result messages with attachments", async () => {
     const userID = "m-user"
     const assistantID = "m-assistant"

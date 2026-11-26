@@ -89,7 +89,7 @@ function list<T>(value: T[] | undefined | null, fallback: T[]) {
   return fallback
 }
 
-const hidden = new Set(["todowrite"])
+const hidden = new Set(["todowrite", "execute"])
 
 function partState(part: PartType, showReasoningSummaries: boolean, hideMinorErrors: boolean) {
   if (part.type === "tool") {

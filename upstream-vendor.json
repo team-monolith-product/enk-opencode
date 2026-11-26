@@ -2,5 +2,19 @@
   "remote": "upstream",
   "url": "https://github.com/anomalyco/opencode.git",
   "defaultRef": "dev",
-  "packages": {}
+  "packages": {
+    "codemode": {
+      "source": "packages/codemode",
+      "dest": "packages/codemode",
+      "sha": "db2d889c0e24daf7b34c8dede641fb01fcd02c00"
+    },
+    "script": {
+      "source": "packages/script",
+      "dest": "packages/opencode-script",
+      "sha": "701eff9e26a2503d5758483bf973100d8ee590a6",
+      "exclude": [
+        "test/highlights.test.ts"
+      ]
+    }
+  }
 }
