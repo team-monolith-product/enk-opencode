@@ -11,6 +11,8 @@ import { ModelID, ProviderID } from "@/provider/schema"
 import { Provider } from "../../provider/provider"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
+import { Locale } from "../../enk/locale"
+import { ProjectSummaryLanguage } from "../../enk/project-summary-language"
 
 const ProjectSummaryShape = z.object({
   title: z.string(),
@@ -179,6 +181,7 @@ export const ProjectSummaryRoutes = lazy(() =>
         sessionID: SessionID.zod,
         providerID: ProviderID.zod.optional(),
         modelID: ModelID.zod.optional(),
+        locale: Locale.Schema.optional(),
       }),
     ),
     async (c) => {
@@ -203,6 +206,8 @@ export const ProjectSummaryRoutes = lazy(() =>
         providerID = def.providerID
         modelID = def.modelID
       }
+
+      const locale = ProjectSummaryLanguage.resolve({ requested: body.locale, messages: msgs })
 
       const info = await Provider.getModel(providerID, modelID)
       const language = await Provider.getLanguage(info)
@@ -232,7 +237,7 @@ export const ProjectSummaryRoutes = lazy(() =>
           "당신은 공유 갤러리에 올라갈 '서비스 소개글' 을 작성합니다.",
           "독자는 코드를 읽지 않는 일반 사용자입니다. 결과물(앱/서비스) 자체를 소개하세요.",
           "절대 금지: 기술 스택, 라이브러리·프레임워크 이름, 구현 방식, 파일/함수/API 이름, 코드 용어, 디버깅 과정, '구현했습니다/추가했습니다' 같은 개발자 시점 표현.",
-          "transcript 의 언어와 같은 언어로 답변하세요.",
+          ProjectSummaryLanguage.directive(locale),
         ].join(" "),
         prompt: `다음 작업 기록과 워크스페이스 상태를 바탕으로, 이 결과물을 '서비스 소개' 형태로 정리하세요. 워크스페이스 트리와 핵심 파일이 실제 만들어진 결과물의 권위 있는 근거이며, 작업 기록은 보조 단서입니다. 둘 사이가 충돌하면 워크스페이스를 우선합니다.
 
@@ -247,7 +252,9 @@ export const ProjectSummaryRoutes = lazy(() =>
 작업 기록:
 ${transcript || "(empty)"}
 
-${workspaceContext || "(워크스페이스 비어있음)"}`,
+${workspaceContext || "(워크스페이스 비어있음)"}
+
+출력 언어: ${ProjectSummaryLanguage.directive(locale)}`,
       })
 
       return c.json(object)
