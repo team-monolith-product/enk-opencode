@@ -5,6 +5,8 @@ import {
   promptHasDraft,
   sessionBusy,
   submitIntent,
+  FOLLOWUP_DEFAULT_VERSION,
+  migrateFollowupDefault,
 } from "./composer-state"
 
 describe("sessionBusy", () => {
@@ -28,9 +30,30 @@ describe("parseFollowupMode", () => {
     expect(parseFollowupMode("none")).toBe("none")
   })
 
-  test("falls back to none for unknown values", () => {
-    expect(parseFollowupMode("steer-old")).toBe("none")
-    expect(parseFollowupMode(undefined)).toBe("none")
+  test("falls back to steer for unknown values", () => {
+    expect(parseFollowupMode("steer-old")).toBe("steer")
+    expect(parseFollowupMode(undefined)).toBe("steer")
+  })
+})
+
+describe("migrateFollowupDefault", () => {
+  test("moves a store saved before the steer default onto steer", () => {
+    const saved = { general: { autoSave: false, followup: "none" }, appearance: { fontSize: 16 } }
+    expect(migrateFollowupDefault(saved)).toEqual({
+      general: { autoSave: false, followup: "steer", followupDefault: FOLLOWUP_DEFAULT_VERSION },
+      appearance: { fontSize: 16 },
+    })
+  })
+
+  test("keeps a pick made after the move", () => {
+    const saved = { general: { followup: "none", followupDefault: FOLLOWUP_DEFAULT_VERSION } }
+    expect(migrateFollowupDefault(saved)).toBe(saved)
+  })
+
+  test("leaves a store without general settings to the defaults", () => {
+    const saved = { appearance: { fontSize: 16 } }
+    expect(migrateFollowupDefault(saved)).toBe(saved)
+    expect(migrateFollowupDefault("broken")).toBe("broken")
   })
 })
 

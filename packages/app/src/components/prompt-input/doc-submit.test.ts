@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { liveSocket, onLocalClock, type DocSubmitState } from "./doc-submit"
+import {
+  dropNotice,
+  droppedForStop,
+  liveSocket,
+  onLocalClock,
+  SubmitRequestError,
+  voteConflict,
+  type DocSubmitState,
+} from "./doc-submit"
 
 // The consent socket IS this client's membership in a vote, so the interesting cases are the ones
 // where the connection is gone but the browser has not noticed: on a real device that is a wifi
@@ -162,5 +170,55 @@ describe("onLocalClock", () => {
   test("a state without serverNow is left as it is", () => {
     const state = vote(123)
     expect(onLocalClock(state)).toBe(state)
+  })
+})
+
+describe("voteConflict", () => {
+  test("a send refused because another vote (a stop vote) is running", () => {
+    expect(voteConflict(new SubmitRequestError(400, { name: "DocVoteConflictError" }))).toBe(true)
+  })
+
+  test("any other failure is not a vote conflict", () => {
+    expect(voteConflict(new SubmitRequestError(500, { name: "UnknownError" }))).toBe(false)
+    expect(voteConflict(new SubmitRequestError(400, undefined))).toBe(false)
+    expect(voteConflict(new Error("network"))).toBe(false)
+  })
+})
+
+describe("droppedForStop", () => {
+  const state = (targetKind: DocSubmitState["targetKind"], status: DocSubmitState["status"], cancelReason?: "stop") =>
+    ({ submitID: "sub_1", targetKind, status, cancelReason }) as unknown as DocSubmitState
+
+  test("a send the server cancelled because a stop vote took over", () => {
+    expect(droppedForStop(state("doc", "cancelled", "stop"))).toBe(true)
+  })
+
+  test("only the server's stated reason counts, not a guess from the surrounding votes", () => {
+    // A participant withdrew it, or it ended another way.
+    expect(droppedForStop(state("doc", "cancelled"))).toBe(false)
+    expect(droppedForStop(state("doc", "expired"))).toBe(false)
+    expect(droppedForStop(state("doc", "pending"))).toBe(false)
+    // A stop vote itself is never "dropped for a stop".
+    expect(droppedForStop(state("stop", "cancelled", "stop"))).toBe(false)
+  })
+})
+
+describe("dropNotice", () => {
+  const dropped = {
+    submitID: "sub_1",
+    targetKind: "doc",
+    status: "cancelled",
+    cancelReason: "stop",
+    actors: [{ actorID: "act_alice" }, { actorID: "act_bob" }],
+  } as unknown as DocSubmitState
+
+  test("every member of the dropped send is told", () => {
+    expect(dropNotice(dropped, { actorID: "act_alice", readonly: false })).toBe(true)
+    expect(dropNotice(dropped, { actorID: "act_bob", readonly: false })).toBe(true)
+  })
+
+  test("a read-only spectator or anyone outside the send is not", () => {
+    expect(dropNotice(dropped, { actorID: "act_alice", readonly: true })).toBe(false)
+    expect(dropNotice(dropped, { actorID: "act_carol", readonly: false })).toBe(false)
   })
 })

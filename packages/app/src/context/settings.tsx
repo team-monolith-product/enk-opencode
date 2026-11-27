@@ -1,7 +1,12 @@
 import { createStore, reconcile } from "solid-js/store"
 import { createEffect, createMemo } from "solid-js"
 import { createSimpleContext } from "@opencode-ai/ui/context"
-import { parseFollowupMode, type FollowupMode } from "@/components/prompt-input/composer-state"
+import {
+  FOLLOWUP_DEFAULT_VERSION,
+  migrateFollowupDefault,
+  parseFollowupMode,
+  type FollowupMode,
+} from "@/components/prompt-input/composer-state"
 import { persisted } from "@/utils/persist"
 
 export interface NotificationSettings {
@@ -24,6 +29,8 @@ export interface Settings {
     autoSave: boolean
     releaseNotes: boolean
     followup: FollowupMode
+    // Which follow-up default this store has been moved onto; see migrateFollowupDefault.
+    followupDefault: number
     showReasoningSummaries: boolean
     shellToolPartsExpanded: boolean
     editToolPartsExpanded: boolean
@@ -49,8 +56,7 @@ export const sansDefault = "System Sans"
 
 const monoFallback =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
-const sansFallback =
-  '"Pretendard", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+const sansFallback = '"Pretendard", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 
 const monoBase = monoFallback
 const sansBase = sansFallback
@@ -90,7 +96,8 @@ const defaultSettings: Settings = {
   general: {
     autoSave: true,
     releaseNotes: true,
-    followup: "none",
+    followup: "steer",
+    followupDefault: FOLLOWUP_DEFAULT_VERSION,
     // thinking 을 보이도록 합니다 모델이 thinking 을 지원하는 경우여야 실제로 생각이 랜더링 됩니다
     showReasoningSummaries: false,
     shellToolPartsExpanded: false,
@@ -130,7 +137,10 @@ function withFallback<T>(read: () => T | undefined, fallback: T) {
 export const { use: useSettings, provider: SettingsProvider } = createSimpleContext({
   name: "Settings",
   init: () => {
-    const [store, setStore, _, ready] = persisted("settings.v3", createStore<Settings>(defaultSettings))
+    const [store, setStore, _, ready] = persisted(
+      { key: "settings.v3", migrate: migrateFollowupDefault },
+      createStore<Settings>(defaultSettings),
+    )
 
     createEffect(() => {
       if (typeof document === "undefined") return

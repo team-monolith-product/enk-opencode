@@ -1210,4 +1210,7 @@ export const dict = {
   "docSubmit.toast.requestFailed": "전송 동의 요청 실패",
   "docSubmit.toast.stopRequestFailed": "중지 동의 요청 실패",
   "docSubmit.toast.clearRequestFailed": "대화 초기화 동의 요청 실패",
+  "docSubmit.toast.voteInProgress": "진행 중인 투표가 있습니다. 투표가 끝난 뒤 다시 보내 주세요.",
+  "docSubmit.toast.supersededByStop": "중지 요청으로 전송이 취소되었습니다",
+  "docSubmit.toast.supersededByStop.description": "보내려던 내용은 입력창에 그대로 남아 있습니다.",
 }

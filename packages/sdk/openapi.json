@@ -15774,6 +15774,10 @@
         },
         "required": ["actorID", "name", "color", "status"]
       },
+      "DocSubmitCancelReason": {
+        "type": "string",
+        "enum": ["stop"]
+      },
       "DocSubmit": {
         "type": "object",
         "properties": {
@@ -15810,6 +15814,9 @@
           },
           "cancelledBy": {
             "$ref": "#/components/schemas/DocSubmitActor"
+          },
+          "cancelReason": {
+            "$ref": "#/components/schemas/DocSubmitCancelReason"
           },
           "timeoutMs": {
             "type": "number"

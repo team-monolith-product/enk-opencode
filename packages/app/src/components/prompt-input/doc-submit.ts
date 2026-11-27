@@ -25,6 +25,8 @@ export type DocSubmitState = {
   status: "pending" | "sent" | "cancelled" | "expired"
   actors: DocSubmitActor[]
   cancelledBy?: DocSubmitActor
+  // Why the server itself cancelled the vote. 'stop': a stop vote took over a send waiting for consent.
+  cancelReason?: "stop"
   timeoutMs: number
   expiresAt: number
   serverNow?: number
@@ -228,6 +230,29 @@ export class SubmitRequestError extends Error {
     super(`Submit request failed (${status})`)
     this.name = "SubmitRequestError"
   }
+}
+
+/** The server refused to open a vote because another one (a stop vote, a clear/rollback) is running. */
+export function voteConflict(err: unknown) {
+  return err instanceof SubmitRequestError && err.body?.name === "DocVoteConflictError"
+}
+
+/**
+ * A send vote the server cancelled because a stop vote took over (the server says so in
+ * `cancelReason`, it is not guessed here). The stop dialog covers the "cancelled" outcome in the same
+ * tick, so without a separate notice nobody would see that the send was dropped.
+ */
+export function droppedForStop(state: DocSubmitState) {
+  return state.targetKind === "doc" && state.status === "cancelled" && state.cancelReason === "stop"
+}
+
+/**
+ * Whether this viewer should be told a send was dropped for a stop vote: only someone who was in that
+ * send. A read-only spectator watches every vote but sent nothing, and "what you were sending is still in
+ * the input" is not true for it.
+ */
+export function dropNotice(state: DocSubmitState, viewer: { actorID: string; readonly: boolean }) {
+  return droppedForStop(state) && !viewer.readonly && state.actors.some((actor) => actor.actorID === viewer.actorID)
 }
 
 export const onLocalClock = (value: DocSubmitState): DocSubmitState => {
