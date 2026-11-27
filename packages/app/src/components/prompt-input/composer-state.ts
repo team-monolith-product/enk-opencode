@@ -11,6 +11,22 @@ export function parseFollowupMode(value: string | undefined): FollowupMode {
   return "steer"
 }
 
+// Bump when the follow-up default changes and stores saved under the old default should move onto
+// the new one. A store is saved whole with its defaults filled in, so an old default looks the same
+// as a deliberate pick; the version stamp is what tells a migrated store apart, so a later pick
+// survives reloads.
+export const FOLLOWUP_DEFAULT_VERSION = 1
+
+export function migrateFollowupDefault(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value
+  const root = value as { general?: unknown }
+  const general = root.general
+  if (typeof general !== "object" || general === null || Array.isArray(general)) return value
+  const current = general as { followup?: unknown; followupDefault?: unknown }
+  if (typeof current.followupDefault === "number" && current.followupDefault >= FOLLOWUP_DEFAULT_VERSION) return value
+  return { ...root, general: { ...current, followup: "steer", followupDefault: FOLLOWUP_DEFAULT_VERSION } }
+}
+
 type SessionStatus = { type: string }
 
 type BusyMessage = {
